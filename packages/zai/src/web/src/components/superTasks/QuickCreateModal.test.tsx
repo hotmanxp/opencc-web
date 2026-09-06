@@ -2,7 +2,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
-import QuickCreateModal, { deriveTitleFromDescription } from './QuickCreateModal'
+import QuickCreateModal from './QuickCreateModal'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import { useAgentStore } from '../../store/useAgentStore'
 
@@ -15,10 +15,10 @@ vi.mock('../../lib/api', () => ({
   api: { post: vi.fn(async () => ({ sessionId: 'quick-sess-1', queued: false })) },
 }))
 
-// tfa-vy72blq6 2026-09-05:QuickCreateModal 提交后切到 chat mode,在 modal 内
-// 嵌 AgentConversation 渲染 intake researcher 的输出;同时 SSE 走
-// subscribeServerEvents 挂到 intake session。happy-dom 没有 EventSource 全局,
-// 这里 mock 两件事:
+// tfa-vy72blq6 2026-09-05 + tf-92b3cxad 2026-09-06:QuickCreateModal 打开即切到
+// chat mode,在 modal 内嵌 AgentConversation 渲染 intake researcher 的输出;
+// SSE 走 subscribeServerEvents 挂到 intake session。happy-dom 没有
+// EventSource 全局,这里 mock 两件事:
 //  - AgentConversation 替成 stub 元素,避免触发整棵 AgentInputBox / MessageList
 //    子树渲染(supervisor 默认 layout 那条线);
 //  - subscribeServerEvents 替成空操作 handle,避免 happy-dom 抛
@@ -60,175 +60,158 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 title)', () => {
-  it('打开时只渲染 description(必填)+ priority / cwd / agent / dependsOn,不再有 title 输入', () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    expect(screen.queryByTestId('quick-title-input')).toBeNull()
-    expect(screen.getByTestId('quick-description-input')).toBeTruthy()
-    expect(screen.getByTestId('quick-priority-radio')).toBeTruthy()
-    expect(screen.getByTestId('quick-cwd-input')).toBeTruthy()
-    expect(screen.getByTestId('quick-agent-select')).toBeTruthy()
-    expect(screen.getByTestId('quick-depends-on-select')).toBeTruthy()
-  })
-
-  it('提交按钮初始 disabled(description 必填)', () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    const btn = screen.getByTestId('quick-submit-button') as HTMLButtonElement
-    expect(btn.hasAttribute('disabled')).toBe(true)
-  })
-
-  it('priority 缺省 = P2', () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    // data-priority 在 input 元素上;选中态给 input.checked = true + 父 label
-    // 加 ant-radio-button-wrapper-checked class。
-    const p2Input = screen.getByDisplayValue('P2') as HTMLInputElement
-    expect(p2Input.checked).toBe(true)
-    // 父 label 应带选中 class
-    const label = p2Input.closest('label.ant-radio-button-wrapper')
-    expect(label?.classList.contains('ant-radio-button-wrapper-checked')).toBe(true)
-  })
-
-  it('cwd 缺省 = useAgentStore.cwd(当前实例 cwd)', () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    const input = screen.getByTestId('quick-cwd-input') as HTMLInputElement
-    expect(input.value).toBe('/current/instance/cwd')
-  })
-
-  it('填齐 description 后提交按钮 enable(没有 title 字段)', () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    const descInput = screen.getByTestId('quick-description-input')
-    fireEvent.change(descInput, { target: { value: '把按钮文案改为完成' } })
-    const btn = screen.getByTestId('quick-submit-button') as HTMLButtonElement
-    expect(btn.hasAttribute('disabled')).toBe(false)
-  })
-
-  it('description 仅空白时提交按钮仍 disabled(防止 trim 后空)', () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    const descInput = screen.getByTestId('quick-description-input')
-    fireEvent.change(descInput, { target: { value: '   \n   ' } })
-    const btn = screen.getByTestId('quick-submit-button') as HTMLButtonElement
-    expect(btn.hasAttribute('disabled')).toBe(true)
-  })
-
-  it('dependsOn 下拉只展示 finished 桶任务(不会含 queue / processing / verifying)', () => {
-    useSuperTaskStore.setState({
-      buckets: {
-        queue: [{ id: 'tf-queued-1', title: '队列任务', status: 'queued', cwd: '/p', bucket: 'queue-tasks' }],
-        processing: [],
-        verifying: [],
-        finished: [{ id: 'tf-fin-1', title: '前置 A', status: 'done', cwd: '/p', bucket: 'finished-tasks' }],
-      },
+describe('QuickCreateModal (2026-09-06 tf-92b3cxad chat-mode-only)', () => {
+  describe('opening builds session immediately', () => {
+    it('打开弹窗立即调 createAgentSession with mainAgent="task-intake-quick"', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      await waitFor(() => {
+        expect(createAgentSession).toHaveBeenCalledWith(
+          expect.objectContaining({ mainAgent: 'task-intake-quick' }),
+        )
+      })
     })
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    fireEvent.click(screen.getByTestId('quick-depends-on-select'))
-    const select = screen.getByTestId('quick-depends-on-select') as HTMLElement
-    // finishedTasks 参数已显式只有 finished 桶,UI 不会越界。
-    expect(select).toBeTruthy()
+
+    it('createAgentSession 入参 cwd=useAgentStore.cwd(实例 cwd)', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      await waitFor(() => {
+        expect(createAgentSession).toHaveBeenCalledWith(
+          expect.objectContaining({ cwd: '/current/instance/cwd' }),
+        )
+      })
+    })
+
+    it('不主动调 /agent/prompt 喂首轮(避免 intake researcher 收到空消息)', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      await waitFor(() => expect(createAgentSession).toHaveBeenCalled())
+      await new Promise((r) => setTimeout(r, 50))
+      // api.post 不应被调来喂首轮 prompt —— 由 AgentInputBox 自己处理
+      expect(api.post).not.toHaveBeenCalled()
+    })
+
+    it('打开即进入 chat mode,可见 AgentConversation stub(无前置表单)', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      expect(await screen.findByTestId('quick-chat-mode')).toBeInTheDocument()
+      expect(screen.getByTestId('quick-chat-conversation-mock')).toBeTruthy()
+      // 表单字段全部不存在
+      expect(screen.queryByTestId('quick-description-input')).toBeNull()
+      expect(screen.queryByTestId('quick-priority-radio')).toBeNull()
+      expect(screen.queryByTestId('quick-cwd-input')).toBeNull()
+      expect(screen.queryByTestId('quick-agent-select')).toBeNull()
+      expect(screen.queryByTestId('quick-depends-on-select')).toBeNull()
+      expect(screen.queryByTestId('quick-submit-button')).toBeNull()
+      expect(screen.queryByTestId('quick-image-picker-trigger')).toBeNull()
+      expect(screen.queryByTestId('quick-cwd-picker-trigger')).toBeNull()
+    })
   })
 
-  it('提交调 createAgentSession with mainAgent="task-intake-quick" + cwd', async () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '把按钮文案改为完成' } })
-    fireEvent.click(screen.getByTestId('quick-submit-button'))
-    await waitFor(() => {
-      expect(createAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({ mainAgent: 'task-intake-quick' }),
+  describe('chat mode (intake researcher lite)', () => {
+    it('打开后自动挂 EventSource(sid=intake session)', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      // subscribeServerEvents 被调过,sid 是 intake session id(createAgentSession
+      // mock 返回 quick-sess-1)
+      expect(subscribeServerEvents).toHaveBeenCalledWith(
+        'quick-sess-1',
+        expect.any(Function),
       )
     })
+
+    it('chat mode 顶部状态栏:「确认建任务」按钮初始 disabled(还没出方案)', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      const btn = screen.getByTestId('quick-chat-confirm-button') as HTMLButtonElement
+      expect(btn.hasAttribute('disabled')).toBe(true)
+    })
+
+    it('chat mode 顶部状态栏:design-pending tag 默认可见;确认按钮 disabled 直到 intake researcher 输出 ## DESIGN_READY', async () => {
+      // intakeStore 是 useMemo 在 modal 内部创建的独立 store,外部无法直接
+      // setState;这里改断言 toolbar 初始状态 —— design-pending tag 可见、
+      // design-ready tag 不在,确认按钮 disabled。designReady 翻 true 的逻辑
+      // 由 intakeMessages 上 useMemo 触发(QuickCreateModal.tsx DESIGN_READY_RE),
+      // 真实场景由 agent SSE 推 assistant.text 自动验证,不在 unit 层做端到端 mock。
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      const btn = screen.getByTestId('quick-chat-confirm-button') as HTMLButtonElement
+      expect(btn.hasAttribute('disabled')).toBe(true)
+      expect(screen.getByTestId('quick-chat-design-pending')).toBeTruthy()
+      expect(screen.queryByTestId('quick-chat-design-ready')).toBeNull()
+    })
+
+    it('「取消」按钮调 deleteAgentSession + onClose,无任务创建', async () => {
+      const onClose = vi.fn()
+      render(<QuickCreateModal open onClose={onClose} />)
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      ;(deleteAgentSession as unknown as { mockClear: () => void }).mockClear()
+      fireEvent.click(screen.getByTestId('quick-chat-cancel-button'))
+      await waitFor(() => {
+        expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')
+        expect(onClose).toHaveBeenCalled()
+      })
+      // 没有 task_factory.created → useSuperTaskStore.lastCreatedTaskId 仍为 null
+      //   → 不应切到「完成」条
+      expect(screen.queryByText(/已创建/)).toBeNull()
+    })
+
+    it('用户 chat 输入 → 触发 confirm 消息 → 完成条出现', async () => {
+      // 模拟 happy path:用户在 chat 里点确认 → agent 调 SuperTasksCreate →
+      // 服务端 SSE 触发 task_factory.created → modal 切到完成条 + 「完成」
+      // 按钮 + handleDone → deleteAgentSession。
+      // intake researcher 是真实模型调用,这里不模拟整段模型推理,改用
+      // 直接 setState lastCreatedTaskId 模拟 SSE 推回,验证前端链路。
+      const onClose = vi.fn()
+      render(<QuickCreateModal open onClose={onClose} />)
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      // 模拟 SSE task_factory.created 推回 → modal 应切到完成条
+      act(() => {
+        useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quickchat01' })
+      })
+      expect(await screen.findByText(/任务 tf-quickchat01 已创建/)).toBeTruthy()
+      // chat mode 卸载,「完成」按钮就位
+      expect(screen.queryByTestId('quick-chat-mode')).toBeNull()
+      const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
+      fireEvent.click(doneBtn)
+      await waitFor(() => {
+        expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')
+        expect(onClose).toHaveBeenCalled()
+      })
+    })
   })
 
-  it('提交后向 /agent/prompt 发送结构化文本:title 从 description 第一行截取 + 含 description/priority/cwd + mode: "quick"', async () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    fireEvent.change(screen.getByTestId('quick-description-input'), {
-      target: { value: '改 /m-super-tasks 顶栏文案\n\n第二行不进入 title' },
-    })
-    fireEvent.click(screen.getByTestId('quick-submit-button'))
-    await waitFor(() => {
-      expect(api.post).toHaveBeenCalled()
-    })
-    const call = (api.post as unknown as { mock: { calls: Array<[string, { prompt: string }, { headers: Record<string, string> }]> } }).mock.calls[0]
-    expect(call?.[0]).toBe('/agent/prompt')
-    // title 由 client 从 description 第一行截取,不是来自独立输入;
-    // title 行是单独一行,后面紧跟换行 + 下一行('description: ')。
-    expect(call?.[1].prompt).toContain('- title: 改 /m-super-tasks 顶栏文案\n')
-    // description 字段保留完整多行输入(包含第二行);只验证 title 那行没把第二行塞进去。
-    expect(call?.[1].prompt).toContain('description: 改 /m-super-tasks 顶栏文案\n\n第二行不进入 title')
-    expect(call?.[1].prompt).toContain('priority: P2')
-    expect(call?.[1].prompt).toContain('cwd: /current/instance/cwd')
-    expect(call?.[1].prompt).toContain('mode: "quick"')
-    // 必须不出现禁词(测试 systemPrompt 串,确保 prompt 内容也遵守)
-    expect(call?.[1].prompt).not.toContain('brainstorm.md')
-    expect(call?.[1].prompt).not.toContain('plan.md')
-    expect(call?.[2].headers['X-Session-Id']).toBe('quick-sess-1')
-  })
-
-  it('description 第一行超 50 字:title 被截断并加 ellipsis', async () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    const long = 'a'.repeat(60)
-    fireEvent.change(screen.getByTestId('quick-description-input'), {
-      target: { value: long + '\n第二行' },
-    })
-    fireEvent.click(screen.getByTestId('quick-submit-button'))
-    await waitFor(() => {
-      expect(api.post).toHaveBeenCalled()
-    })
-    const call = (api.post as unknown as { mock: { calls: Array<[string, { prompt: string }, unknown]> } }).mock.calls[0]
-    expect(call?.[1].prompt).toContain(`title: ${'a'.repeat(50)}…`)
-  })
-
-  it('created 信号到达后弹窗切换到完成条 + 显示「完成」按钮', async () => {
-    render(<QuickCreateModal open onClose={vi.fn()} />)
-    act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quick01' }) })
-    expect(await screen.findByText(/任务 tf-quick01 已创建/)).toBeTruthy()
-    const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
-    expect(doneBtn).toBeTruthy()
-  })
-
-  it('点击完成按钮调 deleteAgentSession + clearLastCreated + onClose', async () => {
-    const onClose = vi.fn()
-    render(<QuickCreateModal open onClose={onClose} />)
-    fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '改文案' } })
-    fireEvent.click(screen.getByTestId('quick-submit-button'))
-    await waitFor(() => {
-      expect(createAgentSession).toHaveBeenCalled()
-    })
-    act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-q1' }) })
-    const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
-    fireEvent.click(doneBtn)
-    await waitFor(() => {
-      expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')
-      expect(onClose).toHaveBeenCalled()
-    })
-  })
-
-  describe('deriveTitleFromDescription 工具函数', () => {
-    it('单行 description:整行作为 title', () => {
-      expect(deriveTitleFromDescription('改文案')).toBe('改文案')
+  describe('created 信号与完成按钮', () => {
+    it('created 信号到达后弹窗切换到完成条 + 显示「完成」按钮', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quick01' }) })
+      expect(await screen.findByText(/任务 tf-quick01 已创建/)).toBeTruthy()
+      const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
+      expect(doneBtn).toBeTruthy()
     })
 
-    it('多行 description:只取第一行,后续行不进 title', () => {
-      expect(deriveTitleFromDescription('第一行\n第二行')).toBe('第一行')
-      expect(deriveTitleFromDescription('第一行\r\n第二行')).toBe('第一行')
-    })
-
-    it('前后空白被 trim', () => {
-      expect(deriveTitleFromDescription('  hello world  ')).toBe('hello world')
-      expect(deriveTitleFromDescription('\n\nhello\n')).toBe('hello')
-    })
-
-    it('超过 50 字:截断到 50 字 + ellipsis', () => {
-      const long = 'a'.repeat(80)
-      expect(deriveTitleFromDescription(long)).toBe('a'.repeat(50) + '…')
-    })
-
-    it('正好 50 字:不截断,不加 ellipsis', () => {
-      const exactly = 'b'.repeat(50)
-      expect(deriveTitleFromDescription(exactly)).toBe(exactly)
-    })
-
-    it('空 / 仅空白:fallback "quick task"(后端 zod 校验过不去)', () => {
-      expect(deriveTitleFromDescription('')).toBe('quick task')
-      expect(deriveTitleFromDescription('   \n  ')).toBe('quick task')
+    it('点击完成按钮调 deleteAgentSession + clearLastCreated + onClose', async () => {
+      const onClose = vi.fn()
+      render(<QuickCreateModal open onClose={onClose} />)
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-q1' }) })
+      const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
+      fireEvent.click(doneBtn)
+      await waitFor(() => {
+        expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')
+        expect(onClose).toHaveBeenCalled()
+      })
     })
   })
 
@@ -245,15 +228,6 @@ describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 
       const content = document.querySelector('.ant-modal-content') as HTMLElement | null
       expect(content).toBeTruthy()
       expect(content?.style.borderRadius).toBe('0px')
-    })
-
-    it('fullscreen=true:表单仍渲染 description / priority / submit 控件;不再有 title 输入', () => {
-      render(<QuickCreateModal open onClose={vi.fn()} fullscreen />)
-      expect(screen.queryByTestId('quick-title-input')).toBeNull()
-      expect(screen.getByTestId('quick-description-input')).toBeTruthy()
-      expect(screen.getByTestId('quick-priority-radio')).toBeTruthy()
-      expect(screen.getByTestId('quick-cwd-input')).toBeTruthy()
-      expect(screen.getByTestId('quick-submit-button')).toBeTruthy()
     })
 
     it('fullscreen=false(默认):桌面回归 width=640,content 无内联 borderRadius', () => {
@@ -278,40 +252,32 @@ describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 
     expect(screen.getByTestId('quick-mobile-drawer')).toBeTruthy()
   })
 
-  it('mobileAsDrawer=true:表单字段仍完整渲染(description/priority/cwd/agent/dependsOn/submit);不再有 title 输入', () => {
+  it('mobileAsDrawer=true:打开即 chat mode,无表单字段;状态栏 / AgentConversation / 取消 / 确认按钮就位', async () => {
     render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
-    expect(screen.queryByTestId('quick-title-input')).toBeNull()
-    expect(screen.getByTestId('quick-description-input')).toBeTruthy()
-    expect(screen.getByTestId('quick-priority-radio')).toBeTruthy()
-    expect(screen.getByTestId('quick-cwd-input')).toBeTruthy()
-    expect(screen.getByTestId('quick-agent-select')).toBeTruthy()
-    expect(screen.getByTestId('quick-depends-on-select')).toBeTruthy()
-    expect(screen.getByTestId('quick-submit-button')).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+    })
+    expect(screen.queryByTestId('quick-description-input')).toBeNull()
+    expect(screen.queryByTestId('quick-priority-radio')).toBeNull()
+    expect(screen.queryByTestId('quick-cwd-input')).toBeNull()
+    expect(screen.queryByTestId('quick-agent-select')).toBeNull()
+    expect(screen.queryByTestId('quick-depends-on-select')).toBeNull()
+    expect(screen.queryByTestId('quick-submit-button')).toBeNull()
+    expect(screen.queryByTestId('quick-cwd-picker-trigger')).toBeNull()
+    expect(screen.queryByTestId('quick-image-picker-trigger')).toBeNull()
+    expect(screen.getByTestId('quick-chat-conversation-mock')).toBeTruthy()
+    expect(screen.getByTestId('quick-chat-cancel-button')).toBeTruthy()
+    expect(screen.getByTestId('quick-chat-confirm-button')).toBeTruthy()
   })
 
   it('mobileAsDrawer=true:created 信号 → 完成条在 Drawer 内渲染', async () => {
     render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
+    await waitFor(() => {
+      expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+    })
     act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quickmob' }) })
     expect(await screen.findByText(/任务 tf-quickmob 已创建/)).toBeTruthy()
     expect(document.querySelector('.ant-drawer')).toBeTruthy()
-  })
-
-  it('mobileAsDrawer=true: cwd picker trigger works and fills cwd', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(
-      JSON.stringify({ ok: true, path: '/Users/picked', parent: '/Users', home: '/Users', entries: [] }),
-      { status: 200 },
-    )))
-    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
-    fireEvent.click(screen.getByTestId('quick-cwd-picker-trigger'))
-    await screen.findByTestId('picker-select')
-    fireEvent.click(screen.getByTestId('picker-select'))
-    expect((screen.getByTestId('quick-cwd-input') as HTMLInputElement).value).toBe('/Users/picked')
-    vi.unstubAllGlobals()
-  })
-
-  it('mobileAsDrawer=true: image picker trigger button present', () => {
-    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
-    expect(screen.getByTestId('quick-image-picker-trigger')).toBeTruthy()
   })
 
   it('默认(桌面):回归 .ant-modal + width=640;无 drawer,无 drawer-handle', () => {
@@ -321,423 +287,5 @@ describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 
     expect(modal?.style.width).toBe('640px')
     expect(document.querySelector('.ant-drawer')).toBeNull()
     expect(screen.queryByTestId('quick-drawer-handle')).toBeNull()
-  })
-
-  describe('cwd picker', () => {
-    it('renders quick-cwd-picker-trigger button next to the cwd input', () => {
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      expect(screen.getByTestId('quick-cwd-picker-trigger')).toBeTruthy()
-    })
-
-    it('clicking picker trigger opens the DirectoryPicker modal', async () => {
-      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, path: '/x', parent: '/', home: '/', entries: [] }), { status: 200 })))
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      fireEvent.click(screen.getByTestId('quick-cwd-picker-trigger'))
-      expect(await screen.findByTestId('quick-directory-picker')).toBeTruthy()
-      vi.unstubAllGlobals()
-    })
-
-    it('DirectoryPicker onSelect updates the cwd field', async () => {
-      vi.stubGlobal('fetch', vi.fn(async () => new Response(
-        JSON.stringify({ ok: true, path: '/Users/picked', parent: '/Users', home: '/Users', entries: [] }),
-        { status: 200 },
-      )))
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      fireEvent.click(screen.getByTestId('quick-cwd-picker-trigger'))
-      // 在 picker 内 fetch 完成后,点「选择当前目录」
-      await screen.findByTestId('picker-select')
-      fireEvent.click(screen.getByTestId('picker-select'))
-      const input = screen.getByTestId('quick-cwd-input') as HTMLInputElement
-      expect(input.value).toBe('/Users/picked')
-      vi.unstubAllGlobals()
-    })
-
-    it('DirectoryPicker cancel keeps cwd unchanged', async () => {
-      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, path: '/x', parent: '/', home: '/', entries: [] }), { status: 200 })))
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      const before = (screen.getByTestId('quick-cwd-input') as HTMLInputElement).value
-      fireEvent.click(screen.getByTestId('quick-cwd-picker-trigger'))
-      await screen.findByTestId('picker-cancel')
-      fireEvent.click(screen.getByTestId('picker-cancel'))
-      const after = (screen.getByTestId('quick-cwd-input') as HTMLInputElement).value
-      expect(after).toBe(before)
-      vi.unstubAllGlobals()
-    })
-  })
-
-  describe('image attachments', () => {
-    function makeImageFile(name: string, type: string, sizeBytes = 1024): File {
-      // happy-dom / jsdom 的 File 是支持的。直接构造。
-      const blob = new Blob([new Uint8Array(sizeBytes)], { type })
-      return new File([blob], name, { type })
-    }
-
-    it('renders quick-image-picker-trigger button below description', () => {
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      expect(screen.getByTestId('quick-image-picker-trigger')).toBeTruthy()
-    })
-
-    it('clicking trigger calls hidden input.click()', () => {
-      // input 在组件里是 plain <input type="file"> (accept="image/*" multiple)。
-      // Modal 内容用 portal 渲染到 document.body,所以走 document.querySelector。
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      const input = document.querySelector('input[type="file"]') as HTMLInputElement
-      expect(input).toBeTruthy()
-      const clickSpy = vi.spyOn(input, 'click')
-      fireEvent.click(screen.getByTestId('quick-image-picker-trigger'))
-      expect(clickSpy).toHaveBeenCalled()
-    })
-
-    it('readImageAsBase64 success → quick-attachment-strip renders ready chip', async () => {
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      const input = document.querySelector('input[type="file"]') as HTMLInputElement
-      const file = makeImageFile('shot.png', 'image/png')
-      // happy-dom 可能不触发完整的 change 链路 — 直接走 onChange
-      fireEvent.change(input, { target: { files: [file] } })
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
-      })
-    })
-
-    it('pasting an image file into the description triggers addImages (attachment chip appears)', async () => {
-      const file = makeImageFile('paste.png', 'image/png')
-      const dataTransfer = {
-        items: [{ kind: 'file', getAsFile: () => file, type: 'image/png' }],
-      }
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      const textarea = screen.getByTestId('quick-description-input') as HTMLTextAreaElement
-      const pasteEvent = {
-        clipboardData: dataTransfer,
-        preventDefault: vi.fn(),
-      } as unknown as React.ClipboardEvent<HTMLTextAreaElement>
-      fireEvent.paste(textarea, pasteEvent)
-      // addImages 被调用的副作用:quick-attachment-strip 出现 (即有附件 chip)
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
-      })
-    })
-
-    it('paste with no image file leaves text behavior alone (no attachment added)', async () => {
-      const dataTransfer = { items: [] }
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      const textarea = screen.getByTestId('quick-description-input') as HTMLTextAreaElement
-      fireEvent.paste(textarea, { clipboardData: dataTransfer, preventDefault: vi.fn() } as unknown as React.ClipboardEvent<HTMLTextAreaElement>)
-      // 等一拍确认没有附件出现
-      await new Promise((r) => setTimeout(r, 50))
-      expect(screen.queryByTestId('quick-attachment-strip')).toBeNull()
-    })
-
-    it('pasting a non-image file (e.g. PDF) does NOT add an attachment', async () => {
-      const pdfFile = makeImageFile('doc.pdf', 'application/pdf')
-      const dataTransfer = {
-        items: [{ kind: 'file', getAsFile: () => pdfFile, type: 'application/pdf' }],
-      }
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      const textarea = screen.getByTestId('quick-description-input') as HTMLTextAreaElement
-      fireEvent.paste(textarea, { clipboardData: dataTransfer, preventDefault: vi.fn() } as unknown as React.ClipboardEvent<HTMLTextAreaElement>)
-      await new Promise((r) => setTimeout(r, 50))
-      expect(screen.queryByTestId('quick-attachment-strip')).toBeNull()
-    })
-
-    it('× button calls removeAttachment (chip removed from strip)', async () => {
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      const input = document.querySelector('input[type="file"]') as HTMLInputElement
-      fireEvent.change(input, { target: { files: [makeImageFile('shot.png', 'image/png')] } })
-      await waitFor(() => { expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy() })
-      const removeBtn = document.querySelector('[data-testid^="quick-attachment-chip-"][data-testid$="-remove"]') as HTMLElement
-      fireEvent.click(removeBtn)
-      // 移除后 strip 卸载(items 0 → null)
-      await waitFor(() => {
-        expect(screen.queryByTestId('quick-attachment-strip')).toBeNull()
-      })
-    })
-  })
-
-  describe('submit with attachments', () => {
-    function makeImageFile(name: string, type: string, sizeBytes = 1024): File {
-      const blob = new Blob([new Uint8Array(sizeBytes)], { type })
-      return new File([blob], name, { type })
-    }
-
-    // happy-dom 下 FileReader 的 onload 异步触发,但内部 microtask/macrotask 顺序
-    // 在不同版本可能略有时序漂移。这里给 FileReader 一个稳定兜底,主动把
-    // status 从 'reading' 推到 'ready',避免单测被 race condition 拖累。
-    // 真实浏览器环境 (jsdom/jsdom-mirror) 不需要这段,但 happy-dom 测试要。
-    async function waitForAttachmentReady(localIdHint: string): Promise<void> {
-      await waitFor(() => {
-        const chip = document.querySelector(`[data-testid^="quick-attachment-chip-"]`)
-        // chip 存在即至少有 placeholder;检查 img 的 src 是 data: 前缀(说明 dataUrl 已填)
-        const img = chip?.querySelector('img')
-        expect(img).toBeTruthy()
-        // blob: 表示还是 thumbnail;data: 表示已 ready
-        const src = img?.getAttribute('src') ?? ''
-        // ready 状态用同一 thumbnailUrl (blob:) 显示,但 dataUrl 在 state 上。
-        // 这里我们直接验证 strip + chip 出现 + img 有 src 即可。
-        // 真正可靠的方法是查内部 dataUrl — 不可见,只能间接验证。
-        expect(src.length).toBeGreaterThan(0)
-      }, { timeout: 3000 })
-      // 给 FileReader 微任务一拍
-      await new Promise((r) => setTimeout(r, 50))
-    }
-
-    it('submitting with one ready image uploads it and includes its absPath in the prompt', async () => {
-      // /api/fs/upload 走 fetch; /agent/prompt 走 api.post(axios, 不是 fetch)
-      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-        if (url === '/api/fs/upload' && init?.method === 'POST') {
-          return new Response(JSON.stringify({ ok: true, absPath: '/Users/me/proj/.zai/uploads/shot.png' }), { status: 200 })
-        }
-        return new Response('{}', { status: 200 })
-      })
-      vi.stubGlobal('fetch', fetchMock)
-      // 在测试开始时清空 api.post 调用记录
-      ;(api.post as unknown as { mock: { calls: unknown[] } }).mock.calls = []
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
-        target: { files: [makeImageFile('shot.png', 'image/png')] },
-      })
-      // 等 strip + chip + 等 FileReader 完成
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
-      })
-      await waitForAttachmentReady('shot.png')
-      fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '把按钮文案改一下' } })
-      fireEvent.click(screen.getByTestId('quick-submit-button'))
-      // 验证 /api/fs/upload 被调了一次
-      await waitFor(() => {
-        const uploadCalls = fetchMock.mock.calls.filter((c) => String(c[0]) === '/api/fs/upload')
-        expect(uploadCalls.length).toBe(1)
-      })
-      // 验证 api.post('/agent/prompt') 被调用 + prompt 含 attachments 段
-      await waitFor(() => {
-        expect(api.post).toHaveBeenCalled()
-      })
-      const promptCall = (api.post as unknown as { mock: { calls: Array<[string, { prompt: string }, { headers: Record<string, string> }]> } }).mock.calls
-        .find((c) => c[0] === '/agent/prompt')
-      expect(promptCall).toBeTruthy()
-      const body = promptCall?.[1]
-      expect(body?.prompt).toContain('attachments (absolute paths, Read these if you need to see them):')
-      expect(body?.prompt).toContain('- /Users/me/proj/.zai/uploads/shot.png')
-      // attachments 段必须在 Pass mode 段之前
-      const attachmentsIdx = body?.prompt.indexOf('attachments (absolute paths') ?? -1
-      const modeIdx = body?.prompt.indexOf('Pass mode: "quick"') ?? -1
-      expect(attachmentsIdx).toBeLessThan(modeIdx)
-      vi.unstubAllGlobals()
-    })
-
-    it('submit with all-failed attachments does NOT call /agent/prompt and shows error', async () => {
-      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-        if (url === '/api/fs/upload' && init?.method === 'POST') {
-          return new Response(JSON.stringify({ ok: false, error: '磁盘满' }), { status: 500 })
-        }
-        return new Response('{}', { status: 200 })
-      })
-      vi.stubGlobal('fetch', fetchMock)
-      // 在测试开始时清空 api.post 调用记录
-      ;(api.post as unknown as { mock: { calls: unknown[] } }).mock.calls = []
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
-        target: { files: [makeImageFile('shot.png', 'image/png')] },
-      })
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
-      })
-      await waitForAttachmentReady('shot.png')
-      fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '改文案' } })
-      const btn = screen.getByTestId('quick-submit-button') as HTMLButtonElement
-      fireEvent.click(btn)
-      // 等到 /api/fs/upload 完成(失败),然后断言 api.post 没被调用 + 错误提示出现
-      await waitFor(() => {
-        const uploadCalls = fetchMock.mock.calls.filter((c) => String(c[0]) === '/api/fs/upload')
-        expect(uploadCalls.length).toBe(1)
-      })
-      // 给 handleSubmit 的 setError 反应一拍
-      await new Promise((r) => setTimeout(r, 50))
-      const promptCalls = (api.post as unknown as { mock: { calls: Array<[string, unknown, unknown]> } }).mock.calls
-        .filter((c) => c[0] === '/agent/prompt')
-      expect(promptCalls.length).toBe(0)
-      expect(await screen.findByText(/所有图片上传失败/)).toBeTruthy()
-      vi.unstubAllGlobals()
-    })
-
-    // zai patch (2026-09-05, tf-pqvxpay0):QuickCreateModal 不直接写 task.yaml,
-    // 但发出的 prompt 里的 attachments 段必须与 task-intake-quick 的 extraction
-    // 契约对齐 —— headline 与每行 bullet 格式稳定,intake-quick 才能提取并
-    // 透传给 SuperTasksCreate 落到 task.yaml.attachments(taskFactoryTools 测试
-    // 守护实际 yaml 落盘)。本测试用更严格的"headline + 顺序约束"覆盖契约:
-    //   - 路径写到 ~/.zai/uploads/(非 cwd-relative,符合 fs.ts 改动后契约)
-    //   - bullet-list 在 Pass mode 之前
-    //   - 单条附件走通 —— 多附件由 buildQuickPrompt 的 for 循环保证(无需 e2e)
-    it('attachment prompt 段是 intake-quick 可解析的 bullet-list(契约回归)', async () => {
-      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-        if (url === '/api/fs/upload' && init?.method === 'POST') {
-          // 模拟 fs.ts 改写后返回 ~/.zai/uploads/<name> 绝对路径(不再是 cwd 相对)
-          return new Response(JSON.stringify({
-            ok: true,
-            absPath: '/Users/me/.zai/uploads/shot.png',
-          }), { status: 200 })
-        }
-        return new Response('{}', { status: 200 })
-      })
-      vi.stubGlobal('fetch', fetchMock)
-      ;(api.post as unknown as { mock: { calls: unknown[] } }).mock.calls = []
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
-        target: { files: [makeImageFile('shot.png', 'image/png')] },
-      })
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
-      })
-      await waitForAttachmentReady('shot.png')
-      fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '改按钮' } })
-      fireEvent.click(screen.getByTestId('quick-submit-button'))
-      await waitFor(() => { expect(api.post).toHaveBeenCalled() })
-      const promptCall = (api.post as unknown as { mock: { calls: Array<[string, { prompt: string }, unknown]> } }).mock.calls
-        .find((c) => c[0] === '/agent/prompt')
-      expect(promptCall).toBeTruthy()
-      const prompt = promptCall?.[1].prompt ?? ''
-      // 契约 1:headline 与 task-intake-quick systemPrompt 内的 extraction 锚点严格一致
-      //         —— intake-quick 会按这个 headline 起头切 bullet-list
-      expect(prompt).toContain('attachments (absolute paths, Read these if you need to see them):')
-      // 契约 2:每条附件以 `- <abs path>` 形式出现(整段前缀匹配)
-      expect(prompt).toMatch(/-\s+\/Users\/me\/\.zai\/uploads\/shot\.png/)
-      // 契约 3:absPath 已迁出 cwd-relative,使用 ~/.zai/uploads/(fs.ts 改动后契约)
-      //         —— 若 fs.ts 回退到 cwd 相对路径,这条断言会捕获回归
-      expect(prompt).not.toContain('proj/.zai/uploads')
-      // 契约 4:顺序 —— attachments 段必须在 Pass mode 之前(intake-quick 视觉对齐约束)
-      const attachmentsIdx = prompt.indexOf('attachments (absolute paths')
-      const modeIdx = prompt.indexOf('Pass mode: "quick"')
-      expect(attachmentsIdx).toBeGreaterThan(-1)
-      expect(modeIdx).toBeGreaterThan(-1)
-      expect(attachmentsIdx).toBeLessThan(modeIdx)
-      vi.unstubAllGlobals()
-    })
-  })
-
-  // ---- chat mode(tfa-vy72blq6 2026-09-05):表单提交后切到对话态,modal 不关闭,
-  // 内嵌 AgentConversation 显示 intake researcher 输出,顶部 toolbar 有
-  // 「取消」+「确认建任务」按钮。designReady 翻 true 后才能点确认。----
-
-  describe('chat mode (intake researcher lite)', () => {
-    it('表单提交后切到 chat mode:渲染 AgentConversation stub + 状态 tag + 取消 / 确认按钮', async () => {
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      fireEvent.change(screen.getByTestId('quick-description-input'), {
-        target: { value: '把按钮文案改一下' },
-      })
-      fireEvent.click(screen.getByTestId('quick-submit-button'))
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
-      })
-      // intake-scoped 子树 + 状态 tag + 取消 / 确认按钮全部就位
-      expect(screen.getByTestId('quick-chat-conversation-mock')).toBeTruthy()
-      expect(screen.getByTestId('quick-chat-design-pending')).toBeTruthy()
-      expect(screen.getByTestId('quick-chat-cancel-button')).toBeTruthy()
-      expect(screen.getByTestId('quick-chat-confirm-button')).toBeTruthy()
-      // chat mode 时表单应卸载(三个 radio / input 都不在 DOM)
-      expect(screen.queryByTestId('quick-description-input')).toBeNull()
-      expect(screen.queryByTestId('quick-submit-button')).toBeNull()
-    })
-
-    it('chat mode 挂 EventSource(sid=intake session)', async () => {
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      fireEvent.change(screen.getByTestId('quick-description-input'), {
-        target: { value: '改文案' },
-      })
-      fireEvent.click(screen.getByTestId('quick-submit-button'))
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
-      })
-      // subscribeServerEvents 被调过,sid 是 intake session id(createAgentSession
-      // mock 返回 quick-sess-1)
-      expect(subscribeServerEvents).toHaveBeenCalledWith(
-        'quick-sess-1',
-        expect.any(Function),
-      )
-    })
-
-    it('chat mode 下「确认建任务」按钮初始 disabled(还没出方案)', async () => {
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      fireEvent.change(screen.getByTestId('quick-description-input'), {
-        target: { value: '改文案' },
-      })
-      fireEvent.click(screen.getByTestId('quick-submit-button'))
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
-      })
-      const btn = screen.getByTestId('quick-chat-confirm-button') as HTMLButtonElement
-      expect(btn.hasAttribute('disabled')).toBe(true)
-    })
-
-    it('「取消」按钮调 deleteAgentSession + onClose,无任务创建', async () => {
-      const onClose = vi.fn()
-      render(<QuickCreateModal open onClose={onClose} />)
-      fireEvent.change(screen.getByTestId('quick-description-input'), {
-        target: { value: '改文案' },
-      })
-      fireEvent.click(screen.getByTestId('quick-submit-button'))
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
-      })
-      // 清除 createAgentSession 计数,只看 cancel 路径的 delete 调用
-      ;(deleteAgentSession as unknown as { mockClear: () => void }).mockClear()
-      fireEvent.click(screen.getByTestId('quick-chat-cancel-button'))
-      await waitFor(() => {
-        expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')
-        expect(onClose).toHaveBeenCalled()
-      })
-      // 没有 task_factory.created → useSuperTaskStore.lastCreatedTaskId 仍为 null
-      //   → 不应切到「完成」条
-      expect(screen.queryByText(/已创建/)).toBeNull()
-    })
-
-    it('用户 chat 输入 → /agent/prompt 触发 confirm 消息 → agent 调用 SuperTasksCreate → 完成条', async () => {
-      // 这里用一个集成序列模拟 happy path:用户在 chat 里点确认 → 发「确认」prompt →
-      // agent 在那一轮调 SuperTasksCreate → 服务端 SSE 触发 task_factory.created →
-      // modal 切到完成条 + 「完成」按钮 + handleDone → deleteAgentSession。
-      // 因为 intake researcher 是真实模型调用,这里不模拟整段模型推理,改用
-      // 后端 path:直接 setState lastCreatedTaskId 模拟 SSE 推回,验证前端
-      // 链路(确认按钮 → /agent/prompt → 切完成条 → handleDone → 关 modal)是对的。
-      const onClose = vi.fn()
-      render(<QuickCreateModal open onClose={onClose} />)
-      fireEvent.change(screen.getByTestId('quick-description-input'), {
-        target: { value: '改文案' },
-      })
-      fireEvent.click(screen.getByTestId('quick-submit-button'))
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
-      })
-      // 模拟 SSE task_factory.created 推回(useSuperTaskStore 的 applyTaskFactoryEvent)
-      // → modal 应切到完成条
-      act(() => {
-        useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quickchat01' })
-      })
-      expect(await screen.findByText(/任务 tf-quickchat01 已创建/)).toBeTruthy()
-      // chat mode 卸载,「完成」按钮就位
-      expect(screen.queryByTestId('quick-chat-mode')).toBeNull()
-      const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
-      fireEvent.click(doneBtn)
-      await waitFor(() => {
-        expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')
-        expect(onClose).toHaveBeenCalled()
-      })
-    })
-
-    it('chat mode 与 createdTaskId 共存时,createdTaskId 优先级高(切到完成条)', async () => {
-      render(<QuickCreateModal open onClose={vi.fn()} />)
-      fireEvent.change(screen.getByTestId('quick-description-input'), {
-        target: { value: '改文案' },
-      })
-      fireEvent.click(screen.getByTestId('quick-submit-button'))
-      await waitFor(() => {
-        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
-      })
-      // task_factory.created 触发 → 应切到完成条,chat mode 卸载
-      act(() => {
-        useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-q1' })
-      })
-      await waitFor(() => {
-        expect(screen.queryByTestId('quick-chat-mode')).toBeNull()
-        expect(screen.getByText(/任务 tf-q1 已创建/)).toBeTruthy()
-      })
-    })
   })
 })

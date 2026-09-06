@@ -1,5 +1,6 @@
 /**
- * 任务 intake · 快速创建 Agent `task-intake-quick`(zai patch 2026-09-05,tf-vy72blq6)。
+ * 任务 intake · 快速创建 Agent `task-intake-quick`(zai patch 2026-09-05,tf-vy72blq6;
+ * 2026-09-06,tf-92b3cxad 去掉前置表单,改为纯对话式 intake)。
  *
  * 「快速创建」弹窗专用:与现有 `task-intake` 主 agent 共享对话式 intake 内核,
  * 但弧长更短(1-3 轮澄清,无 planning 文档)。
@@ -9,6 +10,12 @@
  *  - **不写** planning 文档(任务目录只生成 task.yaml + process.md + 最小 spec 快照);
  *  - 调 SuperTasksCreate 时固定传 `mode: 'quick'`,由 intake gate 与 verifier 按 mode 分流;
  *  - 复用完整 intake 的对话式研究 + 提问 + 方案流程(intake researcher lite)。
+ *
+ * 2026-09-06 改造:QuickCreateModal 去掉了前置表单态(description / cwd /
+ * priority / agent / dependsOn / 图片附件上传),弹窗打开即建 intake session +
+ * 切 chat mode,与「需求讨论」入口 NewSuperTaskModal 的对话式 UX 一致。系统
+ * 默认值(P2 / cwd=<实例 cwd> / agent=opencc / dependsOn=[])在首段 prompt
+ * 里告诉 intake researcher,用户在对话里改即生效。
  *
  * 配置对象由 mainAgents.ts 的 getBuiltinMainAgents() 聚合进内置列表。
  *
@@ -43,26 +50,32 @@ export const TASK_INTAKE_QUICK_MAIN_AGENT_NAME = 'task-intake-quick'
 const TASK_INTAKE_QUICK_SYSTEM_PROMPT = [
   // 头部:接续 RESEARCHER section 的角色定位,把"快速创建弹窗 → intake researcher
   // lite"的角色描述再点一次,强化 model 收到 prompt 后立刻识别任务来源。
-  'You are the intake researcher (lite) bound to the QuickCreateModal of the "Task Factory". The user has filled in a quick task form (description + priority + cwd + agent + dependsOn + optional image attachments) and is now chatting with you inside the modal. Your job: do focused research on their cwd, ask up to 3 clarifying questions, propose a concrete task design, then — only after the user explicitly confirms — call SuperTasksCreate with `mode: "quick"`.',
-  // 入参契约:跟 QuickCreateModal 的 buildQuickPrompt 输出对齐 —— 收到 prompt 里会
-  // 有 `- title: ...` / `- description: ...` / `- priority: ...` / `- cwd: ...`
-  // / `- agent: ...` / `- dependsOn: [...]` 这种 bullet 列表,以及可选 attachments 段。
-  'Form fields you received in the first user turn (from QuickCreateModal):',
-  '- title (required; client-side derived from the first line of description, capped at 50 chars with ellipsis)',
-  '- description (required, multi-line)',
-  '- priority: "P0" | "P1" | "P2" | "P3" (defaults to "P2")',
-  '- cwd (the absolute project path; defaults to the instance cwd)',
-  '- agent: "opencc" | "dsh" | "opencode" (defaults to "opencc")',
-  '- dependsOn: list of finished task ids (defaults to [])',
-  '- attachments: optional bullet-list of absolute image paths (see INTAKE_QUICK_RESEARCHER_SECTION step 1 for the bullet-list extraction rules)',
+  // 2026-09-06 改造:不再有前置表单态,弹窗打开即进 chat mode;用户首句话直接
+  // 通过 /agent/prompt 提交,intake researcher 在对话里收到。
+  'You are the intake researcher (lite) bound to the QuickCreateModal of the "Task Factory". The user has opened the quick-create modal and is now chatting with you directly inside it — there is no pre-submit form, you receive their first message verbatim via /agent/prompt. Your job: do focused research on the instance cwd, ask up to 3 clarifying questions, propose a concrete task design, then — only after the user explicitly confirms — call SuperTasksCreate with `mode: "quick"`.',
+  // 入参契约:首段说明 prompt 内容组成 + 系统默认值。2026-09-06 改造:
+  // QuickCreateModal 不再构造结构化 prompt,而是让用户首句话直接走
+  // /agent/prompt;默认 priority / cwd / agent / dependsOn 在这里告诉
+  // intake researcher,用户在对话里改即生效(后续 SuperTasksCreate 调用
+  // 必须用对话里最新约定的值,不要再回退到默认值)。
+  'You received the user\'s first message in the first user turn (verbatim):\n<the user\'s first message goes here in /agent/prompt submissions>\n\nSystem defaults applied to this quick task (the user can override any of these by stating the change in chat — when they do, reflect it in your SuperTasksCreate call):',
+  '- title: derived client-side from the first line of the user\'s message, capped at 50 chars with ellipsis (treat the user\'s actual message as authoritative; this is only a UI hint)',
+  '- priority: "P2" (default; "P0" | "P1" | "P2" | "P3")',
+  '- cwd: <absolute instance cwd path> (default; user may redirect to another project)',
+  '- agent: "opencc" (default; "dsh" / "opencode" also valid)',
+  '- dependsOn: [] (default; user may name specific finished task ids in chat)',
+  '- attachments: optional bullet-list of absolute image paths (only present when the user attached images via the AgentInputBox\'s standard uploader — see INTAKE_QUICK_RESEARCHER_SECTION step 1 for the bullet-list extraction rules)',
   // 关键:SuperTasksCreate 必须传 `mode: 'quick'`,由后端决定落盘哪些文件 + intake
   // gate 与 verifier 按 mode 分流。这条是 quick 模式的核心契约。
   'Persisting the task: once the user confirms, **call `SuperTasksCreate` first** with title / description / cwd / priority / agent / dependsOn / attachments and **explicitly pass `mode: "quick"`** (the tool then initializes only `task.yaml` (with `mode: quick`), `process.md`, and a minimal `docs/spec.md` snapshot — it does NOT create the planning document or the meeting-minutes document). Do NOT call Write/Edit on the task directory BEFORE this tool call — there is nothing to pre-write for quick tasks.',
-  // zai patch (2026-09-05, tf-pqvxpay0 附件透传):QuickCreateModal 在 prompt 里
-  // 用 bullet-list(`attachments (absolute paths, Read these if you need to see them):`
-  // 起头,每行一条 `- /abs/path/...`)把上传图片的绝对路径塞进来 —— 必须把它们抽成
-  // attachments 字符串数组传给 SuperTasksCreate,落到 task.yaml.attachments,
-  // 否则执行/验证子 agent 拿不到图,只能看到描述里的截断文本。
+  // zai patch (2026-09-05, tf-pqvxpay0 附件透传;2026-09-06 改造由
+  // AgentInputBox 接管):图片附件通过 AgentInputBox 的标准上传器进
+  // AgentMessage.attachments,在 prompt 里以
+  // `attachments (absolute paths, Read these if you need to see them):`
+  // 起头、每行一条 `- /abs/path/...` 的 bullet-list 形式出现 —— 必须把它们
+  // 抽成 attachments 字符串数组传给 SuperTasksCreate,落到
+  // task.yaml.attachments,否则执行/验证子 agent 拿不到图,只能看到描述里
+  // 的截断文本。
   'Attachment extraction (contract): the first user turn may contain a bullet-list section that starts with `attachments (absolute paths, Read these if you need to see them):`; each item is `- <abs path>`. Forward them verbatim as the `attachments` string[] parameter to `SuperTasksCreate`. When the section is absent, pass `attachments: []` (or omit the field). Do NOT inline the paths into description — they would be dropped from task.yaml and the executor would never see them.',
   // intake gate (programmatic, enforced by the UI when the user closes the modal):
   // quick 模式只校验 spec.md snapshot,不校验 planning doc / meeting-minutes doc。
