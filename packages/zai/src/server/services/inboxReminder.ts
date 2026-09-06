@@ -37,15 +37,12 @@ export function drainInboxReminder(sessionId: string): string | null {
  * tests can exercise formatting without spinning up a SessionInbox.
  * Returns null when `messages` is empty.
  *
- * zai patch (2026-09-06, follow-up): XML-escape the inner content.
- *
- * task-factory / subagent sources emit `<task-command>` /
- * `<task-notification>` XML blocks. When embedded verbatim inside a
- * `<system-reminder>...</system-reminder>` wrapper, the inner `<>`
- * confuse the model's XML/SGML parser — it can split the reminder
- * block early at the first inner `</...>` it sees, or close its
- * thinking block prematurely. Escape `<>&` so the inner XML
- * arrives as text inside one well-formed reminder block.
+ * Content is passed through verbatim — no XML escaping. task-factory
+ * and subagent sources emit `<task-command>` / `<task-notification>`
+ * XML blocks that the LLM must read as XML; escaping them would mangle
+ * the intent. Matches vendor `mailbox.ts:renderInbox` which also does
+ * not escape. Callers sending raw text are responsible for their own
+ * content shape.
  */
 export function renderInboxReminder(messages: InboxMessage[]): string | null {
   if (messages.length === 0) return null
@@ -63,7 +60,7 @@ export function renderInboxReminder(messages: InboxMessage[]): string | null {
 }
 
 function renderBullet(msg: InboxMessage): string {
-  const content = escapeXml(msg.content)
+  const content = msg.content
   const kind = msg.source.kind
   const form = msg.source.form
 
@@ -82,18 +79,4 @@ function renderBullet(msg: InboxMessage): string {
     return `- follow-up from user: ${content}`
   }
   return `- ${kind} / ${form}: ${content}`
-}
-
-/**
- * Escape `<`, `>`, `&` so the wrapped XML remains one well-formed
- * reminder block. We do NOT escape quotes (they're not significant
- * inside element text). The escape is applied to msg.content only;
- * the reminder header lines and bullet labels are controlled ASCII and
- * need no escape.
- */
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
 }
