@@ -66,7 +66,7 @@ describe('SuperTaskDetailDrawer', () => {
       return taskDetailsMock()
     }))
     render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
-    expect(await screen.findByText('执行过程')).toBeTruthy()
+    expect(await screen.findByText('事件流')).toBeTruthy()
     expect(await screen.findByText('process.md')).toBeTruthy()
     expect(await screen.findByText('验证记录')).toBeTruthy()
     expect(screen.getAllByText('[init]').length).toBeGreaterThanOrEqual(1)
