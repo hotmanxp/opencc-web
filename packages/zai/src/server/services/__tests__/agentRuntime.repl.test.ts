@@ -32,4 +32,26 @@ describe('agentRuntime runtimeCore=repl (P2 unified switch)', () => {
     expect(typeof runtime.enqueue).toBe('function')
     expect(typeof runtime.interrupt).toBe('function')
   })
+
+  // zai patch (2026-09-06, plugin crash fix): ReplRuntime 必须提供 `plugins`
+  // 字段,否则 routes/plugins.ts 的 r.plugins.listAvailable() 会 500
+  // (Cannot read properties of undefined)。fallback stub 不注入
+  // sharedRuntime 时生效,保证前端"插件管理"tab 永远能加载。
+  it('repl runtime exposes plugins stub with full OpenccPluginApi shape', async () => {
+    const runtime = getRuntime() as any
+    expect(runtime.plugins).toBeDefined()
+    expect(typeof runtime.plugins.listInstalled).toBe('function')
+    expect(typeof runtime.plugins.listAvailable).toBe('function')
+    expect(typeof runtime.plugins.setEnabled).toBe('function')
+    expect(typeof runtime.plugins.install).toBe('function')
+    expect(typeof runtime.plugins.uninstall).toBe('function')
+    expect(typeof runtime.plugins.update).toBe('function')
+    expect(typeof runtime.plugins.reload).toBe('function')
+    expect(typeof runtime.plugins.listMarketplaces).toBe('function')
+    expect(typeof runtime.plugins.addMarketplace).toBe('function')
+
+    // listAvailable 在 fallback stub 路径返回空数组,前端不崩。
+    const available = await runtime.plugins.listAvailable()
+    expect(Array.isArray(available)).toBe(true)
+  })
 })

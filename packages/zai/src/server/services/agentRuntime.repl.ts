@@ -26,7 +26,16 @@ import {
   isKnownSlashCommand,
 } from '@zn-ai/zn-agent-core'
 
-import type { OpenccRuntime } from '@zn-ai/zn-agent-core'
+import type {
+  OpenccMarketplaceActionResult,
+  OpenccMarketplacePluginDto,
+  OpenccPluginActionResult,
+  OpenccPluginDto,
+  OpenccPluginListResult,
+  OpenccPluginReloadCounts,
+  OpenccRuntime,
+  OpenccMarketplaceDto,
+} from '@zn-ai/zn-agent-core'
 
 // 客户端约定的事件形态(从 routes/agent.ts ServerEventInput 抽出最常用字段)。
 type RuntimeEvent = {
@@ -57,7 +66,23 @@ export class ReplRuntime {
   // zai patch (2026-08-30, plan P3.1-T1): shared OpenccRuntime 由
   // services/agentRuntime.ts init 时构造,挂进本类。query() 优先委托给它;
   // 未提供时(单元测试 / 渐进迁移场景)走原 createReplSession 路径。
-  constructor(private readonly openccRuntime?: OpenccRuntime) {}
+  private readonly openccRuntime?: OpenccRuntime
+
+  /**
+   * zai patch (2026-09-06, plugin crash fix): OpenccRuntime 契约要求
+   * `plugins` 字段(routes/plugins.ts 全部 10 个端点都走 r.plugins.*);
+   * 之前 ReplRuntime 没暴露这个字段,前端"插件管理"点开就 500
+   * (Cannot read properties of undefined (reading 'listAvailable'))。
+   * `openccRuntime` 注入了就委托它(createOpenccRuntime-impl 有真实 plugin API);
+   * 没注入(单元测试/legacy 路径)走 fallback stub,不 500。
+   * 在构造函数里初始化以保证 openccRuntime 参数属性赋值后再取 plugins。
+   */
+  plugins: OpenccRuntime['plugins']
+
+  constructor(openccRuntime?: OpenccRuntime) {
+    this.openccRuntime = openccRuntime
+    this.plugins = openccRuntime?.plugins ?? createPluginStub()
+  }
 
   private sessions = new Map<string, ReturnType<typeof createReplSession>>()
   private eventQueues = new Map<string, RuntimeEvent[]>()
@@ -372,5 +397,66 @@ export class ReplRuntime {
       this.sessions.set(sessionId, session)
     }
     return session
+  }
+}
+
+/**
+ * zai patch (2026-09-06): legacy/单元测试 fallback plugin stub。
+ * 生产路径总是由 initAgentRuntime 注入 openccRuntime(它带真实 plugins),
+ * 此 stub 仅在未注入时兜底(单测 / 渐进迁移场景),保证 routes/plugins.ts
+ * 不因 r.plugins === undefined 崩溃。形态与 SessionHostRuntimeAdapter
+ * createPluginStub 一致(同样的 Phase B+ 占位语义)。
+ */
+function createPluginStub(): OpenccRuntime['plugins'] {
+  const UNSUPPORTED = 'repl runtime 未注入共享 OpenccRuntime(单元测试/legacy 路径)'
+  const warn = (...a: unknown[]) =>
+    console.warn('[ReplRuntime] plugins.* 未接入:', ...a)
+  return {
+    listInstalled(): Promise<OpenccPluginListResult> {
+      warn(UNSUPPORTED)
+      return Promise.resolve({ plugins: [] as OpenccPluginDto[], errors: [] })
+    },
+    listAvailable(): Promise<OpenccMarketplacePluginDto[]> {
+      warn(UNSUPPORTED)
+      return Promise.resolve([])
+    },
+    setEnabled(
+      _id: string,
+      _enabled: boolean,
+    ): Promise<OpenccPluginActionResult> {
+      return Promise.resolve({ success: false, message: UNSUPPORTED })
+    },
+    install(_id: string): Promise<OpenccPluginActionResult> {
+      return Promise.resolve({ success: false, message: UNSUPPORTED })
+    },
+    uninstall(_id: string): Promise<OpenccPluginActionResult> {
+      return Promise.resolve({ success: false, message: UNSUPPORTED })
+    },
+    update(_id: string): Promise<OpenccPluginActionResult> {
+      return Promise.resolve({ success: false, message: UNSUPPORTED })
+    },
+    reload(): Promise<OpenccPluginActionResult> {
+      return Promise.resolve({
+        success: true,
+        message: UNSUPPORTED,
+        reload: {
+          plugins: 0,
+          commands: 0,
+          agents: 0,
+          hooks: 0,
+          mcpServers: 0,
+          errors: 0,
+        } satisfies OpenccPluginReloadCounts,
+      })
+    },
+    listMarketplaces(): Promise<OpenccMarketplaceDto[]> {
+      warn(UNSUPPORTED)
+      return Promise.resolve([])
+    },
+    addMarketplace(
+      _source: string,
+    ): Promise<OpenccMarketplaceActionResult> {
+      return Promise.resolve({ success: false, message: UNSUPPORTED })
+    },
   }
 }
