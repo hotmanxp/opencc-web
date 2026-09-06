@@ -77,6 +77,26 @@ describe('task-intake-quick 主 agent (2026-09-05 intake researcher lite, tfa-vy
     expect(text).toMatch(/attachments \(absolute paths.*Read these/i)
   })
 
+  it('systemPrompt 首段入参契约(2026-09-06 tf-92b3cxad):不再接表单字段 bullet,改为用户首句话 + 系统默认值', async () => {
+    const slot = taskIntakeQuickMainAgent.systemPrompt
+    if (typeof slot !== 'function') throw new Error('systemPrompt must be a function')
+    const arr = await slot([])
+    const text = arr.join('\n')
+    // 旧契约不再出现
+    expect(text).not.toContain('Form fields you received in the first user turn')
+    // 新契约出现
+    expect(text).toContain('You received the user\'s first message in the first user turn')
+    expect(text).toContain('the user\'s first message goes here')
+    expect(text).toContain('System defaults applied to this quick task')
+    // 默认值段落完整(priority P2 / cwd / agent=opencc / dependsOn=[])
+    expect(text).toMatch(/priority:\s*"P2"\s*\(default/)
+    expect(text).toContain('<absolute instance cwd path>')
+    expect(text).toMatch(/agent:\s*"opencc"\s*\(default/)
+    expect(text).toMatch(/dependsOn:\s*\[\]\s*\(default/)
+    // attachments 段约定来源改为 AgentInputBox
+    expect(text).toMatch(/via the AgentInputBox.*standard uploader/i)
+  })
+
   it('systemPrompt 顺序:RESEARCHER section 先出现(角色 + 工作流),quick-specific prompt 后出现(契约字段 + mode: "quick")', async () => {
     const slot = taskIntakeQuickMainAgent.systemPrompt
     if (typeof slot !== 'function') throw new Error('systemPrompt must be a function')
