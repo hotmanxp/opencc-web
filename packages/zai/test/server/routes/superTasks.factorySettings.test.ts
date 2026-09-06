@@ -75,7 +75,7 @@ describe('GET /api/super-tasks/settings', () => {
       docsDir: '',
       repoRoot: '',
       maxParallelTasks: 4,
-      preferSpawnAgent: null,
+      preferCliAgent: null,
       historyArchiveHours: 48,
       docsDirExists: false,
       repoRootExists: false,
@@ -97,11 +97,11 @@ describe('GET /api/super-tasks/settings', () => {
 
 describe('PUT /api/super-tasks/settings', () => {
   it('合法 partial patch 合并成功', async () => {
-    const r1 = await supertest(app).put('/api/super-tasks/settings').send({ preferSpawnAgent: 'dsh' })
+    const r1 = await supertest(app).put('/api/super-tasks/settings').send({ preferCliAgent: 'dsh' })
     expect(r1.status).toBe(200)
     const r2 = await supertest(app).put('/api/super-tasks/settings').send({ repoRoot: dataDir })
     expect(r2.status).toBe(200)
-    expect(r2.body.preferSpawnAgent).toBe('dsh')
+    expect(r2.body.preferCliAgent).toBe('dsh')
     expect(r2.body.repoRoot).toBe(dataDir)
   })
 
@@ -125,7 +125,7 @@ describe('PUT /api/super-tasks/settings', () => {
   })
 
   it('非法枚举 / 非字符串路径 → 400', async () => {
-    const r1 = await supertest(app).put('/api/super-tasks/settings').send({ preferSpawnAgent: 'codex' })
+    const r1 = await supertest(app).put('/api/super-tasks/settings').send({ preferCliAgent: 'codex' })
     expect(r1.status).toBe(400)
     const r2 = await supertest(app).put('/api/super-tasks/settings').send({ docsDir: 42 })
     expect(r2.status).toBe(400)

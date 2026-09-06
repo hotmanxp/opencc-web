@@ -13,7 +13,7 @@ import {
 } from '../../../../src/compat/subagents/registry.js'
 import {
   spawnCliAgent,
-  type CliAgentKind,
+  type CliSubagentKind,
 } from '../../../../src/compat/subagents/cliAgent/spawn.js'
 import type { SubprocessHandle } from '../../../../src/compat/subprocess/types.js'
 
@@ -135,10 +135,10 @@ describe('subagents/cliAgent/spawn', () => {
 
   it('throws PROVIDER_NOT_FOUND for an unregistered agent type', async () => {
     await expect(
-      spawnCliAgent({ agentType: 'nope' as CliAgentKind, prompt: 'hi' }),
+      spawnCliAgent({ agentType: 'nope' as CliSubagentKind, prompt: 'hi' }),
     ).rejects.toBeInstanceOf(SubagentError)
     await expect(
-      spawnCliAgent({ agentType: 'nope' as CliAgentKind, prompt: 'hi' }),
+      spawnCliAgent({ agentType: 'nope' as CliSubagentKind, prompt: 'hi' }),
     ).rejects.toThrow(/no provider named 'nope'/)
   })
 

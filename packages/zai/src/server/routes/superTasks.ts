@@ -47,8 +47,8 @@ const router: IRouter = Router()
 const ALLOWED_ACTIONS = ['dispatch', 'resume', 'accept', 'pause'] as const
 type InjectAction = (typeof ALLOWED_ACTIONS)[number]
 
-/** spawnAgent provider 白名单(注册/探测端点共用;向导架构可扩展)。 */
-const SPAWN_AGENT_NAMES = ['opencc', 'dsh', 'opencode'] as const
+/** cliAgent provider 白名单(注册/探测端点共用;向导架构可扩展)。 */
+const CLI_AGENT_NAMES = ['opencc', 'dsh', 'opencode'] as const
 
 /** `which <cmd>` 探测全局命令。失败/未找到 → found=false。 */
 async function whichProbe(cmd: string): Promise<{ found: boolean; path: string | null }> {
@@ -144,13 +144,15 @@ router.put('/super-tasks/settings', async (req, res) => {
 })
 
 /**
- * GET /api/super-tasks/spawn-agents — opencc / dsh / opencode 三个 spawnAgent
+ * GET /api/super-tasks/spawn-agents — opencc / dsh / opencode 三个 cliAgent
  * provider 的可用性快照:
  *  - commandFound/commandPath: `which <name>` 探测全局 CLI;
  *  - registered: ~/.zai/settings.json 是否已有 subagents.<name> 配置块;
  *  - active: 运行时 getSubagentRegistry().list() 是否包含(opencc/claude-code
  *    provider 无条件注册 → 通常 active=true;dsh / opencode 在 initAgentRuntime
  *    按配置注册 → 需 enabled 并重启后 active)。
+ *
+ * 注:端点路径保留 `/spawn-agents` 不改,避免对前端调用造成 breaking change。
  */
 router.get('/super-tasks/spawn-agents', async (_req, res) => {
   let settings: Awaited<ReturnType<typeof readZaiSettings>> | null = null
@@ -166,7 +168,7 @@ router.get('/super-tasks/spawn-agents', async (_req, res) => {
     activeNames = []
   }
   const agents = []
-  for (const name of SPAWN_AGENT_NAMES) {
+  for (const name of CLI_AGENT_NAMES) {
     const { found, path } = await whichProbe(name)
     agents.push({
       name,
@@ -185,11 +187,13 @@ router.get('/super-tasks/spawn-agents', async (_req, res) => {
  * 其它键与 settings.json 其它键不动)。dsh / opencode provider 在 initAgentRuntime
  * 时才注册进 registry,故响应带 restartRequired: true 提示用户重启 zai 服务
  * 生效(系统不自动重启)。:name 白名单 opencc/dsh/opencode,其余 404。
+ *
+ * 注:端点路径保留 `/spawn-agents` 不改,避免对前端调用造成 breaking change。
  */
 router.post('/super-tasks/spawn-agents/:name/register', async (req, res) => {
   const name = req.params.name
-  if (!(SPAWN_AGENT_NAMES as readonly string[]).includes(name)) {
-    return res.status(404).json({ error: `unknown spawn agent: ${name}` })
+  if (!(CLI_AGENT_NAMES as readonly string[]).includes(name)) {
+    return res.status(404).json({ error: `unknown cli agent: ${name}` })
   }
   try {
     const settings = await readZaiSettings()
@@ -307,7 +311,7 @@ router.post('/super-tasks/inject', async (req, res) => {
 
 /**
  * POST /api/super-tasks/:id/start — 手工启动：校验在队列后注入 dispatch 指令，
- * 由任务调度器按任务 cwd 委派执行子 Agent（优先 SpawnAgent）。
+ * 由任务调度器按任务 cwd 委派执行子 Agent（优先 CliAgent）。
  */
 router.post('/super-tasks/:id/start', async (req, res) => {
   const t = await getTaskSummary(req.params.id)

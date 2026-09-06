@@ -1,5 +1,5 @@
 /**
- * SpawnAgent unified surface — a single entry to run one CLI agent
+ * CliAgent unified surface — a single entry to run one CLI subagent
  * (`opencc` | `dsh` | `opencode`) end-to-end.
  *
  * Rationale (handoff 2026-08-31, task #5): claude-code and dsh providers
@@ -26,13 +26,13 @@ import {
   sanitizeAgentName,
 } from './ids.js'
 
-/** CLI agents this carrier can spawn. */
-export type CliAgentKind = 'opencc' | 'dsh' | 'opencode'
+/** CLI subagent variants this carrier can spawn. */
+export type CliSubagentKind = 'opencc' | 'dsh' | 'opencode'
 
-export interface CliAgentSpawnArgs {
+export interface CliSpawnArgs {
   /** Addressable name; defaults to `agentType` when omitted. */
   name?: string
-  agentType: CliAgentKind
+  agentType: CliSubagentKind
   prompt: string
   /** Model-facing short description; falls back to `name ?? agentType`. */
   description?: string
@@ -55,7 +55,7 @@ export interface CliAgentSpawnArgs {
  * future AgentTool wrapper and downstream consumers can treat a CLI-agent
  * spawn like a teammate spawn.
  */
-export interface CliAgentSpawn {
+export interface CliSpawnResult {
   status: 'spawned'
   /** `name@team` when teamName set; otherwise `<name>-<rand8>`. */
   agent_id: string
@@ -68,7 +68,7 @@ export interface CliAgentSpawn {
   description: string
   /** The task text the child agent receives (attribution / mirror). */
   prompt: string
-  agent_type: CliAgentKind
+  agent_type: CliSubagentKind
   /** In-process placeholders, matching vendor `handleSpawnInProcess`. */
   tmux_session_name: 'in-process'
   tmux_window_name: 'in-process'
@@ -87,8 +87,8 @@ export interface CliAgentSpawn {
  * completes. Throws {@link SubagentError} when the provider isn't registered.
  */
 export async function spawnCliAgent(
-  args: CliAgentSpawnArgs,
-): Promise<CliAgentSpawn> {
+  args: CliSpawnArgs,
+): Promise<CliSpawnResult> {
   const { agentType, prompt, cwd, model, signal, env } = args
   const agentName = sanitizeAgentName(args.name ?? agentType)
   const description = args.description ?? args.name ?? agentType

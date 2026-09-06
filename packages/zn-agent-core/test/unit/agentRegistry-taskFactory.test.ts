@@ -3,7 +3,7 @@
  * 注册验证。
  *   1. `loadBuiltinAgents()` 后 agent name='task-factory' 已注册且有 description
  *   2. tools 槽含 SuperTasksCreate / SuperTasksMove 等流水线工具
- *   3. tools 槽保留默认工具池(SpawnAgent 可用)
+ *   3. tools 槽保留默认工具池(CliAgent 可用)
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -25,16 +25,16 @@ describe('task-factory builtin agent', () => {
     expect(reg.resolveAgent('task-factory')?.description).toBeTruthy()
   })
 
-  it('tools 槽保留默认工具池(SpawnAgent 可用)', async () => {
+  it('tools 槽保留默认工具池(CliAgent 可用)', async () => {
     resetAgentRegistryForTests()
     const reg = getAgentRegistry()
     reg.loadBuiltinAgents()
     reg.registryAgent('sess-2', 'task-factory')
     const tools = await reg.slot(
-      [{ name: 'SpawnAgent' } as never],
+      [{ name: 'CliAgent' } as never],
       'tools',
       'sess-2',
     )
-    expect(tools.some((t) => t.name === 'SpawnAgent')).toBe(true)
+    expect(tools.some((t) => t.name === 'CliAgent')).toBe(true)
   })
 })

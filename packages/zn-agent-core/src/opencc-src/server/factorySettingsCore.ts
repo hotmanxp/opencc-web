@@ -17,14 +17,14 @@ export interface CoreFactorySettings {
   docsDir: string
   repoRoot: string
   maxParallelTasks: number
-  preferSpawnAgent: 'opencc' | 'dsh' | 'opencode' | null
+  preferCliAgent: 'opencc' | 'dsh' | 'opencode' | null
 }
 
 export const CORE_FACTORY_SETTINGS_DEFAULTS: CoreFactorySettings = {
   docsDir: '',
   repoRoot: '',
   maxParallelTasks: 4,
-  preferSpawnAgent: null,
+  preferCliAgent: null,
 }
 
 /** 与 zai paths.ts 的 ZAI_DIR 惯例一致:ZAI_DATA_DIR env 可覆盖(测试用)。 */
@@ -50,11 +50,11 @@ export function readCoreFactorySettings(): CoreFactorySettings {
       out.maxParallelTasks = o.maxParallelTasks
     }
     if (
-      o.preferSpawnAgent === 'opencc' ||
-      o.preferSpawnAgent === 'dsh' ||
-      o.preferSpawnAgent === 'opencode'
+      o.preferCliAgent === 'opencc' ||
+      o.preferCliAgent === 'dsh' ||
+      o.preferCliAgent === 'opencode'
     ) {
-      out.preferSpawnAgent = o.preferSpawnAgent
+      out.preferCliAgent = o.preferCliAgent
     }
   } catch {
     return out

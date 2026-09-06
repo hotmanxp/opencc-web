@@ -120,7 +120,7 @@ describe('taskFactoryFiles (task.yaml 2026-09-02)', () => {
     expect(yaml).toContain('cwd: /abs/code/proj-a')
     const s2 = await createPoolTask({ title: 'no-cwd' })
     expect(s2.cwd).toBe(process.cwd())
-    // 空串 cwd 不被接受（'' 穿透 ?? 会毒化下游 SpawnAgent）——回退 process.cwd()
+    // 空串 cwd 不被接受('' 穿透 ?? 会毒化下游 CliAgent)——回退 process.cwd()
     const s3 = await createPoolTask({ title: 'empty-cwd', cwd: '' })
     expect(s3.cwd).toBe(process.cwd())
   })

@@ -65,7 +65,7 @@ describe('attach()', () => {
 
     expect(task.id).toBe('agent-xyz')
     // attach 语义 = caller 已在外部启动执行,登记即 running(2026-09-01 修复:
-    // 旧实现固定 queued 且 attach 路径无调度器,SpawnAgent 全程显示"排队中")
+    // 旧实现固定 queued 且 attach 路径无调度器,CliAgent 全程显示"排队中")
     expect(task.status).toBe('running')
     expect(task.startedAt).toBeTypeOf('number')
     expect(task.input.prompt).toBe('list files')

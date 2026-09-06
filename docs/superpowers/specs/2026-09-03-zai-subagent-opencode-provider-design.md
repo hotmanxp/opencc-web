@@ -5,7 +5,7 @@
 
 ## Problem
 
-SpawnAgent routes `subagent_type` to registered `SubagentProvider`s
+CliAgent routes `subagent_type` to registered `SubagentProvider`s
 (`compat/subagents/registry.ts`). Today the registry carries `opencc`,
 `dsh`, `claude-code` and `codex`. The natural third-party addition is
 SST's `opencode` CLI (`opencode-ai`), already installable via pnpm
@@ -81,15 +81,15 @@ The tool `description()` enumerates registered providers dynamically,
 but these static sites still gate/word opencode out and must change
 with the implementation:
 
-1. `packages/zn-agent-core/src/compat/tools/opencc/SpawnAgentTool.ts`
+1. `packages/zn-agent-core/src/compat/tools/opencc/CliAgentTool.ts`
    — `subagent_type` zod `describe()` example (`\`opencc\` / \`dsh\``),
    header comments (~L32/L42), the `as 'opencc' | 'dsh'` assertion
    (~L168), and the unknown-provider fallback wording (~L155).
-2. `packages/zai/src/server/routes/superTasks.ts` — `SPAWN_AGENT_NAMES`
+2. `packages/zai/src/server/routes/superTasks.ts` — `CLI_AGENT_NAMES`
    whitelist (L50) and the spawn-agents route comments (“opencc / dsh
-   两个”, L146/L182–186).
+   两个”, L146/L182–186)。
 3. `packages/zai/src/web/src/lib/superTaskApi.ts` —
-   `preferSpawnAgent: 'opencc' | 'dsh' | null` union (L126).
+   `preferCliAgent: 'opencc' | 'dsh' | null` union (L126)。
 4. `packages/zai/src/web/src/components/superTasks/FactorySettingsDrawer.tsx`
    — same union (L35) and user-facing copy “注册 opencc / dsh …” (L278).
 5. Stale comments to correct in passing: `subagentProviderBridge.ts`
@@ -117,7 +117,7 @@ with the implementation:
 
 - `/api/super-tasks/spawn-agents` lists `opencode` with
   commandFound/registered/active semantics matching dsh gating.
-- SpawnAgent with `subagent_type: 'opencode'` returns
+- CliAgent with `subagent_type: 'opencode'` returns
   `async_launched`, streams SSE timeline frames, and delivers a
   `<task-notification>` with the final text on completion.
 - Cancellation kills the opencode process tree.

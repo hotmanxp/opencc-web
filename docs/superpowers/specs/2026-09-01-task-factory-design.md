@@ -99,11 +99,11 @@ parentSessionId: ...       # 可选：创建该任务的任务调度器道话 se
   `SuperTasksMarkDone`。
 - `slots.tools`：在默认工具基础上新增两个专用工具。
 
-### 委派执行（重要决策：优先 SpawnAgent）
+### 委派执行（重要决策：优先 CliAgent）
 
-**执行子 Agent 的委派优先走 `SpawnAgent`（外置 CLI agent，`subagent_type`
-为 `claude-code` / `dsh`，即 index.md 的 `agent` 字段），`SpawnAgent` 是默认
-工具池已有工具**（`compat/tools/opencc/SpawnAgentTool.ts`，输入
+**执行子 Agent 的委派优先走 `CliAgent`（外置 CLI agent，`subagent_type`
+为 `claude-code` / `dsh`，即 index.md 的 `agent` 字段），`CliAgent` 是默认
+工具池已有工具**(`compat/tools/opencc/CliAgentTool.ts`,输入
 `{description, prompt, subagent_type, model?, cwd?, name?, team_name?}`，
 异步返回 `task_id`，完成后通知任务调度器）。仅当对应 provider 未注册/不可用时，
 回退内置 `AgentTool`（`subagent_type` 用内置 agent 名）。
@@ -111,14 +111,14 @@ parentSessionId: ...       # 可选：创建该任务的任务调度器道话 se
 **执行器工作目录 = 任务的工程目录（index.md 的 `cwd` 字段）**（2026-09-01 用户追加）：
 不同任务可落在不同代码工程，创建任务时必须记录工程目录；委派执行子 Agent 时把该
 `cwd` 作为执行环境：
-- SpawnAgent 路径：`cwd` 参数 = 任务 `cwd`（绝对路径）；
+- CliAgent 路径：`cwd` 参数 = 任务 `cwd`（绝对路径）；
 - AgentTool 回退路径：prompt 里显式声明任务 `cwd`（绝对路径）并要求在其中工作。
 
 **执行器 transcript 归拢到任务目录**（`~/.zai/task-factory/processing-tasks/<id>/`）：
 core `getAgentTranscriptPath`（`utils/sessionStorage.ts:572`）打小补丁——`transcriptSubdir`
 若为绝对路径则直接作为 transcript 根目录（原实现只拼在 `projectDir/sessionId/subagents/`
 下，无法指向任务目录）；任务调度器委派时把绝对任务目录作为 transcript 位置传入
-（AgentTool 路径传绝对 `transcriptSubdir`；SpawnAgent 路径的 zai 侧 task 记录/output
+（AgentTool 路径传绝对 `transcriptSubdir`；CliAgent 路径的 zai 侧 task 记录/output
 文件自然落在任务目录附近）。CLI 子 agent（claude-code CLI）自己有独立 transcript
 存储，无法被 zai 侧重定向——其 cwd 为任务工程目录，保证工程级隔离。
 
@@ -183,7 +183,7 @@ SSE：任务事件并入现有 SSE 流（`useEventStream` 已有全局连接）�
    讨论(任务调度器+用户)  │  queue-tasks │◄── SuperTasksCreate
    └──────────────►│  (队列/池)   │
                     └──────┬──────┘
-            start(注入) / AI托管自动 │ 派遣（优先 SpawnAgent claude-code|dsh，回退 AgentTool）
+            start(注入) / AI托管自动 │ 派遣（优先 CliAgent claude-code|dsh，回退 AgentTool）
                     ┌──────▼──────┐
                     │ processing  │──► 执行子 Agent（cwd=任务目录, transcript 归拢任务目录）
                     │ (执行中)    │     职责: 读spec/plan→实现→追加process.md→汇报
@@ -198,7 +198,7 @@ SSE：任务事件并入现有 SSE 流（`useEventStream` 已有全局连接）�
 ```
 
 - **手工启动**：按钮 → inject「执行任务 X」→ 任务调度器读 spec/plan → 首次启动写
-  startedAt → 优先 SpawnAgent（claude-code/dsh）派生执行子 Agent，不可用时回退
+  startedAt → 优先 CliAgent（claude-code/dsh）派生执行子 Agent，不可用时回退
   AgentTool；执行器 transcript 归拢到任务目录。
 - **AI 托管（enabled）**：后端事件循环调度——
   - 队列非空 → 自动注入任务调度器「请按队列顺序派发任务」，不限制仅一个任务执行（不同任务可并行）；
@@ -278,7 +278,7 @@ SSE：任务事件并入现有 SSE 流（`useEventStream` 已有全局连接）�
 > 2. **新内置 agent `task-intake`**（`mainAgents-taskIntake.ts`）：职责单一 ——
 >    brainstorming 聊需求 → `SuperTasksCreate` 落库 → 把讨论纪要写入任务目录
 >    `docs/brainstorm.md` → 报告任务 id。tools 槽只追加 SuperTasksCreate
->    （不给 MarkDone/SpawnAgent，不派发不验收）。
+>    （不给 MarkDone/CliAgent，不派发不验收）。
 > 3. **纪要归档**：落库后纪要永久留在 `<任务目录>/docs/brainstorm.md`（任务调度器派发时
 >    与 spec/plan 一并让执行子 Agent 阅读）；临时 intake 会话在用户「完成并关闭」后
 >    删除；讨论未完而关闭 → 保留草稿，下次打开弹窗提示「继续 / 新开」。

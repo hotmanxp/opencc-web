@@ -38,7 +38,7 @@ const TASK_INTAKE_SYSTEM_PROMPT = [
 /**
  * task-intake 工具白名单 —— 需求澄清 + 建任务 + 归档纪要所需的最小集。
  * 讨论纪律是"期间不写文件、产出只有任务与纪要",故不开放编码/派发类工具
- * (NotebookEdit、SpawnAgent、TodoWrite 等)。实际过滤还叠加 mcp__* 全保留
+ * (NotebookEdit、CliAgent、TodoWrite 等)。实际过滤还叠加 mcp__* 全保留
  * (见 taskIntakeTools),与 systemPrompt 保留的 # CodeGraph 段配套。
  */
 const TASK_INTAKE_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([

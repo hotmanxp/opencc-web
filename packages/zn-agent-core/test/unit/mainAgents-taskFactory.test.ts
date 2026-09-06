@@ -18,7 +18,7 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
       { name: 'Bash' },
       { name: 'Read' },
       { name: 'Edit' },
-      { name: 'SpawnAgent' },
+      { name: 'CliAgent' },
     ] as const
     const toolsFactory = taskFactoryMainAgent.tools
     if (typeof toolsFactory !== 'function') throw new Error('tools must be a function')
@@ -34,7 +34,7 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
       { name: 'Bash' },
       { name: 'Read' },
       { name: 'Edit' },
-      { name: 'SpawnAgent' },
+      { name: 'CliAgent' },
     ] as const
     const toolsFactory = taskFactoryMainAgent.tools
     if (typeof toolsFactory !== 'function') throw new Error('tools must be a function')
@@ -75,7 +75,7 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
     expect(text).toContain('SuperTasksMove')
     expect(text).toContain('SuperTasksReset')
     expect(text).toContain('SuperTasksPause')
-    expect(text).toContain('SpawnAgent')
+    expect(text).toContain('CliAgent')
     expect(text).toContain('verification.md')
     // 2026-09-02:SuperTasksGet 替代裸读 task.yaml
     expect(text).toContain('SuperTasksGet')

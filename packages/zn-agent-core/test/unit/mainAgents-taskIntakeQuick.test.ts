@@ -21,7 +21,7 @@ function fakePool() {
     { name: 'TaskUpdate' },
     { name: 'TaskList' },
     { name: 'NotebookEdit' },
-    { name: 'SpawnAgent' },
+    { name: 'CliAgent' },
     { name: 'TodoWrite' },
     { name: 'WebFetch' },
     { name: 'mcp__codegraph__codegraph_explore' },
@@ -110,7 +110,7 @@ describe('task-intake-quick 主 agent (2026-09-05 intake researcher lite, tfa-vy
     expect(researcherIdx).toBeLessThan(modeIdx)
   })
 
-  it('tools 白名单:只允许 Read/Write/Grep/Glob/Bash/AskUserQuestion/SuperTasksCreate + mcp__*,过滤掉 Skill/NotebookEdit/SpawnAgent', () => {
+  it('tools 白名单:只允许 Read/Write/Grep/Glob/Bash/AskUserQuestion/SuperTasksCreate + mcp__*,过滤掉 Skill/NotebookEdit/CliAgent', () => {
     const slot = taskIntakeQuickMainAgent.tools
     if (typeof slot !== 'function') throw new Error('tools must be a function')
     const names = slot(fakePool() as never).map((t) => String(t.name))
@@ -120,8 +120,8 @@ describe('task-intake-quick 主 agent (2026-09-05 intake researcher lite, tfa-vy
     }
     expect(names).toContain('mcp__codegraph__codegraph_explore')
     expect(names).toContain('mcp__chrome-devtools-mcp__navigate_page')
-    // 不应包含 brainstorming 相关(任务系列、Skill、NotebookEdit、SpawnAgent、TodoWrite、Edit、Task*)
-    for (const gone of ['Skill', 'NotebookEdit', 'SpawnAgent', 'TodoWrite', 'WebFetch', 'Edit',
+    // 不应包含 brainstorming 相关(任务系列、Skill、NotebookEdit、CliAgent、TodoWrite、Edit、Task*)
+    for (const gone of ['Skill', 'NotebookEdit', 'CliAgent', 'TodoWrite', 'WebFetch', 'Edit',
       'TaskCreate', 'TaskGet', 'TaskUpdate', 'TaskList']) {
       expect(names).not.toContain(gone)
     }

@@ -5,11 +5,11 @@ import {
 import { CheckCircleFilled, CloseCircleFilled, ReloadOutlined } from '@ant-design/icons'
 import {
   fetchFactorySettings,
-  fetchSpawnAgents,
+  fetchCliAgents,
   putFactorySettings,
-  registerSpawnAgent,
+  registerCliAgent,
   type FactorySettingsDto,
-  type SpawnAgentStatus,
+  type CliAgentStatus,
 } from '../../lib/superTaskApi'
 import { LIGHT_PAGE_VARS } from './lightThemeVars'
 
@@ -17,7 +17,7 @@ import { LIGHT_PAGE_VARS } from './lightThemeVars'
  * FactorySettingsDrawer — 任务工厂独立设置抽屉(tf-pnsl5m5e)。
  *
  * 右侧滑出,编辑 `~/.zai/factory-settings.json`(GET/PUT /api/super-tasks/
- * settings)+ 管理 spawnAgent provider(GET /api/super-tasks/spawn-agents、
+ * settings)+ 管理 cliAgent provider(GET /api/super-tasks/spawn-agents、
  * POST .../:name/register)。沿用任务工厂页亮色主题:页面级 ConfigProvider
  * 经 React context 作用于 portal(见 SuperTasks.tsx 注释),但 portal 拿不到
  * 页面 div 上的 CSS 变量,内容容器再注入一份 LIGHT_PAGE_VARS(与
@@ -32,7 +32,7 @@ interface Draft {
   docsDir: string
   repoRoot: string
   maxParallelTasks: number | null
-  preferSpawnAgent: 'opencc' | 'dsh' | 'opencode' | null
+  preferCliAgent: 'opencc' | 'dsh' | 'opencode' | null
   historyArchiveHours: number | null
 }
 
@@ -40,7 +40,7 @@ const EMPTY_DRAFT: Draft = {
   docsDir: '',
   repoRoot: '',
   maxParallelTasks: 4,
-  preferSpawnAgent: null,
+  preferCliAgent: null,
   historyArchiveHours: 48,
 }
 
@@ -49,7 +49,7 @@ function draftFromSettings(s: FactorySettingsDto): Draft {
     docsDir: s.docsDir,
     repoRoot: s.repoRoot,
     maxParallelTasks: s.maxParallelTasks,
-    preferSpawnAgent: s.preferSpawnAgent,
+    preferCliAgent: s.preferCliAgent,
     historyArchiveHours: s.historyArchiveHours,
   }
 }
@@ -85,7 +85,7 @@ export default function FactorySettingsDrawer({
   const [saving, setSaving] = useState(false)
   const [settings, setSettings] = useState<FactorySettingsDto | null>(null)
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT)
-  const [agents, setAgents] = useState<SpawnAgentStatus[]>([])
+  const [agents, setAgents] = useState<CliAgentStatus[]>([])
   const [registering, setRegistering] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -93,7 +93,7 @@ export default function FactorySettingsDrawer({
     setLoading(true)
     setLoadError(null)
     try {
-      const [s, a] = await Promise.all([fetchFactorySettings(), fetchSpawnAgents()])
+      const [s, a] = await Promise.all([fetchFactorySettings(), fetchCliAgents()])
       setSettings(s)
       setDraft(draftFromSettings(s))
       setAgents(a)
@@ -123,7 +123,7 @@ export default function FactorySettingsDrawer({
         ...(draft.historyArchiveHours !== null
           ? { historyArchiveHours: draft.historyArchiveHours }
           : {}),
-        preferSpawnAgent: draft.preferSpawnAgent,
+        preferCliAgent: draft.preferCliAgent,
       })
       setSettings(dto)
       message.success('工厂设置已保存')
@@ -138,9 +138,9 @@ export default function FactorySettingsDrawer({
   async function handleRegister(name: string): Promise<void> {
     setRegistering(name)
     try {
-      await registerSpawnAgent(name)
+      await registerCliAgent(name)
       message.success(`${name} 注册成功,重启 zai 服务后生效`)
-      setAgents(await fetchSpawnAgents())
+      setAgents(await fetchCliAgents())
     } catch (err) {
       message.error(err instanceof Error ? `注册 ${name} 失败: ${err.message}` : '注册失败')
     } finally {
@@ -263,19 +263,19 @@ export default function FactorySettingsDrawer({
                 />
               </div>
 
-              {/* ── 优先 spawnAgent ───────────────────────────────── */}
+              {/* ── 优先 cliAgent ───────────────────────────────── */}
               <div>
-                <Typography.Text strong>优先 spawnAgent</Typography.Text>
+                <Typography.Text strong>优先 cliAgent</Typography.Text>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', margin: '2px 0 6px' }}>
-                  任务调度器委派执行(SpawnAgent / SuperTasksCreate 的 agent 字段)时优先使用。仅「活跃」的 provider 可选。
+                  任务调度器委派执行(CliAgent / SuperTasksCreate 的 agent 字段)时优先使用。仅「活跃」的 provider 可选。
                 </div>
                 {agents.length > 0 && !anyActive && (
                   <Alert
                     type="info"
                     showIcon
                     style={{ marginBottom: 8 }}
-                    message="当前没有可用的 spawnAgent provider"
-                    description="请在下方「spawnAgent 管理」注册 opencc / dsh / opencode,重启 zai 服务后即出现在此列表。"
+                    message="当前没有可用的 cliAgent provider"
+                    description="请在下方「cliAgent 管理」注册 opencc / dsh / opencode,重启 zai 服务后即出现在此列表。"
                   />
                 )}
                 <Select
@@ -283,8 +283,8 @@ export default function FactorySettingsDrawer({
                   allowClear
                   placeholder="未指定"
                   style={{ width: 240 }}
-                  value={draft.preferSpawnAgent ?? undefined}
-                  onChange={(v) => setDraft((p) => ({ ...p, preferSpawnAgent: (v ?? null) as Draft['preferSpawnAgent'] }))}
+                  value={draft.preferCliAgent ?? undefined}
+                  onChange={(v) => setDraft((p) => ({ ...p, preferCliAgent: (v ?? null) as Draft['preferCliAgent'] }))}
                   options={agents.map((a) => ({
                     value: a.name,
                     disabled: !a.active,
@@ -293,9 +293,9 @@ export default function FactorySettingsDrawer({
                 />
               </div>
 
-              {/* ── spawnAgent 管理 ───────────────────────────────── */}
+              {/* ── cliAgent 管理 ───────────────────────────────── */}
               <div>
-                <Typography.Text strong>spawnAgent 管理</Typography.Text>
+                <Typography.Text strong>cliAgent 管理</Typography.Text>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', margin: '2px 0 10px' }}>
                   写入 ~/.zai/settings.json 的 subagents.&lt;name&gt;(enabled: true,其余键不动);注册后需重启 zai 生效。
                 </div>

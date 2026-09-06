@@ -16,7 +16,7 @@ function fakePool() {
     { name: 'TaskUpdate' },
     { name: 'TaskList' },
     { name: 'NotebookEdit' },
-    { name: 'SpawnAgent' },
+    { name: 'CliAgent' },
     { name: 'TodoWrite' },
     { name: 'WebFetch' },
     { name: 'mcp__codegraph__codegraph_explore' },
@@ -36,7 +36,7 @@ describe('task-intake tools slot (2026-09-03 whitelist)', () => {
     expect(names).toContain('mcp__codegraph__codegraph_explore')
     expect(names).toContain('mcp__chrome-devtools-mcp__navigate_page')
     // 编码/派发/管理类工具剔除
-    for (const gone of ['NotebookEdit', 'SpawnAgent', 'TodoWrite', 'WebFetch']) {
+    for (const gone of ['NotebookEdit', 'CliAgent', 'TodoWrite', 'WebFetch']) {
       expect(names).not.toContain(gone)
     }
   })

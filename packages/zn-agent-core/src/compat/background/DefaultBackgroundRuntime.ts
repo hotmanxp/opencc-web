@@ -254,7 +254,7 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
    * 幂等:已存在相同 id 时直接返回现有 task(用于 AgentTool 重试 / 重复注册场景)。
    *
    * zai patch (2026-09-01): 初始状态为 'running' 而非 'queued'。attach 的语义是
-   * "caller 已在外部启动执行,现在才登记"(SpawnAgent 先 spawnCliAgent 再 attach、
+   * "caller 已在外部启动执行,现在才登记"(CliAgent 先 spawnCliAgent 再 attach、
    * AgentTool async 分支先 runAgent 再 attach),登记时刻任务必然在跑。
    * 'queued' 只在 dispatch 路径有意义(入队等资源调度,runOne 起跑时再切
    * running);attach 路径没有调度器,旧实现会让任务在抽屉里全程显示
@@ -362,8 +362,8 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     rec.task.status = status
     rec.task.finishedAt = Date.now()
     if (error) rec.task.error = error
-    // zai patch (2026-08-31, plan spawnagent-result-inline): attach-path
-    // callers (SpawnAgent / in-process CLI subagents) don't go through
+    // zai patch (2026-08-31, plan cliagent-result-inline): attach-path
+    // callers (CliAgent / in-process CLI subagents) don't go through
     // the dispatch streaming loop, so `task.resultText` is never set and
     // the parent session's <task-notification> ships without a `<result>`
     // block — forcing the parent agent to follow up with `TaskOutput` /

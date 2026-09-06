@@ -11,7 +11,7 @@
  *  - `__resetForTests()` 清缓存。
  *
  * 消费端(混合模式):托管循环以 maxParallelTasks 为服务端强约束;
- * docsDir/repoRoot/preferSpawnAgent 为软引导(任务调度器提示词 + 需求讨论 cwd)。
+ * docsDir/repoRoot/preferCliAgent 为软引导(任务调度器提示词 + 需求讨论 cwd)。
  * core 侧(mainAgents-taskFactory.ts)独立读同一文件,纯 core 环境文件缺失
  * 时全部默认值 no-op。
  */
@@ -27,8 +27,8 @@ export interface FactorySettings {
   repoRoot: string
   /** 并行执行任务上限,整数 2–8。 */
   maxParallelTasks: number
-  /** 委派执行时优先的 spawnAgent;"opencc" | "dsh" | "opencode" | null(未选)。 */
-  preferSpawnAgent: 'opencc' | 'dsh' | 'opencode' | null
+  /** 委派执行时优先的 cliAgent;"opencc" | "dsh" | "opencode" | null(未选)。 */
+  preferCliAgent: 'opencc' | 'dsh' | 'opencode' | null
   /** finished-tasks 终态任务过期自动归档进 history-tasks 的阈值(小时),整数 1–8760。 */
   historyArchiveHours: number
   /**
@@ -50,7 +50,7 @@ export const FACTORY_SETTINGS_DEFAULTS: FactorySettings = {
   docsDir: '',
   repoRoot: '',
   maxParallelTasks: 4,
-  preferSpawnAgent: null,
+  preferCliAgent: null,
   historyArchiveHours: 48,
   stagnantThresholdMs: 180_000,
   stagnantCooldownMs: 300_000,
@@ -61,7 +61,7 @@ export const factorySettingsPatchSchema = z.object({
   docsDir: z.string().optional(),
   repoRoot: z.string().optional(),
   maxParallelTasks: z.number().int().min(2).max(8).optional(),
-  preferSpawnAgent: z.enum(['opencc', 'dsh', 'opencode']).nullable().optional(),
+  preferCliAgent: z.enum(['opencc', 'dsh', 'opencode']).nullable().optional(),
   historyArchiveHours: z.number().int().min(1).max(8760).optional(),
   stagnantThresholdMs: z.number().int().min(5_000).max(3_600_000).optional(),
   stagnantCooldownMs: z.number().int().min(5_000).max(3_600_000).optional(),
@@ -102,13 +102,13 @@ function sanitize(raw: unknown): FactorySettings {
     out.maxParallelTasks = o.maxParallelTasks
   }
   if (
-    o.preferSpawnAgent === 'opencc' ||
-    o.preferSpawnAgent === 'dsh' ||
-    o.preferSpawnAgent === 'opencode'
+    o.preferCliAgent === 'opencc' ||
+    o.preferCliAgent === 'dsh' ||
+    o.preferCliAgent === 'opencode'
   ) {
-    out.preferSpawnAgent = o.preferSpawnAgent
-  } else if (o.preferSpawnAgent === null) {
-    out.preferSpawnAgent = null
+    out.preferCliAgent = o.preferCliAgent
+  } else if (o.preferCliAgent === null) {
+    out.preferCliAgent = null
   }
   if (
     typeof o.historyArchiveHours === 'number' &&

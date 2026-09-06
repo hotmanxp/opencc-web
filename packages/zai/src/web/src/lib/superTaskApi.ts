@@ -123,7 +123,7 @@ export interface FactorySettingsDto {
   docsDir: string
   repoRoot: string
   maxParallelTasks: number
-  preferSpawnAgent: 'opencc' | 'dsh' | 'opencode' | null
+  preferCliAgent: 'opencc' | 'dsh' | 'opencode' | null
   /** finished-tasks 终态任务过期自动归档阈值(小时,1–8760)。 */
   historyArchiveHours: number
   /** 派生字段(服务端 stat):目录存在性徽标,不进 PUT schema。 */
@@ -132,10 +132,10 @@ export interface FactorySettingsDto {
 }
 
 export type FactorySettingsPatch = Partial<
-  Pick<FactorySettingsDto, 'docsDir' | 'repoRoot' | 'maxParallelTasks' | 'preferSpawnAgent' | 'historyArchiveHours'>
+  Pick<FactorySettingsDto, 'docsDir' | 'repoRoot' | 'maxParallelTasks' | 'preferCliAgent' | 'historyArchiveHours'>
 >
 
-export interface SpawnAgentStatus {
+export interface CliAgentStatus {
   name: string
   commandFound: boolean
   commandPath: string | null
@@ -169,13 +169,13 @@ export function putFactorySettings(patch: FactorySettingsPatch): Promise<Factory
   }).then((r) => factorySettingsJson(r))
 }
 
-export function fetchSpawnAgents(): Promise<SpawnAgentStatus[]> {
+export function fetchCliAgents(): Promise<CliAgentStatus[]> {
   return fetch('/api/super-tasks/spawn-agents')
-    .then((r) => json<{ agents: SpawnAgentStatus[] }>(r))
+    .then((r) => json<{ agents: CliAgentStatus[] }>(r))
     .then((d) => d.agents)
 }
 
-export function registerSpawnAgent(
+export function registerCliAgent(
   name: string,
 ): Promise<{ ok: true; restartRequired: boolean }> {
   return fetch(`/api/super-tasks/spawn-agents/${encodeURIComponent(name)}/register`, {

@@ -46,7 +46,7 @@ describe('task-factory supervisor prompt (tf-edl5iwd5 hardening)', () => {
   })
 
   it('contains the retry-context.md write instruction (AC2)', () => {
-    // The exact path the supervisor must write before re-SpawnAgent.
+    // The exact path the supervisor must write before re-CliAgent.
     expect(source).toContain('<task_dir>/retry-context.md')
     expect(source).toContain('Write `<task_dir>/retry-context.md`')
     // The four required section headings in order.

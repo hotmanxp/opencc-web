@@ -9,7 +9,7 @@ const settingsDto = {
   docsDir: '/tmp/docs',
   repoRoot: '',
   maxParallelTasks: 3,
-  preferSpawnAgent: 'opencc' as const,
+  preferCliAgent: 'opencc' as const,
   docsDirExists: true,
   repoRootExists: false,
 }
@@ -45,7 +45,7 @@ beforeEach(() => {
 })
 
 describe('FactorySettingsDrawer (tf-pnsl5m5e)', () => {
-  it('打开 → 拉取并回填当前配置与 spawnAgent 状态', async () => {
+  it('打开 → 拉取并回填当前配置与 cliAgent 状态', async () => {
     render(<FactorySettingsDrawer open onClose={vi.fn()} />)
     const docs = (await screen.findByTestId('factory-settings-docs-dir')) as HTMLInputElement
     expect(docs.value).toBe('/tmp/docs')

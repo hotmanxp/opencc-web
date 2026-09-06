@@ -12,13 +12,13 @@ export interface TaskSummary {
   cwd: string
   description?: string
   agent?: string
-  /** 验证 subagent 名称(可选;默认沿用 `agent`)。SpawnAgent 调验证子任务时使用。 */
+  /** 验证 subagent 名称(可选;默认沿用 `agent`)。CliAgent 调验证子任务时使用。 */
   verifierAgent?: string | null
   createdAt?: string; startedAt?: string | null
   completedAt?: string | null
-  /** 执行器 background task id(SpawnAgent 返回值,Move 时回填)。 */
+  /** 执行器 background task id(CliAgent 返回值,Move 时回填)。 */
   executorTaskId?: string | null
-  /** 验证器 background task id(verifier SpawnAgent 返回值,Move 就地回填)。 */
+  /** 验证器 background task id(verifier CliAgent 返回值,Move 就地回填)。 */
   verifierTaskId?: string | null
   /**
    * 调度优先级(2026-09-02 任务工厂升级)。P0 最紧急、P3 最不紧急;缺省 P2。
@@ -380,7 +380,7 @@ function parseLegacyIndexMd(text: string): TaskYaml {
 export interface CreatePoolTaskInput {
   id?: string; title: string; description?: string; agent?: string; spec?: string; plan?: string
   cwd?: string
-  /** 验证 subagent 名称(可选);缺省回落到任务 `agent` 字段。SpawnAgent 验证时使用。 */
+  /** 验证 subagent 名称(可选);缺省回落到任务 `agent` 字段。CliAgent 验证时使用。 */
   verifierAgent?: string
   /**
    * 调度优先级(2026-09-02)。缺省 P2;非法值 fail loud(intake 阶段已校验)。

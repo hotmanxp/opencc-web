@@ -202,8 +202,8 @@ export function wrapWithJobStarted(
     // 不增活动计数(子代理已由 LocalAgentTask 路径管理),所以不发 job.started。
     attach: (input) => inner.attach(input),
     appendTaskEvent: (taskId, rawEv) => inner.appendTaskEvent(taskId, rawEv),
-    // zai patch (2026-09-01, plan spawnagent-result-inline): forward
-    // `resultText` to inner.finalizeTask so attach-path callers (SpawnAgent)
+    // zai patch (2026-09-01, plan cliagent-result-inline): forward
+    // `resultText` to inner.finalizeTask so attach-path callers (CliAgent)
     // can plumb the final answer through to the bg record. Without this,
     // `wrapWithJobStarted` strips the 4th argument and the parent
     // session's <task-notification> ships without a <result> block —

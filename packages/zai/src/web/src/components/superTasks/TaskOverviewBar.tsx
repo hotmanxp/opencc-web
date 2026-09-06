@@ -167,7 +167,7 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
           </Tooltip>
         </Popconfirm>
         {/* 工厂设置(tf-pnsl5m5e):齿轮入口,打开 FactorySettingsDrawer。 */}
-        <Tooltip title="工厂设置(文档目录/代码库/并行上限/spawnAgent)">
+        <Tooltip title="工厂设置(文档目录/代码库/并行上限/cliAgent)">
           <Button
             icon={<SettingOutlined />}
             data-testid="factory-settings-button"

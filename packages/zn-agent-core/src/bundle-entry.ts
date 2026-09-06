@@ -290,11 +290,11 @@ export type {
   ParsedSlashCommand,
   KnownSlashCommand,
 } from './compat/repl/setup/setupCommandQueue.js'
-// zai patch (2026-08-31, plan spawnagent-register): expose
-// wrapSpawnAgentToolAsOpencc from main entry so vendor `tools.ts`
+// zai patch (2026-08-31, plan cliagent-register): expose
+// wrapCliAgentToolAsOpencc from main entry so vendor `tools.ts`
 // (zai-patched to call it inside getAllBaseTools) sees a live symbol
 // in the esbuild bundle. Without this export esbuild tree-shakes the
-// SpawnAgentTool module (only referenced inside getAllBaseTools' array
+// CliAgentTool module (only referenced inside getAllBaseTools' array
 // literal) and the wrap function is undefined at runtime — the model
-// then sees no SpawnAgent tool.
-export { wrapSpawnAgentToolAsOpencc } from './compat/tools/opencc/SpawnAgentTool.js'
+// then sees no CliAgent tool.
+export { wrapCliAgentToolAsOpencc } from './compat/tools/opencc/CliAgentTool.js'

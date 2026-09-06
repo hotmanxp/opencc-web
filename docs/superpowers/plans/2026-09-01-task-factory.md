@@ -4,7 +4,7 @@
 
 **Goal:** 在 zai 内实现文件驱动的任务工厂：任务调度器 Agent（需求讨论/落库/派生执行/验收）+ `/super-tasks` 调度面板（任务调度器对话 + 三栏任务面板 + 详情抽屉）+ 任务工厂实例入口。
 
-**Architecture:** 文件系统（`~/.zai/task-factory/{queue,processing,finished}-tasks/<id>/`）是唯一事实源。任务调度器 Agent 注册为内置 main agent，`SuperTasksCreate`/`SuperTasksMarkDone` 两个内置工具（core 侧 `buildTool`）操作任务文件并经 `globalThis.__zaiTaskFactoryEmitter` bridge 发 SSE 事件；委派执行**优先 SpawnAgent（claude-code|dsh 外部 CLI agent，默认工具池已有）**，回退 AgentTool，执行器 transcript 归拢到任务目录（core patch 支持绝对 transcript subdir）。zai server 提供 superTasks REST 路由，任务调度器唤醒复用既有 `sessionInbox.followup` → `runNextInQueue` 通道。面板左栏复用 `AgentConversation`（用 `useAgentStore` 固定任务调度器 session），右栏任务面板轮询 + 事件刷新。实例入口走 `--app task-factory` CLI flag + `ZAI_APP` env，强制 mainAgent 并把 `/` 重定向 `/super-tasks`。
+**Architecture:** 文件系统（`~/.zai/task-factory/{queue,processing,finished}-tasks/<id>/`）是唯一事实源。任务调度器 Agent 注册为内置 main agent，`SuperTasksCreate`/`SuperTasksMarkDone` 两个内置工具（core 侧 `buildTool`）操作任务文件并经 `globalThis.__zaiTaskFactoryEmitter` bridge 发 SSE 事件；委派执行**优先 CliAgent（claude-code|dsh 外部 CLI agent，默认工具池已有）**，回退 AgentTool，执行器 transcript 归拢到任务目录（core patch 支持绝对 transcript subdir）。zai server 提供 superTasks REST 路由，任务调度器唤醒复用既有 `sessionInbox.followup` → `runNextInQueue` 通道。面板左栏复用 `AgentConversation`（用 `useAgentStore` 固定任务调度器 session），右栏任务面板轮询 + 事件刷新。实例入口走 `--app task-factory` CLI flag + `ZAI_APP` env，强制 mainAgent 并把 `/` 重定向 `/super-tasks`。
 
 **Tech Stack:** TypeScript；Node `node:fs/promises`；zod v4（工具 inputSchema）；`buildTool`（vendor-shape 工具构造）；zustand（web store）；AntD（面板 UI）；React Router（顶层路由）；vitest。
 
@@ -612,13 +612,13 @@ describe('task-factory builtin agent', () => {
     expect(reg.resolveAgent('task-factory')?.description).toBeTruthy()
   })
 
-  it('tools 槽保留默认工具池（SpawnAgent 可用）', async () => {
+  it('tools 槽保留默认工具池（CliAgent 可用）', async () => {
     resetAgentRegistryForTests()
     const reg = getAgentRegistry()
     reg.loadBuiltinAgents()
     reg.registryAgent('sess-2', 'task-factory')
-    const tools = await reg.slot([{ name: 'SpawnAgent' } as never], 'tools', 'sess-2')
-    expect(tools.some((t) => t.name === 'SpawnAgent')).toBe(true)
+    const tools = await reg.slot([{ name: 'CliAgent' } as never], 'tools', 'sess-2')
+    expect(tools.some((t) => t.name === 'CliAgent')).toBe(true)
   })
 })
 ```
@@ -643,7 +643,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '你是「任务工厂」任务调度器 Agent。职责是接收、落库、分派、验收任务：',
   '1. 需求讨论：用户提出任务时，先调用 SkillTool 运行 brainstorming skill 与用户把需求、验收标准讨论清楚（新建任务的对话默认就是这样）。',
   '2. 落库：讨论清楚后调用 SuperTasksCreate 在 ~/.zai/task-factory/queue-tasks/<id>/ 创建任务骨架；把讨论结果用 Edit/Write 写入 docs/spec.md（需求规格）、docs/plan.md（执行计划）。',
-  '3. 派发执行：需要执行时，读取任务 index.md 的 agent 字段（claude-code 或 dsh 等外部 CLI agent 名）。**优先用 SpawnAgent 派发**（subagent_type 填该 agent 名），不可用（provider 未注册）时回退 AgentTool。执行子 Agent 的 cwd 指向任务目录（~/.zai/task-factory/processing-tasks/<id>/），prompt 要求其先读 docs/spec.md + docs/plan.md，再实现，边做边向 process.md 追加进度（一行时间戳 + 步骤 + 结论），完成后在 process.md 末尾追加 "## [DONE]"，并汇报结果摘要。若用 AgentTool 委派（内部 agent），把 transcriptSubdir 设为任务目录的绝对路径，让 transcript 归拢到任务目录。派发成功后把 index.md 的 executorTaskId 回填为子 Agent 任务的 task id（SpawnAgent 返回值里的 task_id / agentId）。',
+  '3. 派发执行：需要执行时，读取任务 index.md 的 agent 字段（claude-code 或 dsh 等外部 CLI agent 名）。**优先用 CliAgent 派发**（subagent_type 填该 agent 名），不可用（provider 未注册）时回退 AgentTool。执行子 Agent 的 cwd 指向任务目录（~/.zai/task-factory/processing-tasks/<id>/），prompt 要求其先读 docs/spec.md + docs/plan.md，再实现，边做边向 process.md 追加进度（一行时间戳 + 步骤 + 结论），完成后在 process.md 末尾追加 "## [DONE]"，并汇报结果摘要。若用 AgentTool 委派（内部 agent），把 transcriptSubdir 设为任务目录的绝对路径，让 transcript 归拢到任务目录。派发成功后把 index.md 的 executorTaskId 回填为子 Agent 任务的 task id（CliAgent 返回值里的 task_id / agentId）。',
   '4. 验收：子 Agent 完成后（你会收到后台任务完成通知），读 process.md 确认 [DONE] 标记并核对 spec.md 的验收标准；通过则调用 SuperTasksMarkDone 移到 finished-tasks；不通过则向子 Agent 发消息要求修订。',
   '5. 系统指令：会话中会出现 <task-command action="...">...</task-command> 形式的系统消息（来源：task-factory）。按 action 执行：dispatch（从 queue 派发任务执行，可一次派发多个队列任务）、resume（继续执行指定任务，resume 原执行会话或重新委派）、accept（验收指定任务）、pause（结束执行子 Agent 并冻结）。',
   '每个任务同时只派发一个执行子 Agent；不同任务可并行执行——收到 dispatch 指令时按队列顺序派发（可多任务并行，不要强制等前一个任务完成后才派发下一个）。',
@@ -697,7 +697,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(core): 任务调度器 agent task-fact
 ### Task 3.5: 任务 cwd 字段贯穿（用户 2026-09-01 追加：不同任务落在不同工程目录）
 
 > 追加需求：任务信息需携带**工程目录 cwd**（index.md frontmatter），委派执行子 Agent 时
-> 以任务的 cwd 作为执行环境参数（SpawnAgent `cwd` / AgentTool prompt 显式声明）。
+> 以任务的 cwd 作为执行环境参数（CliAgent `cwd` / AgentTool prompt 显式声明）。
 > Task 1/2 已交付的旧 shape（无 cwd）由本任务补齐；Task 3 的 system prompt 同步更新。
 
 **Files:**
@@ -781,7 +781,7 @@ return z.object({
 任务 3 步骤 3 的 prompt 第 3 条改为（关键差异：**cwd 是任务的工程目录**，transcript 仍归拢任务目录）：
 
 ```
-'3. 派发执行：需要执行时，读取任务 index.md 的 agent 字段（claude-code 或 dsh 等外部 CLI agent 名）与 cwd 字段（任务所在工程目录）。**优先用 SpawnAgent 派发**（subagent_type 填该 agent 名，cwd 参数填任务的 cwd），不可用（provider 未注册）时回退 AgentTool（prompt 里显式声明任务的 cwd 绝对路径并要求在其中工作）。执行子 Agent 先读任务目录的 docs/spec.md + docs/plan.md，再实现，边做边向任务目录的 process.md 追加进度（一行时间戳 + 步骤 + 结论），完成后在 process.md 末尾追加 "## [DONE]"，并汇报结果摘要。若用 AgentTool 委派，把 transcriptSubdir 设为任务目录的绝对路径，让 transcript 归拢到任务目录。派发成功后把 index.md 的 executorTaskId 回填为子 Agent 任务的 task id（SpawnAgent 返回值里的 task_id / agentId）。',
+'3. 派发执行：需要执行时，读取任务 index.md 的 agent 字段（claude-code 或 dsh 等外部 CLI agent 名）与 cwd 字段（任务所在工程目录）。**优先用 CliAgent 派发**（subagent_type 填该 agent 名，cwd 参数填任务的 cwd），不可用（provider 未注册）时回退 AgentTool（prompt 里显式声明任务的 cwd 绝对路径并要求在其中工作）。执行子 Agent 先读任务目录的 docs/spec.md + docs/plan.md，再实现，边做边向任务目录的 process.md 追加进度（一行时间戳 + 步骤 + 结论），完成后在 process.md 末尾追加 "## [DONE]"，并汇报结果摘要。若用 AgentTool 委派，把 transcriptSubdir 设为任务目录的绝对路径，让 transcript 归拢到任务目录。派发成功后把 index.md 的 executorTaskId 回填为子 Agent 任务的 task id（CliAgent 返回值里的 task_id / agentId）。',
 ```
 
 - [ ] **Step 6: 回归 + build + 提交**
@@ -1906,7 +1906,7 @@ export default function NewSuperTaskModal({ open, onClose }: { open: boolean; on
           options={[
             { value: 'claude-code', label: 'claude-code（外部 CLI agent，推荐）' },
             { value: 'dsh', label: 'dsh（DeepSeek Harness）' },
-            { value: 'default', label: 'default（内置，SpawnAgent 不可用时回退）' },
+            { value: 'default', label: 'default（内置，CliAgent 不可用时回退）' },
           ]}
         />
         <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -2272,7 +2272,7 @@ Run: `pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715`（先 `lsof -
 1. `/` 重定向到 `/agent`（标准实例）；切到任务工厂实例或直接访问 `/super-tasks`；
 2. `/super-tasks` 页面：左任务调度器对话区 + 右三栏面板，无 Sider 菜单；
 3. 新建任务：点「新建任务」→ 弹窗输入标题 → 发给任务调度器 → 任务调度器会话（SSE 流）回复并出现 `SuperTasksCreate` 工具调用 → 队列栏出现该任务（index.md/process.md 在 `~/.zai/task-factory/queue-tasks/<id>/` 存在）；
-4. 手工启动：点 ▶ → 任务调度器会话收到 `<task-command dispatch>` → 任务调度器调用 `SpawnAgent`（subagent_type=claude-code|dsh）派生执行子 Agent → 任务移入「执行中」，详情抽屉显示执行过程（tools/消息流）；**验证执行器 transcript 出现在 `~/.zai/task-factory/processing-tasks/<id>/` 内（`agent-*.jsonl`）**；SpawnAgent provider 未注册时回退路径（AgentTool）同样验证 transcript 归拢；
+4. 手工启动：点 ▶ → 任务调度器会话收到 `<task-command dispatch>` → 任务调度器调用 `CliAgent`（subagent_type=claude-code|dsh）派生执行子 Agent → 任务移入「执行中」，详情抽屉显示执行过程（tools/消息流）；**验证执行器 transcript 出现在 `~/.zai/task-factory/processing-tasks/<id>/` 内（`agent-*.jsonl`）**；CliAgent provider 未注册时回退路径（AgentTool）同样验证 transcript 归拢；
 5. 暂停/继续：执行中任务点 ⏸（executor 被 kill，index.md status=paused），再点 ▶（任务调度器 resume 派发）；
 6. AI 托管：开 Switch → 新建一个队列任务 → 观察托管循环自动派发/验收；
 7. 完成后任务移到「已完成」，点详情查看 process.md `[DONE]`；多选删除（队列/已完成）成功；processing 任务删除按钮禁用；
@@ -2293,7 +2293,7 @@ Run: `pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715`（先 `lsof -
 ## Self-Review（自审结论）
 
 - **Spec 覆盖**：spec 的 10 节需求全部映射到任务——文件模型(T1)、工具(T2)、任务调度器 Agent(T3)、后端路由/bridge(T4)、实例入口+mainAgent 锁定(T5, T7)、web api/store(T6)、页面+对话区(T8)、三栏+弹窗+托管开关(T9)、详情抽屉(T10)、生命周期 start/pause/resume/托管(T11)、真实验收(T12)。
-- **用户补充要求**：① 委派优先 SpawnAgent（claude-code|dsh）——落在 Task 3 的 system prompt 与 spec「委派执行」小节、Task 12 验收步骤 4/6；② 执行器 transcript 归拢 `~/.zai/task-factory/`——落在 Task 3 Step 0（sessionStorage 绝对 subdir patch + 单测）、spec transcript 注记、Task 12 验收步骤 4；③ **任务并行不强制串行**（用户 2026-09-01 更正）——spec 范围外移除并行项 + AI 托管「队列非空即注入派发」，Task 3 prompt / Task 11 循环取消单任务门闩；④ **任务携带工程目录 cwd**（用户 2026-09-01 追加）——spec index.md 加 `cwd`、委派以任务 cwd 为执行环境，落在新增 Task 3.5（files 层 cwd + 工具 inputSchema cwd + prompt 委派 cwd）+ Task 9 弹窗 cwd 输入。
+- **用户补充要求**：① 委派优先 CliAgent（claude-code|dsh）——落在 Task 3 的 system prompt 与 spec「委派执行」小节、Task 12 验收步骤 4/6；② 执行器 transcript 归拢 `~/.zai/task-factory/`——落在 Task 3 Step 0（sessionStorage 绝对 subdir patch + 单测）、spec transcript 注记、Task 12 验收步骤 4；③ **任务并行不强制串行**（用户 2026-09-01 更正）——spec 范围外移除并行项 + AI 托管「队列非空即注入派发」，Task 3 prompt / Task 11 循环取消单任务门闩；④ **任务携带工程目录 cwd**（用户 2026-09-01 追加）——spec index.md 加 `cwd`、委派以任务 cwd 为执行环境，落在新增 Task 3.5（files 层 cwd + 工具 inputSchema cwd + prompt 委派 cwd）+ Task 9 弹窗 cwd 输入。
 - **占位符**：无 TBD/TODO；所有工具/服务接口均给出签名与实现要点。
-- **类型一致性**：`TaskStatus`/`TaskBucketName`/`TaskSummary`/`TaskBucket`/`TaskDetails` 在 Task 1 定义后贯穿 Task 2/4/6/9；`injectSupervisorCommand` 在 Task 4 定义、Task 9/11 使用；`executorTaskId` 在 Task 1 写入 index.md、Task 10 消费、Task 11 用于 pause/托管；`SpawnAgent` 子 agent 返回的 `task_id`/`agentId` 即回填的 `executorTaskId`（Task 3 system prompt）。
+- **类型一致性**：`TaskStatus`/`TaskBucketName`/`TaskSummary`/`TaskBucket`/`TaskDetails` 在 Task 1 定义后贯穿 Task 2/4/6/9；`injectSupervisorCommand` 在 Task 4 定义、Task 9/11 使用；`executorTaskId` 在 Task 1 写入 index.md、Task 10 消费、Task 11 用于 pause/托管；`CliAgent` 子 agent 返回的 `task_id`/`agentId` 即回填的 `executorTaskId`（Task 3 system prompt）。
 - **已知偏差**：Task 8/9 中 `submitAsk`/`createNewSession` 的返回形状标注「以既有实现为准」——实现时先读 `useAgentStore` 对应方法签名再接线；Task 4 的 `eventBus.emit` 事件名 `task_factory` 为新增类型，前端暂以轮询为主（事件留作可观测性），页面行为不依赖该事件；CLI 子 agent（claude-code CLI）自带 transcript 存储无法被 zai 侧重定向——其 cwd 为任务工程目录，保证工程级隔离（spec 已注明）。

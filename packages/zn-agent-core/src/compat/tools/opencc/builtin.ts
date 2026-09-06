@@ -31,7 +31,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { wrapAskUserQuestionToolAsOpencc } from './AskUserQuestionTool.js'
 import { wrapSkillToolAsOpencc } from './SkillTool.js'
-import { wrapSpawnAgentToolAsOpencc } from './SpawnAgentTool.js'
+import { wrapCliAgentToolAsOpencc } from './CliAgentTool.js'
 
 export type OpenccBuiltinTool = any
 
@@ -124,11 +124,11 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   // ZAI_SKILL_DIRS fallback,Node-safe).
   const skillToolsOpencc = wrapSkillToolAsOpencc()
 
-  // SpawnAgent 走 zai-native wrapper — 承载 claude-code / dsh 两个
+  // CliAgent 走 zai-native wrapper — 承载 claude-code / dsh 两个
   // CLI subagent(subagent_type → compat/subagents registry 路由)。
-  // 与 vendor AgentTool 并存:AgentTool 服务内置 agent,SpawnAgent 服务
-  // 外部 CLI agent(见 SpawnAgentTool.ts 顶部注释)。
-  const SpawnAgentOpencc = wrapSpawnAgentToolAsOpencc()
+  // 与 vendor AgentTool 并存:AgentTool 服务内置 agent,CliAgent 服务
+  // 外部 CLI agent(见 CliAgentTool.ts 顶部注释)。
+  const CliAgentOpencc = wrapCliAgentToolAsOpencc()
 
   // zai patch: short-circuit every vendor tool's checkPermissions to
   // always allow. See the module-level comment above for the root
@@ -211,7 +211,7 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
     GrepTool,
     AskUserQuestionOpencc,
     ...skillToolsOpencc,
-    SpawnAgentOpencc,
+    CliAgentOpencc,
     AgentTool,
     BackgroundAgentResultTool,
     TaskOutputTool,

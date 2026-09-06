@@ -10,7 +10,7 @@
 
 | 节点 | 当前 prompt 描述 | 缺失的工具动作 |
 |------|------------------|---------------|
-| Dispatch (step 3) | "SpawnAgent the executor ... After a successful dispatch, backfill the executorTaskId field in index.md" | **没有**把任务从 `queue-tasks/` 移到 `processing-tasks/`、没有把 `status: queued` 改为 `processing` |
+| Dispatch (step 3) | "CliAgent the executor ... After a successful dispatch, backfill the executorTaskId field in index.md" | **没有**把任务从 `queue-tasks/` 移到 `processing-tasks/`、没有把 `status: queued` 改为 `processing` |
 | Resume (step 4 FAIL round<3) | "通过 resume 通道(原 executor session 续接 / 重新派发)让 executor 改" | **没有**把任务从 `verifying-tasks/` 移回 `processing-tasks/`、没有把 `status` 重置为 `processing` |
 | Pause (step 4 FAIL round==3) | "调 `markTaskStatus(taskId, processing-tasks, status=paused)` 并向用户发通知" | `markTaskStatus` 是 core 函数,**不是工具**,任务调度器根本调不到 |
 
@@ -25,14 +25,14 @@
    - 全部工具实现 `mapToolResultToToolResultBlockParam` / `renderToolUseMessage` / `renderToolResultMessage` / `toAutoClassifierInput` / `checkPermissions` boilerplate,与现有工具一致;`description` 与 `prompt` 字段全部英文。
 2. **删除现有工具**:从 `taskFactoryTools.ts` 删除 `superTasksVerifyTool` 与 `superTasksMarkDoneTool`,从 `mainAgents-taskFactory.ts` 的 tools 槽移除两者的 import。
 3. **任务调度器 prompt 重写**(`mainAgents-taskFactory.ts` 的 `TASK_FACTORY_SYSTEM_PROMPT` step 3-6):
-   - step 3 dispatch:SpawnAgent → 拿到 subagent task id → **一次**调 `SuperTasksMove(id, 'queue-tasks', 'processing-tasks', executorTaskId=...)`;不再要求任务调度器 Edit `index.md`。
-   - step 4 verify:读 `process.md` 确认 `[DONE]` → 调 `Move(processing → verifying)` → SpawnAgent **独立** verifier subagent → verifier 自写 `## 轮次 N` 头段 + `结论:` 一行 → 任务调度器读 `verification.md` 决策:PASS → `Move(verifying → finished)`;FAIL round<3 → `Reset` + re-SpawnAgent executor;FAIL round==3 → `Pause` + 通知用户。
+   - step 3 dispatch:CliAgent → 拿到 subagent task id → **一次**调 `SuperTasksMove(id, 'queue-tasks', 'processing-tasks', executorTaskId=...)`;不再要求任务调度器 Edit `index.md`。
+   - step 4 verify:读 `process.md` 确认 `[DONE]` → 调 `Move(processing → verifying)` → CliAgent **独立** verifier subagent → verifier 自写 `## 轮次 N` 头段 + `结论:` 一行 → 任务调度器读 `verification.md` 决策:PASS → `Move(verifying → finished)`;FAIL round<3 → `Reset` + re-CliAgent executor;FAIL round==3 → `Pause` + 通知用户。
    - step 5 forced accept:`Move(verifying → finished)`。
    - step 6 system commands:dispatch / resume / accept / pause 全部用新工具名替代原 `markTaskStatus` / `moveTask` 直调描述。
 4. **API 路由零改动**:`packages/zai/src/server/routes/superTasks.ts` 仍调用 core 函数 `moveTask` / `markTaskStatus` 直做后端语义(手工 start / pause / accept / delete),与任务调度器 agent 工具层解耦。
 5. **taskFactoryManagedLoop 零改动**:5s tick 仍按「队列非空即注入 dispatch」运行,任务调度器用新工具处理收到的指令。
 6. **测试覆盖**:`packages/zn-agent-core/test/server/taskFactoryTools-{move,reset,pause}.test.ts` 单测矩阵覆盖;in-flight `tf-c1tnq4yy`(verifying 桶新增)任务不被打断。
-7. **端到端验收**:ego-browser 跑通任务调度器流程 — 创建小任务 → dispatch → 执行子任务完成 → 任务调度器 SpawnAgent verifier → PASS → Move 到 finished;截图与四桶状态取证。
+7. **端到端验收**:ego-browser 跑通任务调度器流程 — 创建小任务 → dispatch → 执行子任务完成 → 任务调度器 CliAgent verifier → PASS → Move 到 finished;截图与四桶状态取证。
 
 ## 关键决策与理由
 
@@ -42,7 +42,7 @@
 | 删除 `Verify` / `MarkDone` 而非保留 | 任务调度器真正需要的是「移动+改状态」语义;`verification.md` 头段写入下放给 verifier subagent(它最清楚当前轮数),`MarkDone` 是 `Move` 的特例 |
 | `Reset` 只接受 `id`(自动探测桶) | 任务调度器在 resume 时不关心任务当前在 `verifying` 还是 `processing`(paused);工具统一处理两种合法情况,任务调度器只需传 id |
 | `Move` 显式接受 `from` | 任务调度器在 dispatch / verify / accept 时**已知**当前桶(`queue-tasks` / `processing-tasks` / `verifying-tasks`);显式参数便于校验 `from` 桶存在 + 防止误移 |
-| `executorTaskId` 合并到 `Move` | 任务调度器 SpawnAgent 后只有一次工具调用写状态,避免「先 Move 再 Edit」的 race;frontmatter 与文件夹移动在工具内部紧邻执行 |
+| `executorTaskId` 合并到 `Move` | 任务调度器 CliAgent 后只有一次工具调用写状态,避免「先 Move 再 Edit」的 race;frontmatter 与文件夹移动在工具内部紧邻执行 |
 | 验证子任务自写 `## 轮次 N` 头段 | 任务调度器 prompt 简化(不背轮数计算逻辑);轮数计算封装在 verifier 子任务上下文内;verifier 拥有写 verification.md 的完整所有权 |
 | `Pause` 不动桶位置 | 用户在「暂停」后仍可能人工决定继续/强制通过,保留 verifying 桶语义;桶切换留给 `Reset` 或显式 `Move` |
 | `Pause` 不主动 kill 执行子任务 | 任务调度器在调 `Pause` 前应自己 `BackgroundRuntime.cancel(executorTaskId)`;`Pause` 只做状态写入,职责单一 |
@@ -76,7 +76,7 @@
 - Dispatch:`Move(id, 'queue-tasks', 'processing-tasks', executorTaskId=<subTaskId>)`
 - Verify:`Move(id, 'processing-tasks', 'verifying-tasks')`
 - PASS / forced accept:`Move(id, 'verifying-tasks', 'finished-tasks')` 或 `Move(id, 'processing-tasks', 'finished-tasks')`
-- 强制回滚:`Move(id, 'processing-tasks', 'queue-tasks')`(极少见,任务调度器 SpawnAgent 失败时回滚)
+- 强制回滚:`Move(id, 'processing-tasks', 'queue-tasks')`(极少见,任务调度器 CliAgent 失败时回滚)
 
 ### `SuperTasksReset`
 
@@ -113,20 +113,20 @@
 ```
 3. Dispatch execution:
    a. Read <task_dir>/index.md to extract `agent`, `cwd`, and `verifierAgent` (optional).
-   b. SpawnAgent the executor (subagent_type=<agent>, cwd=<cwd>, prompt=full spec + plan + ...).
+   b. CliAgent the executor (subagent_type=<agent>, cwd=<cwd>, prompt=full spec + plan + ...).
       When delegating via AgentTool, set transcriptSubdir to the absolute path of the task directory.
-   c. After SpawnAgent returns the subagent task id, IMMEDIATELY call:
+   c. After CliAgent returns the subagent task id, IMMEDIATELY call:
         SuperTasksMove(id, from='queue-tasks', to='processing-tasks', executorTaskId=<subTaskId>)
       to atomically (i) move the folder, (ii) set status=processing, (iii) backfill executorTaskId.
       Do NOT edit index.md by hand — Move is the only allowed write path for task state.
-      If Move fails, cancel the SpawnAgent subagent via BackgroundRuntime.cancel and report failure.
+      If Move fails, cancel the CliAgent subagent via BackgroundRuntime.cancel and report failure.
 
 4. Verify (after executor subagent <task-notification>):
    a. Read <task_dir>/process.md; confirm the "## [DONE]" marker is appended. If missing,
       the executor did not finish — wait, re-poll, or escalate to the user.
    b. Call SuperTasksMove(id, from='processing-tasks', to='verifying-tasks') to enter the
       verifying lane. No additional tools are needed — Move returns the task in the new bucket.
-   c. SpawnAgent an INDEPENDENT verifier subagent (subagent_type=<verifierAgent>, cwd=<cwd>,
+   c. CliAgent an INDEPENDENT verifier subagent (subagent_type=<verifierAgent>, cwd=<cwd>,
       transcriptSubdir=<task_dir>) with a prompt instructing it to:
         - Read <task_dir>/docs/spec.md (acceptance criteria) and process.md (executor record).
         - Compute round N = (count of existing "## 轮次 N" sections in verification.md) + 1.
@@ -146,7 +146,7 @@
       - Parse the "结论: " line into PASS or FAIL.
       - PASS → SuperTasksMove(id, from='verifying-tasks', to='finished-tasks').
       - FAIL, round < 3 → SuperTasksReset(id) (moves verifying→processing, status=processing,
-        executorTaskId=null). Then re-SpawnAgent the executor with a prompt that includes
+        executorTaskId=null). Then re-CliAgent the executor with a prompt that includes
         "<task_dir>/docs/verification.md" so the executor reads the feedback before continuing.
       - FAIL, round == 3 → BackgroundRuntime.cancel(executorTaskId) if still alive, then
         SuperTasksPause(id). Emit a <task-notification> to the user describing the situation
@@ -155,12 +155,12 @@
 5. Forced accept (UI "强制通过" button on the verifying lane):
    On <task-command action="forced-accept"> for a task in verifying-tasks, immediately call
    SuperTasksMove(id, from='verifying-tasks', to='finished-tasks') — the verifier is bypassed.
-   Do NOT re-SpawnAgent the verifier.
+   Do NOT re-CliAgent the verifier.
 
 6. System commands (<task-command action="..."> injected by taskFactoryManagedLoop / manual UI):
-   - dispatch: SpawnAgent executor + SuperTasksMove(queue-tasks → processing-tasks,
+   - dispatch: CliAgent executor + SuperTasksMove(queue-tasks → processing-tasks,
      executorTaskId=<subTaskId>). Multiple queued tasks may be dispatched at once.
-   - resume: SuperTasksReset(id) + re-SpawnAgent the executor (or continue the original session).
+   - resume: SuperTasksReset(id) + re-CliAgent the executor (or continue the original session).
    - accept: SuperTasksMove(id, from='processing-tasks'|'verifying-tasks', to='finished-tasks').
    - pause: BackgroundRuntime.cancel(executorTaskId) if alive + SuperTasksPause(id).
 
@@ -172,13 +172,13 @@ do not force waiting for a previous task to finish before dispatching the next).
 ## 数据流与边界
 
 ```
-                         SpawnAgent(task-factory 任务调度器对话)
+                         CliAgent(task-factory 任务调度器对话)
                                   │
                                   ▼
    ┌────────────────────────────────────────────────────┐
    │  step 3: dispatch                                   │
    │    ├─ Read index.md                                 │
-   │    ├─ SpawnAgent executor (subagent_type=agent)     │
+   │    ├─ CliAgent executor (subagent_type=agent)     │
    │    └─ SuperTasksMove(queue-tasks → processing-tasks, │
    │                      executorTaskId=subTaskId)      │
    └────────────────────────────────────────────────────┘
@@ -193,7 +193,7 @@ do not force waiting for a previous task to finish before dispatching the next).
                                   │
                                   ▼
    ┌────────────────────────────────────────────────────┐
-   │  SpawnAgent verifier (独立 session)                 │
+   │  CliAgent verifier (独立 session)                 │
    │    ├─ Read spec.md / process.md                     │
    │    ├─ Compute round N                               │
    │    ├─ Write ## 轮次 N header + 结论 + 原因          │
@@ -205,7 +205,7 @@ do not force waiting for a previous task to finish before dispatching the next).
    │  Decision (read verification.md)                    │
    │    ├─ PASS       → SuperTasksMove(verifying →       │
    │                    finished)                        │
-   │    ├─ FAIL r<3   → SuperTasksReset + re-SpawnAgent  │
+   │    ├─ FAIL r<3   → SuperTasksReset + re-CliAgent  │
    │    └─ FAIL r==3  → BackgroundRuntime.cancel +       │
    │                    SuperTasksPause + notify user    │
    └────────────────────────────────────────────────────┘
@@ -217,13 +217,13 @@ do not force waiting for a previous task to finish before dispatching the next).
 |---------|---------|---------|
 | `Move` 任务不在 `from` 桶 | 抛 `task ${id} not found in ${from}` | 任务调度器应 `getTaskSummary(id)` 看真实位置,重派或报告用户 |
 | `Move` 目标桶已有同名 | 抛 `task ${id} already exists in ${to}` | 任务调度器应报告用户(并发冲突);不重试 |
-| `Move` 后 SpawnAgent 已失败 | 任务调度器先收到 SpawnAgent 错误,Move 还没调 | 任务调度器应改走显式 `Move(processing → queue)` 回滚;若 Move 还没调,任务仍在 queue 桶,无需回滚 |
+| `Move` 后 CliAgent 已失败 | 任务调度器先收到 CliAgent 错误,Move 还没调 | 任务调度器应改走显式 `Move(processing → queue)` 回滚;若 Move 还没调,任务仍在 queue 桶,无需回滚 |
 | `Reset` 任务在 queue/finished | 抛 `cannot be reset (current state: ...)` | 任务调度器应改走 dispatch 流程或报告用户 |
 | `Reset` 任务 processing 但 status≠paused | 同上 | 任务调度器应先报告用户(状态机不一致) |
 | `Pause` 任务在 queue/finished | 抛 `cannot be paused` | 任务调度器应报告用户(无意义操作) |
-| Verifier subagent 没写 `verification.md` | 任务调度器读不到 `## 轮次 N` 段 | 任务调度器应重 SpawnAgent verifier 一次;两次失败则 Pause + 通知用户 |
-| Verifier 写错 `结论:` 格式 | 任务调度器解析不到 PASS/FAIL | 同上(重 SpawnAgent verifier 一次) |
-| executor SpawnAgent 拿到 task id 但 Move 抛错 | 任务仍在 queue,subagent 已运行 | 任务调度器应 BackgroundRuntime.cancel(subagent) + 报告用户 |
+| Verifier subagent 没写 `verification.md` | 任务调度器读不到 `## 轮次 N` 段 | 任务调度器应重 CliAgent verifier 一次;两次失败则 Pause + 通知用户 |
+| Verifier 写错 `结论:` 格式 | 任务调度器解析不到 PASS/FAIL | 同上(重 CliAgent verifier 一次) |
+| executor CliAgent 拿到 task id 但 Move 抛错 | 任务仍在 queue,subagent 已运行 | 任务调度器应 BackgroundRuntime.cancel(subagent) + 报告用户 |
 
 ## 测试覆盖
 
@@ -246,8 +246,8 @@ pnpm --filter @zn-ai/zai dev -- --port 8103 --api-port 7717
 ```
 
 - 在 `/super-tasks` 页面创建一个简单任务(标题:「测试 Move 工具」,agent=claude-code)
-- 触发 managed loop 派发 → 任务调度器 SpawnAgent executor → Move 到 processing-tasks
-- executor 完成(写 [DONE]) → 任务调度器 Move 到 verifying-tasks → SpawnAgent verifier → verifier 自写 verification.md PASS
+- 触发 managed loop 派发 → 任务调度器 CliAgent executor → Move 到 processing-tasks
+- executor 完成(写 [DONE]) → 任务调度器 Move 到 verifying-tasks → CliAgent verifier → verifier 自写 verification.md PASS
 - 任务调度器 Move 到 finished-tasks
 - 截图 + GET `/api/super-tasks` 取证四桶状态、`<task_dir>/index.md` frontmatter、`docs/verification.md`
 
@@ -259,7 +259,7 @@ pnpm --filter @zn-ai/zai dev -- --port 8103 --api-port 7717
 - 不重写 `routes/superTasks.ts`(API 路由仍用 core 函数,工具层与路由层解耦)
 - 不改 `taskFactoryManagedLoop`(注入 dispatch / accept 指令的节奏不变)
 - 不中断 in-flight `tf-c1tnq4yy`(verifying 桶新增)任务;新设计以 verifying 桶为基础兼容,旧任务完成后归档不影响
-- 不引入新 agent 类型注册(`verifierAgent` 沿用现有 SpawnAgent `subagent_type` 字符串)
+- 不引入新 agent 类型注册(`verifierAgent` 沿用现有 CliAgent `subagent_type` 字符串)
 - 不改 `docs/DEVELOPMENT_REFERENCE.md` 之外的文档(主文档如有需要由执行者补充)
 
 ## 风险与回滚
@@ -267,10 +267,10 @@ pnpm --filter @zn-ai/zai dev -- --port 8103 --api-port 7717
 | 风险 | 回滚方式 |
 |------|---------|
 | 新工具 Move 在某些边界 case 与 core `moveTask` 不一致 | 单测对照 core `moveTask.test.ts` 矩阵,逐桶 pair 验证;失败即修 |
-| 任务调度器 prompt 重写导致现有 task-factory 会话行为异常 | tools 槽仍保留所有默认工具(SpawnAgent / Edit / Write / Read 等),任务调度器可 fallback 到手动 Edit;prompt 用英文写,与现有 prompt 风格一致 |
+| 任务调度器 prompt 重写导致现有 task-factory 会话行为异常 | tools 槽仍保留所有默认工具(CliAgent / Edit / Write / Read 等),任务调度器可 fallback 到手动 Edit;prompt 用英文写,与现有 prompt 风格一致 |
 | 删除 Verify/MarkDone 引用断裂 | 单测 grep 检查 `import { superTasksVerifyTool` / `superTasksMarkDoneTool` 在仓库内仅出现在 `taskFactoryTools.ts` 与 `mainAgents-taskFactory.ts`,两处同步删除 |
 | in-flight tf-c1tnq4yy 状态异常 | 该任务在 processing-tasks,新工具对 processing 桶的所有操作与原 Verify/MarkDone 等价;不影响 |
-| verifier subagent 自写 verification.md 时机不对 | verifier prompt 明确「读完 spec/process 再写头段」;任务调度器读完 verification.md 后若发现 N 段缺失,重 SpawnAgent verifier 一次 |
+| verifier subagent 自写 verification.md 时机不对 | verifier prompt 明确「读完 spec/process 再写头段」;任务调度器读完 verification.md 后若发现 N 段缺失,重 CliAgent verifier 一次 |
 
 ## 实施步骤(高层)
 

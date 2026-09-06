@@ -48,25 +48,25 @@ describe('factorySettings.getFactorySettings', () => {
   it('字段缺失 → 缺失项回落默认;非法值(并行数 9)逐字段回落', async () => {
     await writeFile(
       factorySettingsPath(),
-      JSON.stringify({ docsDir: '/tmp/docs', maxParallelTasks: 9, preferSpawnAgent: 'nope' }),
+      JSON.stringify({ docsDir: '/tmp/docs', maxParallelTasks: 9, preferCliAgent: 'nope' }),
       'utf-8',
     )
     const s = await getFactorySettings()
     expect(s.docsDir).toBe('/tmp/docs')
     expect(s.repoRoot).toBe('')
     expect(s.maxParallelTasks).toBe(4)
-    expect(s.preferSpawnAgent).toBeNull()
+    expect(s.preferCliAgent).toBeNull()
     expect(s.historyArchiveHours).toBe(48)
   })
 
-  it('sanitize 认 opencode 为合法 preferSpawnAgent(2026-09-03 provider 扩展)', async () => {
+  it('sanitize 认 opencode 为合法 preferCliAgent(2026-09-03 provider 扩展)', async () => {
     await writeFile(
       factorySettingsPath(),
-      JSON.stringify({ preferSpawnAgent: 'opencode' }),
+      JSON.stringify({ preferCliAgent: 'opencode' }),
       'utf-8',
     )
     const s = await getFactorySettings()
-    expect(s.preferSpawnAgent).toBe('opencode')
+    expect(s.preferCliAgent).toBe('opencode')
   })
 
   it('historyArchiveHours 非法(0/8761/非整数/字符串)→ 回落 48;合法值保留', async () => {
@@ -82,26 +82,26 @@ describe('factorySettings.getFactorySettings', () => {
 describe('factorySettings.setFactorySettings', () => {
   it('patch 合并 + 持久化,重读(清缓存)保持', async () => {
     await setFactorySettings({ maxParallelTasks: 6 })
-    await setFactorySettings({ docsDir: '/tmp/d', preferSpawnAgent: 'dsh' })
+    await setFactorySettings({ docsDir: '/tmp/d', preferCliAgent: 'dsh' })
     __resetForTests()
     const s = await getFactorySettings()
     expect(s.maxParallelTasks).toBe(6)
     expect(s.docsDir).toBe('/tmp/d')
-    expect(s.preferSpawnAgent).toBe('dsh')
+    expect(s.preferCliAgent).toBe('dsh')
     expect(s.repoRoot).toBe('')
   })
 
-  it('preferSpawnAgent opencode 合法并可持久化', async () => {
-    await setFactorySettings({ preferSpawnAgent: 'opencode' })
+  it('preferCliAgent opencode 合法并可持久化', async () => {
+    await setFactorySettings({ preferCliAgent: 'opencode' })
     __resetForTests()
     const s = await getFactorySettings()
-    expect(s.preferSpawnAgent).toBe('opencode')
+    expect(s.preferCliAgent).toBe('opencode')
   })
 
-  it('preferSpawnAgent 显式 null 可清除已选值', async () => {
-    await setFactorySettings({ preferSpawnAgent: 'opencc' })
-    const s = await setFactorySettings({ preferSpawnAgent: null })
-    expect(s.preferSpawnAgent).toBeNull()
+  it('preferCliAgent 显式 null 可清除已选值', async () => {
+    await setFactorySettings({ preferCliAgent: 'opencc' })
+    const s = await setFactorySettings({ preferCliAgent: null })
+    expect(s.preferCliAgent).toBeNull()
   })
 
   it('非法值(maxParallelTasks=1 / 9 / 非整数)拒绝且不落盘', async () => {
@@ -125,7 +125,7 @@ describe('factorySettings.setFactorySettings', () => {
 
   it('非法枚举值拒绝', async () => {
     await expect(
-      setFactorySettings({ preferSpawnAgent: 'codex' as 'opencc' }),
+      setFactorySettings({ preferCliAgent: 'codex' as 'opencc' }),
     ).rejects.toBeInstanceOf(FactorySettingsValidationError)
   })
 

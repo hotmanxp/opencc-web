@@ -31,7 +31,7 @@ const OPEN_PLATFORM_PROVIDER = 'OpenPlatformOAuth2'
  * Normalize a caller-supplied model into the `provider/model` form the
  * opencode CLI's `-m` flag expects.
  *
- * SpawnAgent's `model` param arrives as a bare model id (e.g. `glm-5.2`,
+ * CliAgent's `model` param arrives as a bare model id (e.g. `glm-5.2`,
  * `zhiniao-glm-5.1`); passing that raw to `opencode run -m` fails model
  * resolution (the CLI only knows `<provider>/<model>` ids). Routing rule
  * (2026-09-04, operator decision):

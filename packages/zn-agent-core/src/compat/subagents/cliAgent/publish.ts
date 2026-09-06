@@ -23,7 +23,7 @@ import {
   mirrorAttachTaskToBg,
   mirrorFinalizeBgTask,
 } from '../../runtime/agentTaskBridge.js'
-import type { CliAgentSpawn } from './spawn.js'
+import type { CliSpawnResult } from './spawn.js'
 
 export interface PublishMeta {
   /** Parent session id for task attribution / notifier delivery. */
@@ -55,7 +55,7 @@ export function mapSubagentEventType(type: string): string {
  * the terminal state is mirrored; never rejects.
  */
 export async function publishSpawnToBackground(
-  spawn: CliAgentSpawn,
+  spawn: CliSpawnResult,
   meta: PublishMeta = {},
 ): Promise<void> {
   const { task_id, run, prompt, description } = spawn
@@ -105,7 +105,7 @@ export async function publishSpawnToBackground(
 }
 
 async function pumpEvents(
-  run: CliAgentSpawn['run'],
+  run: CliSpawnResult['run'],
   taskId: string,
 ): Promise<void> {
   try {

@@ -77,7 +77,7 @@ export interface BackgroundRuntime {
    * 'completed'. `SubagentNotifier` (zai server) reads `task.resultText`
    * and inlines it into the parent session's `<task-notification>` so the
    * parent agent sees the result without a follow-up `TaskOutput` round
-   * trip. attach-path callers (SpawnAgent, in-process CLI subagents) that
+   * trip. attach-path callers (CliAgent, in-process CLI subagents) that
    * don't go through the dispatch streaming loop must pass it here;
    * dispatch-path callers can omit it (the streaming loop already set it).
    */

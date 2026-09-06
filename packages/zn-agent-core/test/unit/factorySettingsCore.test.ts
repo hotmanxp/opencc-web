@@ -42,7 +42,7 @@ describe('readCoreFactorySettings', () => {
         docsDir: '/tmp/d',
         repoRoot: '/tmp/r',
         maxParallelTasks: 6,
-        preferSpawnAgent: 'dsh',
+        preferCliAgent: 'dsh',
       }),
       'utf-8',
     )
@@ -50,34 +50,34 @@ describe('readCoreFactorySettings', () => {
       docsDir: '/tmp/d',
       repoRoot: '/tmp/r',
       maxParallelTasks: 6,
-      preferSpawnAgent: 'dsh',
+      preferCliAgent: 'dsh',
     })
     await writeFile(
       coreFactorySettingsPath(),
-      JSON.stringify({ maxParallelTasks: 42, preferSpawnAgent: 'nope' }),
+      JSON.stringify({ maxParallelTasks: 42, preferCliAgent: 'nope' }),
       'utf-8',
     )
     const s = readCoreFactorySettings()
     expect(s.maxParallelTasks).toBe(4)
-    expect(s.preferSpawnAgent).toBeNull()
+    expect(s.preferCliAgent).toBeNull()
   })
 })
 
 describe('taskFactorySettingsSection', () => {
-  it('默认值 → 仅并行上限行,无 repoRoot/preferSpawnAgent 行', () => {
+  it('默认值 → 仅并行上限行,无 repoRoot/preferCliAgent 行', () => {
     const lines = taskFactorySettingsSection(CORE_FACTORY_SETTINGS_DEFAULTS)
     const text = lines.join('\n')
     expect(text).toContain('at most 4 tasks may execute concurrently')
     expect(text).not.toContain('Preferred repo root')
-    expect(text).not.toContain('Preferred spawnAgent')
+    expect(text).not.toContain('Preferred cliAgent')
   })
 
-  it('配置值注入:maxParallelTasks / repoRoot / preferSpawnAgent 全部出现', () => {
+  it('配置值注入:maxParallelTasks / repoRoot / preferCliAgent 全部出现', () => {
     const lines = taskFactorySettingsSection({
       docsDir: '',
       repoRoot: '/work/repos',
       maxParallelTasks: 3,
-      preferSpawnAgent: 'opencc',
+      preferCliAgent: 'opencc',
     })
     const text = lines.join('\n')
     expect(text).toContain('at most 3 tasks may execute concurrently')

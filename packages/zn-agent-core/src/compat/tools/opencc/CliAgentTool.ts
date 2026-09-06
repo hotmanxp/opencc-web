@@ -5,19 +5,19 @@ import {
   type SubagentResult,
 } from '../../subagents/registry.js'
 import { formatSubagentProviderSection } from '../../subagents/promptSection.js'
-import { spawnCliAgent, type CliAgentSpawn } from '../../subagents/cliAgent/spawn.js'
+import { spawnCliAgent, type CliSpawnResult } from '../../subagents/cliAgent/spawn.js'
 import {
   mirrorAppendBgEvent,
   mirrorAttachTaskToBg,
   mirrorFinalizeBgTask,
 } from '../../runtime/agentTaskBridge.js'
-// zai patch (2026-08-31, plan spawnagent-async): the lifecycle helpers
+// zai patch (2026-08-31, plan cliagent-async): the lifecycle helpers
 // (`completeAgentTask` / `killAsyncAgent` / `enqueueAgentNotification`)
 // transitively pull in BashTool.tsx and other heavy vendor modules that
 // fail to evaluate under vitest ESM (pre-existing test-infra issue).
 // Loading them lazily inside `runCliSubagentLifecycle` keeps the top-level
 // module load light: zai-server (Node ESM) triggers them only on the first
-// SpawnAgent call, and the unit tests that exercise only the tool's
+// CliAgent call, and the unit tests that exercise only the tool's
 // surface / wrapper don't trigger the heavy chain at all.
 //
 // All opencc-src imports below are intentionally `import type` (erased at
@@ -28,7 +28,7 @@ import type { LocalAgentTaskState } from '../../../opencc-src/tasks/LocalAgentTa
 import type { SetAppState } from '../../../opencc-src/Task.js'
 
 /**
- * SpawnAgent — OPENCC native tool that delegates to a CLI subagent
+ * CliAgent — OPENCC native tool that delegates to a CLI subagent
  * (`opencc` CLI, `dsh` DeepSeek Harness SDK runtime, or `opencode` CLI).
  *
  * Modeled on vendor `AgentTool`'s async-from-start branch (AgentTool.tsx
@@ -57,7 +57,7 @@ import type { SetAppState } from '../../../opencc-src/Task.js'
  * `formatSubagentProviderSection(registry)` so the model knows which
  * `subagent_type` values are live at call time.
  */
-const SpawnAgentInputV4 = z4.object({
+const CliAgentInputV4 = z4.object({
   /** Model-facing short label (3-5 words). */
   description: z4.string(),
   /** The task text the CLI subagent receives. */
@@ -82,9 +82,9 @@ const SpawnAgentInputV4 = z4.object({
   team_name: z4.string().optional(),
 })
 
-type SpawnAgentInput = z4.infer<typeof SpawnAgentInputV4>
+type CliAgentInput = z4.infer<typeof CliAgentInputV4>
 
-const SpawnAgentBaseDescription =
+const CliAgentBaseDescription =
   'Spawn a CLI subagent to delegate a standalone task to an external agent engine ' +
   '(opencc CLI, dsh / DeepSeek Harness SDK runtime, or opencode CLI). Each runs as an ' +
   'independent process in its own context and inherits no parent conversation. ' +
@@ -96,7 +96,7 @@ const SpawnAgentBaseDescription =
 function buildDescription(): string {
   const section = formatSubagentProviderSection(getSubagentRegistry())
   return (
-    SpawnAgentBaseDescription +
+    CliAgentBaseDescription +
     (section
       ? '\n\n' + section
       : '\n\n(no external subagent providers are registered at this time)')
@@ -115,15 +115,15 @@ interface AsyncLaunchedPayload {
 }
 
 /** Manual tool object — function description + zod/v4 inputSchema + call. */
-export const spawnAgentTool = {
-  name: 'SpawnAgent',
+export const cliAgentTool = {
+  name: 'CliAgent',
   description: buildDescription,
-  inputSchema: SpawnAgentInputV4,
+  inputSchema: CliAgentInputV4,
   async call(args: unknown, ctx: unknown): Promise<{ data: AsyncLaunchedPayload } | { output: string }> {
-    const parsed = SpawnAgentInputV4.safeParse(args)
+    const parsed = CliAgentInputV4.safeParse(args)
     if (!parsed.success) {
       return {
-        output: `[error] invalid input for SpawnAgent: ${parsed.error.issues
+        output: `[error] invalid input for CliAgent: ${parsed.error.issues
           .map((i) => `${i.path.join('.')}: ${i.message}`)
           .join('; ')}`,
       }
@@ -133,7 +133,7 @@ export const spawnAgentTool = {
 }
 
 async function executeSpawn(
-  args: SpawnAgentInput,
+  args: CliAgentInput,
   ctx: unknown,
 ): Promise<{ data: AsyncLaunchedPayload } | { output: string }> {
   const {
@@ -150,7 +150,7 @@ async function executeSpawn(
   const provider = registry.getProvider(subagent_type)
   if (!provider) {
     const message =
-      `SpawnAgent: no subagent provider named '${subagent_type}'. ` +
+      `CliAgent: no subagent provider named '${subagent_type}'. ` +
       `Registered: ${registry.list().join(', ') || '∅'} — route via ` +
       `subagent_type: 'opencc' | 'dsh' | 'opencode' (or whichever are registered).`
     throw new Error(message)
@@ -179,7 +179,7 @@ async function executeSpawn(
   const toolUseId = readToolUseIdFromCtx(ctx)
 
   // Lazy-load the vendor task framework so the heavy BashTool /
-  // LocalAgentTask chain only fires on the first SpawnAgent call (and
+  // LocalAgentTask chain only fires on the first CliAgent call (and
   // not at all in unit tests that exercise only the tool surface).
   const [
     { createTaskStateBase },
@@ -282,7 +282,7 @@ async function runCliSubagentLifecycle({
   parentSessionId,
   outputFile,
 }: {
-  spawn: CliAgentSpawn
+  spawn: CliSpawnResult
   taskId: string
   abortController: AbortController
   setAppState: SetAppState
@@ -471,7 +471,7 @@ function buildAgentToolResult(
 }
 
 /**
- * zai patch (2026-08-31, plan spawnagent-result-inline): vendor
+ * zai patch (2026-08-31, plan cliagent-result-inline): vendor
  * `completeAgentTask` (LocalAgentTask.tsx:416) calls
  * `mirrorFinalizeBgTask(taskId, 'completed')` without forwarding
  * `resultText`, so the bg BackgroundTask's `resultText` field stays empty
@@ -523,7 +523,7 @@ async function completeLocalAgentTaskWithResultText(
 /**
  * Write the final result text to `outputFile` so the model can `Read` it
  * directly. Vendor AgentTool wires this via `initTaskOutputAsSymlink` →
- * transcript JSONL, but attach-path callers (SpawnAgent) don't have a
+ * transcript JSONL, but attach-path callers (CliAgent) don't have a
  * transcript — the simplest durable representation is the result text
  * itself, written verbatim. Best-effort: any fs failure is silently
  * swallowed (TaskOutput still works via in-memory `task.result.content`).
@@ -551,7 +551,7 @@ async function writeResultToOutputFile(
  * arrives via `run.result`.
  */
 async function pumpEventsToBg(
-  run: CliAgentSpawn['run'],
+  run: CliSpawnResult['run'],
   taskId: string,
 ): Promise<void> {
   try {
@@ -641,7 +641,7 @@ function readZaiCurrentSessionIdBridge(): string | undefined {
 }
 
 /**
- * Wrap SpawnAgent as an opencc-compatible Tool so vendor's `query()` can
+ * Wrap CliAgent as an opencc-compatible Tool so vendor's `query()` can
  * call it. Registered in `getOpenccBuiltinTools()` (compat/tools/opencc/
  * builtin.ts) alongside AskUserQuestion / Skill wrappers. Reads the
  * registry + session bridge at CALL time (globalThis), so the cached
@@ -653,8 +653,8 @@ function readZaiCurrentSessionIdBridge(): string | undefined {
  * read output_file / wait for <task-notification>") so the model knows how
  * to query progress for the spawned task.
  */
-export function wrapSpawnAgentToolAsOpencc(): unknown {
-  const base = wrapAsOpenccTool(spawnAgentTool as never, {
+export function wrapCliAgentToolAsOpencc(): unknown {
+  const base = wrapAsOpenccTool(cliAgentTool as never, {
     transformCtx: buildSpawnTransformCtx(),
   })
   return {

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-// SpawnAgentTool.ts (post-async-refactor) imports from
+// CliAgentTool.ts (post-async-refactor) imports from
 // `opencc-src/tasks/LocalAgentTask/LocalAgentTask.tsx`, which transitively
 // pulls BashTool.tsx and many other heavy vendor modules that have
 // pre-existing vitest ESM breakages. To avoid a tower of vi.mock()s that
-// mirrors the bundle-export test suite, we test SpawnAgentTool in two
+// mirrors the bundle-export test suite, we test CliAgentTool in two
 // surfaces that DON'T require loading the heavy chain:
 //
 //  1. **Surface-only tests** — describe / inputSchema / name — these only
@@ -25,9 +25,9 @@ import {
   _resetSubagentRegistryForTests,
 } from '../../../src/compat/subagents/registry.js'
 import {
-  spawnAgentTool,
-  wrapSpawnAgentToolAsOpencc,
-} from '../../../src/compat/tools/opencc/SpawnAgentTool.js'
+  cliAgentTool,
+  wrapCliAgentToolAsOpencc,
+} from '../../../src/compat/tools/opencc/CliAgentTool.js'
 
 interface AsyncLaunchedPayload {
   isAsync: true
@@ -39,20 +39,20 @@ interface AsyncLaunchedPayload {
   canReadOutputFile: boolean
 }
 
-describe('SpawnAgentTool — surface', () => {
+describe('CliAgentTool — surface', () => {
   afterEach(() => {
     _resetSubagentRegistryForTests()
   })
 
   it('exposes the AgentTool-shaped surface (name / description / inputSchema / call)', () => {
-    expect(spawnAgentTool.name).toBe('SpawnAgent')
-    expect(typeof spawnAgentTool.description).toBe('function')
-    expect(typeof spawnAgentTool.call).toBe('function')
-    expect(spawnAgentTool.inputSchema).toBeTruthy()
+    expect(cliAgentTool.name).toBe('CliAgent')
+    expect(typeof cliAgentTool.description).toBe('function')
+    expect(typeof cliAgentTool.call).toBe('function')
+    expect(cliAgentTool.inputSchema).toBeTruthy()
   })
 
   it('description includes the registered provider section (formatSubagentProviderSection)', () => {
-    expect(spawnAgentTool.description()).toContain('no external subagent providers are registered')
+    expect(cliAgentTool.description()).toContain('no external subagent providers are registered')
     getSubagentRegistry().registerProvider({
       name: 'opencc',
       inheritsParentContext: false,
@@ -63,16 +63,16 @@ describe('SpawnAgentTool — surface', () => {
         throw new Error('not exercised')
       },
     })
-    const desc = spawnAgentTool.description()
+    const desc = cliAgentTool.description()
     expect(desc).toContain('External subagent providers')
     expect(desc).toContain('opencc')
   })
 
   it('inputSchema drops run_in_background (pure-async tool)', () => {
-    // The new schema no longer carries `run_in_background` — SpawnAgent is
+    // The new schema no longer carries `run_in_background` — CliAgent is
     // always fire-and-forget, mirroring vendor AgentTool's async-from-start
     // default behavior.
-    const schema = spawnAgentTool.inputSchema as {
+    const schema = cliAgentTool.inputSchema as {
       shape?: Record<string, unknown>
     }
     expect(schema.shape?.run_in_background).toBeUndefined()
@@ -85,7 +85,7 @@ describe('SpawnAgentTool — surface', () => {
     // The base description tells the model how to query progress after
     // async_launched — explicitly mentioning task_id and TaskOutput so the
     // model knows to poll instead of waiting on the same tool call.
-    const desc = spawnAgentTool.description()
+    const desc = cliAgentTool.description()
     expect(desc).toMatch(/task_id/)
     expect(desc).toMatch(/TaskOutput/)
   })
@@ -93,30 +93,30 @@ describe('SpawnAgentTool — surface', () => {
   it('base description + subagent_type field mention the opencode provider', () => {
     // The opencode provider is one of the selectable engines even before it is
     // registered (registration only affects the dynamic provider list section).
-    const desc = spawnAgentTool.description()
+    const desc = cliAgentTool.description()
     expect(desc).toMatch(/opencode/i)
-    const schema = spawnAgentTool.inputSchema as {
+    const schema = cliAgentTool.inputSchema as {
       shape?: Record<string, { description?: string }>
     }
     expect(schema.shape?.subagent_type?.description).toMatch(/opencode/)
   })
 
   it('wraps as an opencc-compatible tool with name + schema', () => {
-    const wrapped = wrapSpawnAgentToolAsOpencc() as {
+    const wrapped = wrapCliAgentToolAsOpencc() as {
       name: string
       inputSchema: unknown
       description: (input: unknown, options: unknown) => Promise<string>
       prompt: (opts: unknown) => Promise<string>
     }
-    expect(wrapped.name).toBe('SpawnAgent')
-    expect(wrapped.inputSchema).toBe(spawnAgentTool.inputSchema)
+    expect(wrapped.name).toBe('CliAgent')
+    expect(wrapped.inputSchema).toBe(cliAgentTool.inputSchema)
     void wrapped
   })
 })
 
-describe('SpawnAgentTool — mapToolResultToToolResultBlockParam', () => {
+describe('CliAgentTool — mapToolResultToToolResultBlockParam', () => {
   it('surfaces the TaskOutput hint for async_launched', () => {
-    const wrapped = wrapSpawnAgentToolAsOpencc() as {
+    const wrapped = wrapCliAgentToolAsOpencc() as {
       mapToolResultToToolResultBlockParam: (
         data: unknown,
         id: string,
@@ -149,7 +149,7 @@ describe('SpawnAgentTool — mapToolResultToToolResultBlockParam', () => {
   })
 
   it('falls back to default for non-async payloads (e.g. [error])', () => {
-    const wrapped = wrapSpawnAgentToolAsOpencc() as {
+    const wrapped = wrapCliAgentToolAsOpencc() as {
       mapToolResultToToolResultBlockParam: (
         data: unknown,
         id: string,
@@ -170,7 +170,7 @@ describe('SpawnAgentTool — mapToolResultToToolResultBlockParam', () => {
   })
 
   it('falls back to default when async_launched payload is malformed', () => {
-    const wrapped = wrapSpawnAgentToolAsOpencc() as {
+    const wrapped = wrapCliAgentToolAsOpencc() as {
       mapToolResultToToolResultBlockParam: (
         data: unknown,
         id: string,

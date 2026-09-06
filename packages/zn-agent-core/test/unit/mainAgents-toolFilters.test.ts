@@ -7,12 +7,12 @@ import { agentCreatorMainAgent } from '../../src/opencc-src/server/mainAgents-ag
 function pool(names: string[]) {
   return names.map((name) => ({ name })) as never
 }
-const NET_POOL = ['Read', 'Bash', 'WebFetch', 'WebSearch', 'SpawnAgent']
+const NET_POOL = ['Read', 'Bash', 'WebFetch', 'WebSearch', 'CliAgent']
 
 describe('WebFetch banned on restricted intranet (2026-09-03)', () => {
   it('filterBannedTools removes WebFetch only', () => {
     const names = filterBannedTools(pool(NET_POOL)).map((t) => String(t.name))
-    expect(names).toEqual(['Read', 'Bash', 'WebSearch', 'SpawnAgent'])
+    expect(names).toEqual(['Read', 'Bash', 'WebSearch', 'CliAgent'])
   })
 
   it('default tools slot strips WebFetch but keeps DisplayFiles', () => {
@@ -39,7 +39,7 @@ describe('WebFetch banned on restricted intranet (2026-09-03)', () => {
     ]) {
       expect(names).not.toContain(gone)
     }
-    expect(names).toContain('SpawnAgent')
+    expect(names).toContain('CliAgent')
     expect(names).toContain('SuperTasksMove')
     expect(names).toContain('CreateWorktree')
   })
