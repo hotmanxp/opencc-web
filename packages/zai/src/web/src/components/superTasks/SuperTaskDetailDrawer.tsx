@@ -30,7 +30,7 @@ function pickActiveStream(s: TaskSummary | undefined): {
   return { id: executor, role: executor ? 'executor' : null }
 }
 
-/** 执行过程事件帧（taskApi.subscribeTaskEvents 产出，字段对齐 taskApi.SseFrame）。 */
+/** 事件流事件帧（taskApi.subscribeTaskEvents 产出，字段对齐 taskApi.SseFrame）。 */
 interface EventFrame {
   id: string | number
   event: string
@@ -52,7 +52,7 @@ interface Expansion {
  *
  * 抽屉打开后拉取任务详情（/api/super-tasks/:id），并在 open 期间每 3s 轮询
  * 刷新（process.md 增量追加）。任务已派生执行子 Agent（task.yaml 的
- * executorTaskId）时，执行过程 Tab 通过 `/api/tasks/:id/events` 订阅执行器
+ * executorTaskId）时，事件流 Tab 通过 `/api/tasks/:id/events` 订阅执行器
  * 的工具调用与消息流，缓冲最近 200 帧。
  */
 export default function SuperTaskDetailDrawer({
@@ -216,7 +216,7 @@ export default function SuperTaskDetailDrawer({
                   // AntD Empty 图标让有无事件状态一目了然。
                   label: (
                     <span data-testid="process-tab-label">
-                      执行过程
+                      事件流
                       {rendered.length > 0 && (
                         <span
                           style={{
