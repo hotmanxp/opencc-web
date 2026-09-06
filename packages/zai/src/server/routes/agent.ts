@@ -2209,6 +2209,26 @@ router.get("/agent/skills", async (_req: Request, res: Response) => {
   }
 });
 
+// TEMP e2e debug — call sessionInbox.followup() directly to trigger
+// the idle wake path. REMOVE after browser verification.
+router.post("/_dev/inject-followup", (req: Request, res: Response) => {
+  const { sessionId, content } = (req.body ?? {}) as {
+    sessionId?: string
+    content?: string
+  }
+  if (!sessionId || !content) {
+    return res.status(400).json({ error: "missing sessionId or content" })
+  }
+  ;(globalThis as { __zaiSessionInbox?: { followup: (s: string, m: unknown) => void } })
+    .__zaiSessionInbox?.followup(sessionId, {
+      id: `dev-inject-${Date.now()}`,
+      source: { kind: "subagent", form: "notice" },
+      content,
+      createdAt: Date.now(),
+    })
+  res.json({ ok: true })
+})
+
 const TITLE_MAX_LEN = 50;
 
 function deriveTitleFromPrompt(prompt: string): string {

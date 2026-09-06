@@ -33,7 +33,9 @@ describe('renderInboxReminder', () => {
       }),
     ])
     expect(out).toContain('- task-factory notice:')
-    expect(out).toContain('<task-command>')
+    // 2026-09-06: inner <>& escaped to keep the reminder block well-formed
+    expect(out).toContain('&lt;task-command&gt;')
+    expect(out).not.toContain('<task-command>')
   })
 
   it('renders subagent / notice with agentType label when present', () => {
@@ -45,7 +47,8 @@ describe('renderInboxReminder', () => {
       }),
     ])
     expect(out).toContain('- subagent notice (agentType=verifier):')
-    expect(out).toContain('<task-notification>')
+    expect(out).toContain('&lt;task-notification&gt;')
+    expect(out).not.toContain('<task-notification>')
   })
 
   it('renders subagent / notice without agentType as plain label', () => {
@@ -97,10 +100,9 @@ describe('renderInboxReminder', () => {
     expect(idxC).toBeGreaterThan(idxB)
   })
 
-  it('passes XML content through verbatim (no escaping) so the LLM can parse it', () => {
-    // task-factory and subagent sources emit XML blocks (e.g. <task-command>);
-    // escaping would mangle their intent. The renderer is deliberately a
-    // pass-through; callers are responsible for their own content shape.
+  it('escapes <, >, & in content to keep the reminder block well-formed', () => {
+    // 2026-09-06: escapes so the model's XML parser doesn't split the
+    // outer <system-reminder> block at an inner </...>.
     const out = renderInboxReminder([
       msg({
         id: 'r',
@@ -108,8 +110,11 @@ describe('renderInboxReminder', () => {
         source: { kind: 'user', form: 'steer' },
       }),
     ])
-    expect(out).toContain('<script>&"hi"</script>')
-    expect(out).not.toContain('&lt;')
+    expect(out).toContain('&lt;script&gt;')
+    expect(out).toContain('&amp;')
+    expect(out).not.toContain('<script>')
+    // but quotes don't need escaping (not significant inside element text)
+    expect(out).toContain('"hi"')
   })
 })
 
