@@ -57,7 +57,14 @@ export class SessionInbox {
       this.lanesFor(sessionId).nextStep.push(msg)
       return
     }
-    this.lanesFor(sessionId).nextTurn.push(msg)
+    // zai patch (2026-09-06): idle path also goes to nextStep so the
+    // bg event rides through the vendor preApiCallReminders hook as
+    // a <system-reminder> block, instead of becoming a plain-text
+    // user prompt on a new auto-started turn. Matches vendor's own
+    // bg-daemon behavior (buildInboxSystemReminder at query.ts:701).
+    // `runNextInQueue` will start an empty-prompt turn when nextStep
+    // has content but sessionQueues + nextTurn are empty.
+    this.lanesFor(sessionId).nextStep.push(msg)
     this.wakeIfBudgeted(sessionId)
   }
 
@@ -87,6 +94,17 @@ export class SessionInbox {
 
   peekNextTurnCount(sessionId: string): number {
     return this.lanesFor(sessionId).nextTurn.length
+  }
+
+  /**
+   * Number of messages currently in the nextStep lane, WITHOUT
+   * consuming them. Used by `runNextInQueue` to detect "idle session
+   * but bg events pending" — when both sessionQueues and nextTurn are
+   * empty but nextStep has content, we still need to start a turn so
+   * the vendor hook (`query.ts:701`) can prepend the reminder.
+   */
+  peekNextStepCount(sessionId: string): number {
+    return this.lanesFor(sessionId).nextStep.length
   }
 
   isBusy(sessionId: string): boolean {

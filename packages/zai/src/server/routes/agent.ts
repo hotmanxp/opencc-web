@@ -938,6 +938,23 @@ async function runNextInQueue(sid: string): Promise<void> {
     cmd = httpCmd
   } else if (inboxMsg) {
     cmd = inboxToPendingPrompt(sid, inboxMsg)
+  } else if (getSessionInbox(sid).peekNextStepCount(sid) > 0) {
+    // zai patch (2026-09-06): idle session, no user prompt in flight,
+    // but SessionInbox.nextStep has bg-event content (subagent
+    // completion, task-factory notice, etc — all now go through
+    // nextStep since the followup-idle unification). The vendor
+    // hook at query.ts:701 will drain nextStep and prepend a
+    // <system-reminder> block on the next API call; we just need
+    // to start the turn with an empty prompt so the hook fires.
+    // Matches vendor's own bg-daemon behavior — daemon messages
+    // arrive with no user input and the LLM responds to the
+    // reminder alone.
+    cmd = {
+      id: `bg-wake-${crypto.randomUUID()}`,
+      sessionId: sid,
+      cwd: resolveInboxCwd(sid),
+      prompt: '',
+    }
   } else {
     sessionQueues.delete(sid)
     emitQueueChanged(sid)
