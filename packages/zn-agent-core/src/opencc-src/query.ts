@@ -74,6 +74,10 @@ import {
   createAssistantMessage,
 } from './utils/messages.js'
 import { buildInboxSystemReminder } from './utils/daemon/inboxSection.js'
+// zai patch (2026-09-06): extra reminder providers — let zai-server drain
+// per-session SessionInbox on every API call (mirrors vendor bg-daemon
+// pattern, but data source is zai's in-process inbox rather than IPC).
+import { runExtraReminderProviders } from './utils/daemon/preApiCallReminders.js'
 import { analyzeContinuationIntent } from './utils/continuation.js'
 import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.js'
 import { prependUserContext, appendSystemContext } from './utils/api.js'
@@ -142,6 +146,7 @@ import { productionDeps, type QueryDeps } from './query/deps.js'
 import type { Terminal, Continue } from './query/transitions.js'
 import {
   getCurrentTurnTokenBudget,
+  getSessionId,
   getTurnOutputTokens,
   incrementBudgetContinuationCount,
 } from './bootstrap/state.js'
@@ -698,7 +703,14 @@ async function* queryLoop(
     // the start of subsequent user messages to prevent accumulation
     // — we apply the same trim here.
     {
-      const reminder = await buildInboxSystemReminder()
+      // Vendor bg-daemon drain + zai-session-inbox drain (zai patch 2026-09-06).
+      // Concatenated so both sources share one `<system-reminder>` block.
+      const bgReminder = await buildInboxSystemReminder()
+      const extraReminder = await runExtraReminderProviders(getSessionId())
+      const reminder =
+        bgReminder && extraReminder
+          ? `${bgReminder}\n\n${extraReminder}`
+          : bgReminder ?? extraReminder ?? null
       if (reminder) {
         const SYSTEM_REMINDER_END = '</system-reminder>'
         messagesForQuery = messagesForQuery.map(m => {

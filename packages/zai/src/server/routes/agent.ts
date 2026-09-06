@@ -39,7 +39,14 @@ import { getDefaultMode } from "../services/permissionMode.js";
 import { getCachedZaiSettingsSync } from "../services/zaiSettingsStore.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
-import { sessionInbox, type InboxMessage } from "../services/sessionInbox.js";
+import {
+  getSessionInbox,
+  setSessionInboxWakeHandler,
+  disposeSessionInbox,
+  listSessionInboxIds,
+  type InboxMessage,
+} from "../services/sessionInbox.js";
+import { drainInboxReminder } from "../services/inboxReminder.js"; // (no longer used here — see agentRuntime.ts registerExtraReminderProvider for the per-API-call hook)
 import { getBackgroundRuntime } from "../services/backgroundRuntime.js";
 import { logHttp } from "../services/accessLog.js";
 import { resolveModel } from "../lib/resolveModel.js";
@@ -922,12 +929,12 @@ async function runNextInQueue(sid: string): Promise<void> {
   if (sessionRunning.has(sid)) return
 
   const httpCmd = nextHttpPrompt(sid)
-  const inboxMsg = sessionInbox.consumeNextTurn(sid)
+  const inboxMsg = getSessionInbox(sid).consumeNextTurn(sid)
 
   let cmd: PendingPrompt | null
   if (httpCmd) {
     // 用户人工输入 → 重置唤醒预算(对齐 SessionInbox.resetWakeBudget 语义)
-    sessionInbox.resetWakeBudget(sid)
+    getSessionInbox(sid).resetWakeBudget(sid)
     cmd = httpCmd
   } else if (inboxMsg) {
     cmd = inboxToPendingPrompt(sid, inboxMsg)
@@ -941,18 +948,22 @@ async function runNextInQueue(sid: string): Promise<void> {
   // 插入任何 await — 「同一 tick 二次触发被 has(sid) 拦截」靠这段同步代码
   // 保证。JS 单线程模型 + 入队/wake 触发都是同步段, 守卫不会被打断。
   sessionRunning.add(sid)
-  sessionInbox.setBusy(sid)
+  getSessionInbox(sid).setBusy(sid)
   emitQueueChanged(sid)
   try {
     await runQueryLoop(cmd)
   } finally {
     sessionRunning.delete(sid)
-    sessionInbox.clearRunning(sid)
-    // turn 结束 → 消费 next-step lane: 多条消息合并为单条 prompt 喂给下一轮
-    const nextStep = sessionInbox.consumeNextStep(sid)
-    if (nextStep.length > 0) {
-      enqueueInboxPrompt(sid, mergeInboxMessages(nextStep))
-    }
+    getSessionInbox(sid).clearRunning(sid)
+    // zai patch (2026-09-06): do NOT drain nextStep here. The vendor
+    // query loop's per-API-call reminder hook
+    // (runExtraReminderProviders in query.ts:701) handles bg events:
+    // it drains SessionInbox.nextStep on the NEXT runQueryLoop start
+    // and prepends a `<system-reminder>` block to the LLM-facing
+    // prompt. Older behavior (drain + enqueueInboxPrompt) would send
+    // bg events as plain text on a separate auto-started turn; the
+    // hook makes them ride along with the user's next prompt,
+    // packaged as a system reminder for the LLM.
     void runNextInQueue(sid)
   }
 }
@@ -1001,27 +1012,15 @@ async function listActiveBackgroundTasks(sid: string): Promise<number> {
   }
 }
 
-/** 多条 next-step 合并为单条 prompt(对齐 DSH steer 批处理语义)。 */
-function mergeInboxMessages(msgs: InboxMessage[]): string {
-  return msgs.map((m) => m.content).join('\n\n')
-}
-
 /**
- * 把 inbox 合并的 prompt 排到 HTTP 队列顶 — HTTP 之后、未来输入之前。
- * 直接 prepend 到 sessionQueues 头部(不再 wake: 已在本 tick 上下文中)。
+ * zai patch (2026-09-06): removed `mergeInboxMessages` and
+ * `enqueueInboxPrompt`. The per-turn "drain nextStep + enqueue as
+ * plain-text next turn" flow has been replaced by vendor's per-API-call
+ * `runExtraReminderProviders` hook (query.ts:701), which prepends
+ * pending SessionInbox content as a `<system-reminder>` block on
+ * the next API call instead of a separate auto-started turn. See
+ * docs/superpowers/plans/zazzy-bubbling-leaf.md.
  */
-function enqueueInboxPrompt(sid: string, prompt: string): void {
-  const cwd = resolveInboxCwd(sid)
-  const cmd: PendingPrompt = {
-    id: `inbox-merged-${crypto.randomUUID()}`,
-    sessionId: sid,
-    cwd,
-    prompt,
-  }
-  const q = sessionQueues.get(sid) ?? []
-  q.unshift(cmd)
-  sessionQueues.set(sid, q)
-}
 
 /** 从 CwdStore 取 session 当前 cwd;缺则 process.cwd 兜底。 */
 function resolveInboxCwd(sid: string): string {
@@ -1041,10 +1040,12 @@ function resolveInboxCwd(sid: string): string {
 // 唤醒父 session — 这里注册为 runNextInQueue, 把 next-turn lane 的消息
 // 作为一条 prompt 喂给 LLM。handler 抛错仅 console.warn, 不让后台回调把
 // server 弄崩(与 SubagentNotifier 同款防御)。
-sessionInbox.setWakeHandler((sid) => {
-  void runNextInQueue(sid).catch((err) =>
-    console.warn('[agent] inbox wake runNextInQueue failed:', err),
-  )
+// Wire per-session inbox wake handler (zai patch 2026-09-06): each new
+// SessionInbox created via getSessionInbox(sid) auto-binds this function.
+// See sessionInbox.ts setSessionInboxWakeHandler for the indirection
+// rationale (avoids circular import between this file and sessionInbox.ts).
+setSessionInboxWakeHandler(async (sid) => {
+  await runNextInQueue(sid)
 })
 
 /**
@@ -1308,6 +1309,15 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       // converts image blocks to Anthropic protocol before hitting the
       // API. JSON-encoding here would leak base64 as plain text and the
       // model can't read the image.
+      //
+      // zai patch (2026-09-06): prompt passes through verbatim. The
+      // `<system-reminder>` prepend is now handled by vendor's
+      // `query.ts` loop via `runExtraReminderProviders(getSessionId())`,
+      // called once per API call. zai registers a provider at startup
+      // (agentRuntime.ts registerExtraReminderProvider) that drains
+      // the per-session SessionInbox on every iteration. Persistence
+      // above uses the unmodified `userContent`, so the reminder never
+      // reaches the transcript on disk.
       prompt: userContent,
       // zai patch (2026-08-28): slash 指令的展开 prompt 以 meta 消息提交给
       // runtime —— vendor 语义下 isMeta 消息 LLM 可见、UI/恢复层隐藏,
@@ -1826,7 +1836,7 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   // 启动判定在同一同步块内完成, JS 单线程保证原子性, 杜绝并发 queryLoop
   // 写同一 transcript。排队状态经 queue.changed SSE 事件 + 响应快照推给前端。
   // 用户人工输入 → 重置 inbox wakeBudget, 让后台通知在主线下次空闲时仍能唤醒。
-  sessionInbox.resetWakeBudget(sessionId)
+  getSessionInbox(sessionId).resetWakeBudget(sessionId)
   const text = prompt?.trim() ?? "";
   const blocks = contentBlocks;
   const queue = sessionQueues.get(sessionId) ?? []
@@ -2161,7 +2171,7 @@ router.post("/agent/queue/steer", async (req: Request, res: Response) => {
   // 进入 inbox next-step lane: 当前轮(是同一 queryLoop)在跑, SessionInbox
   // busy → 不 wake, 仅排队; turn 结束 finally 消费合并为下一条 prompt。
   if (item) {
-    sessionInbox.steer(sessionId, {
+    getSessionInbox(sessionId).steer(sessionId, {
       id: `steer-${promptId}`,
       source: { kind: "user", form: "steer" },
       content: item.prompt,

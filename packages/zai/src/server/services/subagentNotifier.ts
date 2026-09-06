@@ -1,5 +1,5 @@
 import type { BackgroundTask } from '@zn-ai/zn-agent-core'
-import { sessionInbox } from './sessionInbox.js'
+import { getSessionInbox, type SessionInbox } from './sessionInbox.js'
 import { getRuntimeCore } from './agentRuntime.js'
 import type { RuntimeCore } from '../../shared/settings.js'
 
@@ -23,10 +23,17 @@ import type { RuntimeCore } from '../../shared/settings.js'
  *   <summary>Agent "X" completed</summary>
  *   <result>final message</result>
  *   </task-notification>
+ *
+ * zai patch (2026-09-06): inbox 默认按 `parentSessionId` 走 per-session
+ * `getSessionInbox(sid)` 工厂,跨 session 隔离。`opts.inbox` 测试钩子
+ * 保留为单实例(测试场景通常一个 mock 就够)。
  */
 export interface SubagentNotifierOptions {
-  /** 测试钩子:替换为 mock sessionInbox(默认走 module 单例)。 */
-  inbox?: typeof sessionInbox
+  /**
+   * 测试钩子:替换为固定的 SessionInbox 实例(默认走
+   * `getSessionInbox(parentSessionId)` per-session 工厂)。
+   */
+  inbox?: SessionInbox
   /** 测试钩子:替换运行时读取(默认 getRuntimeCore)。 */
   getCore?: () => RuntimeCore
 }
@@ -34,12 +41,20 @@ export interface SubagentNotifierOptions {
 let notifier: SubagentNotifier | null = null
 
 export class SubagentNotifier {
-  private readonly inbox: typeof sessionInbox
+  private readonly fixedInbox: SessionInbox | null
   private readonly getCoreFn: () => RuntimeCore
 
   constructor(opts: SubagentNotifierOptions = {}) {
-    this.inbox = opts.inbox ?? sessionInbox
+    this.fixedInbox = opts.inbox ?? null
     this.getCoreFn = opts.getCore ?? getRuntimeCore
+  }
+
+  /**
+   * Resolve the inbox for a given session. Returns the test-injected
+   * fixed inbox if set, otherwise the per-session instance.
+   */
+  private inboxFor(sessionId: string): SessionInbox {
+    return this.fixedInbox ?? getSessionInbox(sessionId)
   }
 
   /**
@@ -68,7 +83,7 @@ export class SubagentNotifier {
     if (parentSessionId === 'sess-unknown') return // 兜底:无父 session 的占位 ID
 
     try {
-      this.inbox.followup(parentSessionId, {
+      this.inboxFor(parentSessionId).followup(parentSessionId, {
         id: `bg-${task.id}`,
         source: {
           kind: 'subagent',

@@ -63,7 +63,7 @@ import type { LoadedSkill } from '@zn-ai/zn-agent-core'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
 import { PermissionRegistry } from './permissionRegistry.js'
-import { sessionInbox, type InboxMessage } from './sessionInbox.js'
+import { getSessionInbox, disposeSessionInbox, listSessionInboxIds, type InboxMessage } from './sessionInbox.js'
 import { resolveMainAgent } from './mainAgents.js'
 import { readZaiSettings } from './zaiSettingsStore.js'
 import type { SessionRegistry } from './sessionHost/SessionRegistry.js'
@@ -144,10 +144,25 @@ const permissionRegistry = new PermissionRegistry()
 // global-bridge convention).
 ;(globalThis as any).__zaiSessionInbox = {
   followup: (sid: string, msg: unknown) =>
-    sessionInbox.followup(sid, msg as InboxMessage),
+    getSessionInbox(sid).followup(sid, msg as InboxMessage),
   inject: (sid: string, msg: unknown) =>
-    sessionInbox.inject(sid, msg as InboxMessage),
+    getSessionInbox(sid).inject(sid, msg as InboxMessage),
 }
+
+// zai patch (2026-09-06): register zai's per-session SessionInbox drain as
+// a vendor pre-API-call reminder provider. The vendor query loop calls
+// `runExtraReminderProviders(getSessionId())` before each LLM API call
+// and prepends the result as a `<system-reminder>` block — same pattern
+// vendor uses for its bg-daemon inbox. See
+// `packages/zn-agent-core/src/opencc-src/utils/daemon/preApiCallReminders.ts`
+// for the registry shape. Imported lazily below to avoid a circular
+// dep (inboxReminder.ts imports sessionInbox.ts which is fine; this
+// only delays the binding until init).
+import { registerExtraReminderProvider } from '@zn-ai/zn-agent-core'
+import { drainInboxReminder } from './inboxReminder.js'
+let inboxReminderProviderRegistered = false
+registerExtraReminderProvider((sid: string) => drainInboxReminder(sid))
+inboxReminderProviderRegistered = true
 
 // zai patch: AskUserQuestion bridge context — static parts injected
 // once at init. The zai-native AskUserQuestion wrapper
@@ -378,6 +393,12 @@ export function __resetAgentRuntimeForTests(): void {
   serverCwd = null
   activeRuntimeCore = 'repl'
   sessionControllers.clear()
+  // zai patch (2026-09-06): drop per-session inboxes so the next test boot
+  // starts with a clean registry. The module-level wake handler ref stays
+  // installed; new inboxes created later will auto-bind to it.
+  for (const sid of listSessionInboxIds()) {
+    disposeSessionInbox(sid)
+  }
   // Unregister config-gated subagent providers (dsh) so repeated test
   // boots don't stack duplicate registrations.
   while (subagentProviderDisposers.length > 0) {

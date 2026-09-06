@@ -18,7 +18,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { eventBus } from './eventBus.js'
-import { sessionInbox } from './sessionInbox.js'
+import { getSessionInbox } from './sessionInbox.js'
 import { taskFactoryRoot } from '@zn-ai/zn-agent-core'
 
 export type TaskFactoryState = {
@@ -111,7 +111,7 @@ export function injectSupervisorCommand(content: string): void {
     )
     return
   }
-  sessionInbox.followup(sid, {
+  getSessionInbox(sid).followup(sid, {
     id: `tf-cmd-${++seq}-${Date.now()}`,
     source: { kind: 'task-factory', form: 'notice' },
     content,

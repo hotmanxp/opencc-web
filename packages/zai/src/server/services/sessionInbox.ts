@@ -9,6 +9,12 @@
  * consumeNextStep 合并为下一条 prompt —— 对齐 DSH「busy owner 被 inject,
  * settle 一起 cost 一步」的 intent。wakeBudget(默认 3)防止后台连环唤醒;
  * 用户人工输入(turn 结束)经 resetWakeBudget / clearRunning 恢复预算。
+ *
+ * zai patch (2026-09-06): 每个 session 独立 SessionInbox 实例,跨 session
+ * 状态完全隔离。模块层保留 Map<sessionId, SessionInbox> 工厂,新 inbox
+ * 创建时自动挂上 `setSessionInboxWakeHandler` 注册的 wake handler(避免
+ * 工厂与 agent.ts 的循环依赖)。`sessionInbox` 单例导出仅作兼容保留 —
+ * 生产代码不再使用,统一走 `getSessionInbox(sid)`。
  */
 export type InboxDelivery = 'wakeup' | 'quiet'
 
@@ -128,4 +134,74 @@ export class SessionInbox {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Per-session factory + lifecycle
+// ---------------------------------------------------------------------------
+
+const sessionInboxes = new Map<string, SessionInbox>()
+
+/**
+ * Module-level wake handler reference. `setSessionInboxWakeHandler` is
+ * called once at startup (typically from `agent.ts`) so newly created
+ * inbox instances auto-bind to it. This avoids a circular import
+ * between `sessionInbox.ts` and `agent.ts` — agent.ts owns the wake
+ * implementation (`runNextInQueue`), sessionInbox.ts owns the data.
+ */
+type SessionWakeFn = (sessionId: string) => Promise<void>
+let moduleWakeHandler: SessionWakeFn | null = null
+
+export function setSessionInboxWakeHandler(fn: SessionWakeFn): void {
+  moduleWakeHandler = fn
+}
+
+/**
+ * Return the per-session SessionInbox, lazily creating one if absent.
+ * Newly created instances auto-attach the wake handler registered via
+ * `setSessionInboxWakeHandler`.
+ */
+export function getSessionInbox(sessionId: string): SessionInbox {
+  let inbox = sessionInboxes.get(sessionId)
+  if (!inbox) {
+    inbox = new SessionInbox()
+    if (moduleWakeHandler) {
+      const fn = moduleWakeHandler
+      inbox.setWakeHandler((sid) => {
+        fn(sid).catch((err) =>
+          console.warn('[SessionInbox] wake runNextInQueue failed:', err),
+        )
+      })
+    }
+    sessionInboxes.set(sessionId, inbox)
+  }
+  return inbox
+}
+
+/**
+ * Drop a session's inbox from the registry. Idempotent — calling with
+ * an unknown sid is a no-op. Does NOT call any wake handler; the caller
+ * is responsible for terminating any in-flight turn first.
+ */
+export function disposeSessionInbox(sessionId: string): void {
+  sessionInboxes.delete(sessionId)
+}
+
+/**
+ * List of session ids currently registered. Useful for shutdown /
+ * `killAll` paths to dispose every inbox.
+ */
+export function listSessionInboxIds(): string[] {
+  return [...sessionInboxes.keys()]
+}
+
+// ---------------------------------------------------------------------------
+// Singleton — DEPRECATED. Kept exported so legacy callers (and the
+// vendor compat bridge that asserts `globalThis.__zaiSessionInbox`
+// exists) don't break. New code MUST use `getSessionInbox(sid)`.
+// ---------------------------------------------------------------------------
+
+/**
+ * @deprecated Use `getSessionInbox(sessionId)` instead. The singleton is
+ * only kept for the vendor `inboxBridge.ts` globalThis assertion and a
+ * handful of legacy imports; production call sites have all migrated.
+ */
 export const sessionInbox = new SessionInbox()

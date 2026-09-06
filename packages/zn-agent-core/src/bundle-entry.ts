@@ -68,6 +68,13 @@ export { takeDisplayFilesOutput } from './opencc-src/server/displayFilesOpencc.j
 // 共享 module 实例(STATE / commandQueue / bashTracker)。
 export { createHeadlessContext } from './opencc-src/server/createHeadlessContext.js'
 export { createSessionFacade } from './opencc-src/server/sessionFacade.js'
+// zai patch (2026-09-06): pre-API-call reminder provider registry — zai-server
+// registers a provider that drains its per-session SessionInbox on every
+// vendor query-loop iteration (mirrors vendor bg-daemon inbox pattern).
+export {
+  registerExtraReminderProvider,
+  clearExtraReminderProviders,
+} from './opencc-src/utils/daemon/preApiCallReminders.js'
 export * from './index.js'
 
 // ---------------------------------------------------------------------------
