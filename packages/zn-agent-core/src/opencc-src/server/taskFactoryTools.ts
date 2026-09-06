@@ -45,8 +45,20 @@ const LIST_DESC = 'List all Task Factory tasks across the four lifecycle buckets
 
 const MOVE_DESC = 'Move a Task Factory task between lifecycle buckets (queue-tasks / processing-tasks / verifying-tasks / finished-tasks) with optional executorTaskId / verifierTaskId backfill. ' +
   'Use this as the SOLE write path for task state changes — do NOT edit task.yaml by hand. ' +
+  // zai patch (2026-09-06, tf-1g5hhgii): 返回值新增 taskDir(任务目录绝对路径),
+  // supervisor 派单顺序倒置后,executor prompt 的 spec/plan/process/verification
+  // 路径需要从 Move 返回值取 taskDir 插值(避免 SpawnAgent 先于 Move 触发时
+  // queue-tasks/<id>/ 已被改名为 processing-tasks/<id>/,executor Read 报
+  // "File does not exist" 的路径竞态)。
+  'Return value (always includes taskDir — absolute path of the task directory AFTER the move, in the form `<task-factory-root>/<bucket>/<id>/`; ' +
+  'stable for in-place backfills too since the directory is unchanged): ' +
+  '  - output: human-readable summary line followed by `taskDir: <absolute path>` on a new line (the supervisor LLM reads taskDir from this text). ' +
+  '  - taskDir: structured absolute path string (programmatic access; same value as the text). ' +
+  '  - taskId / from / to / status / inPlace: structured fields for tool-result parsing. ' +
+  '  - executorTaskId / verifierTaskId: present ONLY when a backfill was applied. ' +
   'Typical flows: ' +
-  '(a) SuperTasksMove(id, "queue-tasks", "processing-tasks", executorTaskId=<subagent>) on dispatch — atomically moves the folder, sets status=processing, and backfills executorTaskId; ' +
+  '(a) SuperTasksMove(id, "queue-tasks", "processing-tasks") on dispatch — move the folder FIRST, capture taskDir from the return value, THEN SpawnAgent the executor with `<task_dir>/docs/spec.md` paths interpolated from taskDir. After SpawnAgent returns the subagent id, backfill via an in-place move (a2): ' +
+  '(a2) SuperTasksMove(id, "processing-tasks", "processing-tasks", executorTaskId=<subTaskId>) — in-place backfill so the UI keeps the live event stream; taskDir is unchanged (still processing-tasks). ' +
   '(b) SuperTasksMove(id, "processing-tasks", "verifying-tasks") after the executor appends "## [DONE]" to process.md; ' +
   '(b2) SuperTasksMove(id, "verifying-tasks", "verifying-tasks", verifierTaskId=<verifierSubagentId>) — in-place backfill right after SpawnAgent returns the verifier task id (from == to means: no folder move, only patch the field; status stays verifying); ' +
   '(b3) SuperTasksMove(id, "processing-tasks", "processing-tasks", executorTaskId=<newSubagentId>) — in-place backfill after a FAIL-retry re-spawn (Reset cleared executorTaskId, the task is already in processing-tasks); ' +
@@ -181,6 +193,10 @@ export const superTasksMoveTool = buildTool({
     const patch: { executorTaskId?: string; verifierTaskId?: string } = {}
     if (input.executorTaskId && input.executorTaskId.length > 0) patch.executorTaskId = input.executorTaskId
     if (input.verifierTaskId && input.verifierTaskId.length > 0) patch.verifierTaskId = input.verifierTaskId
+    // zai patch (2026-09-06, tf-1g5hhgii): supervisor 派单 §3b 先于 SpawnAgent
+    // 调 Move,taskDir 必须在 output 文本里返回(LLM 通过 mapToolResultToToolResultBlockParam
+    // 只能读到 text content),同时作为结构化字段暴露给工具调用方。
+    const dirPath = taskDir(input.to, input.id)
     // 就地回填:from === to 时不做目录移动,只写 task.yaml 字段(b2/b3 流程)。
     if (input.from === input.to) {
       if (Object.keys(patch).length === 0) {
@@ -191,9 +207,21 @@ export const superTasksMoveTool = buildTool({
       const patched = await markTaskStatus(input.id, input.from, patch)
       emitTaskFactoryEvent('moved', { id: patched.id, from: input.from, to: input.to, inPlace: true })
       const extra = Object.entries(patch).map(([k, v]) => ` (${k}=${v})`).join('')
-      return { data: { output: `Task patched in place: ${patched.id} (${patched.title}) in ${input.from}${extra}` } }
+      const output = `Task patched in place: ${patched.id} (${patched.title}) in ${input.from}${extra}\ntaskDir: ${dirPath}`
+      return {
+        data: {
+          output,
+          taskDir: dirPath,
+          taskId: patched.id,
+          from: input.from,
+          to: input.to,
+          status: patched.status,
+          inPlace: true,
+          ...patch,
+        },
+      }
     }
-    if (existsSync(taskDir(input.to, input.id))) {
+    if (existsSync(dirPath)) {
       throw new Error(`task ${input.id} already exists in ${input.to}`)
     }
     if (Object.keys(patch).length > 0) {
@@ -202,7 +230,19 @@ export const superTasksMoveTool = buildTool({
     const moved = await moveTask(input.id, input.from, input.to)
     emitTaskFactoryEvent('moved', { id: moved.id, from: input.from, to: input.to })
     const extra = Object.entries(patch).map(([k, v]) => ` (${k}=${v})`).join('')
-    return { data: { output: `Task moved: ${moved.id} (${moved.title}) ${input.from} → ${input.to}${extra}` } }
+    const output = `Task moved: ${moved.id} (${moved.title}) ${input.from} → ${input.to}${extra}\ntaskDir: ${dirPath}`
+    return {
+      data: {
+        output,
+        taskDir: dirPath,
+        taskId: moved.id,
+        from: input.from,
+        to: input.to,
+        status: moved.status,
+        inPlace: false,
+        ...patch,
+      },
+    }
   },
   mapToolResultToToolResultBlockParam(content: { output: string }, toolUseID: string) {
     return {
