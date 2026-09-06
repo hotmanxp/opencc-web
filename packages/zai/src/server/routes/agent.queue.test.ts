@@ -518,7 +518,7 @@ describe('INBOX: runNextInQueue 消费', () => {
     getSessionInbox('sess-test').consumeNextTurn('sess-test')
   })
 
-  it('idle inbox followup → 入 nextStep + 起一条空 prompt turn(vendor hook 后续 prepend <system-reminder>)', async () => {
+  it('idle inbox followup → 入 next-turn + 被消费为一条真实 prompt(用户消息注入)', async () => {
     let release!: () => void
     const releaseP = new Promise<void>((r) => {
       release = r
@@ -533,33 +533,26 @@ describe('INBOX: runNextInQueue 消费', () => {
     // 没有任何 HTTP prompt — 直接 inbox.followup(idle)
     getSessionInbox('sess-test').followup('sess-test', inboxMsg('inbox-1', 'inbox content'))
 
-    // waitForMicrotasks 让 wake handler → runNextInQueue → runQueryLoop
+    // waitForMicrotasks 让 wake handler → runNextInQueue → runQueryLoop 链路完成
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
-    // 2026-09-06 改造:idle followup 进 nextStep,runNextInQueue 看到
-    // httpCmd/inboxMsg 都为空但 peekNextStepCount > 0,起一条空 prompt
-    // turn(cmd.prompt = '')。vendor hook 会在 query.ts:701 把 nextStep
-    // 内容 prepend 为 <system-reminder> 块(本测试只到 mock runtime.query 边界)。
+    // zai patch (2026-09-06, revert 665a70c1): idle followup 走 nextTurn,
+    // runNextInQueue.consumeNextTurn 拿到 msg → inboxToPendingPrompt 把
+    // msg.content 当作 cmd.prompt 喂给 vendor query()(真实 user prompt)。
+    // 之前改成 nextStep + 空 prompt turn 推 turnIndex 不唤醒 LLM,这里
+    // 恢复成"用户消息注入"。
     expect(hangingQuery.mock.calls.length).toBeGreaterThanOrEqual(1)
     const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
-    expect(firstArgs.prompt).toBe('')
-
-    // nextStep 已被 runNextInQueue 的 fallthrough 路径消费?不——nextStep 由
-    // vendor hook drain,不在 runQueryLoop 之前的 zai 层消费。
-    // 这里只验证 queue 行为:drainInboxReminder(等价 vendor hook 调用)
-    // 应返回 inbox content 作为 reminder。
-    const drained = drainInboxReminder('sess-test')
-    expect(drained).toContain('inbox content')
-    expect(drained).toContain('<system-reminder>')
+    expect(firstArgs.prompt).toBe('inbox content')
 
     // 清理:释放让 query 结束
     release()
     await new Promise((r) => setImmediate(r))
   })
 
-  it('HTTP prompt 优先于 inbox followup:HTTP 拿走本轮 cmd,nextStep 里的 inbox 留给 vendor hook', async () => {
+  it('HTTP prompt 优先于 inbox next-turn', async () => {
     let release!: () => void
     const releaseP = new Promise<void>((r) => {
       release = r
@@ -572,11 +565,11 @@ describe('INBOX: runNextInQueue 消费', () => {
     })
 
     const app = buildApp()
-    // 1) inbox 先入 nextStep(idle,2026-09-06 改造),并唤醒
+    // 1) inbox 先入 next-turn(idle followup 走 nextTurn)
     getSessionInbox('sess-test').followup('sess-test', inboxMsg('inbox-A', 'from inbox'))
-    // 2) wake 同步触发 runNextInQueue → peekNextStepCount>0 → 起空 prompt turn
-
-    // 立刻 HTTP 入队(可能抢在 wake 前,也可能后)
+    // wake handler 同步触发 runNextInQueue:consumeNextTurn 已把 inbox-A 拿走,
+    // sessionRunning.add(sid) 同步执行;HTTP 入队的 wasIdle 判定
+    // `!running && queue.length===0` 看到 running=true,走 queued:true。
     const r1 = await request(app)
       .post('/api/agent/prompt')
       .send({ prompt: 'from http', sessionId: 'sess-test' })
@@ -585,22 +578,27 @@ describe('INBOX: runNextInQueue 消费', () => {
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
-    // 不管哪个先跑,至少一个 turn 已开始
+    // 第一轮一定是 inbox (HTTP 总是后入队)
     expect(hangingQuery.mock.calls.length).toBeGreaterThanOrEqual(1)
-    // 释放 turn 1
+    const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
+    expect(firstArgs.prompt).toBe('from inbox')
+
+    // 释放 inbox turn, finally runNextInQueue 拿 HTTP 那条(queued:true)
     release()
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
-    // 验证:inbox-A 内容仍在 nextStep(没被消费)
-    // (如果 turn 1 是 wake 起的空 prompt,vendor hook 已 drain;否则 inbox-A
-    // 仍在 nextStep,drainInboxReminder 拿得到)
-    // 这里不强求具体值,只确认 drainInboxReminder 行为正常(不抛)
-    expect(() => drainInboxReminder('sess-test')).not.toThrow()
+    expect(hangingQuery.mock.calls.length).toBeGreaterThanOrEqual(2)
+    const secondArgs = hangingQuery.mock.calls[1]?.[0] as { prompt?: string }
+    expect(secondArgs.prompt).toBe('from http')
+
+    if (r1.status === 200) {
+      // 让第二个 query 也结束 — 第二个是 hangingEvents 不需要 release
+    }
   })
 
-  it('turn 结束后 next-step 不自动合并,等下一条 user prompt 触发 vendor hook prepend', async () => {
+  it('busy followup 入 next-step,turn 结束 finally 不自动 drain,留给 vendor hook prepend', async () => {
     let release!: () => void
     const releaseP = new Promise<void>((r) => {
       release = r
@@ -617,37 +615,35 @@ describe('INBOX: runNextInQueue 消费', () => {
       return hangingEvents()
     })
 
-    // 第一条 inbox: idle → nextStep + wake → runNextInQueue 起一条空 prompt turn
+    // 第一条 inbox 在 idle 状态下走 next-turn(恢复后)→ cmd.prompt = 'step1 content'
     getSessionInbox('sess-test').followup('sess-test', inboxMsg('inbox-step-1', 'step1 content'))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
     expect(getSessionInbox('sess-test').isBusy('sess-test')).toBe(true)
-    // 第二条 inbox 在 busy 状态下自动降级到 next-step (不唤醒)
+    // 第二条 inbox 在 busy 状态下自动降级到 next-step(不唤醒)— 由 vendor hook 处理
     getSessionInbox('sess-test').followup('sess-test', inboxMsg('inbox-step-2', 'step2 content'))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
-    // 第一条 turn 是空 prompt(followup idle 走 nextStep + 空 cmd fallthrough)
     expect(hangingQuery.mock.calls.length).toBeGreaterThanOrEqual(1)
     const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
-    expect(firstArgs.prompt).toBe('')
+    expect(firstArgs.prompt).toBe('step1 content')
 
-    // 释放第一条 → finally 不再 drain(2026-09-06 改造),nextStep 保留 step2
+    // 释放第一条 → finally clearRunning → runNextInQueue recurse,但 consumeNextTurn
+    // 空 + peekNextStepCount 分支已撤回 → 不起第二轮 turn。nextStep 留 step2
+    // 给后续用户 prompt 的 API call 时的 vendor hook。
     release()
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
-    // finally 没起第二轮 turn — 旧的 finally-enqueue 路径已删
     expect(callIdx).toBe(1)
 
-    // drainInboxReminder(等价于 vendor hook 在下次 API call 前的 drain)
-    // 应该返回 step2 — 它就是 vendor hook 要 prepend 的内容。
+    // drainInboxReminder(等价 vendor hook 在下次 API call 前的 drain)应返回 step2。
     const drained = drainInboxReminder('sess-test')
     expect(drained).toContain('step2 content')
     expect(drained).toContain('<system-reminder>')
-    // 二次 drain 应为空(已被消费)
     expect(drainInboxReminder('sess-test')).toBeNull()
   })
 })
@@ -698,6 +694,11 @@ describe('INBOX: runQueryLoop <system-reminder> prepend', () => {
     // the runtime.query mock level. Instead verify the helper that
     // vendor's registered hook invokes (drainInboxReminder) returns
     // the expected reminder when nextStep has content.
+    //
+    // zai patch (2026-09-06, inboxReminder escape XML): task-factory /
+    // subagent 内嵌的 `<task-command>` 等 XML 被 escape 成 `&lt;...&gt;`,
+    // 否则嵌入 `<system-reminder>` 块会让模型 XML parser 在首个 `</...>`
+    // 处提前关闭 reminder 块。
     const inbox = getSessionInbox('sess-rem')
     inbox.setBusy('sess-rem')
     inbox.inject('sess-rem', inboxMsg('bg-1', 'subagent done'))
@@ -715,7 +716,7 @@ describe('INBOX: runQueryLoop <system-reminder> prepend', () => {
     expect(drained).toContain('subagent notice')
     expect(drained).toContain('subagent done')
     expect(drained).toContain('task-factory notice')
-    expect(drained).toContain('<task-command>')
+    expect(drained).toContain('&lt;task-command&gt;')
 
     // 二次 drain 应为空(lane 已被消费)
     expect(drainInboxReminder('sess-rem')).toBeNull()
@@ -753,7 +754,7 @@ describe('INBOX: 并发守卫', () => {
     getSessionInbox('sess-race').consumeNextTurn('sess-race')
   })
 
-  it('同一 tick 两次 followup 只起单 turn,第二条留在 nextStep 等下次 prepend', async () => {
+  it('同一 tick 两次 followup 只起单 turn:idle 走 nextTurn(用户消息注入),第二条因 busy 降级入 nextStep 等 vendor hook prepend', async () => {
     let release!: () => void
     const releaseP = new Promise<void>((r) => {
       release = r
@@ -770,9 +771,10 @@ describe('INBOX: 并发守卫', () => {
       return hangingEvents()
     })
 
-    // 同一 tick 两次 idle followup(2026-09-06 统一入 nextStep):
-    // 第一条触发 wake → runNextInQueue → 起一条空 prompt turn;
-    // 第二条因 busy 已被设,降级入 nextStep 不唤醒。
+    // 同一 tick 两次 followup(2026-09-06 revert 665a70c1:idle 走 nextTurn):
+    // 第一条触发 wake → runNextInQueue → consumeNextTurn(msgA) → cmd.prompt='A content';
+    // 第二条因 busy 已被设,降级入 nextStep 不唤醒 — 留给后续 user prompt
+    // 的 API call 时由 vendor hook prepend <system-reminder>。
     getSessionInbox('sess-race').followup('sess-race', inboxMsg('msgA', 'A content'))
     getSessionInbox('sess-race').followup('sess-race', inboxMsg('msgB', 'B content'))
 
@@ -780,26 +782,26 @@ describe('INBOX: 并发守卫', () => {
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
-    // 关键断言:本 sid 只起了一个 query turn(空 prompt)
+    // 关键断言:本 sid 只起了一个 query turn(用户消息注入语义)
     expect(callIdx).toBe(1)
     const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
-    expect(firstArgs.prompt).toBe('')
+    expect(firstArgs.prompt).toBe('A content')
 
-    // 释放第一条 → finally 不再 drain/合并,msgA + msgB 都留在 nextStep
+    // 释放第一条 → finally clearRunning → runNextInQueue recurse,consumeNextTurn
+    // 空 + peekNextStepCount 分支已撤回 → 不起第二轮。msgA 已消费,msgB
+    // 留 nextStep 给 vendor hook。
     release()
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
-    // 没起第二轮 turn
     expect(callIdx).toBe(1)
     // drainInboxReminder(等价 vendor hook 下次 API call 前的 drain)
-    // 应该返回 msgA + msgB 两行 bullet
+    // 应返回 msgB 一行 bullet(msgA 已被 nextTurn 消费)
     const drained = drainInboxReminder('sess-race')
-    expect(drained).toContain('A content')
+    expect(drained).not.toContain('A content')
     expect(drained).toContain('B content')
     expect(drained).toContain('<system-reminder>')
-    // 二次 drain 应为空
     expect(drainInboxReminder('sess-race')).toBeNull()
   })
 })

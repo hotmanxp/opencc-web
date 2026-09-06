@@ -57,14 +57,15 @@ export class SessionInbox {
       this.lanesFor(sessionId).nextStep.push(msg)
       return
     }
-    // zai patch (2026-09-06): idle path also goes to nextStep so the
-    // bg event rides through the vendor preApiCallReminders hook as
-    // a <system-reminder> block, instead of becoming a plain-text
-    // user prompt on a new auto-started turn. Matches vendor's own
-    // bg-daemon behavior (buildInboxSystemReminder at query.ts:701).
-    // `runNextInQueue` will start an empty-prompt turn when nextStep
-    // has content but sessionQueues + nextTurn are empty.
-    this.lanesFor(sessionId).nextStep.push(msg)
+    // zai patch (2026-09-06, revert 665a70c1): idle followup 走 nextTurn
+    // (恢复成"用户消息注入"语义)— wake 触发 runNextInQueue 把 msg.content
+    // 当作真实 cmd.prompt 喂给 vendor query(),落盘 transcript + 唤醒 LLM。
+    // 之前改成 nextStep 让 vendor hook 在 API call 时 prepend <system-reminder>
+    // 的设计,在 idle + 无后续 user prompt 场景下:空 prompt turn 推进 turnIndex
+    // 但 LLM 不思考 → 后台通知"没地方唤醒 LLM"。busy 时的 followup 仍走 nextStep
+    // (steer/inject 永远 nextStep),由 vendor hook 在用户下一条 prompt 的 API
+    // call 时 prepend,这条路径保留 4ae1223b 的 vendor hook 设计。
+    this.lanesFor(sessionId).nextTurn.push(msg)
     this.wakeIfBudgeted(sessionId)
   }
 

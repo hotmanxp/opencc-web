@@ -938,23 +938,6 @@ async function runNextInQueue(sid: string): Promise<void> {
     cmd = httpCmd
   } else if (inboxMsg) {
     cmd = inboxToPendingPrompt(sid, inboxMsg)
-  } else if (getSessionInbox(sid).peekNextStepCount(sid) > 0) {
-    // zai patch (2026-09-06): idle session, no user prompt in flight,
-    // but SessionInbox.nextStep has bg-event content (subagent
-    // completion, task-factory notice, etc — all now go through
-    // nextStep since the followup-idle unification). The vendor
-    // hook at query.ts:701 will drain nextStep and prepend a
-    // <system-reminder> block on the next API call; we just need
-    // to start the turn with an empty prompt so the hook fires.
-    // Matches vendor's own bg-daemon behavior — daemon messages
-    // arrive with no user input and the LLM responds to the
-    // reminder alone.
-    cmd = {
-      id: `bg-wake-${crypto.randomUUID()}`,
-      sessionId: sid,
-      cwd: resolveInboxCwd(sid),
-      prompt: '',
-    }
   } else {
     sessionQueues.delete(sid)
     emitQueueChanged(sid)
@@ -972,15 +955,13 @@ async function runNextInQueue(sid: string): Promise<void> {
   } finally {
     sessionRunning.delete(sid)
     getSessionInbox(sid).clearRunning(sid)
-    // zai patch (2026-09-06): do NOT drain nextStep here. The vendor
-    // query loop's per-API-call reminder hook
-    // (runExtraReminderProviders in query.ts:701) handles bg events:
-    // it drains SessionInbox.nextStep on the NEXT runQueryLoop start
-    // and prepends a `<system-reminder>` block to the LLM-facing
-    // prompt. Older behavior (drain + enqueueInboxPrompt) would send
-    // bg events as plain text on a separate auto-started turn; the
-    // hook makes them ride along with the user's next prompt,
-    // packaged as a system reminder for the LLM.
+    // zai patch (2026-09-06, partial revert): finally 不再 drain nextStep。
+    // vendor query loop 的 per-API-call reminder hook
+    // (runExtraReminderProviders in query.ts:701) 处理 busy 路径下用户
+    // 下一条 prompt 时的 bg 事件 — drain SessionInbox.nextStep 并 prepend
+    // `<system-reminder>` 块到 LLM-facing prompt。idle 路径的 followup 现在
+    // 走 nextTurn(在 runNextInQueue 入口已被 consumeNextTurn 取走),无需
+    // finally 再 drain。
     void runNextInQueue(sid)
   }
 }
