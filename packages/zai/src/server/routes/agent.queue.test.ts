@@ -695,10 +695,13 @@ describe('INBOX: runQueryLoop <system-reminder> prepend', () => {
     // vendor's registered hook invokes (drainInboxReminder) returns
     // the expected reminder when nextStep has content.
     //
-    // zai patch (2026-09-06, inboxReminder escape XML): task-factory /
-    // subagent 内嵌的 `<task-command>` 等 XML 被 escape 成 `&lt;...&gt;`,
-    // 否则嵌入 `<system-reminder>` 块会让模型 XML parser 在首个 `</...>`
-    // 处提前关闭 reminder 块。
+    // zai patch (2026-09-06, inboxReminder parse+rebuild): inner
+    // <task-notification> XML on subagent notices is parsed and re-emitted
+    // as a structured ASCII bullet (no embedded XML); task-factory
+    // <task-command>... is rendered verbatim (no parser for it yet).
+    // The whole bullet body (outside the outer <system-reminder> wrapper)
+    // is pure ASCII for subagent notices, task-factory preserves its
+    // literal XML.
     const inbox = getSessionInbox('sess-rem')
     inbox.setBusy('sess-rem')
     inbox.inject('sess-rem', inboxMsg('bg-1', 'subagent done'))
@@ -716,7 +719,9 @@ describe('INBOX: runQueryLoop <system-reminder> prepend', () => {
     expect(drained).toContain('subagent notice')
     expect(drained).toContain('subagent done')
     expect(drained).toContain('task-factory notice')
-    expect(drained).toContain('&lt;task-command&gt;')
+    // task-factory preserves the literal <task-command> wrapper as-is.
+    expect(drained).toContain('<task-command>')
+    expect(drained).toContain('</task-command>')
 
     // 二次 drain 应为空(lane 已被消费)
     expect(drainInboxReminder('sess-rem')).toBeNull()
