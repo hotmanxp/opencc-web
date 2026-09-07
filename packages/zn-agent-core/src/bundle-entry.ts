@@ -149,6 +149,19 @@ export {
 // 类型级支持 —— 暴露后 zai 调用方拿到的是 QueuedCommand 的精确类型
 // 而不是 any, typecheck 仍能发现误用。
 export type { QueuedCommand } from './opencc-src/types/textInputTypes.js'
+// zai patch (2026-09-07, plan P0-1.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// 暴露 compat 层 zaiEnqueue / zaiEnqueuePendingNotification wrapper,
+// 让 zai-server `services/messageQueueAdapter.ts` 与 26 个 vendor 调用方
+// 都能从主入口 `@zn-ai/zn-agent-core` 拿到(走 bundle 单实例, 跨模块
+// globalThis 桥共享)。vendor 文件(`opencc-src/*`) 不能直接 import
+// zai-server 路径(隔离), 但可以 import 同一 bundle 内的 compat 模块。
+export {
+  zaiEnqueue,
+  zaiEnqueuePendingNotification,
+  __zaiGetCurrentSessionId,
+  installMessageQueueAdapterBridges,
+  type ZaiQueuedCommand,
+} from './compat/messageQueueAdapter.js'
 export { repairAndPersistTranscript } from './compat/transcript/repair.js'
 export {
   appendUserMessageV2,

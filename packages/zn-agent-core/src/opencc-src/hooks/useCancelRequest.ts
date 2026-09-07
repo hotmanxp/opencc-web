@@ -31,9 +31,11 @@ import { killWorkflowTask } from '../tasks/LocalWorkflowTask/lifecycle.js'
 import type { PromptInputMode, VimMode } from '../types/textInputTypes.js'
 import {
   clearCommandQueue,
-  enqueuePendingNotification,
   hasCommandsInQueue,
 } from '../utils/messageQueueManager.js'
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper (自动注入独立 sessionId 字段)
+import { zaiEnqueuePendingNotification } from '../../compat/messageQueueAdapter.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
 
 /** Time window in ms during which a second press kills all background agents. */
@@ -230,7 +232,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
       running.length === 1
         ? `Background task "${descriptions[0]}" was stopped by the user.`
         : `${running.length} background tasks were stopped by the user: ${descriptions.map(d => `"${d}"`).join(', ')}.`
-    enqueuePendingNotification({ value: summary, mode: 'task-notification' })
+    zaiEnqueuePendingNotification({ value: summary, mode: 'task-notification' })
     onAgentsKilled()
     return true
   }, [store, setAppState, onAgentsKilled])

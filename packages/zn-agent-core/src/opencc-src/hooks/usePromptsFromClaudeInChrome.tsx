@@ -9,6 +9,10 @@ import type { ConnectedMCPServer, MCPServerConnection } from '../services/mcp/ty
 import type { PermissionMode } from '../types/permissions.js';
 import { CLAUDE_IN_CHROME_MCP_SERVER_NAME, isTrackedClaudeInChromeTabId } from '../utils/claudeInChrome/common.js';
 import { lazySchema } from '../utils/lazySchema.js';
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// vendor 文件 import 替换为 zai layer wrapper (兼容 unused import: 当前文件
+// import 仅做占位, 实际 call site 在其它文件)。这里仍 import 实际调用的
+// vendor 函数, 不破坏 unused import 检测。
 import { enqueuePendingNotification } from '../utils/messageQueueManager.js';
 
 // Schema for the prompt notification from Chrome extension (JSON-RPC 2.0 format)

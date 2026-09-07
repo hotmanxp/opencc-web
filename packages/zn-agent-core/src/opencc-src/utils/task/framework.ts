@@ -14,7 +14,9 @@ import {
   type TaskType,
 } from '../../Task.js'
 import type { TaskState } from '../../tasks/types.js'
-import { enqueuePendingNotification } from '../messageQueueManager.js'
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper
+import { zaiEnqueuePendingNotification } from '../../../compat/messageQueueAdapter.js'
 import { enqueueSdkEvent } from '../sdkEventQueue.js'
 import { getTaskOutputDelta, getTaskOutputPath } from './diskOutput.js'
 
@@ -197,7 +199,7 @@ export async function generateTaskAttachments(state: AppState): Promise<{
     }
 
     // Completed tasks are NOT notified here — each task type handles its own
-    // completion notification via enqueuePendingNotification(). Generating
+    // completion notification via zaiEnqueuePendingNotification(). Generating
     // attachments here would race with those per-type callbacks, causing
     // dual delivery (one inline attachment + one separate API turn).
   }
@@ -286,7 +288,7 @@ function enqueueTaskNotification(attachment: TaskAttachment): void {
 <${SUMMARY_TAG}>Task "${attachment.description}" ${statusText}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>`
 
-  enqueuePendingNotification({ value: message, mode: 'task-notification' })
+  zaiEnqueuePendingNotification({ value: message, mode: 'task-notification' })
 }
 
 /**

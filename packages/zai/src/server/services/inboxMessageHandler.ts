@@ -294,3 +294,198 @@ export function queuedCommandToInboxMessage(cmd: QueuedCommand & { sessionId?: s
     sessionId: cmd.sessionId ?? cmd.agentId,
   }
 }
+
+// ---------------------------------------------------------------------------
+// 8 dsh-aligned delivery kinds (plan §2.4)
+// ---------------------------------------------------------------------------
+//
+// 区别于上面 10 个 vendor 类型 (useInboxPoller:818 mailbox JSON 解析),
+// 这 8 个 dsh delivery kind 是 zai 多 session 服务端从内部事件流
+// (subagentNotifier / bashNotifier / systemReminder / cronScheduler /
+// toolExecution 等) 收集 inbox 消息的统一抽象。每类对齐 dsh agent-loop
+// inbox 的语义, 由 `dispatchDshInbox()` 路由到对应 zai 内部 channel:
+//
+//  1. task-notification     → SessionInbox.followup (idle wake / busy steer)
+//  2. permission_denied     → askRegistry.reject (用户拒绝 tool 工具调用)
+//  3. permission_allowed    → askRegistry.answer (用户批准 tool 工具调用)
+//  4. elicit                → ElicitationRegistry.request (MCP elicit 协议)
+//  5. tool_result           → toolExecution.queueResult (tool use result 回灌)
+//  6. system_reminder       → next-turn prompt prepend (mid-turn drain)
+//  7. user_message          → SessionInbox.followup (idle wake / busy steer)
+//  8. bash_task.changed / cron_fired → eventBus emit (前端 SSE, 不入 inbox)
+//
+// 设计要点:
+//   - 与上面 10 vendor 类型是**两层抽象**: vendor mailbox 是跨进程通信
+//     (文件 + Unix socket), dsh inbox 是同进程事件流。两者通过
+//     `__zaiInboxBridge` global 桥接 (zai-server createApp 时 install)。
+//   - 不修改 vendor InboxMessageSchema (vendor mailbox 字段名固定)。
+//   - zai-server 暴露 `dispatchDshInbox()` 给内部事件流调用方
+//     (subagentNotifier.handle / bashNotifier.handle / cronScheduler.onFire
+//     / preApiCallReminderProvider 等)。失败的 dispatch 返回 false, 调用方
+//     走 vendor 原通道兜底。
+//   - 测试 seam: `__resetDshInboxBridgesForTests()` 清空所有 bridge。
+
+/** 8 类 dsh-aligned inbox delivery kinds (plan §2.4)。 */
+export type DshDeliveryKind =
+  | 'task-notification'
+  | 'permission_denied'
+  | 'permission_allowed'
+  | 'elicit'
+  | 'tool_result'
+  | 'system_reminder'
+  | 'user_message'
+  | 'bash_task.changed'
+  | 'cron_fired'
+
+export interface DshInboxEnvelope {
+  kind: DshDeliveryKind
+  sessionId: string
+  /** 发件方, 自由文本(agent name / teammate / 'system' / 'user') */
+  from?: string
+  /** ms epoch (optional; default = Date.now() at dispatch time) */
+  createdAt?: number
+  /** payload: type-specific, 自由 shape; receiver 自行 narrow */
+  payload: Record<string, unknown>
+  /** delivery preference: 'wake' = idle 时唤醒, 'quiet' = 不唤醒 */
+  delivery?: 'wake' | 'quiet'
+}
+
+export interface DshDispatchResult {
+  kind: DshDeliveryKind
+  ok: boolean
+  /** Optional reason when ok=false (for logging) */
+  reason?: string
+}
+
+// ---------------------------------------------------------------------------
+// Bridge registry — 8 delivery kinds → concrete zai channel
+// ---------------------------------------------------------------------------
+// 不直接 import askRegistry / elicitationRegistry 等具体模块 —— 避免
+// inboxMessageHandler 变成中央依赖, 接收方由 zai-server 在 createApp 时
+// install, 模块依赖单向 (inbox handler 只声明契约, 不感知实现)。
+//
+// Bridge shape:
+//   - task-notification / user_message: `{ followup(sessionId, msg) }`
+//     与 SessionInbox.followup 同构
+//   - permission_denied / permission_allowed: `{ answer/reject(toolUseId, ...) }`
+//     askRegistry 实现
+//   - elicit: `{ request(input) → Promise<result> }`, ElicitationRegistry 实现
+//   - tool_result: `{ queueResult(toolUseId, output, isError) }`, toolExecution 实现
+//   - system_reminder: `{ prependReminder(sessionId, text) }`, next-turn prompt
+//   - bash_task.changed / cron_fired: 直接 emit eventBus(不是 inbox 投递)
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __zaiInboxBridge:
+    | {
+        /** SessionInbox.followup / steer (task-notification / user_message) */
+        followup?: (sessionId: string, msg: { id: string; source: { kind: string; form: string }; content: string; createdAt: number }) => void
+        /** askRegistry.answer(allow) — permission_allowed */
+        answerAsk?: (toolUseId: string, payload: Record<string, unknown>) => boolean
+        /** askRegistry.reject(deny) — permission_denied */
+        rejectAsk?: (toolUseId: string, reason?: string) => boolean
+        /** ElicitationRegistry.request — elicit */
+        requestElicit?: (input: Record<string, unknown>) => Promise<{ action: string; content?: Record<string, unknown> }>
+        /** toolExecution.queueResult — tool_result */
+        queueToolResult?: (sessionId: string, toolUseId: string, output: unknown, isError: boolean) => void
+        /** queryLoop / runQueryLoop prepend — system_reminder */
+        prependReminder?: (sessionId: string, text: string) => void
+        /** eventBus.emit wrapper — bash_task.changed / cron_fired */
+        emit?: (eventType: string, payload: Record<string, unknown>) => void
+      }
+    | undefined
+}
+
+/**
+ * Install concrete channel implementations. Called once at zai-server startup
+ * (createApp), passing references to SessionInbox / askRegistry /
+ * elicitationRegistry / toolExecution / eventBus. After install,
+ * `dispatchDshInbox()` routes any DshInboxEnvelope to its concrete channel.
+ */
+export function installDshInboxBridges(bridges: NonNullable<typeof globalThis.__zaiInboxBridge>): void {
+  globalThis.__zaiInboxBridge = bridges
+}
+
+/** 测试 seam: 清空 bridge。 */
+export function __resetDshInboxBridgesForTests(): void {
+  globalThis.__zaiInboxBridge = undefined
+}
+
+/**
+ * 主分发入口: 把一条 dsh inbox envelope 路由到对应 zai 内部 channel。
+ * 返回 ok=false 表示 bridge 未安装 / 对应 kind 无 handler, 调用方应
+ * 走 vendor 原通道兜底(subagentNotifier fallback / bashTracker log 等)。
+ */
+export function dispatchDshInbox(env: DshInboxEnvelope): DshDispatchResult {
+  const bridge = globalThis.__zaiInboxBridge
+  if (!bridge) {
+    return { kind: env.kind, ok: false, reason: 'bridge not installed' }
+  }
+  const createdAt = env.createdAt ?? Date.now()
+  const sessionId = env.sessionId
+
+  switch (env.kind) {
+    case 'task-notification':
+    case 'user_message': {
+      if (!bridge.followup) return { kind: env.kind, ok: false, reason: 'followup not wired' }
+      const content = String(env.payload.content ?? env.payload.value ?? JSON.stringify(env.payload))
+      bridge.followup(sessionId, {
+        id: `${env.kind}-${createdAt}`,
+        source: { kind: env.kind, form: 'notice' },
+        content,
+        createdAt,
+      })
+      return { kind: env.kind, ok: true }
+    }
+    case 'permission_denied': {
+      const toolUseId = String(env.payload.toolUseId ?? '')
+      if (!toolUseId) return { kind: env.kind, ok: false, reason: 'toolUseId missing' }
+      if (!bridge.rejectAsk) return { kind: env.kind, ok: false, reason: 'rejectAsk not wired' }
+      const ok = bridge.rejectAsk(toolUseId, env.payload.reason as string | undefined)
+      return { kind: env.kind, ok }
+    }
+    case 'permission_allowed': {
+      const toolUseId = String(env.payload.toolUseId ?? '')
+      if (!toolUseId) return { kind: env.kind, ok: false, reason: 'toolUseId missing' }
+      if (!bridge.answerAsk) return { kind: env.kind, ok: false, reason: 'answerAsk not wired' }
+      const ok = bridge.answerAsk(toolUseId, env.payload)
+      return { kind: env.kind, ok }
+    }
+    case 'elicit': {
+      if (!bridge.requestElicit) return { kind: env.kind, ok: false, reason: 'requestElicit not wired' }
+      void bridge.requestElicit(env.payload).catch((err) => {
+        console.warn('[inboxMessageHandler] elicit failed:', err)
+      })
+      return { kind: env.kind, ok: true }
+    }
+    case 'tool_result': {
+      const toolUseId = String(env.payload.toolUseId ?? '')
+      if (!toolUseId) return { kind: env.kind, ok: false, reason: 'toolUseId missing' }
+      if (!bridge.queueToolResult) return { kind: env.kind, ok: false, reason: 'queueToolResult not wired' }
+      bridge.queueToolResult(
+        sessionId,
+        toolUseId,
+        env.payload.output,
+        Boolean(env.payload.isError),
+      )
+      return { kind: env.kind, ok: true }
+    }
+    case 'system_reminder': {
+      const text = String(env.payload.text ?? env.payload.content ?? '')
+      if (!text) return { kind: env.kind, ok: false, reason: 'text missing' }
+      if (!bridge.prependReminder) return { kind: env.kind, ok: false, reason: 'prependReminder not wired' }
+      bridge.prependReminder(sessionId, text)
+      return { kind: env.kind, ok: true }
+    }
+    case 'bash_task.changed': {
+      if (!bridge.emit) return { kind: env.kind, ok: false, reason: 'emit not wired' }
+      bridge.emit('bash_task.changed', { sessionId, task: env.payload })
+      return { kind: env.kind, ok: true }
+    }
+    case 'cron_fired': {
+      if (!bridge.emit) return { kind: env.kind, ok: false, reason: 'emit not wired' }
+      bridge.emit('cron_fired', { sessionId, prompt: env.payload.prompt ?? env.payload.value })
+      return { kind: env.kind, ok: true }
+    }
+  }
+}

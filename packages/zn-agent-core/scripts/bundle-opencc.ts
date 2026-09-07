@@ -181,6 +181,10 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   // 类型供 zai 层 messageQueueAdapter.ts 入参使用(自动注入独立 sessionId
   // 字段)。同上, vendor 模块无独立 d.ts, 镜像到 ./index.js。
   './opencc-src/types/textInputTypes.js': './index.js',
+  // zai patch (2026-09-07, plan P0-1.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+  // 暴露 compat 层 zaiEnqueue / zaiEnqueuePendingNotification wrapper。compat
+  // 模块本身由 tsc 发射 dist/compat/messageQueueAdapter.d.ts,不需要重写。
+  // 保留空条目(显式 no-op)以便未来若需要镜像到 ./index.js 时改这里。
 }
 
 /** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。 */

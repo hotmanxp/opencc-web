@@ -158,11 +158,27 @@ const permissionRegistry = new PermissionRegistry()
 // for the registry shape. Imported lazily below to avoid a circular
 // dep (inboxReminder.ts imports sessionInbox.ts which is fine; this
 // only delays the binding until init).
-import { registerExtraReminderProvider } from '@zn-ai/zn-agent-core'
+import {
+  enqueue as _vendorEnqueue,
+  enqueuePendingNotification as _vendorEnqueuePendingNotification,
+  installMessageQueueAdapterBridges,
+  registerExtraReminderProvider,
+} from '@zn-ai/zn-agent-core'
 import { drainInboxReminder } from './inboxReminder.js'
 let inboxReminderProviderRegistered = false
 registerExtraReminderProvider((sid: string) => drainInboxReminder(sid))
 inboxReminderProviderRegistered = true
+
+// zai patch (2026-09-07, plan P0-1.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// 入口层 install 一次 vendor enqueue 桥, 让 compat 层 zaiEnqueue*
+// wrapper 拿到真实 vendor 函数引用(bundle 单实例保证两边是同一个 module)。
+// 必须在 vendor 第一次调 zaiEnqueuePendingNotification 前 set,
+// 否则 throw loud("vendor bridge not installed")。agentRuntime.ts 是
+// server 启动必经模块, 这里 install 一次覆盖整个 server 生命周期。
+installMessageQueueAdapterBridges({
+  enqueue: _vendorEnqueue,
+  enqueuePendingNotification: _vendorEnqueuePendingNotification,
+})
 
 // zai patch: AskUserQuestion bridge context — static parts injected
 // once at init. The zai-native AskUserQuestion wrapper
@@ -179,6 +195,28 @@ inboxReminderProviderRegistered = true
   askRegistry,
   permissionRegistry,
   onYield: bridgeToolYieldToPrompt,
+}
+
+// zai patch (2026-09-07, plan P2-2.4, worktree-dsh): install 8 dsh inbox
+// delivery kinds → zai 内部 channel 桥(inboxMessageHandler.dispatchDshInbox)。
+// 桥接: SessionInbox.followup / askRegistry.answer|reject / eventBus.emit。
+// toolExecution.queueResult / prependReminder 暂未实现 (plan 后续阶段补)
+// —— dispatchDshInbox 收到对应 kind 时返回 ok=false, 调用方走 fallback。
+import { ElicitationRegistry } from './elicitationRegistry.js'
+const _elicitationRegistry = new ElicitationRegistry()
+;(globalThis as any).__zaiInboxBridge = {
+  followup: (sessionId: string, msg: { id: string; source: { kind: string; form: string }; content: string; createdAt: number }) => {
+    getSessionInbox(sessionId).followup(sessionId, msg as InboxMessage)
+  },
+  answerAsk: (toolUseId: string, payload: Record<string, unknown>) =>
+    askRegistry.answer(toolUseId, payload as Parameters<typeof askRegistry.answer>[1]),
+  rejectAsk: (toolUseId: string, reason?: string) =>
+    askRegistry.reject(toolUseId, reason ?? 'user_rejected'),
+  requestElicit: (input: Record<string, unknown>) =>
+    _elicitationRegistry.request(input as Parameters<typeof _elicitationRegistry.request>[0]),
+  emit: (eventType: string, payload: Record<string, unknown>) => {
+    eventBus.emit({ type: eventType, ...payload } as Parameters<typeof eventBus.emit>[0])
+  },
 }
 
 /**

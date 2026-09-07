@@ -38,7 +38,9 @@ import {
 import { registerCleanup } from '../utils/cleanupRegistry.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logError } from '../utils/log.js'
-import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper
+import { zaiEnqueuePendingNotification } from '../../compat/messageQueueAdapter.js'
 import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
 import {
   getAgentTranscriptPath,
@@ -260,7 +262,7 @@ function enqueueMainSessionNotification(
 </${TASK_NOTIFICATION_TAG}>`
 
   // zai patch (2026-09-01): 主会话后台任务属 agent 类通知。
-  enqueuePendingNotification({ value: message, mode: 'task-notification', taskKind: 'agent' })
+  zaiEnqueuePendingNotification({ value: message, mode: 'task-notification', taskKind: 'agent' })
 }
 
 /**
