@@ -886,12 +886,31 @@ export function useInboxPoller({
     const agentName = getAgentNameToPoll(currentAppState)
     if (!agentName) return
 
-    const pendingMessages = currentAppState.inbox.messages.filter(
-      m => m.status === 'pending',
-    )
-    const processedMessages = currentAppState.inbox.messages.filter(
-      m => m.status === 'processed',
-    )
+    // zai patch (2026-09-07, plan P2-2.2, worktree-dsh): sessionId 路由。
+    // zai 多 session 服务下, useInboxPoller 当前是 process-level 单例 hook
+    // (busy → idle 切换时全 session 共享 drain)。zai 喂进 inbox 的消息
+    // 都带 sessionId 标签(本模块上层 zai 注入, 来自 zai inbox handler),
+    // 这里按 sessionId 路由 —— 当前 sessionId 不在消息标签里时跳过,
+    // 避免其他 session 的 inbox 通知被本 session drain 后误投到 onSubmit。
+    //
+    // vendor 单进程场景下 inbox 消息无 sessionId 标签, 走兼容路径(全部
+    // drain, 行为不变)。zai 调用方通过 messageQueueAdapter.ts 注入
+    // sessionId 字段后, 此 filter 自动按 session 隔离。
+    const mySessionId =
+      (currentAppState as any).sessionId ??
+      (currentAppState as any).toolPermissionContext?.sessionId
+    const filterBySession = (m: any): boolean => {
+      if (!mySessionId) return true // vendor TUI 兼容路径
+      if (!m.sessionId) return true // 旧消息无 sessionId 标签, 兼容
+      return m.sessionId === mySessionId
+    }
+
+    const pendingMessages = currentAppState.inbox.messages
+      .filter(m => m.status === 'pending')
+      .filter(filterBySession)
+    const processedMessages = currentAppState.inbox.messages
+      .filter(m => m.status === 'processed')
+      .filter(filterBySession)
 
     // Clean up processed messages (they were already delivered mid-turn as attachments)
     if (processedMessages.length > 0) {

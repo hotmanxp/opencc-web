@@ -177,6 +177,10 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   // from tsc — mirror to ./index.js for type re-export. Runtime value
   // comes from esbuild bundle.
   './opencc-src/bootstrap/state.js': './index.js',
+  // zai patch (2026-09-07, plan P0-1.1, worktree-dsh): 暴露 QueuedCommand
+  // 类型供 zai 层 messageQueueAdapter.ts 入参使用(自动注入独立 sessionId
+  // 字段)。同上, vendor 模块无独立 d.ts, 镜像到 ./index.js。
+  './opencc-src/types/textInputTypes.js': './index.js',
 }
 
 /** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。 */

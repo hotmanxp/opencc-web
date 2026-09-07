@@ -15,6 +15,20 @@
  * 创建时自动挂上 `setSessionInboxWakeHandler` 注册的 wake handler(避免
  * 工厂与 agent.ts 的循环依赖)。`sessionInbox` 单例导出仅作兼容保留 —
  * 生产代码不再使用,统一走 `getSessionInbox(sid)`。
+ *
+ * dsh 视角特有对齐(2026-09-07, plan §1 + plan §3, worktree-dsh):
+ *   本模块对齐 dsh 微内核 session lifecycle 设计 — nextTurn / nextStep
+ *   双车道对应 dsh Inbox 双队列(followup / steer lanes),followup /
+ *   inject 事件通道对应 dsh agent loop wakeDriver 状态机(idle / busy /
+ *   settling transitions)。wakeBudget 是 dsh `wakeCap` 配置字段的直接
+ *   镜像 — dsh 默认 3 wake/turn,防止后台事件连环唤醒 owner agent。
+ *
+ *   与 zai 维度 1+2 隔离的接口: SessionInbox 是 per-session lane,
+ *   vendor `commandQueue` 是进程级单例(sessionId 路由通过
+ *   `QueuedCommand.sessionId` 字段, messageQueueAdapter.ts 注入)。
+ *   两个存储互补: SessionInbox 处理 zai 自管的 inbox 通知(nextTurn
+ *   prompt), vendor commandQueue 处理 vendor 内部 task-notification
+ *   drain。两层都按 sessionId 隔离。
  */
 export type InboxDelivery = 'wakeup' | 'quiet'
 

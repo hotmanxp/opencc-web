@@ -502,6 +502,14 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
                 appendSystemPrompt: undefined,
                 querySource: 'server-repl' as const,
               },
+              // zai patch (2026-09-07, plan P0-1.5, worktree-dsh): 独立
+              // sessionId 字段, 不复用 agentId, 配合 query.ts:2672-2673
+              // mid-turn drain filter 走独立 sessionId 路由, 规避 vendor
+              // 内部 30+ 处 toolUseContext.agentId 副作用(BashTool
+              // preventCwdChanges / attachments plan 路径 /
+              // PermissionContext / SDK 输出)。
+              sessionId: sessionId as any,
+              agentId: undefined,
               abortController: fallbackAbortController,
               readFileState: fallbackReadFileState,
               // zai patch (2026-08-30, plan P3-T0 fix): vendor getTools() and

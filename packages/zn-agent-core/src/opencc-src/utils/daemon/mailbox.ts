@@ -95,6 +95,17 @@ export type InboxMessageWithId = InboxMessage & {id: number}
  * Format: OpenCC-specific UUID v4 (upstream uses appState-side
  * identity, which is implicit per REPL process; we make it explicit
  * for the daemon's per-clientId mailbox routing).
+ *
+ * zai patch (2026-09-07, plan P2-2.1, worktree-dsh): per-session clientId。
+ * zai 是多 session 服务, 单一进程下多 session 共享同一 clientId 会导致
+ * bg-daemon 把所有 session 的 inbox 路由到同一 clientId, session 间消息
+ * 互相窜。这里引入 sessionClientIds Map: vendor 单进程场景下走 cachedClientId
+ * (process-level singleton, 行为不变); zai 多 session 场景下通过
+ * `getReplClientIdForSession(sessionId)` 取 per-session clientId。
+ *
+ * daemon IPC 协议层 bg-daemon 接受 clientId 字符串, per-session UUID
+ * 在 zai 进程内是 stable 的, 但 daemon 侧只是 routing key —— 多 session
+ * 的 daemon 路由对应 daemon-side per-clientId mailbox。
  */
 let cachedClientId: string | null = null
 export function getReplClientId(): string {
@@ -102,6 +113,27 @@ export function getReplClientId(): string {
     cachedClientId = randomUUID()
   }
   return cachedClientId
+}
+
+/**
+ * zai patch (2026-09-07, plan P2-2.1, worktree-dsh): per-session clientId。
+ * sessionId → clientId 映射, 第一次调用时 lazy-init UUID。Map 在 process
+ * 范围内, 多个 session 各自独立, daemon 侧拿到的是不同 clientId, 不再
+ * 共享同一 inbox 流。
+ */
+const sessionClientIds = new Map<string, string>()
+export function getReplClientIdForSession(sessionId: string): string {
+  let id = sessionClientIds.get(sessionId)
+  if (!id) {
+    id = randomUUID()
+    sessionClientIds.set(sessionId, id)
+  }
+  return id
+}
+
+/** Test seam: 清空 sessionClientIds Map。 */
+export function __resetSessionClientIdsForTests(): void {
+  sessionClientIds.clear()
 }
 
 /**

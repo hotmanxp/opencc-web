@@ -316,6 +316,51 @@ export function bridgePermissionPendingToPromptPermission(
 }
 
 /**
+ * zai patch (2026-09-07, plan P2-2.5, worktree-dsh): elicit_pending 是
+ * MCP Elicitation 工具触发的, vendor 原生无 zai web 端桥接(React/Ink
+ * only)。这里把 elicit_pending 翻译成 `prompt.elicit` ServerEvent,
+ * 与 ask_pending / permission_pending 同构, 让前端 elicit form 弹窗
+ * 能响应(ElicitationRegistry 通过此 channel 注册)。
+ */
+export function bridgeElicitPendingToPromptElicit(
+  event:
+    | {
+        type?: string
+        id?: string
+        toolUseId?: string
+        elicitationId?: string
+        mcpServerName?: string
+        message?: string
+        mode?: 'form' | 'url'
+        url?: string
+        requestedSchema?: Record<string, unknown>
+      }
+    | undefined,
+): void {
+  if (!event || event.type !== 'tool_use:elicit_pending') return
+  const bus = (globalThis as any).__zaiEventBus as
+    | { emit: (e: unknown) => void }
+    | undefined
+  if (!bus) return
+  const bridge = ((globalThis as any).__zaiBridgeCtx ?? {}) as {
+    sessionId?: string
+  }
+  const sessionId =
+    getSessionIdFromChain() ?? bridge.sessionId ?? currentSessionId ?? ''
+  bus.emit({
+    type: 'prompt.elicit',
+    sessionId,
+    toolUseId: event.id ?? event.toolUseId ?? '',
+    elicitationId: event.elicitationId ?? '',
+    mcpServerName: event.mcpServerName ?? '',
+    message: event.message ?? '',
+    mode: event.mode ?? 'form',
+    url: event.url,
+    requestedSchema: event.requestedSchema,
+  })
+}
+
+/**
  * Unified bridge onYield dispatcher. The AskUserQuestion wrapper and the
  * headless permission bridge both emit through `__zaiBridgeCtx.onYield`; the
  * per-tool bridge functions translate each vocabulary to the matching
@@ -333,6 +378,12 @@ export function bridgeToolYieldToPrompt(
       break
     case 'tool_use:permission_pending':
       bridgePermissionPendingToPromptPermission(event)
+      break
+    // zai patch (2026-09-07, plan P2-2.5, worktree-dsh): 扩展 onYield 处理
+    // MCP elicitation (vendor tool_use:elicit_pending)。不破现有 vendor
+    // 调用方 —— 仅新增 case, 旧 path 行为不变。
+    case 'tool_use:elicit_pending':
+      bridgeElicitPendingToPromptElicit(event)
       break
     default:
       break
@@ -614,6 +665,11 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     // Non-fatal — registry 缺失不阻断 runtime 初始化,降级到 default agent。
     console.warn('[initAgentRuntime] agent registry init failed:', err)
   }
+
+  // zai patch (2026-09-07, plan P0-1.6, worktree-dsh): BashNotifier 接入
+  // 实际由 initStateBridge(createApp:82)负责 —— 在 backgroundRuntime
+  // 启动后、第一次 publish 'bash_task.changed' 前完成 listener 注册。
+  // 这里仅留注释占位, 不重复 init(单例守护 idempotent)。
 
   // Build the new OpenccRuntime. The runtime is awaited so the
   // synchronous `initBackgroundRuntime()` call in `createApp` (the

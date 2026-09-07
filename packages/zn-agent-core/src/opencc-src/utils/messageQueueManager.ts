@@ -123,6 +123,11 @@ export function recheckCommandQueue(): void {
  * Add a command to the queue.
  * Used for user-initiated commands (prompt, bash, orphaned-permission).
  * Defaults priority to 'next' (processed before task notifications).
+ *
+ * zai patch (2026-09-07, plan P0-1.4, worktree-dsh): 签名接受可选 sessionId
+ * 入参(通过 QueuedCommand.sessionId? 字段携带, textInputTypes.ts:359
+ * 已扩展)。vendor 纯单进程场景下不设该字段, 行为保持原状; zai 多
+ * session 调用方通过 messageQueueAdapter.ts 自动注入 sessionId。
  */
 export function enqueue(command: QueuedCommand): void {
   // zai patch (2026-09-01): 统一盖章入队时刻 —— 通知类命令据此在模型文案里
@@ -143,6 +148,12 @@ export function enqueue(command: QueuedCommand): void {
  * Add a task notification to the queue.
  * Convenience wrapper that defaults priority to 'later' so user input
  * is never starved by system messages.
+ *
+ * zai patch (2026-09-07, plan P0-1.4, worktree-dsh): 签名接受可选 sessionId
+ * 入参(通过 QueuedCommand.sessionId? 字段携带, textInputTypes.ts:359
+ * 已扩展)。zai 多 session 调用方通过 messageQueueAdapter.ts 的
+ * `zaiEnqueuePendingNotification` wrapper 自动注入独立 sessionId,
+ * 不污染 vendor agentId 字段。
  */
 export function enqueuePendingNotification(command: QueuedCommand): void {
   // zai patch (2026-09-01): 同 enqueue,统一盖章 enqueuedAt。

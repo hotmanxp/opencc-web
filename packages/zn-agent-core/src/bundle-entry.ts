@@ -138,10 +138,17 @@ export { registerProcessOutputErrorHandlers } from './runtime/index.js'
 // not a function`。
 export {
   enqueuePendingNotification,
+  enqueue,
   hasCommandsInQueue,
   resetCommandQueue,
   subscribeToCommandQueue,
 } from './opencc-src/utils/messageQueueManager.js'
+// zai patch (2026-09-07, plan P0-1.1, worktree-dsh): 暴露 QueuedCommand
+// 类型供 zai 层 messageQueueAdapter.ts 入参使用(自动注入独立 sessionId
+// 字段)。原 vendor 类型默认 vendor-only 内部消费, zai wrapper 需要
+// 类型级支持 —— 暴露后 zai 调用方拿到的是 QueuedCommand 的精确类型
+// 而不是 any, typecheck 仍能发现误用。
+export type { QueuedCommand } from './opencc-src/types/textInputTypes.js'
 export { repairAndPersistTranscript } from './compat/transcript/repair.js'
 export {
   appendUserMessageV2,

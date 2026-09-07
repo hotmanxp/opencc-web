@@ -358,6 +358,14 @@ export type QueuedCommand = {
    */
   agentId?: AgentId
   /**
+   * zai patch (2026-09-07, plan P0-1.2, worktree-dsh): 独立 sessionId 字段,
+   * 规避 30+ 处 toolUseContext.agentId 副作用。zai 多 session 服务把
+   * sessionId 注入独立字段, mid-turn drain filter (query.ts:2672-2673)
+   * 优先 cmd.sessionId ?? cmd.agentId, 不污染 vendor 子 agent 命名空间。
+   * vendor 纯单进程场景下不设该字段, 行为保持原状。
+   */
+  sessionId?: import('./ids.js').SessionId
+  /**
    * zai patch (2026-09-01): task-notification 的来源类型(bash/agent/monitor/
    * workflow)。生产者入队时打上,消费端(wrapCommandText)据此分流文案 ——
    * 原先 bash 完成通知也被称为 "background agent",模型会误归因为用户指令。
