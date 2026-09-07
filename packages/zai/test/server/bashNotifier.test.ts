@@ -76,14 +76,21 @@ describe('BashNotifier.handle', () => {
   })
 
   test('failed / killed → 同样触发通知 query,summary 反映失败', async () => {
+    // zai patch (2026-09-07, fix task-notification dup, worktree-dsh): 用
+    // 不同 taskId 区分 failed 与 killed 两种终态 —— 同一 taskId 在
+    // DEDUP_WINDOW_MS 内只 inject 一次。原 test 复用 taskId='bash-1'
+    // 会与 dedup 冲突。
     const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
     await n.handle({
       sessionId: 'sess-parent',
-      task: makeTask({ status: 'failed', exitCode: 1 }),
+      task: makeTask({ taskId: 'bash-failed', status: 'failed', exitCode: 1 }),
     })
     expect(lastRunOpts.prompt).toContain('<status>failed</status>')
     expect(lastRunOpts.prompt).toContain('failed with exit code 1')
-    await n.handle({ sessionId: 'sess-parent', task: makeTask({ status: 'killed' }) })
+    await n.handle({
+      sessionId: 'sess-parent',
+      task: makeTask({ taskId: 'bash-killed', status: 'killed' }),
+    })
     expect(lastRunOpts.prompt).toContain('<status>killed</status>')
     expect(lastRunOpts.prompt).toContain('was stopped')
   })
@@ -176,6 +183,38 @@ describe('BashNotifier.handle', () => {
     const n = new BashNotifier({ getRuntime: () => broken as any })
     await expect(n.handle({ sessionId: 'sess-parent', task: makeTask() })).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()
+  })
+
+  // zai patch (2026-09-07, fix task-notification dup, worktree-dsh):
+  // 同一 taskId 在 DEDUP_WINDOW_MS 内只触发一次 runtime.query()。
+  // 根因:bashTracker 终态后 markTaskNotified 仍走 50ms debounce 二次 emit。
+  test('同 taskId 二次 handle → 只触发一次 query(防御性 dedup)', async () => {
+    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    await n.handle({ sessionId: 'sess-parent', task: makeTask({ taskId: 'dup-1' }) })
+    expect(queryCalls).toBe(1)
+    // 同一 taskId 第二次到达,直接 dedup 掉(不再 inject)
+    await n.handle({ sessionId: 'sess-parent', task: makeTask({ taskId: 'dup-1' }) })
+    expect(queryCalls).toBe(1)
+    // 不同 taskId 仍能正常注入
+    await n.handle({ sessionId: 'sess-parent', task: makeTask({ taskId: 'dup-2' }) })
+    expect(queryCalls).toBe(2)
+  })
+
+  test('主线活跃时同 taskId 两次 → busy 入队两次,flush 时 dedup 吞第二次', async () => {
+    // busy 路径只入 pendingNotifications, 不标 injected。
+    // flush 时 handle 重新走 → 第一次 mark + inject, 第二次 dedup 吞。
+    // 总 inject 数 = 1,符合"同 taskId 一次通知"的预期。
+    __setBashNotifier(new BashNotifier({ getRuntime: () => mockRuntime as any }))
+    registerSessionController('sess-parent', new AbortController())
+    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    await n.handle({ sessionId: 'sess-parent', task: makeTask({ taskId: 'busy-dup' }) })
+    await n.handle({ sessionId: 'sess-parent', task: makeTask({ taskId: 'busy-dup' }) })
+    expect(queryCalls).toBe(0)
+    // main turn ends; flush drains pending, dedup 吞掉重复
+    releaseSessionController('sess-parent')
+    flushPendingBashNotifications('sess-parent')
+    await new Promise((r) => setTimeout(r, 10))
+    expect(queryCalls).toBe(1)
   })
 })
 

@@ -57,6 +57,46 @@ let notifier: BashNotifier | null = null
 // 保证通知 query 不与主线并行、互相之间也不并行。
 const pendingNotifications = new Map<string, BashTaskInfo[]>()
 
+// zai patch (2026-09-07, fix task-notification dup, worktree-dsh): 防御性
+// 去重 —— 同一 taskId 在 DEDUP_WINDOW_MS 内多次到达 inject 路径时, 只
+// 触发一次 runtime.query()。触发场景:bash 完成路径里
+//   zaiBashTracker.markFinished() → 同步 emit
+//   zaiBashTracker.markTaskNotified() → scheduleEmit (50ms debounce)
+// 若 markTaskNotified 走 scheduleEmit, 50ms 后会再来一次 bash_task.changed,
+// 引发第二次 BashNotifier.handle → 第二次 runtime.query → 第二份
+// <task-notification> 写进 transcript (ZULU session bin925bz9 现场)。
+// 修过的 BashTracker.markTaskNotified 已经在 terminal 走同步 emit(cancel
+// + emit), 根因堵住; 此处 dedup 是兜底, 防 bashTracker 行为回退 或
+// 其它 emit 路径产生重复。
+//
+// 关键不变量:
+//   - busy 路径(push 到 pendingNotifications)不标 injected。
+//     flush 时 handle 走 idle + injected 路径, 此时才算 inject。
+//   - dedup 只在真正 inject 前查, inject 成功后 mark。
+//     否则 busy 路径标 injected, 等 flush 注入时被吞。
+const recentlyInjected = new Map<string, number>()
+const DEDUP_WINDOW_MS = 2_000
+
+function wasInjectedRecently(taskId: string): boolean {
+  const now = Date.now()
+  const last = recentlyInjected.get(taskId)
+  if (last !== undefined && now - last < DEDUP_WINDOW_MS) {
+    return true
+  }
+  return false
+}
+
+function markInjected(taskId: string): void {
+  recentlyInjected.set(taskId, Date.now())
+  // best-effort: 定期清理,避免 map 无限增长
+  if (recentlyInjected.size > 256) {
+    const now = Date.now()
+    for (const [k, ts] of recentlyInjected) {
+      if (now - ts > DEDUP_WINDOW_MS) recentlyInjected.delete(k)
+    }
+  }
+}
+
 /** 补发某 session 暂存的后台 Bash 完成通知。主线 query 结束(agent.ts finally)时调用。 */
 export function flushPendingBashNotifications(sessionId: string): void {
   const tasks = pendingNotifications.get(sessionId)
@@ -73,6 +113,9 @@ export function flushPendingBashNotifications(sessionId: string): void {
 /** 测试 seam:清空暂存队列。 */
 export function __resetBashNotifierPendingForTests(): void {
   pendingNotifications.clear()
+  // zai patch (2026-09-07, fix task-notification dup, worktree-dsh): 同步清
+  // 空 dedup map,否则上一个 test case 注入过的 taskId 在 2s 内被静默吞掉。
+  recentlyInjected.clear()
 }
 
 /**
@@ -152,11 +195,11 @@ export class BashNotifier {
     const sessionId = e.sessionId
     if (!sessionId || sessionId === 'sess-unknown') return // 兜底:无父 session 的占位 ID
 
-    // zai patch (2026-08-09): running 守卫 —— 主 session 有活跃 query 时不
-    // 另起 query,通知暂存,主线结束后由 flushPendingBashNotifications 补发。
-    // 通知 query 自身不注册 sessionController,若主线活跃时仍走 inject,
-    // 多个通知会同时通过守卫 → 多个通知 query 并行、各自加载完整父上下文
-    // 续跑主任务 → 请求叠加。暂存保证通知 query 之间也互斥。
+    // zai patch (2026-09-07, fix task-notification dup, worktree-dsh):
+    // 同一 taskId 在 DEDUP_WINDOW_MS 内只 inject 一次。详见
+    // recentlyInjected 注释。dedup 放在 running 守卫之后:busy 路径
+    // 只入 pendingNotifications, 不算 inject, 也不标 injected(否则
+    // flush 时 handle 走 idle,被 dedup 吞掉, 永远不 inject)。
     if (hasActiveQuery(sessionId)) {
       const list = pendingNotifications.get(sessionId) ?? []
       list.push(task)
@@ -164,6 +207,17 @@ export class BashNotifier {
       return
     }
 
+    // 真正要 inject 前查 dedup。已 inject 过的同 taskId 直接吞掉,
+    // 这是 bashTracker 二次 emit / 多 listener 重复触发场景的最后一道
+    // 兜底。
+    if (wasInjectedRecently(task.taskId)) {
+      return
+    }
+
+    // 标已 inject 在 await 前, 避免 inject 异步过程中同 taskId 第二次到达
+    // 通过守卫 → 第二次 runtime.query(虽然 DEDUP_WINDOW_MS 2s 远大于 inject
+    // 耗时, 但提前 set 杜绝该 race)。
+    markInjected(task.taskId)
     try {
       await this.inject(sessionId, task)
     } catch (err) {

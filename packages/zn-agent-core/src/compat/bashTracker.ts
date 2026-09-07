@@ -132,12 +132,35 @@ export class BashBackgroundTracker {
   /**
    * 把 task 标记为 notified, 抑制后续 <task-notification> 哨兵。
    * 对标 LocalShellTask.markTaskNotified。
+   *
+   * zai patch (2026-09-07, fix task-notification dup, worktree-dsh):
+   * 终态任务走同步 emit(对齐 markFinished),不走 50ms debounce。
+   *
+   * 根因:bash 完成路径调用序是
+   *   markFinished() → cancelPendingEmit() + 同步 emit
+   *   markTaskNotified() → scheduleEmit() → 新建 50ms debounce 定时器
+   * 50ms 后定时器触发第二次 bash_task.changed,导致 zai BashNotifier
+   * 调第二次 runtime.query(),同一 task-notification 在 transcript 双写
+   * (ZULU session bin925bz9 现场:msg 15 + 16 同 taskId 双份 user 消息)。
+   * 修复:task 已在 terminal 状态(已走 markFinished)时,notified 变化
+   * 走同步 emit(cancel + emit),与 markFinished 同节奏;非终态(罕见
+   * 路径, 仅有 LocalShellTask 自身在 backgroundTask 内)保留 debounce
+   * 以批量高频输出变化。
    */
   markTaskNotified(taskId: string): void {
     const t = this.byId.get(taskId)
     if (!t) return
     t.notified = true
-    this.scheduleEmit(taskId)
+    if (t.status === 'running') {
+      // 罕见路径:running 状态被标 notified(LocalShellTask.backgroundTask
+      // 内的 race 防护)→ 走 debounce, 与 appendOutput 同批。
+      this.scheduleEmit(taskId)
+      return
+    }
+    // zai patch: terminal 状态走同步 emit, 避免 markFinished 之后
+    // 再触发一次 50ms 后的重复 bash_task.changed。
+    this.cancelPendingEmit(taskId)
+    stateChangeBus.emit('bash_task.changed', { sessionId: t.sessionId, task: { ...t } })
   }
 
   /**
