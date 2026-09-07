@@ -115,8 +115,16 @@ grep "task-notification" $SID.jsonl | tail -1 | python3 -c "..."
 
 ## 4. commit
 
-- commit hash: 待 commit 后回填
+- commit hash: `69c0fa66`
 - commit message: `fix(zai): busy flush 真正生效 (v2,位置修正)`
+- files changed: 7 (706 insertions, 34 deletions)
+  - `BUSY_FLUSH_V2_REPORT.md` (新增)
+  - `packages/zai/src/server/services/busyFlush.ts` (新增)
+  - `packages/zai/test/server/busyFlush.test.ts` (新增,11 tests)
+  - `packages/zai/src/server/routes/agent.queue.test.ts` (3 tests 改写反映 v2 设计)
+  - `packages/zai/src/server/routes/agent.ts` (finally 块加 2 个 flush 调用)
+  - `packages/zai/src/server/services/sessionInbox.ts` (`promoteNextStepToNextTurn` + `wakeFor`)
+  - `packages/zn-agent-core/src/bundle-entry.ts` (暴露 `dequeueAllMatching / peek / getCommandQueue`)
 
 ## 5. 仍可能遗留的问题
 
