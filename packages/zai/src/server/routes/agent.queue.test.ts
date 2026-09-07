@@ -598,7 +598,7 @@ describe('INBOX: runNextInQueue 消费', () => {
     }
   })
 
-  it('busy followup 入 next-step,turn 结束 finally 不自动 drain,留给 vendor hook prepend', async () => {
+  it('busy followup 入 next-step,turn 结束 finally promote 到 nextTurn + 起第二轮 turn', async () => {
     let release!: () => void
     const releaseP = new Promise<void>((r) => {
       release = r
@@ -621,7 +621,11 @@ describe('INBOX: runNextInQueue 消费', () => {
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
     expect(getSessionInbox('sess-test').isBusy('sess-test')).toBe(true)
-    // 第二条 inbox 在 busy 状态下自动降级到 next-step(不唤醒)— 由 vendor hook 处理
+    // 第二条 inbox 在 busy 状态下自动降级到 next-step(不唤醒)— zai patch
+    // (2026-09-07, fix-busy-flush-v2, worktree-dsh): turn 真正结束时 finally
+    // 调 promoteNextStepToNextTurn 把 nextStep 全部搬到 nextTurn + wake,
+    // 起第二轮 turn 处理 step2 (vs. v1 设计留到下次 user prompt 时由 vendor
+    // hook prepend)。新设计让 LLM 真正能看到 busy 期间堆积的通知。
     getSessionInbox('sess-test').followup('sess-test', inboxMsg('inbox-step-2', 'step2 content'))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
@@ -630,21 +634,17 @@ describe('INBOX: runNextInQueue 消费', () => {
     const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
     expect(firstArgs.prompt).toBe('step1 content')
 
-    // 释放第一条 → finally clearRunning → runNextInQueue recurse,但 consumeNextTurn
-    // 空 + peekNextStepCount 分支已撤回 → 不起第二轮 turn。nextStep 留 step2
-    // 给后续用户 prompt 的 API call 时的 vendor hook。
+    // 释放第一条 → finally clearRunning → runNextInQueue recurse → promote
+    // nextStep 到 nextTurn + wake → 起第二轮 turn
     release()
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
-    expect(callIdx).toBe(1)
-
-    // drainInboxReminder(等价 vendor hook 在下次 API call 前的 drain)应返回 step2。
-    const drained = drainInboxReminder('sess-test')
-    expect(drained).toContain('step2 content')
-    expect(drained).toContain('<system-reminder>')
-    expect(drainInboxReminder('sess-test')).toBeNull()
+    // v2 设计预期: callIdx === 2 (第二条 followup 触发第二轮 turn)
+    expect(callIdx).toBe(2)
+    const secondArgs = hangingQuery.mock.calls[1]?.[0] as { prompt?: string }
+    expect(secondArgs.prompt).toBe('step2 content')
   })
 })
 
@@ -778,8 +778,9 @@ describe('INBOX: 并发守卫', () => {
 
     // 同一 tick 两次 followup(2026-09-06 revert 665a70c1:idle 走 nextTurn):
     // 第一条触发 wake → runNextInQueue → consumeNextTurn(msgA) → cmd.prompt='A content';
-    // 第二条因 busy 已被设,降级入 nextStep 不唤醒 — 留给后续 user prompt
-    // 的 API call 时由 vendor hook prepend <system-reminder>。
+    // 第二条因 busy 已被设,降级入 nextStep 不唤醒。
+    // zai patch (2026-09-07, fix-busy-flush-v2, worktree-dsh): turn 真正结束
+    // 时 finally promote nextStep → nextTurn + wake, 起第二轮 turn。
     getSessionInbox('sess-race').followup('sess-race', inboxMsg('msgA', 'A content'))
     getSessionInbox('sess-race').followup('sess-race', inboxMsg('msgB', 'B content'))
 
@@ -792,22 +793,17 @@ describe('INBOX: 并发守卫', () => {
     const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
     expect(firstArgs.prompt).toBe('A content')
 
-    // 释放第一条 → finally clearRunning → runNextInQueue recurse,consumeNextTurn
-    // 空 + peekNextStepCount 分支已撤回 → 不起第二轮。msgA 已消费,msgB
-    // 留 nextStep 给 vendor hook。
+    // 释放第一条 → finally clearRunning → runNextInQueue recurse → promote
+    // msgB 从 nextStep 到 nextTurn + wake → 起第二轮 turn 处理 msgB。
     release()
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
-    expect(callIdx).toBe(1)
-    // drainInboxReminder(等价 vendor hook 下次 API call 前的 drain)
-    // 应返回 msgB 一行 bullet(msgA 已被 nextTurn 消费)
-    const drained = drainInboxReminder('sess-race')
-    expect(drained).not.toContain('A content')
-    expect(drained).toContain('B content')
-    expect(drained).toContain('<system-reminder>')
-    expect(drainInboxReminder('sess-race')).toBeNull()
+    // v2 设计预期: callIdx === 2 (msgB promote 触发第二轮)
+    expect(callIdx).toBe(2)
+    const secondArgs = hangingQuery.mock.calls[1]?.[0] as { prompt?: string }
+    expect(secondArgs.prompt).toBe('B content')
   })
 })
 
@@ -979,23 +975,23 @@ describe('POST /agent/queue/steer — 插话发送', () => {
     expect(pendingAfter.some((p) => p.id === qid2)).toBe(false)
     expect(pendingAfter.some((p) => p.text === 'queued-three')).toBe(true)
 
-    // 释放第一条 → finally 不再 drain(2026-09-06 改造),steered 内容留在 nextStep
+    // 释放第一条 → finally promote nextStep 到 nextTurn + wake(2026-09-07 v2),
+    // 起第二轮 turn 处理 steered 内容(queued-two);HTTP 队列还有 queued-three + probe,
+    // runNextInQueue 也会消耗 sessionQueues。
     releaseFirst()
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setTimeout(r, 20))
 
     // first turn 结束了。但 HTTP 队列还有 queued-three + probe — finally
-    // 不再 drain nextStep,但 runNextInQueue 仍会消耗 sessionQueues。
-    // 这里不锁 callIdx(可能因 queued-three 起第二轮 turn);只锁 drainInboxReminder
-    // 行为。
+    // promote + runNextInQueue 消耗 sessionQueues。
+    // 这里不锁 callIdx(可能因 queued-three 或 probe 起后续 turn);只锁
+    // nextTurn 内容。
     expect(callIdx).toBeGreaterThanOrEqual(1)
 
-    // drainInboxReminder(等价 vendor hook 下次 API call 前的 drain)
-    // 应该返回 steered 内容
-    const drained = drainInboxReminder(sid)
-    expect(drained).toContain('queued-two')
-    expect(drained).toContain('<system-reminder>')
+    // v2 设计: steered 内容已被 promote 到 nextTurn 并消费(第二轮 turn 跑了它)。
+    // nextStep 应该空,drainInboxReminder 返回 null。
+    expect(drainInboxReminder(sid)).toBeNull()
   })
 
   it('steer 不存在的 promptId → queue-item-not-found', async () => {

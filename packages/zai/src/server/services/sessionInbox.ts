@@ -107,6 +107,42 @@ export class SessionInbox {
     return out
   }
 
+  // zai patch (2026-09-07, fix-busy-flush-v2, worktree-dsh): 主 turn finally
+  // 兜底 —— 把 busy 路径降级到 nextStep 的 inbox 消息在 turn 真正结束时提升
+  // 到 nextTurn, 触发 runNextInQueue 唤醒 LLM 看到 <task-notification>。
+  //
+  // 背景: vendor QueryEngine 的 mid-turn drain(query.ts:2675 getCommandsByMaxPriority)
+  // 只在 LLM **下一次 API call 之前** 触发, 与 print.ts 的 drainCommandQueue
+  // (print.ts:2619) 不同 —— print.ts 是 EventDrivenPrint, 有订阅唤醒 run()
+  // 的机制 (subscribeToHeadlessWake, print.ts:2095); repl 路径默认走
+  // QueryEngine, **没有这个 wake 机制**。
+  //
+  // 现场 (sess-1788753456906-3fvboh58, 2026-09-07): 父 turn 派 Agent 子任务,
+  // 子任务在父 turn **end_turn 之前** 完成。SubagentNotifier.handle → inbox.followup
+  // 探测 busy 入 nextStep (per followup() 设计); vendor `enqueuePendingNotification`
+  // 也推了一份到 vendor `commandQueue`。父 turn end_turn → 没有下一次 API call →
+  // mid-turn drain 不跑 → nextStep 与 commandQueue 两份通知**双双卡住**, LLM 永远
+  // 看不到 task-notification。
+  //
+  // 修法: 主 turn finally 里把 nextStep 全部提升到 nextTurn + 调 wakeHandler
+  // (runNextInQueue) 触发新一轮 turn。wakeIfBudgeted 的 wake budget 限制保留
+  // (默认 3 wake/turn, 避免后台连环唤醒); 超过预算的仍入 nextTurn 等下次
+  // 用户输入, 不丢消息。
+  promoteNextStepToNextTurn(sessionId: string): number {
+    const lanes = this.lanesFor(sessionId)
+    const count = lanes.nextStep.length
+    if (count === 0) return 0
+    // 全量提升 — 不区分来源 (subagent / bash / system_reminder), turn 结束
+    // 全部当作"下一条 prompt 候选"对待, 等同 wake 后 runNextInQueue 按 nextTurn
+    // FIFO 消费。
+    while (lanes.nextStep.length > 0) {
+      const m = lanes.nextStep.shift()
+      if (m) lanes.nextTurn.push(m)
+    }
+    this.gc(sessionId)
+    return count
+  }
+
   peekNextTurnCount(sessionId: string): number {
     return this.lanesFor(sessionId).nextTurn.length
   }
@@ -137,6 +173,18 @@ export class SessionInbox {
 
   resetWakeBudget(sessionId: string): void {
     this.wakeBudget.delete(sessionId)
+  }
+
+  // zai patch (2026-09-07, fix-busy-flush-v2, worktree-dsh): 显式 wake 入口,
+  // 给 finally 兜底用。 busy 路径 followup 入 nextStep + 不 wake;
+  // finally 释放 busy 之后调 promoteNextStepToNextTurn(sid) 把消息搬到
+  // nextTurn, 然后 wakeFor(sid) 触发 wake handler (runNextInQueue),
+  // 不走 followup / steer 那种 lane 选择, 直接拿 wake budget 试一次。
+  //
+  // wakeBudget 内超额时静默 no-op, 调用方应理解为"消息已入 nextTurn,
+  // 等用户下条 prompt 一起消费" —— 不算丢。
+  wakeFor(sessionId: string): void {
+    this.wakeIfBudgeted(sessionId)
   }
 
   private wakeIfBudgeted(sessionId: string): void {

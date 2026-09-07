@@ -142,6 +142,16 @@ export {
   hasCommandsInQueue,
   resetCommandQueue,
   subscribeToCommandQueue,
+  // zai patch (2026-09-07, fix-busy-flush-v2, worktree-dsh): 主 turn finally
+  // 把 vendor commandQueue 里指向本 session 的 task-notification 命令兜底
+  // drain —— vendor QueryEngine mid-turn drain (query.ts:2675) 只在下一次
+  // API call 之前触发, repl runtime 没有 print.ts 的 subscribeToHeadlessWake
+  // 唤醒 (print.ts:2095), 主 turn end_turn 后若没有下一次 API call,
+  // 命令就卡在 commandQueue 永远不见天日。dequeueAllMatching + peek 暴露
+  // 给 zai-server 入口层, 配合 SessionInbox.promoteNextStepToNextTurn 兜底。
+  dequeueAllMatching,
+  peek,
+  getCommandQueue,
 } from './opencc-src/utils/messageQueueManager.js'
 // zai patch (2026-09-07, plan P0-1.1, worktree-dsh): 暴露 QueuedCommand
 // 类型供 zai 层 messageQueueAdapter.ts 入参使用(自动注入独立 sessionId

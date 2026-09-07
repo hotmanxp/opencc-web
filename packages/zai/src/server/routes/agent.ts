@@ -60,6 +60,16 @@ import { drainInboxReminder } from "../services/inboxReminder.js"; // (no longer
 // 之前 finally 块没有 flush, 后台 bash 在主线活跃时完成只能入 pendingNotifications
 // 队列, 主线结束无 flush → 通知丢失。
 import { flushPendingBashNotifications } from "../services/bashNotifier.js";
+// zai patch (2026-09-07, fix-busy-flush-v2, worktree-dsh): v2 修复 ——
+// flush 路径扩展到 SessionInbox.nextStep 降级队列 + vendor commandQueue。
+// v1 只覆盖 BashNotifier 暂存, v2 兜底 subagent (SessionInbox.followup
+// busy 降级 nextStep) + vendor `enqueuePendingNotification` (repl runtime
+// 没有 print.ts 的 subscribeToHeadlessWake 唤醒, commandQueue 卡住)。
+// 三者顺序执行: bashNotifier → SessionInbox → commandQueue, 各自独立。
+import {
+  promoteNextStepToNextTurn as flushSessionInboxNextStep,
+  drainCommandQueueForSession as flushVendorCommandQueue,
+} from "../services/busyFlush.js";
 import { getBackgroundRuntime } from "../services/backgroundRuntime.js";
 import { logHttp } from "../services/accessLog.js";
 import { resolveModel } from "../lib/resolveModel.js";
@@ -1798,6 +1808,22 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // 与后台 bash 完成事件并发, flush 时 hasActiveQuery(sessionId) 已经
     // 是 false (releaseSessionController 已执行), handle 走 idle inject 路径。
     flushPendingBashNotifications(sessionId)
+    // zai patch (2026-09-07, fix-busy-flush-v2, worktree-dsh): v2 兜底
+    // 1) SessionInbox.nextStep → nextTurn。父 turn busy 时 SubagentNotifier
+    //    .followup 降级入 nextStep; 父 turn end_turn 后 vendor QueryEngine
+    //    没有 print.ts 同款 wake 机制, nextStep 永远不消费。把 nextStep
+    //    全部搬到 nextTurn + wake (走 wakeBudget), runNextInQueue 入口
+    //    consumeNextTurn 当真实 cmd.prompt 喂 vendor query(), 落盘
+    //    transcript + 唤醒 LLM 看到 <task-notification>。
+    // 2) vendor `commandQueue` (messageQueueManager.ts:52 全局单例) —
+    //    vendor `enqueuePendingNotification` 把任务通知推到那里, QueryEngine
+    //    mid-turn drain (query.ts:2675) 只在下一次 API call 之前触发;
+    //    repl runtime 父 turn end_turn 没有下一次 API call, 命令卡住。
+    //    dequeueAllMatching + cmd.sessionId 路由 → SessionInbox.followup
+    //    (idle 路径, 走 nextTurn + wake)。wake 触发 runNextInQueue 消费
+    //    nextTurn 后, 新 turn 的 mid-turn drain 会自动消费剩余 commandQueue。
+    flushSessionInboxNextStep(sessionId)
+    flushVendorCommandQueue(sessionId)
   }
   })
 }
