@@ -989,9 +989,15 @@ describe('POST /agent/queue/steer — 插话发送', () => {
     // nextTurn 内容。
     expect(callIdx).toBeGreaterThanOrEqual(1)
 
-    // v2 设计: steered 内容已被 promote 到 nextTurn 并消费(第二轮 turn 跑了它)。
-    // nextStep 应该空,drainInboxReminder 返回 null。
-    expect(drainInboxReminder(sid)).toBeNull()
+    // v2-r2 设计 (Item B, fix-busy-flush-v2-r2, worktree-dsh): steer 消息
+    // 不被 promote 搬走 — 设计语义是"等用户下次 prompt 时 prepend
+    // <system-reminder>", 与 vendor hook prepend 路径一致, 不应触发
+    // 立即新 turn。nextStep 仍含 steered 内容, drainInboxReminder 应返回
+    // 该 steer 的 <system-reminder> 块, 给下次 API call prepend 用。
+    const reminder = drainInboxReminder(sid)
+    expect(reminder).not.toBeNull()
+    expect(reminder).toContain('queued-two')
+    expect(reminder).toContain('<system-reminder>')
   })
 
   it('steer 不存在的 promptId → queue-item-not-found', async () => {

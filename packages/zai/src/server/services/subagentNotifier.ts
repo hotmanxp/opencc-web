@@ -1,6 +1,7 @@
 import type { BackgroundTask } from '@zn-ai/zn-agent-core'
 import { getSessionInbox, type SessionInbox } from './sessionInbox.js'
 import { getRuntimeCore } from './agentRuntime.js'
+import { registerSessionAgent } from './sessionAgentRegistry.js'
 import type { RuntimeCore } from '../../shared/settings.js'
 
 /**
@@ -81,6 +82,15 @@ export class SubagentNotifier {
     const parentSessionId = task.parentSessionId
     if (!parentSessionId) return
     if (parentSessionId === 'sess-unknown') return // 兜底:无父 session 的占位 ID
+
+    // zai patch (2026-09-07, fix-busy-flush-v2-r2, Item C): 在 terminal
+    // 事件入口注册 (parentSessionId, task.id) 到 sessionAgentRegistry,
+    // 让后续 busyFlush.drainCommandQueueForSession 的 cmd.agentId fallback
+    // 能严格校验"这个 agentId 真的属于这个 session", 避免跨 session 误派。
+    // 写入点是稳定的 (terminal 时 parentSessionId / task.id 都已 freeze),
+    // 不会 race。其它 cron / 第三方 vendor 调用方不走这条, 它们被 fallback
+    // 跳过时会 warn log, 提示改造走 zai wrapper。
+    registerSessionAgent(parentSessionId, task.id)
 
     try {
       this.inboxFor(parentSessionId).followup(parentSessionId, {

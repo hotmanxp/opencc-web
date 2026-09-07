@@ -20,6 +20,10 @@ import {
 } from '../../src/server/services/busyFlush.js'
 import { getSessionInbox, disposeSessionInbox } from '../../src/server/services/sessionInbox.js'
 import {
+  registerSessionAgent,
+  __resetSessionAgentsForTests,
+} from '../../src/server/services/sessionAgentRegistry.js'
+import {
   enqueuePendingNotification,
   resetCommandQueue,
 } from '@zn-ai/zn-agent-core'
@@ -40,7 +44,8 @@ function setupBusyInbox(sid: string, wakeHandler: () => void) {
 
 afterEach(() => {
   resetCommandQueue()
-  for (const sid of ['sess-test', 'sess-other', 'sess-multi']) {
+  __resetSessionAgentsForTests()
+  for (const sid of ['sess-test', 'sess-other', 'sess-multi', 'sess-steer']) {
     disposeSessionInbox(sid)
   }
   vi.restoreAllMocks()
@@ -211,23 +216,99 @@ describe('drainCommandQueueForSession', () => {
     drainCommandQueueForSession('sess-other')
   })
 
-  test('cmd.agentId 兼容路径: vendor 原生无 sessionId 时按 agentId 路由', () => {
+  test('cmd.agentId 兼容路径 (Item C, v2-r2): 仅当该 agentId 注册为属于本 session 时才匹配', () => {
     let wakeCount = 0
     const inbox = getSessionInbox('sess-test')
     inbox.setWakeHandler(() => {
       wakeCount++
     })
-    // vendor 原生 enqueuePendingNotification 无 sessionId 字段
+    // 注册: agent 'agent-x' 属于 session 'sess-test' (模拟 SubagentNotifier
+    // terminal 事件时 registerSessionAgent 写入)。
+    registerSessionAgent('sess-test', 'agent-x')
+
+    // vendor 原生 enqueuePendingNotification 无 sessionId 字段, 只填 agentId
+    // (cron / 第三方 vendor 调用方可能漏改 wrapper 的场景)。
     enqueuePendingNotification({
       value: '<task-notification>fallback</task-notification>',
       mode: 'task-notification',
-      agentId: 'sess-test',
+      agentId: 'agent-x',
       taskKind: 'agent',
     })
     const drained = drainCommandQueueForSession('sess-test')
     expect(drained).toBe(1)
     expect(inbox.peekNextTurnCount('sess-test')).toBe(1)
     expect(wakeCount).toBe(1)
+  })
+
+  // zai patch (2026-09-07, Item C, fix-busy-flush-v2-r2): 严格 fallback
+  // 防止跨 session 误派。原 "cmd.agentId === sid" 一刀切在多 session
+  // 并发时会撞 sid 字面值 (sess-xxxx vs sess-yyyy)。
+  test('cmd.agentId === sid 但 agent 不属于本 session → 严格 fallback 拒绝', () => {
+    let wakeCount = 0
+    const inbox = getSessionInbox('sess-test')
+    inbox.setWakeHandler(() => {
+      wakeCount++
+    })
+    // 关键: 不调用 registerSessionAgent, 表示这个 agentId 没注册到任何 session
+    // (或注册到了别的 session)。模拟 vendor 调用方未走 wrapper, 漏写
+    // sessionId, 又恰好 agentId 字面撞上 sid。
+
+    // cmd.agentId === sid 字面撞: 这种情况以前会被旧 fallback 误派
+    enqueuePendingNotification({
+      value: '<task-notification>would-be-misdelivered</task-notification>',
+      mode: 'task-notification',
+      agentId: 'sess-test', // ← 撞 sid 字面值, 但没 register
+      taskKind: 'agent',
+    })
+    const drained = drainCommandQueueForSession('sess-test')
+    expect(drained).toBe(0) // ← 严格 fallback 拒收
+    expect(inbox.peekNextTurnCount('sess-test')).toBe(0)
+    expect(wakeCount).toBe(0)
+  })
+
+  test('cmd.agentId 是别的 session 注册的 agent → 不抽 (跨 session 隔离)', () => {
+    let wakeCount = 0
+    const inbox = getSessionInbox('sess-test')
+    inbox.setWakeHandler(() => {
+      wakeCount++
+    })
+    // 注册 agent-y 属于 sess-other
+    registerSessionAgent('sess-other', 'agent-y')
+
+    enqueuePendingNotification({
+      value: '<task-notification>belongs-to-other-session</task-notification>',
+      mode: 'task-notification',
+      agentId: 'agent-y', // ← 注册到 sess-other, 不是 sess-test
+      taskKind: 'agent',
+    })
+    const drained = drainCommandQueueForSession('sess-test')
+    expect(drained).toBe(0) // ← 拒收
+    expect(inbox.peekNextTurnCount('sess-test')).toBe(0)
+
+    // 但 drainCommandQueueForSession('sess-other') 能正确拿到
+    const drainedOther = drainCommandQueueForSession('sess-other')
+    expect(drainedOther).toBe(1)
+  })
+
+  test('fallback 命中时输出 warn log 提示调用方改造走 zai wrapper', () => {
+    const inbox = getSessionInbox('sess-test')
+    inbox.setWakeHandler(() => {})
+    registerSessionAgent('sess-test', 'agent-x')
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    enqueuePendingNotification({
+      value: '<task-notification>x</task-notification>',
+      mode: 'task-notification',
+      agentId: 'agent-x',
+      taskKind: 'agent',
+    })
+    drainCommandQueueForSession('sess-test')
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('严格 agentId fallback'),
+    )
+    // 提示包含 sessionId 便于排查
+    expect(warnSpy.mock.calls[0][0]).toContain('sess-test')
+    warnSpy.mockRestore()
   })
 
   test('多条混合: 部分本 session 部分其他 → 仅本 session 被抽', () => {
@@ -335,5 +416,117 @@ describe('busy-flush-v2 集成: 真实场景重现', () => {
     expect(m1?.content).toContain('<task-notification>')
     expect(m2?.content).toContain('<task-notification>')
     expect(inbox.peekNextTurnCount('sess-multi')).toBe(0)
+  })
+
+  // zai patch (2026-09-07, fix-busy-flush-v2-r2, worktree-dsh, Item B):
+  // steer 路径语义 — steer (kind=user + form=steer) 写入 nextStep 后, promote
+  // 必须跳过它, 保留在 nextStep 由下次 API call 的 vendor hook prepend
+  // <system-reminder>。steer 的设计意图是"等用户下次 prompt 时让 LLM 看到",
+  // 不被 promote 触发立即新 turn。
+  test('steer 消息不被 promoteNextStepToNextTurn 搬走 (skipSteer=true)', () => {
+    let wakeCount = 0
+    const inbox = getSessionInbox('sess-steer')
+    inbox.setWakeHandler(() => {
+      wakeCount++
+    })
+    // 模拟 steer 路径: queue/steer endpoint 写入 inbox.steer()
+    // (busy 状态下 steer 也入 nextStep, 走 vendor hook prepend)
+    inbox.setBusy('sess-steer')
+    inbox.steer('sess-steer', {
+      id: 'steer-1', source: { kind: 'user', form: 'steer' },
+      content: '用户插话文本',
+      createdAt: Date.now(),
+    })
+    inbox.steer('sess-steer', {
+      id: 'steer-2', source: { kind: 'user', form: 'steer' },
+      content: '第二条插话',
+      createdAt: Date.now(),
+    })
+    inbox.clearRunning('sess-steer')
+
+    // promote 必须跳过 steer (skipSteer 默认 true 在 busyFlush 层)
+    const promoted = promoteNextStepToNextTurn('sess-steer')
+    expect(promoted).toBe(0)
+    expect(inbox.peekNextStepCount('sess-steer')).toBe(2)
+    expect(inbox.peekNextTurnCount('sess-steer')).toBe(0)
+    // 没有 promote → 没触发 wake (steer 不需要 wake 触发新 turn)
+    expect(wakeCount).toBe(0)
+    // 两条 steer 仍在 nextStep, vendor hook 会在下次 API call prepend
+    expect(inbox.consumeNextStep('sess-steer').map((m) => m.id)).toEqual([
+      'steer-1',
+      'steer-2',
+    ])
+  })
+
+  test('混合: steer + subagent + task-factory → 只 promote 非 steer 消息', () => {
+    let wakeCount = 0
+    const inbox = getSessionInbox('sess-steer')
+    inbox.setWakeHandler(() => {
+      wakeCount++
+    })
+    inbox.setBusy('sess-steer')
+    // 1 steer
+    inbox.steer('sess-steer', {
+      id: 'steer-x', source: { kind: 'user', form: 'steer' },
+      content: '插话', createdAt: Date.now(),
+    })
+    // 1 subagent (busy 路径)
+    inbox.followup('sess-steer', {
+      id: 'subagent-x', source: { kind: 'subagent', form: 'notice' },
+      content: '<task-notification>x</task-notification>', createdAt: Date.now(),
+    })
+    // 1 task-factory (busy 路径)
+    inbox.followup('sess-steer', {
+      id: 'tf-x', source: { kind: 'task-factory', form: 'notice' },
+      content: '<task-command>x</task-command>', createdAt: Date.now(),
+    })
+    inbox.clearRunning('sess-steer')
+
+    const promoted = promoteNextStepToNextTurn('sess-steer')
+    expect(promoted).toBe(2) // subagent + task-factory, steer 留下
+    expect(inbox.peekNextTurnCount('sess-steer')).toBe(2)
+    expect(inbox.peekNextStepCount('sess-steer')).toBe(1) // steer 仍在 nextStep
+    expect(wakeCount).toBe(1)
+    // consumeNextTurn FIFO: subagent 先 (busy followup 比 task-factory 早入 nextStep)
+    expect(inbox.consumeNextTurn('sess-steer')?.id).toBe('subagent-x')
+    expect(inbox.consumeNextTurn('sess-steer')?.id).toBe('tf-x')
+    // steer 留在 nextStep (consumeNextStep 返回数组, 取首个元素)
+    expect(inbox.consumeNextStep('sess-steer')[0]?.id).toBe('steer-x')
+  })
+
+  test('SessionInbox 直调: skipSteer=false (默认) → 仍搬 steer (向后兼容)', () => {
+    // SessionInbox.promoteNextStepToNextTurn 默认 skipSteer=false, 让
+    // 旧调用方 (agent.queue.test.ts) 行为不变; busyFlush 是新 caller,
+    // 显式传 skipSteer=true。这是契约边界 —— 两个层各自决定过滤策略。
+    const inbox = getSessionInbox('sess-steer')
+    inbox.setBusy('sess-steer')
+    inbox.steer('sess-steer', {
+      id: 's1', source: { kind: 'user', form: 'steer' },
+      content: 'steer msg', createdAt: Date.now(),
+    })
+    inbox.clearRunning('sess-steer')
+
+    // 默认 opts={} → skipSteer=false → steer 也会被搬走 (旧契约)
+    const promoted = inbox.promoteNextStepToNextTurn('sess-steer')
+    expect(promoted).toBe(1)
+    expect(inbox.peekNextStepCount('sess-steer')).toBe(0)
+    expect(inbox.peekNextTurnCount('sess-steer')).toBe(1)
+  })
+
+  test('SessionInbox 直调: skipSteer=true → steer 留下', () => {
+    const inbox = getSessionInbox('sess-steer')
+    inbox.setBusy('sess-steer')
+    inbox.steer('sess-steer', {
+      id: 's1', source: { kind: 'user', form: 'steer' },
+      content: 'steer msg', createdAt: Date.now(),
+    })
+    inbox.clearRunning('sess-steer')
+
+    const promoted = inbox.promoteNextStepToNextTurn('sess-steer', {
+      skipSteer: true,
+    })
+    expect(promoted).toBe(0)
+    expect(inbox.peekNextStepCount('sess-steer')).toBe(1)
+    expect(inbox.peekNextTurnCount('sess-steer')).toBe(0)
   })
 })

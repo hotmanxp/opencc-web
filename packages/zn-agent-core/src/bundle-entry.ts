@@ -152,6 +152,20 @@ export {
   dequeueAllMatching,
   peek,
   getCommandQueue,
+  // zai patch (2026-09-07, fix-busy-flush-v2-r2, worktree-dsh, Item D):
+  // 补齐 vendor commandQueue 全量 capability 暴露。下次类似 busy-flush
+  // 类兜底 (e.g. cron-prompt 优先级感知、emergency-clear ESC) 不用再
+  // 改 bundle-entry。命名规范: 全部从 `./opencc-src/utils/messageQueueManager.js`
+  // 直接 re-export, 不在中间层加 wrapper; 单实例 invariant 保留。
+  getCommandQueueLength,
+  getCommandQueueSnapshot,
+  dequeue,
+  remove,
+  removeByFilter,
+  clearCommandQueue,
+  getCommandsByMaxPriority,
+  recheckCommandQueue,
+  isSlashCommand,
 } from './opencc-src/utils/messageQueueManager.js'
 // zai patch (2026-09-07, plan P0-1.1, worktree-dsh): 暴露 QueuedCommand
 // 类型供 zai 层 messageQueueAdapter.ts 入参使用(自动注入独立 sessionId

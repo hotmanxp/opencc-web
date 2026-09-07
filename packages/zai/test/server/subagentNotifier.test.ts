@@ -1,12 +1,39 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-// mock 必须早于被测模块 import 生效 —— vitest 会 hoist vi.mock 到文件顶部,
-// 但显式写在 import 前更安全。
+// zai patch (2026-09-07, fix-busy-flush-v2-r2, worktree-dsh, Item E):
+// mock 模式从静态 `sessionInbox.followup` 改为 per-session `getSessionInbox`
+// 工厂返回固定 instance (mock instance 的 followup 由全局 followupMock
+// 捕获)。原因: subagentNotifier.ts 在 2026-09-06 改用
+// `getSessionInbox(parentSessionId)` per-session 工厂, 静态 singleton
+// `sessionInbox` 已 deprecated (test seam only) —— 原 test 仍 mock
+// `sessionInbox.followup`, 而源码走 `getSessionInbox`, mock 与源码
+// 不对齐导致 `followup` 永远不被调用, 4/14 测试失败。
 const followupMock = vi.fn()
+const mockInbox = {
+  followup: (...args: unknown[]) => followupMock(...args),
+  // 其它 SessionInbox 方法备用, SubagentNotifier 仅 followup 触发
+  setBusy: vi.fn(),
+  clearRunning: vi.fn(),
+  setWakeHandler: vi.fn(),
+  steer: vi.fn(),
+  inject: vi.fn(),
+  consumeNextTurn: vi.fn(() => null),
+  consumeNextStep: vi.fn(() => []),
+  peekNextTurnCount: vi.fn(() => 0),
+  peekNextStepCount: vi.fn(() => 0),
+  isBusy: vi.fn(() => false),
+  promoteNextStepToNextTurn: vi.fn(() => 0),
+  resetWakeBudget: vi.fn(),
+  wakeFor: vi.fn(),
+}
 vi.mock('../../src/server/services/sessionInbox.js', () => ({
-  sessionInbox: {
-    followup: (...args: unknown[]) => followupMock(...args),
-  },
+  // zai patch (Item E): mock getSessionInbox 工厂, 返回固定 instance。
+  // 保留 sessionInbox 导出, 让 vendor compat bridge 之类不报错。
+  sessionInbox: {},
+  getSessionInbox: vi.fn(() => mockInbox),
+  setSessionInboxWakeHandler: vi.fn(),
+  disposeSessionInbox: vi.fn(),
+  listSessionInboxIds: vi.fn(() => []),
 }))
 // subagentNotifier 顶部 import getRuntimeCore(默认值)—— mock 掉避免
 // 测试拉起整个 agentRuntime / core bundle。'repl'(spec §5.1 未配置兜底,注入照常走)。

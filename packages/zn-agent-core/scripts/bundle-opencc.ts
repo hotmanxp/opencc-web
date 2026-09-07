@@ -187,10 +187,19 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   // 保留空条目(显式 no-op)以便未来若需要镜像到 ./index.js 时改这里。
 }
 
-/** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。 */
+/** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。
+ *  zai patch (2026-09-07, fix-busy-flush-v2-r2, Item D): 用 replaceAll
+ *  替代 replace —— 多行 export block 内若注释里包含目标路径字符串
+ *  (e.g. "全部从 `./opencc-src/utils/messageQueueManager.js` 直接 re-export"),
+ *  String.prototype.replace 只替换首个匹配, 注释里的字符串会被替换但
+ *  `from '...'` 子句不变, 导致 assertDtsTargetsResolve 失败。replaceAll
+ *  保证块内所有出现都被改写。
+ */
 function rewriteDtsSourcePath(line: string): string {
   for (const [from, to] of Object.entries(DTS_PATH_REWRITE)) {
-    if (line.includes(from)) return line.replace(from, to)
+    if (line.includes(from)) {
+      return line.split(from).join(to)
+    }
   }
   return line
 }

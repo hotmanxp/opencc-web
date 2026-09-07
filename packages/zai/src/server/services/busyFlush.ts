@@ -30,9 +30,18 @@
  *
  * 三者各自独立, 任一路径触发的通知都不会丢。共同点: 都从 idle 入口
  * (releaseSessionController 之后) 走, 不需要 running 守卫。
+ *
+ * zai patch (2026-09-07, fix-busy-flush-v2-r2, worktree-dsh): Item B —
+ * steer 路径语义保持 vendor hook prepend 设计。steer 消息
+ * (`source.kind === 'user' && source.form === 'steer'`) 的设计意图是
+ * "等下次 user prompt 时作为 <system-reminder> prepend", 不立即触发新 turn。
+ * v2 的 `promoteNextStepToNextTurn` 会把 steer 误搬到 nextTurn, 触发新 turn,
+ * 与 vendor hook 设计相悖。这里过滤掉 steer, 让它继续走 vendor hook prepend
+ * 路径, 与 `agent.ts:2249` queue/steer endpoint 写入语义对齐。
  */
 import { dequeueAllMatching, type QueuedCommand } from '@zn-ai/zn-agent-core'
 import { getSessionInbox, type InboxMessage } from './sessionInbox.js'
+import { isAgentOfSession } from './sessionAgentRegistry.js'
 
 /**
  * 提升某 session 的 SessionInbox.nextStep 全部消息到 nextTurn 队列,
@@ -46,10 +55,19 @@ import { getSessionInbox, type InboxMessage } from './sessionInbox.js'
  * 之后兜底提升到 nextTurn, 触发 LLM 真正处理通知 (vs. 留到用户下条
  * prompt 时 vendor hook prepend —— 那条路在用户不主动发 prompt 时永远
  * 走不到, 通知丢失)。
+ *
+ * zai patch (2026-09-07, fix-busy-flush-v2-r2): **steer 消息不 promote**。
+ * steer (kind=user + form=steer, 由 `routes/agent.ts:2249` queue/steer
+ * endpoint 写入) 的设计语义是"等用户下次 prompt 时 prepend <system-reminder>",
+ * 保持 vendor hook prepend 语义, 不要被 promote 到 nextTurn 触发立即新 turn。
+ * steer 仍然在 nextStep 里, 由下一次 API call (vendor hook drainInboxReminder)
+ * 消费, 渲染成 reminder block 注入 LLM。
  */
 export function promoteNextStepToNextTurn(sessionId: string): number {
   const inbox = getSessionInbox(sessionId)
-  const promoted = inbox.promoteNextStepToNextTurn(sessionId)
+  const promoted = inbox.promoteNextStepToNextTurn(sessionId, {
+    skipSteer: true,
+  })
   if (promoted > 0) {
     // wake handler 由 agent.ts 在启动时注册为 runNextInQueue(sid):
     // 见 agent.ts:1058 setSessionInboxWakeHandler。wakeBudget 默认 3/turn,
@@ -68,19 +86,44 @@ export function promoteNextStepToNextTurn(sessionId: string): number {
  *
  * zai patch 注入: vendor `enqueuePendingNotification` 由 zai wrapper
  * (`compat/messageQueueAdapter.ts`) 自动注入独立 `sessionId` 字段
- * (而非污染 `agentId`), 这里读 `cmd.sessionId` 精确路由, fallback
- * `cmd.agentId` 兼容 vendor 原生调用。
+ * (而非污染 `agentId`), 这里读 `cmd.sessionId` 精确路由。
+ *
+ * zai patch (2026-09-07, fix-busy-flush-v2-r2, worktree-dsh, Item C):
+ * fallback `cmd.agentId === sid` 改成 **严格校验** —— 仅当该 agentId
+ * 通过 `sessionAgentRegistry` 注册为属于本 session 时才匹配。原来"cmd.agentId
+ * 撞 sid 字面值"的兜底会跨 session 误派通知, 22 个 vendor 调用方已走
+ * zai wrapper 注入独立 sessionId, 这里走严格 fallback; cron / 第三方
+ * vendor 调用方漏改 wrapper 时会被跳过 + warn log, 提示改造走 zai wrapper。
  */
 export function drainCommandQueueForSession(sessionId: string): number {
   let drained = 0
+  let fallbackHits = 0
   // 单次 drain: dequeueAllMatching 把匹配的全部拿出, 我们逐条走 followup。
   // 循环兜底: 若 followup 触发了新 turn (nextTurn + wake → runQueryLoop),
   // 那个新 turn 的 mid-turn drain 会消费 commandQueue 的剩余项 —— 不需要
   // 在这里再 drain。
   const matched = dequeueAllMatching((cmd: QueuedCommand) => {
     const cmdSid = (cmd as { sessionId?: string }).sessionId
-    return cmdSid === sessionId || cmd.agentId === sessionId
+    if (cmdSid === sessionId) return true
+    // zai patch (2026-09-07, Item C): 严格 agentId fallback, 防跨 session 误派
+    // — 不是 "agentId === sid 字面值", 而是 "agentId 注册为属于本 session"
+    // (SubagentNotifier terminal 时 registerSessionAgent(sid, task.id))。
+    // 漏走 zai wrapper (没注入 sessionId) 的 vendor 调用方还能路由, 但
+    // 其它 session 的 agentId 字面撞 sid 时会被拒收。
+    if (cmd.agentId && isAgentOfSession(sessionId, cmd.agentId)) {
+      fallbackHits++
+      return true
+    }
+    return false
   })
+  if (fallbackHits > 0) {
+    // zai patch (2026-09-07, Item C): warn log 提示调用方改造走 zai wrapper。
+    // 22 个 vendor 调用方已改, 此 warn 只在 cron / 第三方 vendor 调用方
+    // 没改 wrapper 时出现, 用于排查跨 session 误派隐患。
+    console.warn(
+      `[busyFlush] drainCommandQueueForSession(sid=${sessionId}): ${fallbackHits} 命令经严格 agentId fallback 匹配 — 调用方未走 zai wrapper (compat/messageQueueAdapter) 注入独立 sessionId, 请改造`,
+    )
+  }
   if (matched.length === 0) return 0
   const inbox = getSessionInbox(sessionId)
   for (const cmd of matched) {
