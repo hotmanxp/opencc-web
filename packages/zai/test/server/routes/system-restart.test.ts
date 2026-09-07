@@ -40,14 +40,19 @@ describe('POST /api/system/restart', () => {
     app.use('/api', systemRouter)
     const res = await request(app).post('/api/system/restart').send({ reason: 'user_action' })
     expect(res.status).toBe(202)
-    // 子进程 → supervisor 必须发 { type: 'restart', reason } 才会触发 respawn。
-    // 早期占位类型 'restarted' 与 supervisor 协议不符,即便 closeServer/exit
-    // 修了按钮也不重启 — 这就是 SettingsDrawer 重启按钮无响应的根因之一。
+    // zai patch (2026-09-07, fix-pre-existing, worktree-dsh): coordinator
+    // 异步跑 closeServer → sendRestart → exit。route handler 立刻返回 202,
+    // HTTP 响应 await 后 captured 还未设置。轮询 exitSpy 调用(由 sendRestart
+    // 之后触发)作为 barrier,超时 1s 兜底避免 hang 住。早期占位类型
+    // 'restarted' 与 supervisor 协议不符,即便 closeServer/exit 修了按钮也不
+    // 重启 — 这就是 SettingsDrawer 重启按钮无响应的根因之一。
     // 见 supervisor.ts:188 + managedChild.ts:ChildMessage。
+    const exitStart = Date.now()
+    while (!exitSpy.mock.calls.length && Date.now() - exitStart < 1000) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
     expect(captured?.type).toBe('restart')
     expect(captured?.reason).toBe('user_action')
-    // 给 coordinator 微任务时间跑完 closeServer → sendRestart → exit(抛错)。
-    await new Promise((r) => setTimeout(r, 10))
     expect(exitSpy).toHaveBeenCalledWith(0)
   })
 })

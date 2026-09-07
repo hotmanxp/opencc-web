@@ -2098,8 +2098,14 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
   try {
     const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
     const store = getTranscriptStore();
+    // zai patch (2026-09-07, fix-pre-existing, worktree-dsh): legacyTranscriptStore.patch
+    // 在 2026-08-30 改为「unknown session → warn + null」而非抛错, 防止 fire-and-forget
+    // 调用方把 unhandled rejection 拖崩进程。但路由侧是 await, 应正确把 null 映射成
+    // 404 — 让 agentSettingsMode "returns 500 for unknown session id" 单测过。
+    // 三个 patch 字段任何一项命中 unknown session 都直接 404, 避免半成功状态。
     if (parsed.data.model && parsed.data.model !== "unknown") {
-      await store.patch(sid, { model: parsed.data.model }, { cwd: ctx.cwd });
+      const found = await store.patch(sid, { model: parsed.data.model }, { cwd: ctx.cwd });
+      if (found === null) return res.status(404).json({ error: "session not found" });
     }
     // zai patch: providerId persistence. Same "skip if absent" rule as
     // model so the absence of the field (old clients) never wipes an
@@ -2107,11 +2113,12 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
     // accepts a partial meta shape, but the vendor OpenccTranscriptMeta
     // type is widened in serverTypes.ts.
     if (parsed.data.providerId) {
-      await store.patch(
+      const found = await store.patch(
         sid,
         { providerId: parsed.data.providerId } as { providerId: string },
         { cwd: ctx.cwd },
       );
+      if (found === null) return res.status(404).json({ error: "session not found" });
     }
     if (parsed.data.permissionMode) {
       if (parsed.data.permissionMode === "plan") {
@@ -2130,7 +2137,8 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
       } else {
         planPreModeBySession.delete(sid);
       }
-      await store.patch(sid, { permissionMode: parsed.data.permissionMode }, { cwd: ctx.cwd });
+      const found = await store.patch(sid, { permissionMode: parsed.data.permissionMode }, { cwd: ctx.cwd });
+      if (found === null) return res.status(404).json({ error: "session not found" });
     }
     res.json({ ok: true });
   } catch (err) {
