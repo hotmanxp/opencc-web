@@ -914,3 +914,38 @@ describe('mainAgent per-session (zai patch 2026-08-20)', () => {
     }
   })
 })
+
+describe('runQueryLoop finally flushes pending bash notifications (zai patch 2026-09-07, fix busy-flush, worktree-dsh)', () => {
+  it('主 turn 结束后调 flushPendingBashNotifications(sessionId)', async () => {
+    // zai patch (2026-09-07, fix busy-flush, worktree-dsh): 之前 finally
+    // 块没调 flushPendingBashNotifications, 后台 bash 在主线活跃时完成
+    // → 入 pendingNotifications 队列 → 主线结束无 flush → 通知丢失。
+    const flushSpy = vi.fn()
+    const fakeBashNotifier = await import('../../src/server/services/bashNotifier.js')
+    const flushPending = vi
+      .spyOn(fakeBashNotifier, 'flushPendingBashNotifications')
+      .mockImplementation(flushSpy)
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'sess-flush-1',
+          contentBlocks: [{ type: 'text', text: 'hi' }],
+        }),
+      })
+      expect(res.status).toBe(200)
+      const reader = res.body!.getReader()
+      while (true) {
+        const { done } = await reader.read()
+        if (done) break
+      }
+      // finally 块应调一次 flushPendingBashNotifications('sess-flush-1')
+      expect(flushPending).toHaveBeenCalledWith('sess-flush-1')
+    } finally {
+      flushPending.mockRestore()
+      close()
+    }
+  })
+})

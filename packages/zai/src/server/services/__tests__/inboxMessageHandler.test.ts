@@ -152,6 +152,8 @@ describe('inboxMessageHandler: 8 类 dsh delivery kinds dispatch (plan §2.4)', 
   let answerAskCalls: Array<{ toolUseId: string; payload: any }>
   let rejectAskCalls: Array<{ toolUseId: string; reason?: string }>
   let elicitCalls: any[]
+  let queueToolResultCalls: Array<{ sessionId: string; toolUseId: string; output: unknown; isError: boolean }>
+  let prependReminderCalls: Array<{ sessionId: string; text: string }>
   let emitCalls: Array<{ eventType: string; payload: any }>
 
   beforeEach(() => {
@@ -159,6 +161,8 @@ describe('inboxMessageHandler: 8 类 dsh delivery kinds dispatch (plan §2.4)', 
     answerAskCalls = []
     rejectAskCalls = []
     elicitCalls = []
+    queueToolResultCalls = []
+    prependReminderCalls = []
     emitCalls = []
     installDshInboxBridges({
       followup: (sid, msg) => followupCalls.push({ sid, msg }),
@@ -174,8 +178,18 @@ describe('inboxMessageHandler: 8 类 dsh delivery kinds dispatch (plan §2.4)', 
         elicitCalls.push(input)
         return { action: 'accept', content: {} }
       },
-      queueToolResult: undefined,
-      prependReminder: undefined,
+      queueToolResult: (sessionId, toolUseId, output, isError) => {
+        // zai patch (2026-09-07, fix tool_result dsh bridge, worktree-dsh):
+        // 测试钩子 —— record 但不调真实 toolExecution.queueResult (避免拉起
+        // 整个 transcriptStore / eventBus)。单测关心 dispatch 决策, 不关心
+        // 持久化副作用。
+        queueToolResultCalls.push({ sessionId, toolUseId, output, isError })
+      },
+      prependReminder: (sessionId, text) => {
+        // zai patch (2026-09-07, fix system_reminder dsh bridge, worktree-dsh):
+        // 测试钩子同上。
+        prependReminderCalls.push({ sessionId, text })
+      },
       emit: (eventType, payload) => emitCalls.push({ eventType, payload }),
     })
   })
@@ -232,25 +246,59 @@ describe('inboxMessageHandler: 8 类 dsh delivery kinds dispatch (plan §2.4)', 
     expect(elicitCalls[0].mcpServerName).toBe('mcp-1')
   })
 
-  it('5. tool_result → toolExecution.queueResult (未实现, 返回 ok=false)', () => {
+  it('5. tool_result → toolExecution.queueResult (wired, ok=true)', () => {
+    // zai patch (2026-09-07, fix tool_result dsh bridge, worktree-dsh):
+    // bridge 已 wired (agentRuntime.ts:223 queueToolResult → toolExecution.queueResult)。
+    // dispatchDshInbox 应返 ok=true 并调 queueToolResult 一次。
     const result = dispatchDshInbox({
       kind: 'tool_result',
       sessionId: 'sess-A',
       payload: { toolUseId: 'tu-1', output: 'ok', isError: false },
     })
-    // queueToolResult bridge 未 install → ok=false (callers fallback)
-    expect(result.ok).toBe(false)
-    expect(result.reason).toBe('queueToolResult not wired')
+    expect(result.ok).toBe(true)
+    expect(result.kind).toBe('tool_result')
+    expect(queueToolResultCalls).toHaveLength(1)
+    expect(queueToolResultCalls[0].sessionId).toBe('sess-A')
+    expect(queueToolResultCalls[0].toolUseId).toBe('tu-1')
+    expect(queueToolResultCalls[0].output).toBe('ok')
+    expect(queueToolResultCalls[0].isError).toBe(false)
   })
 
-  it('6. system_reminder → queryLoop prepend (未实现, 返回 ok=false)', () => {
+  it('5b. tool_result isError=true 透传', () => {
+    dispatchDshInbox({
+      kind: 'tool_result',
+      sessionId: 'sess-A',
+      payload: { toolUseId: 'tu-2', output: 'err', isError: true },
+    })
+    expect(queueToolResultCalls).toHaveLength(1)
+    expect(queueToolResultCalls[0].isError).toBe(true)
+  })
+
+  it('5c. tool_result 缺 toolUseId → 返回 ok=false', () => {
+    const result = dispatchDshInbox({
+      kind: 'tool_result',
+      sessionId: 'sess-A',
+      payload: { output: 'ok', isError: false },
+    })
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('toolUseId missing')
+  })
+
+  it('6. system_reminder → prependReminder bridge (wired, ok=true)', () => {
+    // zai patch (2026-09-07, fix system_reminder dsh bridge, worktree-dsh):
+    // bridge 已 wired (agentRuntime.ts:227 prependReminder → SessionInbox.steer
+    // 入 nextStep lane, 由 drainInboxReminder 在下次 API call 时 prepend 为
+    // <system-reminder>)。
     const result = dispatchDshInbox({
       kind: 'system_reminder',
       sessionId: 'sess-A',
       payload: { text: 'be concise' },
     })
-    expect(result.ok).toBe(false)
-    expect(result.reason).toBe('prependReminder not wired')
+    expect(result.ok).toBe(true)
+    expect(result.kind).toBe('system_reminder')
+    expect(prependReminderCalls).toHaveLength(1)
+    expect(prependReminderCalls[0].sessionId).toBe('sess-A')
+    expect(prependReminderCalls[0].text).toBe('be concise')
   })
 
   it('7. user_message → SessionInbox.followup', () => {

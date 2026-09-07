@@ -199,10 +199,12 @@ installMessageQueueAdapterBridges({
 
 // zai patch (2026-09-07, plan P2-2.4, worktree-dsh): install 8 dsh inbox
 // delivery kinds → zai 内部 channel 桥(inboxMessageHandler.dispatchDshInbox)。
-// 桥接: SessionInbox.followup / askRegistry.answer|reject / eventBus.emit。
-// toolExecution.queueResult / prependReminder 暂未实现 (plan 后续阶段补)
-// —— dispatchDshInbox 收到对应 kind 时返回 ok=false, 调用方走 fallback。
+// 桥接: SessionInbox.followup / askRegistry.answer|reject / eventBus.emit /
+// toolExecution.queueResult / SessionInbox.steer (prependReminder 走
+// nextStep lane, 由 agentRuntime.ts registerExtraReminderProvider 的
+// drainInboxReminder 在下次 API call 时 prepend 为 <system-reminder>)。
 import { ElicitationRegistry } from './elicitationRegistry.js'
+import { queueResult as toolExecutionQueueResult } from './toolExecution.js'
 const _elicitationRegistry = new ElicitationRegistry()
 ;(globalThis as any).__zaiInboxBridge = {
   followup: (sessionId: string, msg: { id: string; source: { kind: string; form: string }; content: string; createdAt: number }) => {
@@ -214,6 +216,27 @@ const _elicitationRegistry = new ElicitationRegistry()
     askRegistry.reject(toolUseId, reason ?? 'user_rejected'),
   requestElicit: (input: Record<string, unknown>) =>
     _elicitationRegistry.request(input as Parameters<typeof _elicitationRegistry.request>[0]),
+  queueToolResult: (sessionId: string, toolUseId: string, output: unknown, isError: boolean) => {
+    // zai patch (2026-09-07, fix tool_result dsh bridge, worktree-dsh):
+    // tool_result dsh delivery kind → toolExecution.queueResult。
+    // out-of-band 通路: 外部 inbox 消息(非 queryLoop for-await)需要把
+    // tool_use result 同步进 transcript + emit runtime.tool_result SSE。
+    toolExecutionQueueResult(sessionId, toolUseId, output, isError)
+  },
+  prependReminder: (sessionId: string, text: string) => {
+    // zai patch (2026-09-07, fix system_reminder dsh bridge, worktree-dsh):
+    // system_reminder dsh delivery kind → SessionInbox.steer 入 nextStep
+    // lane, 由 registerExtraReminderProvider 的 drainInboxReminder 在下次
+    // API call 时渲染为 <system-reminder> prepend 到 prompt。
+    // steer 而非 followup: reminder 是 mid-turn drain 语义(nextStep
+    // lane), 不是 wake(idle → nextTurn)语义。
+    getSessionInbox(sessionId).steer(sessionId, {
+      id: `system_reminder-${Date.now()}`,
+      source: { kind: 'system', form: 'reminder' },
+      content: text,
+      createdAt: Date.now(),
+    } as InboxMessage)
+  },
   emit: (eventType: string, payload: Record<string, unknown>) => {
     eventBus.emit({ type: eventType, ...payload } as Parameters<typeof eventBus.emit>[0])
   },
@@ -922,20 +945,64 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
             : {}),
         }
       }
-      // TODO (plan §5 MCP elicitation row): wire a proper ElicitRegistry
-      // / eventBus event so the web UI can render elicitation prompts.
-      // For now we cancel so MCP servers never block; users get a console
-      // warning instead of a UI dialog. Tracked as a follow-up alongside
-      // the elicitation.ask UI work.
+      // zai patch (2026-09-07, plan P2-2.5, worktree-dsh): wire vendor
+      // elicit_pending → ElicitationRegistry.request + prompt.elicit SSE。
+      // 之前 stub 直接 cancel, MCP 服务端永远拿不到用户答复, 客户端也
+      // 看不到弹窗。这里:
+      //   1. emit prompt.elicit ServerEvent 给前端 SSE 渠道
+      //      (前端 useEventStream reducer 据此弹 elicit form)
+      //   2. 同步调 _elicitationRegistry.request 注册 elicitationId,
+      //      返回 Promise 等用户答复
+      //   3. 用户答复(ElicitationRegistry.resolve)后, result 透传 vendor
+      //      createPrintRuntime → control_response_success
       const elicitationBridge: ElicitationBridgeFn = async ({
         sessionId,
+        requestId,
         mcpServerName,
         message,
+        mode,
+        url,
+        elicitationId,
+        requestedSchema,
       }) => {
-        console.warn(
-          `[inproc] MCP elicitation not yet wired to UI — cancelling: server=${mcpServerName} message=${message.slice(0, 80)} session=${sessionId}`,
-        )
-        return { action: 'cancel' }
+        // 1. emit prompt.elicit SSE (前端弹窗)
+        const bus = (globalThis as any).__zaiEventBus as
+          | { emit: (e: unknown) => void }
+          | undefined
+        if (bus) {
+          bus.emit({
+            type: 'prompt.elicit',
+            sessionId,
+            toolUseId: requestId,
+            elicitationId: elicitationId ?? '',
+            mcpServerName: mcpServerName ?? '',
+            message: message ?? '',
+            mode: mode ?? 'form',
+            url,
+            requestedSchema,
+          })
+        }
+        // 2. 注册到 ElicitationRegistry, 等用户答复
+        try {
+          const result = await _elicitationRegistry.request({
+            elicitationId,
+            mcpServerName: mcpServerName ?? '',
+            message: message ?? '',
+            mode: mode ?? 'form',
+            url,
+            requestedSchema,
+          })
+          return {
+            action: result.action,
+            ...(result.content ? { content: result.content } : {}),
+          }
+        } catch (err) {
+          // elicitId 二次注册等异常 → cancel, MCP 服务端不阻塞
+          console.warn(
+            `[inproc] ElicitationRegistry.request failed — cancelling: server=${mcpServerName} message=${(message ?? '').slice(0, 80)} session=${sessionId} err=${String(err)}`,
+          )
+          return { action: 'cancel' }
+        }
       }
       runtime = await createPrintRuntime({
         dataDir,

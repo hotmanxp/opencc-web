@@ -55,6 +55,11 @@ import {
   type InboxMessage,
 } from "../services/sessionInbox.js";
 import { drainInboxReminder } from "../services/inboxReminder.js"; // (no longer used here — see agentRuntime.ts registerExtraReminderProvider for the per-API-call hook)
+// zai patch (2026-09-07, fix busy-flush, worktree-dsh): 主 turn 结束时
+// flush 积压的 bash 后台通知。详见 bashNotifier.flushPendingBashNotifications。
+// 之前 finally 块没有 flush, 后台 bash 在主线活跃时完成只能入 pendingNotifications
+// 队列, 主线结束无 flush → 通知丢失。
+import { flushPendingBashNotifications } from "../services/bashNotifier.js";
 import { getBackgroundRuntime } from "../services/backgroundRuntime.js";
 import { logHttp } from "../services/accessLog.js";
 import { resolveModel } from "../lib/resolveModel.js";
@@ -1785,6 +1790,14 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // release 只删 map 项, 不主动 .abort(). abort 已经发生过的 controller
     // 自然 abort, 还没发生的就让它跑完.
     releaseSessionController(sessionId)
+    // zai patch (2026-09-07, fix busy-flush, worktree-dsh): 主 turn 结束时
+    // flush 积压的 bash 后台通知。busy 路径(push 到 pendingNotifications)
+    // 不标 injected —— flush 时 handle 走 idle + injected 路径, 此时才算
+    // inject。dedup 在 inject 前查, 因此 busy 路径标记 injected 会导致
+    // flush 时被吞(永远不 inject)。这里无需担心竞争: 主 turn finally
+    // 与后台 bash 完成事件并发, flush 时 hasActiveQuery(sessionId) 已经
+    // 是 false (releaseSessionController 已执行), handle 走 idle inject 路径。
+    flushPendingBashNotifications(sessionId)
   }
   })
 }
