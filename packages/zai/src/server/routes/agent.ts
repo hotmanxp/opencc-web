@@ -55,6 +55,21 @@ import {
   type InboxMessage,
 } from "../services/sessionInbox.js";
 import { drainInboxReminder } from "../services/inboxReminder.js"; // (no longer used here — see agentRuntime.ts registerExtraReminderProvider for the per-API-call hook)
+// zai patch (2026-09-07, fix busy-flush, worktree-dsh): 主 turn 结束时
+// flush 积压的 bash 后台通知。详见 bashNotifier.flushPendingBashNotifications。
+// 之前 finally 块没有 flush, 后台 bash 在主线活跃时完成只能入 pendingNotifications
+// 队列, 主线结束无 flush → 通知丢失。
+import { flushPendingBashNotifications } from "../services/bashNotifier.js";
+// zai patch (2026-09-07, fix-busy-flush-v2, worktree-dsh): v2 修复 ——
+// flush 路径扩展到 SessionInbox.nextStep 降级队列 + vendor commandQueue。
+// v1 只覆盖 BashNotifier 暂存, v2 兜底 subagent (SessionInbox.followup
+// busy 降级 nextStep) + vendor `enqueuePendingNotification` (repl runtime
+// 没有 print.ts 的 subscribeToHeadlessWake 唤醒, commandQueue 卡住)。
+// 三者顺序执行: bashNotifier → SessionInbox → commandQueue, 各自独立。
+import {
+  promoteNextStepToNextTurn as flushSessionInboxNextStep,
+  drainCommandQueueForSession as flushVendorCommandQueue,
+} from "../services/busyFlush.js";
 import { getBackgroundRuntime } from "../services/backgroundRuntime.js";
 import { logHttp } from "../services/accessLog.js";
 import { resolveModel } from "../lib/resolveModel.js";
@@ -1785,6 +1800,30 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // release 只删 map 项, 不主动 .abort(). abort 已经发生过的 controller
     // 自然 abort, 还没发生的就让它跑完.
     releaseSessionController(sessionId)
+    // zai patch (2026-09-07, fix busy-flush, worktree-dsh): 主 turn 结束时
+    // flush 积压的 bash 后台通知。busy 路径(push 到 pendingNotifications)
+    // 不标 injected —— flush 时 handle 走 idle + injected 路径, 此时才算
+    // inject。dedup 在 inject 前查, 因此 busy 路径标记 injected 会导致
+    // flush 时被吞(永远不 inject)。这里无需担心竞争: 主 turn finally
+    // 与后台 bash 完成事件并发, flush 时 hasActiveQuery(sessionId) 已经
+    // 是 false (releaseSessionController 已执行), handle 走 idle inject 路径。
+    flushPendingBashNotifications(sessionId)
+    // zai patch (2026-09-07, fix-busy-flush-v2, worktree-dsh): v2 兜底
+    // 1) SessionInbox.nextStep → nextTurn。父 turn busy 时 SubagentNotifier
+    //    .followup 降级入 nextStep; 父 turn end_turn 后 vendor QueryEngine
+    //    没有 print.ts 同款 wake 机制, nextStep 永远不消费。把 nextStep
+    //    全部搬到 nextTurn + wake (走 wakeBudget), runNextInQueue 入口
+    //    consumeNextTurn 当真实 cmd.prompt 喂 vendor query(), 落盘
+    //    transcript + 唤醒 LLM 看到 <task-notification>。
+    // 2) vendor `commandQueue` (messageQueueManager.ts:52 全局单例) —
+    //    vendor `enqueuePendingNotification` 把任务通知推到那里, QueryEngine
+    //    mid-turn drain (query.ts:2675) 只在下一次 API call 之前触发;
+    //    repl runtime 父 turn end_turn 没有下一次 API call, 命令卡住。
+    //    dequeueAllMatching + cmd.sessionId 路由 → SessionInbox.followup
+    //    (idle 路径, 走 nextTurn + wake)。wake 触发 runNextInQueue 消费
+    //    nextTurn 后, 新 turn 的 mid-turn drain 会自动消费剩余 commandQueue。
+    flushSessionInboxNextStep(sessionId)
+    flushVendorCommandQueue(sessionId)
   }
   })
 }
@@ -2059,8 +2098,14 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
   try {
     const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
     const store = getTranscriptStore();
+    // zai patch (2026-09-07, fix-pre-existing, worktree-dsh): legacyTranscriptStore.patch
+    // 在 2026-08-30 改为「unknown session → warn + null」而非抛错, 防止 fire-and-forget
+    // 调用方把 unhandled rejection 拖崩进程。但路由侧是 await, 应正确把 null 映射成
+    // 404 — 让 agentSettingsMode "returns 500 for unknown session id" 单测过。
+    // 三个 patch 字段任何一项命中 unknown session 都直接 404, 避免半成功状态。
     if (parsed.data.model && parsed.data.model !== "unknown") {
-      await store.patch(sid, { model: parsed.data.model }, { cwd: ctx.cwd });
+      const found = await store.patch(sid, { model: parsed.data.model }, { cwd: ctx.cwd });
+      if (found === null) return res.status(404).json({ error: "session not found" });
     }
     // zai patch: providerId persistence. Same "skip if absent" rule as
     // model so the absence of the field (old clients) never wipes an
@@ -2068,11 +2113,12 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
     // accepts a partial meta shape, but the vendor OpenccTranscriptMeta
     // type is widened in serverTypes.ts.
     if (parsed.data.providerId) {
-      await store.patch(
+      const found = await store.patch(
         sid,
         { providerId: parsed.data.providerId } as { providerId: string },
         { cwd: ctx.cwd },
       );
+      if (found === null) return res.status(404).json({ error: "session not found" });
     }
     if (parsed.data.permissionMode) {
       if (parsed.data.permissionMode === "plan") {
@@ -2091,7 +2137,8 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
       } else {
         planPreModeBySession.delete(sid);
       }
-      await store.patch(sid, { permissionMode: parsed.data.permissionMode }, { cwd: ctx.cwd });
+      const found = await store.patch(sid, { permissionMode: parsed.data.permissionMode }, { cwd: ctx.cwd });
+      if (found === null) return res.status(404).json({ error: "session not found" });
     }
     res.json({ ok: true });
   } catch (err) {

@@ -2,6 +2,37 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+// zai patch (2026-09-07, fix-pre-existing, worktree-dsh): mock 模式从静态
+// `sessionInbox.followup` 改为 per-session `getSessionInbox` 工厂返回固定
+// mockInbox。原因: taskFactoryBridge.ts:114 走 `getSessionInbox(sid)` per-session
+// 工厂, 静态 singleton `sessionInbox` 已 deprecated。源码不再调静态
+// `sessionInbox.followup`, spy 永远不触发, 10/25 用例失败。
+const followupMock = vi.fn()
+const mockInbox = {
+  followup: (...args: unknown[]) => followupMock(...args),
+  setBusy: vi.fn(),
+  clearRunning: vi.fn(),
+  setWakeHandler: vi.fn(),
+  steer: vi.fn(),
+  inject: vi.fn(),
+  consumeNextTurn: vi.fn(() => null),
+  consumeNextStep: vi.fn(() => []),
+  peekNextTurnCount: vi.fn(() => 0),
+  peekNextStepCount: vi.fn(() => 0),
+  isBusy: vi.fn(() => false),
+  promoteNextStepToNextTurn: vi.fn(() => 0),
+  resetWakeBudget: vi.fn(),
+  wakeFor: vi.fn(),
+}
+vi.mock('../../../src/server/services/sessionInbox.js', () => ({
+  sessionInbox: {},
+  getSessionInbox: vi.fn(() => mockInbox),
+  setSessionInboxWakeHandler: vi.fn(),
+  disposeSessionInbox: vi.fn(),
+  listSessionInboxIds: vi.fn(() => []),
+}))
+
 import {
   createPoolTask, markTaskStatus, moveTask,
 } from '@zn-ai/zn-agent-core'
@@ -16,7 +47,6 @@ import {
 import {
   __resetForTests as resetFactorySettings,
 } from '../../../src/server/services/factorySettings.js'
-import { sessionInbox } from '../../../src/server/services/sessionInbox.js'
 import {
   __setBackgroundRuntime, __resetBackgroundRuntimeForTests,
 } from '../../../src/server/services/backgroundRuntime.js'
@@ -46,6 +76,7 @@ beforeEach(async () => {
   await rm(join(dataDir, 'factory-settings.json'), { force: true })
   __resetForTests()
   __resetBackgroundRuntimeForTests()
+  followupMock.mockClear()
   await setTaskFactoryState({ managedEnabled: true, supervisorSessionId: 'sess-sup' })
   // tick() 无条件读 getBackgroundRuntime();这里注入一个最小 stub(未知 executor
   // 一律视为不存在, 决不解析为终态), 避免测试依赖真实 background runtime 初始化。
@@ -66,14 +97,14 @@ afterEach(() => {
 function injectedContents(
   spy: { mock: { calls: Array<[string, { content: string }]> } },
 ): string[] {
-  return spy.mock.calls.map(([, msg]) => String(msg.content))
+  return spy.mock.calls.map((args) => String(args[1]?.content ?? ''))
 }
 
 describe('taskFactoryManagedLoop', () => {
   it('队列非空时注入 dispatch 指令（不依赖 processing 是否为空，允许多任务并行）', async () => {
     await createPoolTask({ title: 'a' })
     await createPoolTask({ title: 'b' }) // 多个队列任务 → 指令可让调度器并行派发
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(20) // 紧凑 interval 便于测试
     await new Promise((r) => setTimeout(r, 60))
     const contents = injectedContents(spy)
@@ -85,7 +116,7 @@ describe('taskFactoryManagedLoop', () => {
     const s = await createPoolTask({ title: 'b' })
     await markTaskStatus(s.id, 'queue-tasks', { status: 'processing', executorTaskId: 'a-unknown' })
     await moveTask(s.id, 'queue-tasks', 'processing-tasks')
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(20)
     await new Promise((r) => setTimeout(r, 60))
     // executorTaskId 在后台运行时不可解析 → 不注入 accept(避免幽灵验收);
@@ -113,7 +144,7 @@ describe('taskFactoryManagedLoop — maxParallelTasks 并行上限(tf-pnsl5m5e)'
         id === 'exec-done' ? { status: 'completed' } : id === 'exec-running' ? { status: 'running' } : null,
       cancel: async () => ({ ok: true }),
     } as unknown as Parameters<typeof __setBackgroundRuntime>[0])
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(20)
     await new Promise((r) => setTimeout(r, 80))
     stopTaskFactoryManagedLoopForTests()
@@ -129,7 +160,7 @@ describe('taskFactoryManagedLoop — maxParallelTasks 并行上限(tf-pnsl5m5e)'
     await markTaskStatus(p1.id, 'queue-tasks', { status: 'processing', executorTaskId: 'exec-running' })
     await moveTask(p1.id, 'queue-tasks', 'processing-tasks')
     await createPoolTask({ title: 'under-q1' })
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(20)
     await new Promise((r) => setTimeout(r, 80))
     stopTaskFactoryManagedLoopForTests()
@@ -151,7 +182,7 @@ describe('taskFactoryManagedLoop — quick verifier 分流(2026-09-04 round 2)',
     // 全 quick:单个 quick 任务就触发 hint,多个 quick 同样含 hint
     await createPoolTask({ title: 'q-task-A', mode: 'quick' })
     await createPoolTask({ title: 'q-task-B', mode: 'quick' })
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(20)
     await new Promise((r) => setTimeout(r, 60))
     stopTaskFactoryManagedLoopForTests()
@@ -166,7 +197,7 @@ describe('taskFactoryManagedLoop — quick verifier 分流(2026-09-04 round 2)',
   it('queue 全是 mode=full(显式)→ dispatch 注入段不含 QUICK_VERIFIER_HINT', async () => {
     await createPoolTask({ title: 'f-task-A', mode: 'full' })
     await createPoolTask({ title: 'f-task-B', mode: 'full' })
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(20)
     await new Promise((r) => setTimeout(r, 60))
     stopTaskFactoryManagedLoopForTests()
@@ -180,7 +211,7 @@ describe('taskFactoryManagedLoop — quick verifier 分流(2026-09-04 round 2)',
     // 不传 mode → CreatePoolTaskInput.mode? 缺省 → 走 full 默认路径
     await createPoolTask({ title: 'legacy-A' })
     await createPoolTask({ title: 'legacy-B' })
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(20)
     await new Promise((r) => setTimeout(r, 60))
     stopTaskFactoryManagedLoopForTests()
@@ -193,7 +224,7 @@ describe('taskFactoryManagedLoop — quick verifier 分流(2026-09-04 round 2)',
   it('queue 混合 quick + full → 含至少一个 quick 时仍注入 QUICK_VERIFIER_HINT', async () => {
     await createPoolTask({ title: 'mix-full', mode: 'full' })
     await createPoolTask({ title: 'mix-quick', mode: 'quick' })
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(20)
     await new Promise((r) => setTimeout(r, 60))
     stopTaskFactoryManagedLoopForTests()
@@ -275,7 +306,7 @@ describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
         'exec-stuck': [makeEvent(1), makeEvent(2), makeEvent(3), makeEvent(4), makeEvent(5), makeEvent(6)],
       },
     }) as unknown as Parameters<typeof __setBackgroundRuntime>[0])
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     // 真实 timer:threshold=5s,interval=50ms — 5s 后跨过阈值触发告警。
     startTaskFactoryManagedLoop(50)
     await new Promise((r) => setTimeout(r, 5500))
@@ -301,7 +332,7 @@ describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
       events: (async function* () { /* 不会被调用 */ }) as never,
       cancel: async () => ({ ok: true }),
     } as unknown as Parameters<typeof __setBackgroundRuntime>[0])
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(50)
     await new Promise((r) => setTimeout(r, 5500))
     stopTaskFactoryManagedLoopForTests()
@@ -323,7 +354,7 @@ describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
         'exec-cd': [makeEvent(1), makeEvent(2)],
       },
     }) as unknown as Parameters<typeof __setBackgroundRuntime>[0])
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(50)
     await new Promise((r) => setTimeout(r, 6500))
     stopTaskFactoryManagedLoopForTests()
@@ -342,7 +373,7 @@ describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
       records: { 'exec-fin': { status: 'completed', eventCount: 5 } },
       events: {},
     }) as unknown as Parameters<typeof __setBackgroundRuntime>[0])
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(50)
     await new Promise((r) => setTimeout(r, 5500))
     stopTaskFactoryManagedLoopForTests()
@@ -369,7 +400,7 @@ describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
       records: { 'exec-payload': { status: 'running', eventCount: 7 } },
       events: { 'exec-payload': history },
     }) as unknown as Parameters<typeof __setBackgroundRuntime>[0])
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    const spy = followupMock
     startTaskFactoryManagedLoop(50)
     await new Promise((r) => setTimeout(r, 5500))
     stopTaskFactoryManagedLoopForTests()

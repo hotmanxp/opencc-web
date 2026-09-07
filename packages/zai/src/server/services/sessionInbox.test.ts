@@ -89,4 +89,46 @@ describe('SessionInbox', () => {
     expect(inbox.consumeNextStep('s1').map((m) => m.id)).toEqual(['a1'])
     expect(inbox.consumeNextStep('s2').map((m) => m.id)).toEqual(['b1'])
   })
+
+  // zai patch (2026-09-07, fix-busy-flush-v2-r2, worktree-dsh): 墙钟锁防护 —
+  // busy 时同 session 在 1s 窗口内多次 enqueue 只触发 1 次 wake handler,
+  // 防止后台 task 极速完成 (race) 累计触发并行 turn。idle 时 (clearRunning
+  // 已重置 wakeLastAt) 锁不生效, 仍由 wakeBudget 计数兜底。
+  it('wakeBudgetLock (busy): 同 session 1s 内多次 followup 只 wake 一次', () => {
+    inbox.setBusy('s1')
+    inbox.followup('s1', msg('a'))   // busy 入 nextStep + 不 wake
+    expect(woken).toEqual([])
+    // 模拟 finally 把 busy 清掉、再次 followup (race 场景)
+    inbox.clearRunning('s1')
+    inbox.followup('s1', msg('1'))
+    inbox.followup('s1', msg('2'))
+    inbox.followup('s1', msg('3'))
+    inbox.followup('s1', msg('4'))
+    // 锁仅在 busy 时生效; idle (clearRunning 已删 wakeLastAt) 不受锁约束。
+    // wakeBudget 默认 3 → 3 wake handler 调用。
+    expect(woken.length).toBe(3)
+  })
+
+  it('wakeBudgetLock (busy 内): 测试 seam 模拟 race → 锁拦下第 2 次', () => {
+    // 测试 seam: setWakeBudgetLockMs(10) 让锁间隔压短, 但仍 > 单测同步段耗时。
+    inbox.setWakeBudgetLockMs(50)
+    inbox.setBusy('s1')
+    // wakeFor 是 wakeIfBudgeted 唯一对 busy 状态下能被外部强制走的入口
+    // (followup / steer busy 时不 wake; inject 永不 wake)。模拟 finally
+    // 后两条 flush 路径同时调 wakeFor (race)。
+    inbox.wakeFor('s1')
+    inbox.wakeFor('s1')   // 50ms 内 → 墙钟锁拦下
+    inbox.wakeFor('s1')   // 50ms 内 → 墙钟锁拦下
+    expect(woken.length).toBe(1)
+  })
+
+  it('wakeBudgetLock 释放 (clearRunning): 下次 turn 可正常 wake', () => {
+    inbox.setWakeBudgetLockMs(0)   // 锁关掉, 仅验证 clearRunning 也能清 wakeLastAt
+    inbox.setBusy('s1')
+    inbox.wakeFor('s1')             // busy 下 wake 1 次
+    expect(woken.length).toBe(1)
+    inbox.clearRunning('s1')
+    inbox.wakeFor('s1')             // busy=false → 锁失效, wake 1 次
+    expect(woken.length).toBe(2)
+  })
 })

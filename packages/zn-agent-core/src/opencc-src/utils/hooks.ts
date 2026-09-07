@@ -132,7 +132,9 @@ import { logError } from './log.js'
 import { createCombinedAbortSignal } from './combinedAbortSignal.js'
 import type { PermissionResult } from './permissions/PermissionResult.js'
 import { registerPendingAsyncHook } from './hooks/AsyncHookRegistry.js'
-import { enqueuePendingNotification } from './messageQueueManager.js'
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper
+import { zaiEnqueuePendingNotification } from '../../compat/messageQueueAdapter.js'
 import {
   extractTextContent,
   createAssistantMessage,
@@ -409,7 +411,7 @@ function executeInBackground({
         outcome: result.code === 0 ? 'success' : 'error',
       })
       if (result.code === 2) {
-        enqueuePendingNotification({
+        zaiEnqueuePendingNotification({
           value: wrapInSystemReminder(
             `Stop hook blocking error from command "${hookName}": ${stderr || stdout}`,
           ),

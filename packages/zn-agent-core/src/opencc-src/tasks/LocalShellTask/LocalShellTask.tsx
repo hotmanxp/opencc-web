@@ -8,7 +8,11 @@ import type { AgentId } from '../../types/ids.js';
 import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { tailFile } from '../../utils/fsOperations.js';
 import { logError } from '../../utils/log.js';
-import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper (2 处调用: stall watchdog + 终态通知)。
+// 不替换 enqueueShellNotification(它是 LocalShellTask 内部函数, 走 setAppState notified
+// 守卫, 不经 messageQueueManager)。
+import { zaiEnqueuePendingNotification } from '../../../compat/messageQueueAdapter.js';
 import type { ShellCommand } from '../../utils/ShellCommand.js';
 import { evictTaskOutput, getTaskOutputPath } from '../../utils/task/diskOutput.js';
 import { registerTask, updateTaskState } from '../../utils/task/framework.js';
@@ -109,7 +113,7 @@ Last output:
 ${content.trimEnd()}
 
 The command is likely blocked on an interactive prompt. Kill this task and re-run with piped input (e.g., \`echo y | command\`) or a non-interactive flag if one exists.`;
-        enqueuePendingNotification({
+        zaiEnqueuePendingNotification({
           value: message,
           mode: 'task-notification',
           // zai patch (2026-09-01): stall watchdog 只对 bash 类任务启动
@@ -189,7 +193,7 @@ function enqueueShellNotification(taskId: string, description: string, status: '
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>`;
-  enqueuePendingNotification({
+  zaiEnqueuePendingNotification({
     value: message,
     mode: 'task-notification',
     // zai patch (2026-09-01): 按 BashTaskKind 打标,供 wrapCommandText 分流

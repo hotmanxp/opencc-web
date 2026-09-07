@@ -32,7 +32,9 @@ import { isFullscreenEnvEnabled } from '../fullscreen.js';
 import { toArray } from '../generators.js';
 import { registerSkillHooks } from '../hooks/registerSkillHooks.js';
 import { logError } from '../log.js';
-import { enqueuePendingNotification } from '../messageQueueManager.js';
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper
+import { zaiEnqueuePendingNotification } from '../../../compat/messageQueueAdapter.js';
 import { createCommandInputMessage, createSyntheticUserCaveatMessage, createSystemMessage, createUserInterruptionMessage, createUserMessage, formatCommandInputTags, isCompactBoundaryMessage, isSystemLocalCommandMessage, normalizeMessages, prepareUserContent } from '../messages.js';
 import type { ModelAlias } from '../model/aliases.js';
 import { parseToolListFromCLI } from '../permissions/permissionSetup.js';
@@ -131,7 +133,7 @@ async function executeForkedSlashCommand(command: CommandBase & PromptCommand, a
     // drained, this triggers a main-agent turn that sees the result and
     // decides whether to SendUserMessage. Propagate workload so that
     // second turn is also tagged.
-    const enqueueResult = (value: string): void => enqueuePendingNotification({
+    const enqueueResult = (value: string): void => zaiEnqueuePendingNotification({
       value,
       mode: 'prompt',
       priority: 'later',

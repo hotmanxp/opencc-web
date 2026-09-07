@@ -15,7 +15,9 @@ import type { ParsedWorkflowMeta } from '../../tools/WorkflowTool/parseMetaFromS
 import { createNestedWorkflowRunner } from '../../tools/WorkflowTool/runtime/workflowNested.js'
 import type { WorkflowApi } from '../../tools/WorkflowTool/runtime/vmContext.js'
 import { createInitialState, type LocalWorkflowTaskState } from './state.js'
-import { enqueuePendingNotification } from '../../utils/messageQueueManager.js'
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper
+import { zaiEnqueuePendingNotification } from '../../../compat/messageQueueAdapter.js'
 import { logError } from '../../utils/log.js'
 import {
   writeWorkflowReport,
@@ -468,7 +470,7 @@ export class LocalWorkflowTask implements Task {
    *     does NOT trigger a new LLM turn. The user would see a
    *     system message but the LLM would have no way to process
    *     the result.
-   *   - `enqueuePendingNotification({ mode: 'task-notification' })`
+   *   - `zaiEnqueuePendingNotification({ mode: 'task-notification' })`
    *     goes through the same path as LocalAgentTask /
    *     LocalShellTask completion (see those files for examples).
    *     The framework wraps the value in `<task_notification>` XML,
@@ -499,7 +501,7 @@ export class LocalWorkflowTask implements Task {
       error: this.state.error?.message,
       reportPath: this.state.reportPath ?? '',
     })
-    enqueuePendingNotification({
+    zaiEnqueuePendingNotification({
       value: content,
       mode: 'task-notification',
       // zai patch (2026-09-01): workflow 终态通知标 workflow,分流文案。

@@ -59,10 +59,7 @@ export async function runExtraReminderProviders(
       const out = await fn(sessionId)
       if (out) parts.push(out)
     } catch (err) {
-      logError(
-        toError(err),
-        '[preApiCallReminders] provider threw, skipping its reminder:',
-      )
+      logError(toError(err))
     }
   }
   if (parts.length === 0) return null

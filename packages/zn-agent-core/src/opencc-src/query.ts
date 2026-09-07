@@ -2667,7 +2667,11 @@ if (
       querySource.startsWith('repl_main_thread') ||
       querySource === 'server-repl' ||
       querySource === 'sdk'
-    const currentAgentId = toolUseContext.agentId
+    // zai patch (2026-09-07, plan P0-1.3, worktree-dsh): 独立 sessionId 字段
+    // 路由 mid-turn drain。zai 注入 `toolUseContext.sessionId`(`createReplSession.ts`
+    // 独立字段, 不复用 agentId, 规避 30+ 处 vendor 副作用), 优先读 sessionId,
+    // fallback agentId(vendor 子 agent / TUI 兼容路径)。
+    const currentAgentId = (toolUseContext as any).sessionId ?? toolUseContext.agentId
     const queuedCommandsSnapshot = getCommandsByMaxPriority(
       sleepRan ? 'later' : 'next',
     ).filter(cmd => {
@@ -2675,7 +2679,15 @@ if (
       if (isMainThread) return cmd.agentId === undefined
       // Subagents only drain task-notifications addressed to them — never
       // user prompts, even if someone stamps an agentId on one.
-      return cmd.mode === 'task-notification' && cmd.agentId === currentAgentId
+      // zai patch (2026-09-07, plan P0-1.3, worktree-dsh): 优先 cmd.sessionId,
+      // fallback cmd.agentId(vendor 子 agent / TUI 兼容)。当 zai 入队时已注入
+      // 独立 sessionId 字段, 这里走 sessionId 路径精确路由; 没设 sessionId
+      // 的 vendor 原生 cmd 走 agentId 兼容路径, 不破坏 vendor 单进程行为。
+      return (
+        cmd.mode === 'task-notification' &&
+        (((cmd as any).sessionId === currentAgentId) ||
+          (cmd.agentId === currentAgentId && (cmd as any).sessionId === undefined))
+      )
     })
 
     for await (const attachment of getAttachmentMessages(

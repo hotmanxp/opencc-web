@@ -2,12 +2,43 @@ import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+// zai patch (2026-09-07, fix-busy-flush-v2-r2, worktree-dsh, Item E):
+// mock 模式从静态 `sessionInbox.followup` 改为 per-session `getSessionInbox`
+// 工厂返回固定 instance。原因: taskFactoryBridge.ts (2026-09-06 改) 走
+// `getSessionInbox(sid)` per-session 工厂, 静态 singleton `sessionInbox`
+// 已 deprecated。原 test 仍 `vi.spyOn(sessionInbox, 'followup')`, 而源码
+// 不再调静态 `sessionInbox.followup` —— spy 永远不触发, 1/10 测试失败。
+const followupMock = vi.fn()
+const mockInbox = {
+  followup: (...args: unknown[]) => followupMock(...args),
+  setBusy: vi.fn(),
+  clearRunning: vi.fn(),
+  setWakeHandler: vi.fn(),
+  steer: vi.fn(),
+  inject: vi.fn(),
+  consumeNextTurn: vi.fn(() => null),
+  consumeNextStep: vi.fn(() => []),
+  peekNextTurnCount: vi.fn(() => 0),
+  peekNextStepCount: vi.fn(() => 0),
+  isBusy: vi.fn(() => false),
+  promoteNextStepToNextTurn: vi.fn(() => 0),
+  resetWakeBudget: vi.fn(),
+  wakeFor: vi.fn(),
+}
+vi.mock('../../../src/server/services/sessionInbox.js', () => ({
+  sessionInbox: {},
+  getSessionInbox: vi.fn(() => mockInbox),
+  setSessionInboxWakeHandler: vi.fn(),
+  disposeSessionInbox: vi.fn(),
+  listSessionInboxIds: vi.fn(() => []),
+}))
+
 import {
   initTaskFactoryBridge, getTaskFactoryState, getTaskFactoryStateSync, setTaskFactoryState,
   injectSupervisorCommand, buildTaskCommand, QUICK_VERIFIER_HINT, __resetForTests,
 } from '../../../src/server/services/taskFactoryBridge.js'
 import { eventBus } from '../../../src/server/services/eventBus.js'
-import { sessionInbox } from '../../../src/server/services/sessionInbox.js'
 
 let dir: string
 beforeAll(async () => {
@@ -42,9 +73,9 @@ describe('taskFactoryBridge', () => {
   it('injectSupervisorCommand 走 sessionInbox.followup', async () => {
     __resetForTests()
     await setTaskFactoryState({ managedEnabled: false, supervisorSessionId: 'sess-sup' })
-    const spy = vi.spyOn(sessionInbox, 'followup')
+    followupMock.mockClear()
     injectSupervisorCommand('<task-command action="dispatch"></task-command>')
-    expect(spy).toHaveBeenCalledWith(
+    expect(followupMock).toHaveBeenCalledWith(
       'sess-sup',
       expect.objectContaining({
         source: expect.objectContaining({ kind: 'task-factory' }),
@@ -56,16 +87,14 @@ describe('taskFactoryBridge', () => {
   it('injectSupervisorCommand 在 sid 为 null 时跳过(2026-09-02 reset 护栏)', async () => {
     __resetForTests()
     await setTaskFactoryState({ managedEnabled: false, supervisorSessionId: null })
-    // mockClear 处理前一个测试未 mockRestore 的 spy 累积
-    const spy = vi.spyOn(sessionInbox, 'followup')
-    spy.mockClear()
+    // mockClear 处理前一个测试未 mockRestore 的累积
+    followupMock.mockClear()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     warn.mockClear()
     injectSupervisorCommand('<task-command action="dispatch"></task-command>')
-    expect(spy).not.toHaveBeenCalled()
+    expect(followupMock).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('injectSupervisorCommand skipped'))
     warn.mockRestore()
-    spy.mockRestore()
   })
 })
 

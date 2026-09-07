@@ -21,7 +21,9 @@ import { getExternalEditor } from '../../../utils/editor.js';
 import { getDisplayPath } from '../../../utils/file.js';
 import { toIDEDisplayName } from '../../../utils/ide.js';
 import { logError } from '../../../utils/log.js';
-import { enqueuePendingNotification } from '../../../utils/messageQueueManager.js';
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper
+import { zaiEnqueuePendingNotification } from '../../../../compat/messageQueueAdapter.js';
 import { createUserMessage } from '../../../utils/messages.js';
 import { getMainLoopModel, getRuntimeMainLoopModel, modelDisplayString } from '../../../utils/model/model.js';
 import { createPromptRuleContent, isClassifierPermissionsEnabled, PROMPT_PREFIX } from '../../../utils/permissions/bashClassifier.js';
@@ -337,7 +339,7 @@ export function ExitPlanModePermissionRequest({
         getAppState: store.getState,
         setAppState: store.setState,
         signal: new AbortController().signal
-      }).then(msg => enqueuePendingNotification({
+      }).then(msg => zaiEnqueuePendingNotification({
         value: msg,
         mode: 'task-notification'
       })).catch(logError);

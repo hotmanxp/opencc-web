@@ -30,13 +30,36 @@ export function initStateBridge(): () => void {
   const onCwdChanged = (e: { sessionId: string; cwd: string; updatedAt: number }) => {
     eventBus.emit({ type: 'cwd.changed', ...e })
   }
-  // zai patch (2026-09-01): 不再调 BashNotifier —— repl/inproc 运行时下
-  // vendor LocalShellTask.enqueueShellNotification 的 commandQueue 与查询
-  // loop 同 module 实例,mid-turn drain 可达(会话 sess-1788225186061 现场:
-  // BashNotifier 与 vendor drain 双链路导致通知重复注入)。这里只保留
-  // UI 侧 SSE 透传。
+  // zai patch (2026-09-07, plan P0-1.6, worktree-dsh): 在保留 UI 侧 SSE
+  // 透传的同时, 把 stateBridge 当作 BashNotifier 的 listener —— 之前
+  // initBashNotifier() 从未被调用, 后台 Bash 完成通知无通道到达
+  // BashNotifier。stateChangeBus.on('bash_task.changed', ...) 与 initBashNotifier
+  // 在同一 initStateBridge 调用链里, 保证 listener 先于 backgroundRuntime
+  // 的第一次 emit 注册。
+  //
+  // 备注 (继承自 2026-09-01): repl/inproc runtime 下 vendor drain 与
+  // BashNotifier 双链路并存, BashNotifier 内部已守 `getRuntimeCore() ===
+  // 'inproc'` 直接 return (bashNotifier.ts:140), 不重复注入。
+  //
+  // dynamic import + .then 是 fire-and-forget, 不阻塞 initStateBridge
+  // 返回。initStateBridge 自身保持同步签名(createApp:82 调用点)。
+  // 失败回落到 'no-op' 模式 —— stateBridge 继续转发 UI SSE, 只是不
+  // 注入 BashNotifier。
+  let bashNotifier: ReturnType<typeof import('./bashNotifier.js').initBashNotifier> | null = null
+  void import('./bashNotifier.js')
+    .then(({ initBashNotifier }) => {
+      bashNotifier = initBashNotifier()
+    })
+    .catch((err) => {
+      console.warn('[stateBridge] dynamic import bashNotifier failed:', err)
+    })
   const onBashTaskChanged = (e: { sessionId: string; task: unknown }) => {
     eventBus.emit({ type: 'bash_task.changed', ...e })
+    if (!bashNotifier) return
+    // 异步 handle —— fire-and-forget, 不阻塞 stateBridge dispatch。
+    void bashNotifier.handle(e as { sessionId: string; task: any }).catch((err) =>
+      console.warn('[stateBridge] BashNotifier.handle failed:', err),
+    )
   }
   const onV2TaskChanged = (e: { sessionId: string; task: unknown; action: 'upsert' | 'delete' }) => {
     eventBus.emit({ type: 'v2_task.changed', ...e })

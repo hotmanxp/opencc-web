@@ -138,10 +138,54 @@ export { registerProcessOutputErrorHandlers } from './runtime/index.js'
 // not a function`。
 export {
   enqueuePendingNotification,
+  enqueue,
   hasCommandsInQueue,
   resetCommandQueue,
   subscribeToCommandQueue,
+  // zai patch (2026-09-07, fix-busy-flush-v2, worktree-dsh): 主 turn finally
+  // 把 vendor commandQueue 里指向本 session 的 task-notification 命令兜底
+  // drain —— vendor QueryEngine mid-turn drain (query.ts:2675) 只在下一次
+  // API call 之前触发, repl runtime 没有 print.ts 的 subscribeToHeadlessWake
+  // 唤醒 (print.ts:2095), 主 turn end_turn 后若没有下一次 API call,
+  // 命令就卡在 commandQueue 永远不见天日。dequeueAllMatching + peek 暴露
+  // 给 zai-server 入口层, 配合 SessionInbox.promoteNextStepToNextTurn 兜底。
+  dequeueAllMatching,
+  peek,
+  getCommandQueue,
+  // zai patch (2026-09-07, fix-busy-flush-v2-r2, worktree-dsh, Item D):
+  // 补齐 vendor commandQueue 全量 capability 暴露。下次类似 busy-flush
+  // 类兜底 (e.g. cron-prompt 优先级感知、emergency-clear ESC) 不用再
+  // 改 bundle-entry。命名规范: 全部从 `./opencc-src/utils/messageQueueManager.js`
+  // 直接 re-export, 不在中间层加 wrapper; 单实例 invariant 保留。
+  getCommandQueueLength,
+  getCommandQueueSnapshot,
+  dequeue,
+  remove,
+  removeByFilter,
+  clearCommandQueue,
+  getCommandsByMaxPriority,
+  recheckCommandQueue,
+  isSlashCommand,
 } from './opencc-src/utils/messageQueueManager.js'
+// zai patch (2026-09-07, plan P0-1.1, worktree-dsh): 暴露 QueuedCommand
+// 类型供 zai 层 messageQueueAdapter.ts 入参使用(自动注入独立 sessionId
+// 字段)。原 vendor 类型默认 vendor-only 内部消费, zai wrapper 需要
+// 类型级支持 —— 暴露后 zai 调用方拿到的是 QueuedCommand 的精确类型
+// 而不是 any, typecheck 仍能发现误用。
+export type { QueuedCommand } from './opencc-src/types/textInputTypes.js'
+// zai patch (2026-09-07, plan P0-1.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// 暴露 compat 层 zaiEnqueue / zaiEnqueuePendingNotification wrapper,
+// 让 zai-server `services/messageQueueAdapter.ts` 与 26 个 vendor 调用方
+// 都能从主入口 `@zn-ai/zn-agent-core` 拿到(走 bundle 单实例, 跨模块
+// globalThis 桥共享)。vendor 文件(`opencc-src/*`) 不能直接 import
+// zai-server 路径(隔离), 但可以 import 同一 bundle 内的 compat 模块。
+export {
+  zaiEnqueue,
+  zaiEnqueuePendingNotification,
+  __zaiGetCurrentSessionId,
+  installMessageQueueAdapterBridges,
+  type ZaiQueuedCommand,
+} from './compat/messageQueueAdapter.js'
 export { repairAndPersistTranscript } from './compat/transcript/repair.js'
 export {
   appendUserMessageV2,

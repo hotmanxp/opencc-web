@@ -7,7 +7,9 @@ import { TodoWriteTool } from '../../tools/TodoWriteTool/TodoWriteTool.js';
 import { type BackgroundRemoteSessionPrecondition, checkBackgroundRemoteSessionEligibility } from '../../utils/background/remote/remoteSession.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { logError } from '../../utils/log.js';
-import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper (4 处调用)
+import { zaiEnqueuePendingNotification } from '../../../compat/messageQueueAdapter.js';
 import { extractTag } from '../../utils/messages.js';
 import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js';
 import { deleteRemoteAgentMetadata, listRemoteAgentMetadata, type RemoteAgentMetadata, writeRemoteAgentMetadata } from '../../utils/sessionStorage.js';
@@ -200,7 +202,7 @@ function enqueueRemoteNotification(taskId: string, title: string, status: 'compl
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
 <${SUMMARY_TAG}>Remote task "${title}" ${statusText}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>`;
-  enqueuePendingNotification({
+  zaiEnqueuePendingNotification({
     value: message,
     mode: 'task-notification'
   });
@@ -256,7 +258,7 @@ export function enqueueUltraplanFailureNotification(taskId: string, sessionId: s
 <${SUMMARY_TAG}>Ultraplan failed: ${reason}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>
 The remote Ultraplan session did not produce a plan (${reason}). Inspect the session at ${sessionUrl} and tell the user to retry locally with plan mode.`;
-  enqueuePendingNotification({
+  zaiEnqueuePendingNotification({
     value: message,
     mode: 'task-notification'
   });
@@ -359,7 +361,7 @@ function enqueueRemoteReviewNotification(taskId: string, reviewContent: string, 
 The remote review produced the following findings:
 
 ${reviewContent}`;
-  enqueuePendingNotification({
+  zaiEnqueuePendingNotification({
     value: message,
     mode: 'task-notification'
   });
@@ -377,7 +379,7 @@ function enqueueRemoteReviewFailureNotification(taskId: string, reason: string, 
 <${SUMMARY_TAG}>Remote review failed: ${reason}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>
 Remote review did not produce output (${reason}). Tell the user to retry /ultrareview, or use /review for a local review instead.`;
-  enqueuePendingNotification({
+  zaiEnqueuePendingNotification({
     value: message,
     mode: 'task-notification'
   });

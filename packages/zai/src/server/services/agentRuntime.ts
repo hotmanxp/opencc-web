@@ -158,11 +158,27 @@ const permissionRegistry = new PermissionRegistry()
 // for the registry shape. Imported lazily below to avoid a circular
 // dep (inboxReminder.ts imports sessionInbox.ts which is fine; this
 // only delays the binding until init).
-import { registerExtraReminderProvider } from '@zn-ai/zn-agent-core'
+import {
+  enqueue as _vendorEnqueue,
+  enqueuePendingNotification as _vendorEnqueuePendingNotification,
+  installMessageQueueAdapterBridges,
+  registerExtraReminderProvider,
+} from '@zn-ai/zn-agent-core'
 import { drainInboxReminder } from './inboxReminder.js'
 let inboxReminderProviderRegistered = false
 registerExtraReminderProvider((sid: string) => drainInboxReminder(sid))
 inboxReminderProviderRegistered = true
+
+// zai patch (2026-09-07, plan P0-1.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// 入口层 install 一次 vendor enqueue 桥, 让 compat 层 zaiEnqueue*
+// wrapper 拿到真实 vendor 函数引用(bundle 单实例保证两边是同一个 module)。
+// 必须在 vendor 第一次调 zaiEnqueuePendingNotification 前 set,
+// 否则 throw loud("vendor bridge not installed")。agentRuntime.ts 是
+// server 启动必经模块, 这里 install 一次覆盖整个 server 生命周期。
+installMessageQueueAdapterBridges({
+  enqueue: _vendorEnqueue,
+  enqueuePendingNotification: _vendorEnqueuePendingNotification,
+})
 
 // zai patch: AskUserQuestion bridge context — static parts injected
 // once at init. The zai-native AskUserQuestion wrapper
@@ -179,6 +195,51 @@ inboxReminderProviderRegistered = true
   askRegistry,
   permissionRegistry,
   onYield: bridgeToolYieldToPrompt,
+}
+
+// zai patch (2026-09-07, plan P2-2.4, worktree-dsh): install 8 dsh inbox
+// delivery kinds → zai 内部 channel 桥(inboxMessageHandler.dispatchDshInbox)。
+// 桥接: SessionInbox.followup / askRegistry.answer|reject / eventBus.emit /
+// toolExecution.queueResult / SessionInbox.steer (prependReminder 走
+// nextStep lane, 由 agentRuntime.ts registerExtraReminderProvider 的
+// drainInboxReminder 在下次 API call 时 prepend 为 <system-reminder>)。
+import { ElicitationRegistry } from './elicitationRegistry.js'
+import { queueResult as toolExecutionQueueResult } from './toolExecution.js'
+const _elicitationRegistry = new ElicitationRegistry()
+;(globalThis as any).__zaiInboxBridge = {
+  followup: (sessionId: string, msg: { id: string; source: { kind: string; form: string }; content: string; createdAt: number }) => {
+    getSessionInbox(sessionId).followup(sessionId, msg as InboxMessage)
+  },
+  answerAsk: (toolUseId: string, payload: Record<string, unknown>) =>
+    askRegistry.answer(toolUseId, payload as Parameters<typeof askRegistry.answer>[1]),
+  rejectAsk: (toolUseId: string, reason?: string) =>
+    askRegistry.reject(toolUseId, reason ?? 'user_rejected'),
+  requestElicit: (input: Record<string, unknown>) =>
+    _elicitationRegistry.request(input as Parameters<typeof _elicitationRegistry.request>[0]),
+  queueToolResult: (sessionId: string, toolUseId: string, output: unknown, isError: boolean) => {
+    // zai patch (2026-09-07, fix tool_result dsh bridge, worktree-dsh):
+    // tool_result dsh delivery kind → toolExecution.queueResult。
+    // out-of-band 通路: 外部 inbox 消息(非 queryLoop for-await)需要把
+    // tool_use result 同步进 transcript + emit runtime.tool_result SSE。
+    toolExecutionQueueResult(sessionId, toolUseId, output, isError)
+  },
+  prependReminder: (sessionId: string, text: string) => {
+    // zai patch (2026-09-07, fix system_reminder dsh bridge, worktree-dsh):
+    // system_reminder dsh delivery kind → SessionInbox.steer 入 nextStep
+    // lane, 由 registerExtraReminderProvider 的 drainInboxReminder 在下次
+    // API call 时渲染为 <system-reminder> prepend 到 prompt。
+    // steer 而非 followup: reminder 是 mid-turn drain 语义(nextStep
+    // lane), 不是 wake(idle → nextTurn)语义。
+    getSessionInbox(sessionId).steer(sessionId, {
+      id: `system_reminder-${Date.now()}`,
+      source: { kind: 'system', form: 'reminder' },
+      content: text,
+      createdAt: Date.now(),
+    } as InboxMessage)
+  },
+  emit: (eventType: string, payload: Record<string, unknown>) => {
+    eventBus.emit({ type: eventType, ...payload } as Parameters<typeof eventBus.emit>[0])
+  },
 }
 
 /**
@@ -316,6 +377,51 @@ export function bridgePermissionPendingToPromptPermission(
 }
 
 /**
+ * zai patch (2026-09-07, plan P2-2.5, worktree-dsh): elicit_pending 是
+ * MCP Elicitation 工具触发的, vendor 原生无 zai web 端桥接(React/Ink
+ * only)。这里把 elicit_pending 翻译成 `prompt.elicit` ServerEvent,
+ * 与 ask_pending / permission_pending 同构, 让前端 elicit form 弹窗
+ * 能响应(ElicitationRegistry 通过此 channel 注册)。
+ */
+export function bridgeElicitPendingToPromptElicit(
+  event:
+    | {
+        type?: string
+        id?: string
+        toolUseId?: string
+        elicitationId?: string
+        mcpServerName?: string
+        message?: string
+        mode?: 'form' | 'url'
+        url?: string
+        requestedSchema?: Record<string, unknown>
+      }
+    | undefined,
+): void {
+  if (!event || event.type !== 'tool_use:elicit_pending') return
+  const bus = (globalThis as any).__zaiEventBus as
+    | { emit: (e: unknown) => void }
+    | undefined
+  if (!bus) return
+  const bridge = ((globalThis as any).__zaiBridgeCtx ?? {}) as {
+    sessionId?: string
+  }
+  const sessionId =
+    getSessionIdFromChain() ?? bridge.sessionId ?? currentSessionId ?? ''
+  bus.emit({
+    type: 'prompt.elicit',
+    sessionId,
+    toolUseId: event.id ?? event.toolUseId ?? '',
+    elicitationId: event.elicitationId ?? '',
+    mcpServerName: event.mcpServerName ?? '',
+    message: event.message ?? '',
+    mode: event.mode ?? 'form',
+    url: event.url,
+    requestedSchema: event.requestedSchema,
+  })
+}
+
+/**
  * Unified bridge onYield dispatcher. The AskUserQuestion wrapper and the
  * headless permission bridge both emit through `__zaiBridgeCtx.onYield`; the
  * per-tool bridge functions translate each vocabulary to the matching
@@ -333,6 +439,12 @@ export function bridgeToolYieldToPrompt(
       break
     case 'tool_use:permission_pending':
       bridgePermissionPendingToPromptPermission(event)
+      break
+    // zai patch (2026-09-07, plan P2-2.5, worktree-dsh): 扩展 onYield 处理
+    // MCP elicitation (vendor tool_use:elicit_pending)。不破现有 vendor
+    // 调用方 —— 仅新增 case, 旧 path 行为不变。
+    case 'tool_use:elicit_pending':
+      bridgeElicitPendingToPromptElicit(event)
       break
     default:
       break
@@ -615,6 +727,11 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     console.warn('[initAgentRuntime] agent registry init failed:', err)
   }
 
+  // zai patch (2026-09-07, plan P0-1.6, worktree-dsh): BashNotifier 接入
+  // 实际由 initStateBridge(createApp:82)负责 —— 在 backgroundRuntime
+  // 启动后、第一次 publish 'bash_task.changed' 前完成 listener 注册。
+  // 这里仅留注释占位, 不重复 init(单例守护 idempotent)。
+
   // Build the new OpenccRuntime. The runtime is awaited so the
   // synchronous `initBackgroundRuntime()` call in `createApp` (the
   // very next line) sees a non-null `runtime` and can read it via
@@ -828,20 +945,64 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
             : {}),
         }
       }
-      // TODO (plan §5 MCP elicitation row): wire a proper ElicitRegistry
-      // / eventBus event so the web UI can render elicitation prompts.
-      // For now we cancel so MCP servers never block; users get a console
-      // warning instead of a UI dialog. Tracked as a follow-up alongside
-      // the elicitation.ask UI work.
+      // zai patch (2026-09-07, plan P2-2.5, worktree-dsh): wire vendor
+      // elicit_pending → ElicitationRegistry.request + prompt.elicit SSE。
+      // 之前 stub 直接 cancel, MCP 服务端永远拿不到用户答复, 客户端也
+      // 看不到弹窗。这里:
+      //   1. emit prompt.elicit ServerEvent 给前端 SSE 渠道
+      //      (前端 useEventStream reducer 据此弹 elicit form)
+      //   2. 同步调 _elicitationRegistry.request 注册 elicitationId,
+      //      返回 Promise 等用户答复
+      //   3. 用户答复(ElicitationRegistry.resolve)后, result 透传 vendor
+      //      createPrintRuntime → control_response_success
       const elicitationBridge: ElicitationBridgeFn = async ({
         sessionId,
+        requestId,
         mcpServerName,
         message,
+        mode,
+        url,
+        elicitationId,
+        requestedSchema,
       }) => {
-        console.warn(
-          `[inproc] MCP elicitation not yet wired to UI — cancelling: server=${mcpServerName} message=${message.slice(0, 80)} session=${sessionId}`,
-        )
-        return { action: 'cancel' }
+        // 1. emit prompt.elicit SSE (前端弹窗)
+        const bus = (globalThis as any).__zaiEventBus as
+          | { emit: (e: unknown) => void }
+          | undefined
+        if (bus) {
+          bus.emit({
+            type: 'prompt.elicit',
+            sessionId,
+            toolUseId: requestId,
+            elicitationId: elicitationId ?? '',
+            mcpServerName: mcpServerName ?? '',
+            message: message ?? '',
+            mode: mode ?? 'form',
+            url,
+            requestedSchema,
+          })
+        }
+        // 2. 注册到 ElicitationRegistry, 等用户答复
+        try {
+          const result = await _elicitationRegistry.request({
+            elicitationId,
+            mcpServerName: mcpServerName ?? '',
+            message: message ?? '',
+            mode: mode ?? 'form',
+            url,
+            requestedSchema,
+          })
+          return {
+            action: result.action,
+            ...(result.content ? { content: result.content } : {}),
+          }
+        } catch (err) {
+          // elicitId 二次注册等异常 → cancel, MCP 服务端不阻塞
+          console.warn(
+            `[inproc] ElicitationRegistry.request failed — cancelling: server=${mcpServerName} message=${(message ?? '').slice(0, 80)} session=${sessionId} err=${String(err)}`,
+          )
+          return { action: 'cancel' }
+        }
       }
       runtime = await createPrintRuntime({
         dataDir,

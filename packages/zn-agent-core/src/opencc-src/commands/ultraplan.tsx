@@ -11,7 +11,9 @@ import type { LocalJSXCommandCall } from '../types/command.js';
 import { logForDebugging } from '../utils/debug.js';
 import { errorMessage } from '../utils/errors.js';
 import { logError } from '../utils/log.js';
-import { enqueuePendingNotification } from '../utils/messageQueueManager.js';
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper (7 处 call sites)
+import { zaiEnqueuePendingNotification } from '../../compat/messageQueueAdapter.js';
 import { ALL_MODEL_CONFIGS } from '../utils/model/configs.js';
 import { updateTaskState } from '../utils/task/framework.js';
 import { archiveRemoteSession, teleportToRemote } from '../utils/teleport.js';
@@ -116,7 +118,7 @@ function startDetachedPoll(taskId: string, sessionId: string, url: string, getAp
           ...prev,
           ultraplanSessionUrl: undefined
         } : prev);
-        enqueuePendingNotification({
+        zaiEnqueuePendingNotification({
           value: [`Ultraplan approved — executing in Z.Ai on the web. Follow along at: ${url}`, '', 'Results will land as a pull request when the remote session finishes. There is nothing to do here.'].join('\n'),
           mode: 'task-notification'
         });
@@ -150,7 +152,7 @@ function startDetachedPoll(taskId: string, sessionId: string, url: string, getAp
         reason: (e instanceof UltraplanPollError ? e.reason : 'network_or_unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         reject_count: e instanceof UltraplanPollError ? e.rejectCount : undefined
       });
-      enqueuePendingNotification({
+      zaiEnqueuePendingNotification({
         value: `Ultraplan failed: ${errorMessage(e)}\n\nSession: ${url}`,
         mode: 'task-notification'
       });
@@ -213,11 +215,11 @@ export async function stopUltraplan(taskId: string, sessionId: string, setAppSta
     ultraplanLaunching: undefined
   } : prev);
   const url = getRemoteSessionUrl(sessionId, process.env.SESSION_INGRESS_URL);
-  enqueuePendingNotification({
+  zaiEnqueuePendingNotification({
     value: `Ultraplan stopped.\n\nSession: ${url}`,
     mode: 'task-notification'
   });
-  enqueuePendingNotification({
+  zaiEnqueuePendingNotification({
     value: 'The user stopped the ultraplan session above. Do not respond to the stop notification — wait for their next message.',
     mode: 'task-notification',
     isMeta: true
@@ -321,7 +323,7 @@ async function launchDetached(opts: {
         precondition_errors: eligibility.errors.map(e => e.type).join(',') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
       });
       const reasons = eligibility.errors.map(formatPreconditionError).join('\n');
-      enqueuePendingNotification({
+      zaiEnqueuePendingNotification({
         value: `ultraplan: cannot launch remote session —\n${reasons}`,
         mode: 'task-notification'
       });
@@ -345,7 +347,7 @@ async function launchDetached(opts: {
       logEvent('tengu_ultraplan_create_failed', {
         reason: (bundleFailMsg ? 'bundle_fail' : 'teleport_null') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
       });
-      enqueuePendingNotification({
+      zaiEnqueuePendingNotification({
         value: `ultraplan: session creation failed${bundleFailMsg ? ` — ${bundleFailMsg}` : ''}. See --debug for details.`,
         mode: 'task-notification'
       });
@@ -387,7 +389,7 @@ async function launchDetached(opts: {
     logEvent('tengu_ultraplan_create_failed', {
       reason: 'unexpected_error' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
     });
-    enqueuePendingNotification({
+    zaiEnqueuePendingNotification({
       value: `ultraplan: unexpected error — ${errorMessage(e)}`,
       mode: 'task-notification'
     });

@@ -7,6 +7,9 @@
 
 import { createCronScheduler, type CronScheduler } from '../../../opencc-src/utils/cronScheduler.js'
 import { enqueuePendingNotification } from '../../../opencc-src/utils/messageQueueManager.js'
+// zai patch (2026-09-07, plan P1-2.1, worktree-dsh, fix-area: vendor-enqueue-imports):
+// import 替换 vendor enqueue 为 zai layer wrapper (cron 触发入队通知 LLM)
+import { zaiEnqueuePendingNotification } from '../../messageQueueAdapter.js'
 import { isKairosCronEnabled } from '../../../opencc-src/tools/ScheduleCronTool/prompt.js'
 
 type SetupScheduledTasksOpts = {
@@ -30,7 +33,7 @@ export function setupScheduledTasks(opts: SetupScheduledTasksOpts): SetupSchedul
   if (isKairosCronEnabled()) {
     scheduler = createCronScheduler({
       onFire: prompt => {
-        enqueuePendingNotification({
+        zaiEnqueuePendingNotification({
           value: prompt,
           mode: 'prompt',
           priority: 'later',
