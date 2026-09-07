@@ -2676,7 +2676,19 @@ if (
       sleepRan ? 'later' : 'next',
     ).filter(cmd => {
       if (isSlashCommand(cmd)) return false
-      if (isMainThread) return cmd.agentId === undefined
+      // zai patch (2026-09-07, fix 🔴-2): 主线程同样必须按 sessionId 路由。
+      // zai 入队命令 agentId 恒为 undefined、sessionId 恒有值
+      // (createReplSession / messageQueueAdapter),旧逻辑
+      // `cmd.agentId === undefined` 会让任一活跃主线程 session 吞掉其它
+      // session 排队的 prompt/task-notification。vendor 原生 cmd(无
+      // sessionId)行为不变。
+      if (isMainThread) {
+        return (
+          cmd.agentId === undefined &&
+          ((cmd as any).sessionId === undefined ||
+            (cmd as any).sessionId === currentAgentId)
+        )
+      }
       // Subagents only drain task-notifications addressed to them — never
       // user prompts, even if someone stamps an agentId on one.
       // zai patch (2026-09-07, plan P0-1.3, worktree-dsh): 优先 cmd.sessionId,

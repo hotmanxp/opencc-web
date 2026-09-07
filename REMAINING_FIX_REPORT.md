@@ -19,7 +19,7 @@
 - 新增 `test/server/agent.test.ts:919-952` `主 turn 结束后调 flushPendingBashNotifications(sessionId)`,真实 HTTP 启 app + spyOn `flushPendingBashNotifications` + POST `/api/agent/prompt` → 断言 spy 被以 sessionId 调用一次。23/23 pass
 - API smoke:启动 zai dev (port 8107/7719)→ POST `/api/agent/sessions` 返回合法 sessionId
 
-## 2. Item 2: tool_result / system_reminder dsh bridge
+## 2. Item 2: tool_result / system_reminder inbox bridge
 
 ### 修复
 

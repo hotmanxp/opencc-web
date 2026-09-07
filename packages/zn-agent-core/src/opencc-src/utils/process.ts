@@ -1,5 +1,3 @@
-import { getPrintSessionContext } from './printSessionRuntime.js'
-
 function handleEPIPE(
   stream: NodeJS.WriteStream,
 ): (err: NodeJS.ErrnoException) => void {
@@ -28,14 +26,6 @@ function writeOut(stream: NodeJS.WriteStream, data: string): void {
 }
 
 export function writeToStdout(data: string): void {
-  // zai patch (2026-08-27): in-process headless sessions route NDJSON output
-  // to the per-session sink instead of the process-wide stdout. Outside a
-  // print-session context this is exactly the original behavior.
-  const ctx = getPrintSessionContext()
-  if (ctx) {
-    ctx.writeOutput(data)
-    return
-  }
   writeOut(process.stdout, data)
 }
 

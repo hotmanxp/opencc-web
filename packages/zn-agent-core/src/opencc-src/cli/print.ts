@@ -17,12 +17,6 @@ import {
 } from 'src/commands.js'
 import { createStreamlinedTransformer } from 'src/utils/streamlinedTransform.js'
 import { installStreamJsonStdoutGuard } from 'src/utils/streamJsonStdoutGuard.js'
-// zai patch (2026-08-27): in-process headless session runtime context
-import {
-  getPrintSessionContext,
-  getPrintSessionKey,
-  isPrintSessionMode,
-} from 'src/utils/printSessionRuntime.js'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import type { ThinkingConfig } from 'src/utils/thinking.js'
 import { assembleToolPool, filterToolsByDenyRules } from 'src/tools.js'
@@ -404,41 +398,26 @@ Shut down your team and prepare your final response for the user.`
 
 // Track message UUIDs received during the current session runtime
 const MAX_RECEIVED_UUIDS = 10_000
-// zai patch (2026-08-27): bucketed per print-session (was process-wide Set/array,
-// which would cross-dedup messages between concurrent in-process sessions).
-// CLI mode uses the single shared `__cli_default__` bucket — identical semantics.
-type ReceivedUuidBucket = { set: Set<UUID>; order: UUID[] }
-const receivedUuidBuckets = new Map<string, ReceivedUuidBucket>()
+const receivedUuidSet = new Set<UUID>()
+const receivedUuidOrder: UUID[] = []
 
 function trackReceivedMessageUuid(uuid: UUID): boolean {
-  const key = getPrintSessionKey()
-  let bucket = receivedUuidBuckets.get(key)
-  if (!bucket) {
-    bucket = { set: new Set<UUID>(), order: [] }
-    receivedUuidBuckets.set(key, bucket)
-  }
-  if (bucket.set.has(uuid)) {
+  if (receivedUuidSet.has(uuid)) {
     return false // duplicate
   }
-  bucket.set.add(uuid)
-  bucket.order.push(uuid)
+  receivedUuidSet.add(uuid)
+  receivedUuidOrder.push(uuid)
   // Evict oldest entries when at capacity
-  if (bucket.order.length > MAX_RECEIVED_UUIDS) {
-    const toEvict = bucket.order.splice(
+  if (receivedUuidOrder.length > MAX_RECEIVED_UUIDS) {
+    const toEvict = receivedUuidOrder.splice(
       0,
-      bucket.order.length - MAX_RECEIVED_UUIDS,
+      receivedUuidOrder.length - MAX_RECEIVED_UUIDS,
     )
     for (const old of toEvict) {
-      bucket.set.delete(old)
+      receivedUuidSet.delete(old)
     }
   }
   return true // new UUID
-}
-
-/** zai patch (2026-08-27): drop a finished session's dedup bucket (called by
- * the in-process session factory on dispose; no-op for CLI sessions). */
-export function clearReceivedMessageUuids(sessionKey: string): void {
-  receivedUuidBuckets.delete(sessionKey)
 }
 
 type PromptValue = string | ContentBlockParam[]
@@ -627,13 +606,7 @@ export async function runHeadless(
   // line-by-line JSON parser. Install a guard that diverts non-JSON lines to
   // stderr so the stream stays clean. Must run before the first
   // structuredIO.write below.
-  if (
-    options.outputFormat === 'stream-json' &&
-    // zai patch (2026-08-27): the guard monkey-patches process.stdout.write
-    // (a process-wide singleton) — meaningless and harmful when N in-process
-    // sessions each own a per-session sink. Skip it in print-session mode.
-    !isPrintSessionMode()
-  ) {
+  if (options.outputFormat === 'stream-json') {
     installStreamJsonStdoutGuard()
   }
 
@@ -926,12 +899,7 @@ export async function runHeadless(
   }
 
   // Install errors handlers to gracefully handle broken pipes (e.g., when parent process dies)
-  // zai patch (2026-08-27): in-process sessions run inside the zai server —
-  // the server owns its stdio error handling; per-session calls would stack
-  // listeners on the real process.stdout/stderr.
-  if (!isPrintSessionMode()) {
-    registerProcessOutputErrorHandlers()
-  }
+  registerProcessOutputErrorHandlers()
 
   headlessProfilerCheckpoint('after_loadInitialMessages')
 
@@ -1222,15 +1190,7 @@ function runHeadlessStreaming(
     }
     void gracefulShutdown(0)
   }
-  // zai patch (2026-08-27): in-process sessions must not stack process-wide
-  // SIGINT listeners (never removed — one per session would accumulate and
-  // all fire on a single Ctrl+C). In session mode interruption arrives via the
-  // SDK input queue's control_request{subtype:'interrupt'} (vendor handler at
-  // the interrupt branch aborts the same abortController); the server owns
-  // process signals.
-  if (!isPrintSessionMode()) {
-    process.on('SIGINT', sigintHandler)
-  }
+  process.on('SIGINT', sigintHandler)
 
   // Dump run()'s state at SIGTERM so a stuck session's healthsweep can name
   // the do/while(waitingForAgents) poll without reading the transcript.
@@ -2065,13 +2025,13 @@ function runHeadlessStreaming(
     // task-notifications / orphaned-permission / cron-prompt commands all
     // arrive via the same `commandQueue` (see utils/messageQueueManager.ts)
     // but were never wired to a wake in headless streaming mode. TUI/REPL
-    // gets this for free via hooks/useQueueProcessor.ts; -p / spawn / inproc
-    // don't, so a background agent completing while run()'s do-while is
+    // gets this for free via hooks/useQueueProcessor.ts; -p (headless)
+    // doesn't, so a background agent completing while run()'s do-while is
     // momentarily between iterations (completeAsyncAgent flipped task status
     // to 'completed' but enqueueAgentNotification hasn't fired yet) sees
     // waitingForAgents=false → do-while exits → run() returns → for-await
     // on structuredInput suspends → the next enqueuePendingNotification
-    // lands with no consumer. Symptom in zai inproc: agent completes, main
+    // lands with no consumer. Symptom in zai: agent completes, main
     // LLM never produces the follow-up summary. The mutex `running` makes
     // this safe mid-turn; the post-finally peek at the bottom of run() picks
     // up items that arrived during the run window.
@@ -2900,7 +2860,7 @@ function runHeadlessStreaming(
         }
         suggestionState.abortController?.abort()
         suggestionState.abortController = null
-        await finalizePendingAsyncHooks(getPrintSessionKey())
+        await finalizePendingAsyncHooks()
         unsubscribeSkillChanges()
         unsubscribeAuthStatus?.()
         statusListeners.delete(rateLimitListener)
@@ -2929,47 +2889,34 @@ function runHeadlessStreaming(
   // run() if !running && !inputClosed. The run() mutex makes this safe
   // during an active turn: the wake no-ops.
   //
-  // zai patch (2026-08-27, P3 cron routing per plan §4 / §6 P3): when this
-  // loop is running inside an in-process print-session context AND the
-  // context's `disableCron` flag is set, skip per-instance scheduling.
-  // The zai-side createPrintRuntime factory owns a single process-wide
-  // scheduler that fires once per `scheduled_tasks.json` task and routes
-  // the prompt to the right sessionId instance via ALS lookup. This
-  // avoids N timers per server + cross-fire risk on shared .zai/scheduled_tasks.json
-  // + 1s N timer cost. Outside any context (CLI / tests / lightweight track)
-  // the per-instance scheduler runs as before.
   let cronScheduler: import('../utils/cronScheduler.js').CronScheduler | null =
     null
   if (cronGate.isKairosCronEnabled()) {
-    const ctx = getPrintSessionContext()
-    const skipForInproc = isPrintSessionMode() && ctx?.disableCron
-    if (!skipForInproc) {
-      cronScheduler = cronSchedulerModule.createCronScheduler({
-        onFire: prompt => {
-          if (inputClosed) return
-          enqueue({
-            mode: 'prompt',
-            value: prompt,
-            uuid: randomUUID(),
-            priority: 'later',
-            // System-generated — matches useScheduledTasks.ts REPL equivalent.
-            // Without this, messages.ts metaProp eval is {} → prompt leaks
-            // into visible transcript when cron fires mid-turn in -p mode.
-            isMeta: true,
-            // Threaded to cc_workload= in the billing-header attribution block
-            // so the API can serve cron requests at lower QoS. drainCommandQueue
-            // reads this per-iteration and hoists it into bootstrap state for
-            // the ask() call.
-            workload: WORKLOAD_CRON,
-          })
-          void run()
-        },
-        isLoading: () => running || inputClosed,
-        getJitterConfig: cronJitterConfigModule.getCronJitterConfig,
-        isKilled: () => !cronGate.isKairosCronEnabled(),
-      })
-      cronScheduler.start()
-    }
+    cronScheduler = cronSchedulerModule.createCronScheduler({
+      onFire: prompt => {
+        if (inputClosed) return
+        enqueue({
+          mode: 'prompt',
+          value: prompt,
+          uuid: randomUUID(),
+          priority: 'later',
+          // System-generated — matches useScheduledTasks.ts REPL equivalent.
+          // Without this, messages.ts metaProp eval is {} → prompt leaks
+          // into visible transcript when cron fires mid-turn in -p mode.
+          isMeta: true,
+          // Threaded to cc_workload= in the billing-header attribution block
+          // so the API can serve cron requests at lower QoS. drainCommandQueue
+          // reads this per-iteration and hoists it into bootstrap state for
+          // the ask() call.
+          workload: WORKLOAD_CRON,
+        })
+        void run()
+      },
+      isLoading: () => running || inputClosed,
+      getJitterConfig: cronJitterConfigModule.getCronJitterConfig,
+      isKilled: () => !cronGate.isKairosCronEnabled(),
+    })
+    cronScheduler.start()
   }
 
   const sendControlResponseSuccess = function (
@@ -4307,12 +4254,7 @@ clients: prev.mcp.clients.map((c: MCPServerConnection) =>
         )
 
         // Check both historical duplicates (from file) and runtime duplicates (this session)
-        // zai patch (2026-08-27): per-session bucket lookup (was shared Set)
-        const uuidBucket = receivedUuidBuckets.get(getPrintSessionKey())
-        if (
-          existsInSession ||
-          (uuidBucket !== undefined && uuidBucket.set.has(message.uuid))
-        ) {
+        if (existsInSession || receivedUuidSet.has(message.uuid)) {
           logForDebugging(`Skipping duplicate user message: ${message.uuid}`)
           // Send acknowledgment for duplicate message if replay mode is enabled
           if (options.replayUserMessages) {
@@ -4350,14 +4292,6 @@ clients: prev.mcp.clients.map((c: MCPServerConnection) =>
         value: await resolveAndPrepend(message, message.message.content),
         uuid: message.uuid,
         priority: message.priority,
-        // zai patch (2026-08-28): forward isMeta from the inbound SDK user
-        // line (headlessPrintSession.sendUserMessage spreads it into the
-        // NDJSON). Without this, a slash-command-expanded prompt submitted
-        // with isMeta:true lands as a PLAIN user message in the transcript
-        // and zai's web UI replays it as if the user typed the whole skill
-        // prompt. ask() already threads cmd.isMeta → createUserMessage →
-        // recordTranscript, so the flag persists once it reaches the queue.
-        isMeta: (message as unknown as { isMeta?: boolean }).isMeta,
       })
       // Increment prompt count for attribution tracking and save snapshot
       // The snapshot persists promptCount so it survives compaction
@@ -4383,7 +4317,7 @@ clients: prev.mcp.clients.map((c: MCPServerConnection) =>
       }
       suggestionState.abortController?.abort()
       suggestionState.abortController = null
-      await finalizePendingAsyncHooks(getPrintSessionKey())
+      await finalizePendingAsyncHooks()
       unsubscribeSkillChanges()
       unsubscribeAuthStatus?.()
       statusListeners.delete(rateLimitListener)
@@ -5299,31 +5233,6 @@ async function loadInitialMessages(
       let parsedSessionId = parseSessionIdentifier(
         typeof options.resume === 'string' ? options.resume : '',
       )
-      // zai patch (2026-08-27, P1 inproc-print): zai session ids are
-      // `sess-<uuid>` (routes/agent.ts newSessionId), not bare UUIDs, so
-      // parseSessionIdentifier rejects them and the branch below would
-      // gracefulShutdownSync(1) — in an in-process session that resolves the
-      // instance's `done` promise immediately and the turn yields zero events
-      // (looks like "the agent never answered"). The id is only ever used as
-      // `${sessionId}.jsonl` (sessionStorage.ts:230/4217), so accepting it
-      // verbatim gives the full vendor restore chain (getLastSessionLog →
-      // fileHistory / attribution / mode / worktree), which the `.jsonl`-path
-      // alternative would not. Gated on isPrintSessionMode() so the CLI's
-      // strict UUID validation and its error message are untouched.
-      if (
-        !parsedSessionId &&
-        isPrintSessionMode() &&
-        typeof options.resume === 'string' &&
-        options.resume !== ''
-      ) {
-        parsedSessionId = {
-          sessionId: options.resume as UUID,
-          ingressUrl: null,
-          isUrl: false,
-          jsonlFile: null,
-          isJsonlFile: false,
-        }
-      }
       if (!parsedSessionId) {
         let errorMessage =
           'Error: --resume requires a valid session ID when used with --print. Usage: opencc -p --resume <session-id>'

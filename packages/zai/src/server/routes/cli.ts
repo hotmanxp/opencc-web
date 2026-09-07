@@ -5,7 +5,7 @@ import { spawn } from '../services/spawner.js';
 import { createSseStream } from './stream.js';
 
 const router: IRouter = Router();
-const CliNameSchema = z.enum(['nova', 'opencode', 'opencc', 'agent-login', 'codegraph', 'zai']);
+const CliNameSchema = z.enum(['nova', 'opencode', 'opencc', 'agent-login', 'codegraph', 'dsh', 'zai']);
 
 router.get('/cli', async (req, res) => {
   try {
@@ -25,9 +25,10 @@ router.get('/cli', async (req, res) => {
 
 const InstallCliSchema = z.object({
   // Accept @zn-ai/<name> (most packages), opencode-ai (different scope on
-  // the registry), and @colbymchenry/<name> (third-party but mirrored on
-  // the internal registry — e.g. codegraph).
-  pkg: z.string().regex(/^(@zn-ai\/[a-z-]+|opencode-ai|@colbymchenry\/[a-z-]+)(@latest)?$/),
+  // the registry), @colbymchenry/<name> (third-party but mirrored on
+  // the internal registry — e.g. codegraph), and @deepseek-ai/<name>
+  // (e.g. dsh).
+  pkg: z.string().regex(/^(@zn-ai\/[a-z-]+|opencode-ai|@colbymchenry\/[a-z-]+|@deepseek-ai\/[a-z-]+)(@latest)?$/),
 });
 
 // Shared SSE handler — POST takes pkg from JSON body, GET takes it from the

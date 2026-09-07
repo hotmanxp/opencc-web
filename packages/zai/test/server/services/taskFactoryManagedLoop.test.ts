@@ -283,12 +283,27 @@ describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
     const events = opts.events ?? {}
     return {
       get: async (id: string) => opts.records[id] ?? null,
-      events: (async function* (id: string, fromSeq = 0) {
-        const history = events[id] ?? []
-        for (const ev of history) {
-          if ((ev as { seq: number }).seq > fromSeq) yield ev
-        }
-      }),
+      // zai patch (2026-09-07, fix 🔴-1): events() 语义对齐真实
+      // DefaultBackgroundRuntime.events —— 回放历史后,非终态任务的流不
+      // 自行结束,只在 signal abort 时返回。旧 stub 回放完直接 return,
+      // 掩盖了 collectRecentEvents 在「历史不足 5 条」时的永久挂起 bug。
+      events: (id: string, fromSeq = 0, signal?: AbortSignal) =>
+        (async function* () {
+          const history = events[id] ?? []
+          for (const ev of history) {
+            if (signal?.aborted) return
+            if ((ev as { seq: number }).seq > fromSeq) yield ev
+          }
+          const rec = opts.records[id]
+          const terminal = rec
+            ? ['completed', 'failed', 'cancelled', 'killed'].includes(rec.status)
+            : false
+          if (terminal) return
+          await new Promise<void>((resolve) => {
+            if (signal?.aborted) return resolve()
+            signal?.addEventListener('abort', () => resolve(), { once: true })
+          })
+        })(),
       cancel: async () => ({ ok: true }),
     }
   }
@@ -341,8 +356,11 @@ describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
     expect(contents.some((c) => c.includes('<task-alert action="stagnant"'))).toBe(false)
   })
 
-  it('case 3: 同一任务 cooldown 期内不重复告警', async () => {
-    // cooldown=20s 测试时长内不会跨过,threshold=5s — 等 6s 后应该恰好 1 次告警。
+  it('case 3: 同一任务 cooldown 期内不重复告警(含 🔴-1 回归:历史不足 5 条不再挂起)', async () => {
+    // cooldown=20s 测试时长内不会跨过,threshold=5s。事件历史只有 2 条 ——
+    // 旧实现里 collectRecentEvents 会等第 5 个事件永久挂起;修复后靠
+    // AbortSignal.timeout(1.5s) 兜底退出,告警仍注入且只 1 次。
+    // 等待 7.5s = 5s 阈值 + 1.5s 事件流超时 + 注入缓冲。
     await writeFile(join(dataDir, 'factory-settings.json'), JSON.stringify(STAGNANT_SETTINGS), 'utf-8')
     resetFactorySettings()
     const s = await createPoolTask({ title: 'cooldown-task' })
@@ -356,11 +374,13 @@ describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
     }) as unknown as Parameters<typeof __setBackgroundRuntime>[0])
     const spy = followupMock
     startTaskFactoryManagedLoop(50)
-    await new Promise((r) => setTimeout(r, 6500))
+    await new Promise((r) => setTimeout(r, 7500))
     stopTaskFactoryManagedLoopForTests()
     const contents = injectedContents(spy)
     const alerts = contents.filter((c) => c.includes('<task-alert action="stagnant"'))
     expect(alerts.length).toBe(1)
+    // 快照只拿到 2 条历史事件,但告警确实产出了 —— 证明未挂起
+    expect(alerts[0]).toContain('Recent 2 TaskEvents')
   })
 
   it('case 4: 已终态(Completed)子任务从 trackers 移除,不告警', async () => {

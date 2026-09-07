@@ -24,7 +24,7 @@ export interface HeadlessWakeOptions {
  *
  * Per-session: the caller passes `getAppState` / `getBgRunning` /
  * `hasMainThreadQueued` as closures bound to its own AppState instance,
- * so zai's inproc multi-session mode stays isolated — a wake on session A
+ * so zai's multi-session mode stays isolated — a wake on session A
  * never triggers session B.
  *
  * Mirror of REPL's `hooks/useQueueProcessor.ts::useQueueProcessor` shape,

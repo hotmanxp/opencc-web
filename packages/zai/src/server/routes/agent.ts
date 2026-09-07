@@ -1176,9 +1176,8 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     //
     // zai patch (2026-08-28): slash 指令消息对齐 vendor processSlashCommand
     // 的双消息形态 —— 可见行(cmd.displayText,原始 `/cmd args`)由 server
-    // 经 appendVisibleUserMessage 真实落盘(此通道不依赖 store.append,
-    // inproc track 下 append 是 no-op、消息行归 vendor 环写);展开后的
-    // prompt 以 isMeta:true 提交 runtime(createPrintRuntime 透传到
+    // 经 appendVisibleUserMessage 真实落盘;展开后的
+    // prompt 以 isMeta:true 提交 runtime(透传到
     // sendUserMessage → print.ts 入队 → recordTranscript 写 isMeta 行,
     // 前端 loadTranscriptMessages 按 isMeta 跳过)。
     // 无 displayText 的普通消息路径行为不变。
@@ -1276,7 +1275,7 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     }
     // zai patch (2026-08-29, plan §3.3): 把 sessionMainAgent 绑到
     // AgentRegistry,让 per-session tools/systemPrompt 槽走
-    // registry.slot 派发(createOpenccRuntime/createPrintRuntime 内部
+    // registry.slot 派发(createOpenccRuntime 内部
     // 会 lookup getBoundAgentId(sessionId))。已有绑定由 restoreAllSessions
     // 冷启动回灌,这里覆盖幂等。UnknownAgentError → 静默 skip(走 default pass-through)。
     if (sessionMainAgent !== null) {

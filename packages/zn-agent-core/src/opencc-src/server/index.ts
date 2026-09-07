@@ -72,25 +72,6 @@ export type {
 
 export { createOpenccRuntime } from './createOpenccRuntime.js'
 
-// zai patch (2026-08-27, P1 inproc-print track): createPrintRuntime —
-// one in-process vendor print.ts session instance per sessionId,
-// satisfying OpenccRuntimeV2 (steering + state introspection on top of
-// the frozen 8-method contract). Public types live in the thin module.
-export type {
-  AskBridgeFn,
-  AskBridgeInput,
-  AskBridgeResult,
-  CreatePrintRuntimeOptions,
-  ElicitationBridgeFn,
-  ElicitationBridgeInput,
-  ElicitationBridgeResult,
-  PermissionBridgeFn,
-  PermissionBridgeInput,
-  PermissionBridgeResult,
-} from './createPrintRuntime.js'
-
-export { createPrintRuntime } from './createPrintRuntime.js'
-
 // zai patch (2026-08-20): 主 Agent 插槽配置。
 export { getBuiltinMainAgents } from './mainAgents.js'
 export type {
@@ -111,8 +92,8 @@ export {
   AgentRegistryImpl,
 } from './agentRegistry.js'
 
-// zai patch (2026-08-30, plan P0): createReplSession value export (parallel
-// to createPrintRuntime). zai call sites opt-in via runtime.kernel=repl
+// zai patch (2026-08-30, plan P0): createReplSession value export.
+// zai call sites opt-in via runtime.kernel=repl
 // (full switch lands in P1).
 export { createReplSession } from '../../compat/repl/index.js'
 export type {

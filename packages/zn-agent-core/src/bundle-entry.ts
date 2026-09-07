@@ -16,19 +16,6 @@
  */
 export * from './opencc-src/query.js'
 export { createOpenccRuntime } from './opencc-src/server/createOpenccRuntime.js'
-// zai patch (2026-08-27, P1 inproc-print track): createPrintRuntime value
-// export (types flow via `export type * from './opencc-src/server/index.js'`).
-export { createPrintRuntime } from './opencc-src/server/index.js'
-// zai patch (2026-08-27): print-session ALS helpers 值导出 —— P2/P3 的
-// 生命周期接线与本 bundle 消费者(含契约测试的 runHeadless stub)必须与
-// createPrintRuntime 用同一模块实例的 storage(手写 d.ts 由
-// scripts/bundle-opencc.ts 合成)。
-export {
-  getPrintSessionContext,
-  getPrintSessionKey,
-  isPrintSessionMode,
-  runWithPrintSession,
-} from './opencc-src/utils/printSessionRuntime.js'
 // zai patch (2026-08-20): 主 Agent 插槽配置 —— getBuiltinMainAgents 是
 // value,`export type *` 不会带出,需显式导出。路径指向 server/index.js
 // (dist 里已存在)而非 mainAgents.js —— bundle-opencc 的
@@ -118,11 +105,10 @@ export { runWithSessionId, getCurrentSessionId } from './compat/runWithSessionId
 export { runWithSdkContext } from './opencc-src/bootstrap/state.js'
 export type { SdkContext } from './opencc-src/bootstrap/state.js'
 export type { PermissionMode } from './compat/permissions.js'
-// zai patch (2026-08-24): SessionHost(B1 spawn CLI 路径)把子进程 stdout
-// NDJSON 行翻译成 zai RuntimeEvent(Anthropic primitives),复用 opencc SDK
-// 内部同款 translator —— vendor CLI 子进程的 stdout 事件形状与
-// opencc `query()` 产出一致(stream_event / assistant / result / system),
-// 直接喂 translateSdkToRuntime 即可,避免 zai 侧再造一套翻译。
+// zai patch (2026-08-24): stdout NDJSON → zai RuntimeEvent 翻译
+// (stream_event / assistant / result / system 同构复用 opencc 内部
+// translator),供 runtime adapter / SDK 模式把 vendor 输出事件统一喂
+// 前端 SSE —— 避免 zai 侧再造一套翻译。
 export { translateSdkToRuntime } from './compat/runtime/sdkEventAdapter.js'
 export type { SdkEventMeta } from './compat/runtime/sdkEventAdapter.js'
 export type { RuntimeEvent } from './compat/runtime/events.js'
@@ -130,8 +116,7 @@ export { stateChangeBus, resetStateChangeBusForTests } from './stateChangeBus.js
 export type { StateChangeEventMap } from './stateChangeBus.js'
 export { registerProcessOutputErrorHandlers } from './runtime/index.js'
 // zai patch (2026-08-29): 暴露 vendor 的统一 commandQueue API —
-// inproc + REPL + spawn 共享同一 module 单例(subagentNotifier.ts:51-58
-// 注释亦基于此 invariant)。zai-server 调试 / 测试可以拿到真实的
+// REPL + default 共享同一 bundle module 单例。zai-server 调试 / 测试可以拿到真实的
 // `enqueuePendingNotification` 入口(后台 Agent 完成时 vendor 内部
 // 用的就是这条),不暴露这条就只能从源码路径走 — 那条路会拉全
 // BashTool 等 vendor 重型模块,vitest 解析阶段就 `getMaxTimeoutMs is

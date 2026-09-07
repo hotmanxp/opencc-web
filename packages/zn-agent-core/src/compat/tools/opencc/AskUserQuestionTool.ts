@@ -13,10 +13,9 @@ export interface AskUserQuestionBridgeContext {
  * zai patch (2026-08-27): resolve the bridging ctx for an AskUserQuestion
  * call. sessionId prefers the per-async-chain ALS (runWithSessionId) over the
  * process-global `__zaiBridgeCtx.sessionId` pointer:
- *   - in-process print sessions (ZAI_RUNTIME_CORE=inproc) wrap the whole
- *     runHeadless chain in runWithSessionId, so concurrent sessions each see
- *     their OWN sessionId here — the global pointer would cross-fire.
- *   - outside any ALS (current lightweight default runtime) the global pointer is used
+ *   - 并发 session 场景(服务端多 session 共享进程)按 runWithSessionId
+ *     各自解析到 OWN sessionId, 全局指针不会 cross-fire。
+ *   - outside any ALS (legacy lightweight runtime) the global pointer is used
  *     unchanged (per-query merge in createOpenccRuntime-impl.query), so
  *     existing behavior is preserved.
  * Exported for unit testing without booting the full tool.

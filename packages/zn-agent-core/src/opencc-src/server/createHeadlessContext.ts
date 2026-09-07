@@ -94,7 +94,7 @@ export interface CreateHeadlessContextOptions {
    * this context's lifetime. Mirrors vendor CLI flag
    * `--allow-dangerously-skip-permissions`. Default false.
    *
-   * zai-server uses this for the inproc track so that turn-time mode
+   * zai-server uses this so that turn-time mode
    * switches (plan → bypassPermissions) are not blocked by
    * `print.ts:4802-4823`. Does NOT bypass AskUserQuestion's
    * `requiresUserInteraction()` step (`permissions.ts:1233`) or
@@ -128,11 +128,11 @@ export interface CreateHeadlessContextOptions {
   isInteractive?: boolean
   /**
    * zai patch (2026-08-29, plan §3.7.2): per-instance session id used
-   * to dispatch the main-agent tools / mcp slots. The inproc track
-   * (createPrintRuntime) calls `registryAgent(sessionId, agentId)` on
-   * the singleton registry before this factory runs, so the slot fns
-   * resolve against the bound agent. When undefined (legacy callers /
-   * tests), the slot dispatch pass-throughs with origin unchanged.
+   * to dispatch the main-agent tools / mcp slots. 调用方在本 factory
+   * 运行前对单例 registry 调用 `registryAgent(sessionId, agentId)`,
+   * so the slot fns resolve against the bound agent. When undefined
+   * (legacy callers / tests), the slot dispatch pass-throughs with
+   * origin unchanged.
    */
   sessionId?: string
 }

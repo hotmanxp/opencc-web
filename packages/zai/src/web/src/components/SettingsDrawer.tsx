@@ -646,11 +646,11 @@ function formatValue(row: SettingsRow): string {
 
 type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 
-// 核心运行时(zai patch 2026-08-28 命名统一,2026-08-30 全部统一为
-// `runtimeCore` 字段):settings.runtimeCore 四态。
+// 核心运行时:settings.runtimeCore 二态(inproc/spawn 轨道已于
+// 2026-09-07 移除,残留配置值服务端静默落 'repl')。
 // 实际生效优先级:--runtimeCore flag / env ZAI_RUNTIME_CORE > 本设置;且
 // 运行时只在服务启动 initAgentRuntime 时解析一次,改后需重启实例生效。
-type RuntimeCoreOption = 'default' | 'inproc' | 'spawn' | 'repl'
+type RuntimeCoreOption = 'default' | 'repl'
 
 // 阶段 1 schema:对齐 spec 表里的 Model / Permission / Theme / Env Vars 字段,
 // 但用 opencc /config 风格文本行代替 Tabs + Form。
@@ -868,8 +868,7 @@ function buildStaticSchema(
     },
     {
       // Agent 核心运行时 — 写入 settings.runtimeCore。
-      // default:默认进程内 query 链路;inproc:in-process print 多 session
-      // 运行时;spawn:子进程 SessionRegistry;repl:ReplRuntime (P2 默认)。
+      // default:进程内 query 链路;repl:ReplRuntime(默认)。
       // 改后需重启实例生效(运行时在 initAgentRuntime 一次性解析);
       // env ZAI_RUNTIME_CORE 或 --runtimeCore flag 存在时会覆盖本设置。
       section: '运行时',
@@ -881,8 +880,6 @@ function buildStaticSchema(
           value: runtimeCore,
           options: [
             { value: 'default', label: 'default', description: '进程内 query 链路' },
-            { value: 'inproc', label: 'inproc', description: 'in-process print 多 session 运行时' },
-            { value: 'spawn', label: 'spawn', description: '子进程 SessionRegistry' },
             { value: 'repl', label: 'repl', description: 'in-process REPL' },
           ],
         },
@@ -978,8 +975,6 @@ export default function SettingsDrawer() {
         if (typeof data.mainAgent === 'string') setMainAgent(data.mainAgent)
         if (
           data.runtimeCore === 'default' ||
-          data.runtimeCore === 'inproc' ||
-          data.runtimeCore === 'spawn' ||
           data.runtimeCore === 'repl'
         ) {
           setRuntimeCore(data.runtimeCore)

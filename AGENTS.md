@@ -140,7 +140,6 @@ pnpm release:major
 | Runtime printts SSE web bridge | `docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md` |
 | zai Desktop 办公桌面 | `docs/superpowers/specs/2026-08-26-zai-desktop-office-design.md` + `plans/2026-08-26-zai-desktop-office-plan.md` |
 | Headless runtime vs vendor REPL 对比 | `docs/superpowers/specs/2026-08-27-zai-headless-runtime-vs-vendor-repl-comparison.md` |
-| In-process print 多 session runtime | `docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md` |
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 

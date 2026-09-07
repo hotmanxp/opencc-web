@@ -12,7 +12,7 @@ export interface SystemInfo {
 }
 
 export interface CliStatus {
-  name: 'nova' | 'opencode' | 'opencc' | 'agent-login' | 'codegraph' | 'zai';
+  name: 'nova' | 'opencode' | 'opencc' | 'agent-login' | 'codegraph' | 'dsh' | 'zai';
   pkg: string;
   bin: string;
   installed: boolean;

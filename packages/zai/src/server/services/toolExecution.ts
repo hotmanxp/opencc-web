@@ -1,12 +1,10 @@
 /**
- * zai patch (2026-09-07, fix tool_result dsh bridge, worktree-dsh):
  * out-of-band tool_result 队列 —— vendor `runtime.tool_result` 事件是
  * 串在 queryLoop for-await 通路里同步 emit 的(translateRuntimeEvents →
  * routes/agent.ts 处理 → appendToolResult 落 transcript)。本模块为
- * 非 queryLoop 通路(plan §2.4 dsh tool_result delivery) 提供等价
- * 入站通道: 外部 inbox 消息可调 queueResult, 把 tool_use result
- * 同步进 transcript + 通过 eventBus 发 SSE, 让前端 UI 收到
- * `runtime.tool_result` 事件。
+ * 非 queryLoop 通路提供等价入站通道: 外部 inbox 消息可调 queueResult,
+ * 把 tool_use result 同步进 transcript + 通过 eventBus 发 SSE, 让前端
+ * UI 收到 `runtime.tool_result` 事件。
  *
  * 不引入 vendor 改动的边界: 仅暴露 queueResult(sessionId, toolUseId,
  * output, isError) 一个函数, 由 inboxMessageHandler 的 __zaiInboxBridge.

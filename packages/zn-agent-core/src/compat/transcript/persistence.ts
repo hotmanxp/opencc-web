@@ -201,8 +201,8 @@ export async function appendVisibleUserMessage(
     }
     const cwd = pathOpts?.cwd ?? ctx.cwd
     if (typeof store.appendMessageEntry === 'function') {
-      // inproc track: store.append 是 no-op(消息行归 vendor 环写),可见
-      // 指令行走 appendMessageEntry 真实落盘通道。
+      // 可见指令行走 appendMessageEntry 真实落盘通道(独立于普通
+      // 用户消息的 store.append)。
       await store.appendMessageEntry(sessionId, msg, { cwd })
     } else {
       await store.append(sessionId, msg, { cwd })

@@ -31,14 +31,16 @@ describe('resolveRuntimeCore (agentRuntime priority chain)', () => {
     expect(resolveRuntimeCore({ runtimeCore: undefined })).toBe('repl')
   }, TEST_TIMEOUT_MS)
 
-  it("(b) invalid env value → 'repl'; empty env treated as unset", async () => {
+  it("(b) invalid env value → 'repl'; empty env treated as unset; 废弃值 inproc/spawn → 'repl'", async () => {
     const { resolveRuntimeCore } = await mod()
     process.env.ZAI_RUNTIME_CORE = 'bogus'
     expect(resolveRuntimeCore({})).toBe('repl')
     process.env.ZAI_RUNTIME_CORE = ''
     expect(resolveRuntimeCore({})).toBe('repl')
-    // env 空串时 settings 仍生效
-    expect(resolveRuntimeCore({ runtimeCore: 'spawn' })).toBe('spawn')
+    process.env.ZAI_RUNTIME_CORE = ''
+    // env 空串时 settings 仍生效,但废弃值 inproc/spawn 视同未配置落 'repl'
+    expect(resolveRuntimeCore({ runtimeCore: 'spawn' })).toBe('repl')
+    expect(resolveRuntimeCore({ runtimeCore: 'inproc' })).toBe('repl')
   }, TEST_TIMEOUT_MS)
 
   it("(c) invalid settings value → 'repl'", async () => {
@@ -48,10 +50,10 @@ describe('resolveRuntimeCore (agentRuntime priority chain)', () => {
 
   it("(d) explicit env values honored, flag(env) > settings", async () => {
     const { resolveRuntimeCore } = await mod()
-    for (const v of ['default', 'inproc', 'spawn', 'repl'] as const) {
+    for (const v of ['default', 'repl'] as const) {
       process.env.ZAI_RUNTIME_CORE = v
       // env 显式值盖过 settings(模拟 --runtimeCore flag 经 env 强制覆盖)
-      expect(resolveRuntimeCore({ runtimeCore: 'inproc' })).toBe(v)
+      expect(resolveRuntimeCore({ runtimeCore: 'repl' })).toBe(v)
     }
   }, TEST_TIMEOUT_MS)
 
@@ -59,8 +61,8 @@ describe('resolveRuntimeCore (agentRuntime priority chain)', () => {
     const { resolveRuntimeCore } = await mod()
     const settings = (v: ZaiSettings['runtimeCore']): ZaiSettings => ({ runtimeCore: v })
     expect(resolveRuntimeCore(settings('default'))).toBe('default')
-    expect(resolveRuntimeCore(settings('inproc'))).toBe('inproc')
-    expect(resolveRuntimeCore(settings('spawn'))).toBe('spawn')
+    expect(resolveRuntimeCore(settings('inproc'))).toBe('repl')
+    expect(resolveRuntimeCore(settings('spawn'))).toBe('repl')
     expect(resolveRuntimeCore(settings('repl'))).toBe('repl')
   }, TEST_TIMEOUT_MS)
 

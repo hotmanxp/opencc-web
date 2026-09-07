@@ -143,13 +143,12 @@ export function* translateSdkToRuntime(
     if (raw.type === 'message_start' && meta.streamedBlockIndices) {
       meta.streamedBlockIndices.clear()
       // zai patch (2026-08-30): bump meta.turnIndex per assistant
-      // message_start. inproc-print runs a long-lived query() that
-      // bridges multiple LLM turns (main turn → agent dispatch → main
-      // turn close → wait for <task-notification> → sub-agent finishes
-      // → new turn). All those turns come through THIS one
-      // translateSdkToRuntime call (one query per session), so the
-      // query-entry ++rec.turnIndex in createPrintRuntime-impl.ts:659
-      // only fires once. We need each new assistant turn to bump
+      // message_start. A long-lived query() bridges multiple LLM turns
+      // (main turn → agent dispatch → main turn close → wait for
+      // <task-notification> → sub-agent finishes → new turn). All those
+      // turns come through ONE translateSdkToRuntime call (one query per
+      // session), so the query-entry ++rec.turnIndex would only fire
+      // once. We need each new assistant turn to bump
       // turnIndex so the downstream runtime.started/runtime.delta
       // events get a fresh id and the frontend can detect "new turn"
       // via strict-greater-than (useAgentStore.runtime.started branch).

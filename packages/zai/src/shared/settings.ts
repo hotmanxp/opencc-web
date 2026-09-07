@@ -83,20 +83,14 @@ export interface ZaiPermissions {
 }
 
 /**
- * 核心运行时(zai patch 2026-08-28 三态;2026-08-30 加 'repl'):
+ * 核心运行时二态(2026-09-07 移除 inproc / spawn 轨道后收敛):
  * - 'default' → 轻量 in-process `createOpenccRuntime`(legacy 兜底)
- * - 'inproc'  → in-process print 多 session 运行时
- *   (`createPrintRuntime`:每 sessionId 一个 vendor print.ts REPL 等价实例,
- *   hooks/resume 全恢复/rewind/steering 原生可用)
- * - 'spawn'   → spawn `opencc -p` 子进程(SessionHost 路径)
- * - 'repl'    → 新 REPL 命令式抽壳路径(`createReplSession`,plan P2 默认;
- *   替代 'default' 的默认位置。P0/P1 实现 + P2 接入后默认走这条。
- *   P2-T5 deferred,此路径与 'inproc' 共存,紧急回退用 'inproc' 或 'default')
- * 详见 docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md
- * 与 docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md
- * 与 docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1。
+ * - 'repl'    → REPL 抽壳路径(`createReplSession`,默认)
+ * 历史值('inproc' / 'spawn' / 其它非法值)由 resolveRuntimeCore 静默落
+ * 'repl';已废弃字段值不入类型面。详见
+ * docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1。
  */
-export type RuntimeCore = 'default' | 'inproc' | 'spawn' | 'repl'
+export type RuntimeCore = 'default' | 'repl'
 
 /** Shape of ~/.zai/settings.json. */
 export interface ZaiSettings {
@@ -194,14 +188,13 @@ export interface ZaiSettings {
     rateLimitCircuitOpenSeconds?: number
   }
   /**
-   * 核心运行时三态(zai patch 2026-08-28 命名统一,原 `runtime.openccCli`
-   * 硬切,不留兼容)。见 RuntimeCore 的取值语义。生效优先级:
+   * 核心运行时二态。见 RuntimeCore 的取值语义。生效优先级:
    * `--runtimeCore` flag > env `ZAI_RUNTIME_CORE` > 本设置。
    * 缺失 / 非法值 → 'repl'(spec 2026-08-30 §5.1 把默认从 'default' 切到 'repl')。
    */
   runtimeCore?: RuntimeCore
   /**
-   * zai patch (2026-08-29, plan §A): 显式 opt-in 让 inproc 轨道把
+   * zai patch (2026-08-29, plan §A): 显式 opt-in 把
    * `toolPermissionContext.isBypassPermissionsModeAvailable` 锁定为 true,
    * 等价 vendor CLI flag `--allow-dangerously-skip-permissions`。生效优先级:
    * env `ZAI_DANGEROUSLY_SKIP_PERMISSIONS === '1'` > 本设置 > 'false'。

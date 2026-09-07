@@ -12,9 +12,8 @@
  *
  *   1. Hand-written d.ts files emitted by `scripts/bundle-opencc.ts`
  *      via direct writeFileSync calls (see "Tool type declarations" +
- *      "Subagent registry barrel d.ts" + "printSessionRuntime types"
- *      + "Session API counter types" + "Generic model capabilities
- *      types" sections in bundle-opencc.ts).
+ *      "Subagent registry barrel d.ts" + "Session API counter types" +
+ *      "Generic model capabilities types" sections in bundle-opencc.ts).
  *   2. d.ts files emitted by `tsc -p tsconfig.server.json` and copied
  *      from `.server-types-tmp/opencc-src/server/` to
  *      `dist/opencc-src/server/` by bundle-opencc.ts. Self-containment
@@ -50,7 +49,6 @@ const KEEP_RELATIVE_PATHS = new Set([
   // Hand-written by bundle-opencc.ts. Source of truth lives in
   // scripts/bundle-opencc.ts at each `writeFileSync(...)` site.
   'Tool.d.ts',
-  'utils/printSessionRuntime.d.ts',
   'utils/model/genericModelCapabilities.d.ts',
   'services/api/sessionApiCounter.d.ts',
 ])

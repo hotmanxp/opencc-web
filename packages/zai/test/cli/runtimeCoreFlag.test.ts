@@ -28,29 +28,29 @@ describe('runtimeCoreFlag: --runtimeCore 强制语义不被 settings.env 覆盖'
   it('applyRuntimeCoreFlag(undefined) 不动 env,reapply 不恢复', () => {
     applyRuntimeCoreFlag(undefined)
     expect(getForcedRuntimeCoreFlag()).toBeNull()
-    process.env[ENV] = 'spawn'
+    process.env[ENV] = 'repl'
     reapplyRuntimeCoreFlag()
-    expect(process.env[ENV]).toBe('spawn')
+    expect(process.env[ENV]).toBe('repl')
     delete process.env[ENV]
   })
 
-  it("applyRuntimeCoreFlag('inproc') 写 env 并记住强制值", () => {
-    applyRuntimeCoreFlag('inproc')
-    expect(process.env[ENV]).toBe('inproc')
-    expect(getForcedRuntimeCoreFlag()).toBe('inproc')
+  it("applyRuntimeCoreFlag('repl') 写 env 并记住强制值", () => {
+    applyRuntimeCoreFlag('repl')
+    expect(process.env[ENV]).toBe('repl')
+    expect(getForcedRuntimeCoreFlag()).toBe('repl')
   })
 
-  it('模拟 settings env 覆盖后,reapplyRuntimeCoreFlag 恢复 inproc', () => {
+  it('模拟 settings env 覆盖后,reapplyRuntimeCoreFlag 恢复 repl', () => {
     process.env[ENV] = 'default'
     reapplyRuntimeCoreFlag()
-    expect(process.env[ENV]).toBe('inproc')
+    expect(process.env[ENV]).toBe('repl')
   })
 
   it("applyRuntimeCoreFlag('default') 强制 default 并盖过脏 env", () => {
-    process.env[ENV] = 'inproc'
+    process.env[ENV] = 'repl'
     applyRuntimeCoreFlag('default')
     expect(process.env[ENV]).toBe('default')
-    process.env[ENV] = 'inproc'
+    process.env[ENV] = 'repl'
     reapplyRuntimeCoreFlag()
     expect(process.env[ENV]).toBe('default')
   })

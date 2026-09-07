@@ -65,8 +65,8 @@ import { enableConfigs } from '../utils/config.js'
 import { getCanUseToolFn } from '../cli/print.js'
 import { wrapHeadlessPermissionFn } from './headlessPermissionBridge.js'
 import { getTools } from '../tools.js'
-// zai patch (2026-08-29, plan §3.7.2): inproc 链路 tools / mcp 槽接
-// AgentRegistry。走 ./index.js barrel 触发 esbuild 生成 local binding,
+// zai patch (2026-08-29, plan §3.7.2): tools / mcp 槽接 AgentRegistry。
+// 走 ./index.js barrel 触发 esbuild 生成 local binding,
 // 避开 minify 后 call site TDZ(详见 Task 6 report §self-review 1)。
 import { getAgentRegistry } from './index.js'
 import { onTaskChanged } from '../utils/tasks.js'

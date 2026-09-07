@@ -179,14 +179,12 @@ describe('inboxMessageHandler: 8 类 dsh delivery kinds dispatch (plan §2.4)', 
         return { action: 'accept', content: {} }
       },
       queueToolResult: (sessionId, toolUseId, output, isError) => {
-        // zai patch (2026-09-07, fix tool_result dsh bridge, worktree-dsh):
         // 测试钩子 —— record 但不调真实 toolExecution.queueResult (避免拉起
         // 整个 transcriptStore / eventBus)。单测关心 dispatch 决策, 不关心
         // 持久化副作用。
         queueToolResultCalls.push({ sessionId, toolUseId, output, isError })
       },
       prependReminder: (sessionId, text) => {
-        // zai patch (2026-09-07, fix system_reminder dsh bridge, worktree-dsh):
         // 测试钩子同上。
         prependReminderCalls.push({ sessionId, text })
       },
@@ -247,8 +245,7 @@ describe('inboxMessageHandler: 8 类 dsh delivery kinds dispatch (plan §2.4)', 
   })
 
   it('5. tool_result → toolExecution.queueResult (wired, ok=true)', () => {
-    // zai patch (2026-09-07, fix tool_result dsh bridge, worktree-dsh):
-    // bridge 已 wired (agentRuntime.ts:223 queueToolResult → toolExecution.queueResult)。
+    // bridge 已 wired (agentRuntime.ts queueToolResult → toolExecution.queueResult)。
     // dispatchDshInbox 应返 ok=true 并调 queueToolResult 一次。
     const result = dispatchDshInbox({
       kind: 'tool_result',
@@ -285,8 +282,7 @@ describe('inboxMessageHandler: 8 类 dsh delivery kinds dispatch (plan §2.4)', 
   })
 
   it('6. system_reminder → prependReminder bridge (wired, ok=true)', () => {
-    // zai patch (2026-09-07, fix system_reminder dsh bridge, worktree-dsh):
-    // bridge 已 wired (agentRuntime.ts:227 prependReminder → SessionInbox.steer
+    // bridge 已 wired (agentRuntime.ts prependReminder → SessionInbox.steer
     // 入 nextStep lane, 由 drainInboxReminder 在下次 API call 时 prepend 为
     // <system-reminder>)。
     const result = dispatchDshInbox({

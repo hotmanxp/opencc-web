@@ -165,8 +165,10 @@ describe('zaiSettingsStore', () => {
     expect(resolveRuntimeCore({ runtimeCore: 'bogus' as never })).toBe('repl')
     // 显式合法值原样保留
     expect(resolveRuntimeCore({ runtimeCore: 'default' })).toBe('default')
-    expect(resolveRuntimeCore({ runtimeCore: 'inproc' })).toBe('inproc')
-    expect(resolveRuntimeCore({ runtimeCore: 'spawn' })).toBe('spawn')
     expect(resolveRuntimeCore({ runtimeCore: 'repl' })).toBe('repl')
+    // 已废弃值(inproc/spawn,2026-09-07 轨道移除)视同未配置落 'repl'
+    // (类型面已不含,使用 as never 模拟磁盘遗留数据)
+    expect(resolveRuntimeCore({ runtimeCore: 'inproc' as never })).toBe('repl')
+    expect(resolveRuntimeCore({ runtimeCore: 'spawn' as never })).toBe('repl')
   })
 })

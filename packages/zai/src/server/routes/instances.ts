@@ -90,7 +90,7 @@ function parsePortField(
   return { ok: true, value: v }
 }
 
-const RUNTIME_CORE_VALUES: readonly RuntimeCore[] = ['default', 'inproc', 'spawn', 'repl']
+const RUNTIME_CORE_VALUES: readonly RuntimeCore[] = ['default', 'repl']
 
 /**
  * Parse an optional `runtimeCore` body field. Tri-state contract mirrors
@@ -104,7 +104,7 @@ const RUNTIME_CORE_VALUES: readonly RuntimeCore[] = ['default', 'inproc', 'spawn
  *   `settings.runtimeCore`". POST /instances treats `null` as 400 to
  *   match the `port` discipline (nothing to clear on a brand-new
  *   definition);
- * - string ∈ `'default' | 'inproc' | 'spawn' | 'repl'` → persisted as
+ * - string ∈ `'default' | 'repl'` → persisted as
  *   the per-instance override;
  * - anything else → 400.
  *
@@ -119,11 +119,11 @@ function parseRuntimeCoreField(
 ): { ok: true; value: RuntimeCore | null | undefined } | { ok: false; error: string } {
   if (v === undefined) return { ok: true, value: undefined }
   if (v === null) {
-    if (!allowNull) return { ok: false, error: `${field} must be one of [default, inproc, spawn, repl]` }
+    if (!allowNull) return { ok: false, error: `${field} must be one of [default, repl]` }
     return { ok: true, value: null }
   }
   if (typeof v !== 'string' || !RUNTIME_CORE_VALUES.includes(v as RuntimeCore)) {
-    return { ok: false, error: `${field} must be one of [default, inproc, spawn, repl]` }
+    return { ok: false, error: `${field} must be one of [default, repl]` }
   }
   return { ok: true, value: v as RuntimeCore }
 }

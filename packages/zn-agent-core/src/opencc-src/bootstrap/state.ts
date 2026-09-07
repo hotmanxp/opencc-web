@@ -571,7 +571,14 @@ export const onSessionSwitch = sessionSwitched.subscribe
  */
 export function getSessionProjectDir(): string | null {
   const ctx = getSdkContext()
-  return ctx?.sessionProjectDir ?? STATE.sessionProjectDir
+  // NOTE: `??` would be wrong here — null is a legitimate ctx value
+  // ("transcript derives from originalCwd", set by regenerateSessionId /
+  // switchSession defaults). `ctx.sessionProjectDir ?? STATE.…` would leak
+  // the process-global project dir into an in-process session that has none.
+  if (ctx) {
+    return ctx.sessionProjectDir
+  }
+  return STATE.sessionProjectDir
 }
 
 export function getOriginalCwd(): string {

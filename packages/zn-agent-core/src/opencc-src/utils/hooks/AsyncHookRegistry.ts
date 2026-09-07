@@ -4,8 +4,6 @@ import type {
   SyncHookJSONOutput,
 } from 'src/entrypoints/agentSdkTypes.js'
 import { logForDebugging } from '../debug.js'
-// zai patch (2026-08-27): stamp/finalize async hooks by owning print-session
-import { getPrintSessionKey } from '../printSessionRuntime.js'
 import type { ShellCommand } from '../ShellCommand.js'
 import { invalidateSessionEnvCache } from '../sessionEnvironment.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
@@ -24,9 +22,6 @@ export type PendingAsyncHook = {
   responseAttachmentSent: boolean
   shellCommand?: ShellCommand
   stopProgressInterval: () => void
-  // zai patch (2026-08-27): owning print-session key so session dispose can
-  // finalize just its own hooks. CLI sessions share `__cli_default__`.
-  ownerKey?: string
 }
 
 // Global registry state
@@ -84,8 +79,6 @@ export function registerPendingAsyncHook({
     responseAttachmentSent: false,
     shellCommand,
     stopProgressInterval,
-    // zai patch (2026-08-27): stamp owner session
-    ownerKey: getPrintSessionKey(),
   })
 }
 
@@ -285,18 +278,8 @@ export function removeDeliveredAsyncHooks(processIds: string[]): void {
   }
 }
 
-export async function finalizePendingAsyncHooks(
-  ownerKey?: string,
-): Promise<void> {
-  // zai patch (2026-08-27): optional owner filter — an in-process session's
-  // dispose finalizes only its own pending hooks instead of draining (and
-  // clearing!) every other session's in-flight hooks. Without a filter the
-  // behavior is identical to before (CLI / process shutdown).
-  const all = Array.from(pendingHooks.values())
-  const hooks =
-    ownerKey === undefined
-      ? all
-      : all.filter(h => (h.ownerKey ?? '__cli_default__') === ownerKey)
+export async function finalizePendingAsyncHooks(): Promise<void> {
+  const hooks = Array.from(pendingHooks.values())
   await Promise.all(
     hooks.map(async hook => {
       if (hook.shellCommand?.status === 'completed') {
@@ -314,13 +297,7 @@ export async function finalizePendingAsyncHooks(
       }
     }),
   )
-  if (ownerKey === undefined) {
-    pendingHooks.clear()
-  } else {
-    for (const hook of hooks) {
-      pendingHooks.delete(hook.processId)
-    }
-  }
+  pendingHooks.clear()
 }
 
 // Test utility function to clear all hooks

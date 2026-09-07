@@ -66,50 +66,37 @@ import { PermissionRegistry } from './permissionRegistry.js'
 import { getSessionInbox, disposeSessionInbox, listSessionInboxIds, type InboxMessage } from './sessionInbox.js'
 import { resolveMainAgent } from './mainAgents.js'
 import { readZaiSettings } from './zaiSettingsStore.js'
-import type { SessionRegistry } from './sessionHost/SessionRegistry.js'
 import type { RuntimeCore, ZaiSettings } from '../../shared/settings.js'
-import type {
-  AskBridgeFn,
-  PermissionBridgeFn,
-  ElicitationBridgeFn,
-} from '@zn-ai/zn-agent-core'
 
 /**
- * 核心运行时三态(zai patch 2026-08-28 命名统一,2026-08-30 字段全部统一为
- * `runtimeCore`,原 RuntimeTrack/openccCli):
+ * 核心运行时二态(2026-09-07 移除 inproc / spawn 两条轨道后):
  *   default → 轻量 in-process createOpenccRuntime
- *   inproc  → createPrintRuntime(每 sessionId 一个 vendor print.ts 实例)
- *   spawn   → spawn `opencc -p` 子进程(SessionHost)
- *   repl    → ReplRuntime(createReplSession 抽壳路径,P2 默认;取代原
- *            'default' 的默认位置;紧急回退用 'inproc' 或 'default')
+ *   repl    → ReplRuntime(createReplSession 抽壳路径,默认)
  * 解析优先级:`--runtimeCore` flag(落到 env)> env `ZAI_RUNTIME_CORE`
- * > settings.runtimeCore > 'repl'(spec 2026-08-30 §5.1)。
- * 在 `initAgentRuntime` 入口读一次,不在每个 query 重读。见
- * docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md
- * 与 docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md。
+ * > settings.runtimeCore > 'repl'。已废弃值('inproc'/'spawn'/其它非法值)
+ * 静默视同未配置,落 'repl'。见
+ * docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md。
  */
 export function resolveRuntimeCore(settings: ZaiSettings): RuntimeCore {
   const env = process.env.ZAI_RUNTIME_CORE
   if (env !== undefined && env !== '') {
-    if (env === 'inproc' || env === 'spawn' || env === 'default' || env === 'repl') return env
+    if (env === 'default' || env === 'repl') return env
     return 'repl'
   }
   const s = settings.runtimeCore
-  if (s === 'inproc' || s === 'spawn' || s === 'default' || s === 'repl') return s
+  if (s === 'default' || s === 'repl') return s
   return 'repl'
 }
 
 let runtime: OpenccRuntime | null = null
 let currentSessionId: string | null = null
-// zai patch (2026-08-28): initAgentRuntime 解析出的核心运行时缓存,供下游按
-// 运行时分支(如 SubagentNotifier 在 inproc 下跳过
-// server 注入——通知由 vendor print 环的 commandQueue drain 原生投递)。
+// initAgentRuntime 解析出的核心运行时缓存,供下游读取当前生效路径
+// (agentSettings 状态端点等)。
 let activeRuntimeCore: RuntimeCore = 'repl'
 /** 当前核心运行时;'repl' 也是 initAgentRuntime 未跑完时的安全默认值(spec §5.1 未配置兜底)。 */
 export function getRuntimeCore(): RuntimeCore {
   return activeRuntimeCore
 }
-let sessionRegistry: SessionRegistry | null = null
 /**
  * Legacy transcript accessor. Task 5 keeps a working `TranscriptStore`
  * around because route handlers (`routes/agent.ts`, `routes/transcript.ts`,
@@ -217,17 +204,14 @@ const _elicitationRegistry = new ElicitationRegistry()
   requestElicit: (input: Record<string, unknown>) =>
     _elicitationRegistry.request(input as Parameters<typeof _elicitationRegistry.request>[0]),
   queueToolResult: (sessionId: string, toolUseId: string, output: unknown, isError: boolean) => {
-    // zai patch (2026-09-07, fix tool_result dsh bridge, worktree-dsh):
-    // tool_result dsh delivery kind → toolExecution.queueResult。
     // out-of-band 通路: 外部 inbox 消息(非 queryLoop for-await)需要把
     // tool_use result 同步进 transcript + emit runtime.tool_result SSE。
     toolExecutionQueueResult(sessionId, toolUseId, output, isError)
   },
   prependReminder: (sessionId: string, text: string) => {
-    // zai patch (2026-09-07, fix system_reminder dsh bridge, worktree-dsh):
-    // system_reminder dsh delivery kind → SessionInbox.steer 入 nextStep
-    // lane, 由 registerExtraReminderProvider 的 drainInboxReminder 在下次
-    // API call 时渲染为 <system-reminder> prepend 到 prompt。
+    // system_reminder → SessionInbox.steer 入 nextStep lane, 由
+    // registerExtraReminderProvider 的 drainInboxReminder 在下次 API call
+    // 时渲染为 <system-reminder> prepend 到 prompt。
     // steer 而非 followup: reminder 是 mid-turn drain 语义(nextStep
     // lane), 不是 wake(idle → nextTurn)语义。
     getSessionInbox(sessionId).steer(sessionId, {
@@ -521,10 +505,6 @@ export function __resetAgentRuntimeForTests(): void {
       // best-effort
     }
   }
-  if (sessionRegistry) {
-    void sessionRegistry.killAll('test reset')
-    sessionRegistry = null
-  }
 }
 
 /**
@@ -750,16 +730,13 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // `streamingToolExecutor` tool loop → vendor's
   // `queryModelWithStreaming` → upstream API.
   // ---------------------------------------------------------------------
-  // 三态分支(ZAI_RUNTIME_CORE,spec §5.6):
-  //   default → 现状 in-process createOpenccRuntime;
-  //   inproc  → createPrintRuntime(每 sessionId 一个 vendor print.ts 实例);
-  //   spawn   → spawn `opencc -p` 子进程(SessionHost,stdio NDJSON +
-  //           control_request 协议),zai 退化为 SDK 宿主;
+  // 二态分支(ZAI_RUNTIME_CORE,spec §5.6):
+  //   default → 进程内 createOpenccRuntime(legacy 兜底);
   //   repl    → ReplRuntime(createReplSession 抽壳路径,默认)。
-  // settings 在分支前读一次;上下文注释见文档 spec。三条链路都保留上文
+  // 已废弃值(inproc / spawn / 其它)静默落 'repl'(resolveRuntimeCore 收敛)。
+  // settings 在分支前读一次;上下文注释见文档 spec。两条链路都保留上文
   // enableOpenccConfigs(vendor config system)与 zai 内部子系统
   // (PluginRuntime / eventBus / __zaiBridgeCtx / sessionInbox / sessionFacade)。
-  // isSdk 参数语义在阶段 5 收敛时删除;双轨期间保留 legacy 分支行为不变。
   // ---------------------------------------------------------------------
   // zai patch (2026-08-28): `enableOpenccConfigs()`(上一段)会把 settings.env
   // 无条件 `Object.assign` 回 process.env,覆盖 CLI 入口处
@@ -771,14 +748,11 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   activeRuntimeCore = runtimeCore
 
   // zai patch (2026-08-30, plan P2, Task 6): 'repl' is a top-level
-  // runtimeCore value (alongside 'default' / 'inproc' / 'spawn'), unified
-  // under the existing runtimeCore mechanism — not a sub-mode of 'inproc'
-  // and not a separate `runtime.kernel` field. repl branch instantiates
-  // ReplRuntime which wraps createReplSession as OpenccRuntimeV2 adapter.
-  // Default 'repl' makes the new path canonical (P2 complete). Legacy
-  // 'inproc' (createPrintRuntime) stays as fallback (P2-T5 revert
-  // deferred per user directive 2026-08-30). Emergency rollback:
-  // ZAI_RUNTIME_CORE=inproc or ZAI_RUNTIME_CORE=default.
+  // runtimeCore value, unified under the existing runtimeCore mechanism —
+  // not a sub-mode of anything and not a separate `runtime.kernel` field.
+  // repl branch instantiates ReplRuntime which wraps createReplSession as
+  // OpenccRuntimeV2 adapter. Default 'repl' makes the new path canonical
+  // (P2 complete); 'default' remains the legacy in-process fallback.
   // Spec: docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1.
   if (runtimeCore === 'repl') {
     try {
@@ -828,218 +802,6 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       process.once('SIGINT', cleanup)
     } catch (err) {
       console.error('[initAgentRuntime] ReplRuntime init failed:', err)
-      throw err
-    }
-  } else if (runtimeCore === 'spawn') {
-  // 启动日志显式标注运行时路径(双轨监控埋点,spec §5.6.5)。
-  console.log(
-    `[initAgentRuntime] runtimeCore=${runtimeCore} cwd=${cwd} (ZAI_RUNTIME_CORE=${process.env.ZAI_RUNTIME_CORE ?? 'unset'})`,
-  )
-    const { createSessionFacade } = await import('@zn-ai/zn-agent-core')
-    const { SessionRegistry } = await import('./sessionHost/SessionRegistry.js')
-    const { SessionHostRuntimeAdapter } = await import(
-      './agentRuntime/RuntimeAdapter.js'
-    )
-    try {
-      const reg = new SessionRegistry()
-      sessionRegistry = reg
-      const facade = await createSessionFacade({ cwd, dataDir })
-      runtime = new SessionHostRuntimeAdapter(reg, facade, cwd)
-      const cleanup = () => {
-        void reg.killAll('server shutdown')
-      }
-      process.once('SIGTERM', cleanup)
-      process.once('SIGINT', cleanup)
-      console.log(
-        `[initAgentRuntime] opencc-cli runtime 就绪(sessionRegistry hosts=0)`,
-      )
-    } catch (err) {
-      console.error('[initAgentRuntime] SessionHost runtime init failed:', err)
-      throw err
-    }
-  } else if (runtimeCore === 'inproc') {
-    // P1 inproc-print track: one vendor print.ts session instance per
-    // sessionId (plan §3). Implements OpenccRuntimeV2 (8-method contract +
-    // enqueue/interrupt/getSessionState); routes/agent.ts 消费 8 方法零改动,
-    // steering 接线按 `'enqueue' in runtime` 探测(P1-b)。
-    try {
-      const { createPrintRuntime } = await import('@zn-ai/zn-agent-core')
-      // P3 (plan §5): wire the three control_request bridges so vendor's
-      // can_use_tool / elicitation control_protocol hits the same ask /
-      // permission registries the lightweight track uses, with the same
-      // ALS-resolved sessionId routing (P0.5). The compat AskUserQuestion
-      // wrapper (paths/0.5) still fires first; these bridges are the
-      // defense-in-depth path for any tool that escapes the wrapper
-      // (vendor-native AskUserQuestion fallback, MCP elicitation, future
-      // sandbox-style tools).
-      const askBridge: AskBridgeFn = async ({
-        sessionId,
-        toolUseId,
-        requestId,
-        input,
-      }) => {
-        // askRegistry.register returns a Promise<AskUserAnswers> that
-        // resolves when the HTTP /api/agent/answer route calls answer().
-        // We register synchronously, emit prompt.ask so the frontend
-        // QuestionCard shows, and await the user's response.
-        const ctrl = new AbortController()
-        const answersPromise = askRegistry.register(
-          toolUseId,
-          sessionId,
-          ctrl.signal,
-        )
-        // Cast to ServerEventInput — vendor's MCP AskUserQuestion payload
-        // shape (vendor control_request.input.questions) is structurally
-        // compatible but TS narrows each option to `{}` since the input is
-        // `Record<string, unknown>`. The SSE consumer (web UI) parses
-        // through the same zod schema; if it fails the QuestionCard just
-        // shows an empty question list — but the ask still resolves.
-        eventBus.emit({
-          type: 'prompt.ask',
-          sessionId,
-          toolUseId,
-          requestId,
-          questions: input.questions ?? [],
-          ...(input.metadata ? { metadata: input.metadata } : {}),
-        } as unknown as Parameters<typeof eventBus.emit>[0])
-        const answers = await answersPromise
-        return { answers: answers as Record<string, unknown> }
-      }
-      const permissionBridge: PermissionBridgeFn = async ({
-        sessionId,
-        toolUseId,
-        requestId,
-        toolName,
-        input,
-      }) => {
-        const ctrl = new AbortController()
-        const decisionPromise = permissionRegistry.register(
-          toolUseId,
-          sessionId,
-          ctrl.signal,
-        )
-        eventBus.emit({
-          type: 'prompt.permission',
-          sessionId,
-          toolUseId,
-          requestId,
-          toolName,
-          description: typeof input === 'object' && input
-            ? JSON.stringify(input)
-            : String(input ?? ''),
-          // vendor's permission_pending event has no `message` field;
-          // zai's schema requires one — fall back to the description.
-          message: typeof input === 'object' && input
-            ? JSON.stringify(input)
-            : String(input ?? ''),
-        } as unknown as Parameters<typeof eventBus.emit>[0])
-        const decision = await decisionPromise
-        // Map registry's {decision, message?} shape to vendor's
-        // {behavior, message?, updatedInput?} shape. updatedInput is
-        // populated by the registry when the route supplies it.
-        return {
-          behavior: decision.decision,
-          ...(decision.message ? { message: decision.message } : {}),
-          ...(decision.updatedInput
-            ? { updatedInput: decision.updatedInput }
-            : {}),
-        }
-      }
-      // zai patch (2026-09-07, plan P2-2.5, worktree-dsh): wire vendor
-      // elicit_pending → ElicitationRegistry.request + prompt.elicit SSE。
-      // 之前 stub 直接 cancel, MCP 服务端永远拿不到用户答复, 客户端也
-      // 看不到弹窗。这里:
-      //   1. emit prompt.elicit ServerEvent 给前端 SSE 渠道
-      //      (前端 useEventStream reducer 据此弹 elicit form)
-      //   2. 同步调 _elicitationRegistry.request 注册 elicitationId,
-      //      返回 Promise 等用户答复
-      //   3. 用户答复(ElicitationRegistry.resolve)后, result 透传 vendor
-      //      createPrintRuntime → control_response_success
-      const elicitationBridge: ElicitationBridgeFn = async ({
-        sessionId,
-        requestId,
-        mcpServerName,
-        message,
-        mode,
-        url,
-        elicitationId,
-        requestedSchema,
-      }) => {
-        // 1. emit prompt.elicit SSE (前端弹窗)
-        const bus = (globalThis as any).__zaiEventBus as
-          | { emit: (e: unknown) => void }
-          | undefined
-        if (bus) {
-          bus.emit({
-            type: 'prompt.elicit',
-            sessionId,
-            toolUseId: requestId,
-            elicitationId: elicitationId ?? '',
-            mcpServerName: mcpServerName ?? '',
-            message: message ?? '',
-            mode: mode ?? 'form',
-            url,
-            requestedSchema,
-          })
-        }
-        // 2. 注册到 ElicitationRegistry, 等用户答复
-        try {
-          const result = await _elicitationRegistry.request({
-            elicitationId,
-            mcpServerName: mcpServerName ?? '',
-            message: message ?? '',
-            mode: mode ?? 'form',
-            url,
-            requestedSchema,
-          })
-          return {
-            action: result.action,
-            ...(result.content ? { content: result.content } : {}),
-          }
-        } catch (err) {
-          // elicitId 二次注册等异常 → cancel, MCP 服务端不阻塞
-          console.warn(
-            `[inproc] ElicitationRegistry.request failed — cancelling: server=${mcpServerName} message=${(message ?? '').slice(0, 80)} session=${sessionId} err=${String(err)}`,
-          )
-          return { action: 'cancel' }
-        }
-      }
-      runtime = await createPrintRuntime({
-        dataDir,
-        runtimeId: 'zai-server',
-        defaultCwd: cwd,
-        defaultModel:
-          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
-          ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
-        connectMcp: false,
-        interactive: !(isSdk ?? false),
-        maxSessions: Number(process.env.ZAI_PRINT_MAX_SESSIONS ?? '8') || 0,
-        // P2 idle-TTL eviction (minutes). Instances idle past this with no
-        // turn / no active background tasks are disposed; next query
-        // re-hydrates via vendor resume. Default 30; 0 disables.
-        idleTtlMin: Number(process.env.ZAI_PRINT_IDLE_TTL_MIN ?? '30'),
-        // zai patch (2026-08-29, plan §A): opt-in per-instance option that
-        // locks `isBypassPermissionsModeAvailable` to true so vendor's
-        // runtime mode-switch guard (print.ts:4802-4823) doesn't block
-        // plan→bypass transitions. Resolution: env > settings > false.
-        // Default false; production users opt in via
-        // ZAI_DANGEROUSLY_SKIP_PERMISSIONS=1 or
-        // settings.openccCliDangerouslySkip === true.
-        dangerouslySkipPermissions:
-          process.env.ZAI_DANGEROUSLY_SKIP_PERMISSIONS === '1'
-          || (settings.openccCliDangerouslySkip === true),
-        askBridge,
-        permissionBridge,
-        elicitationBridge,
-      })
-      const cleanup = () => {
-        if (runtime) void runtime.shutdown()
-      }
-      process.once('SIGTERM', cleanup)
-      process.once('SIGINT', cleanup)
-      console.log(`[initAgentRuntime] inproc-print runtime 就绪(instances=0)`)
-    } catch (err) {
-      console.error('[initAgentRuntime] createPrintRuntime failed:', err)
       throw err
     }
   } else {
@@ -1142,20 +904,6 @@ export function getCurrentSessionId(): string | null {
 export function getRuntime(): OpenccRuntime {
   if (!runtime) throw new Error('Agent runtime not initialized')
   return runtime
-}
-
-/**
- * B1 路径的 SessionRegistry(spec §5.5.1)。仅在 `ZAI_RUNTIME_CORE=spawn` 时被
- * initAgentRuntime 挂载;legacy 路径调用会直接 throw(Phase B 的 registry
- * resolve 落点需要它时,following 分支已守卫)。
- */
-export function getSessionRegistry(): SessionRegistry {
-  if (!sessionRegistry) {
-    throw new Error(
-      'SessionRegistry not initialized (需要 ZAI_RUNTIME_CORE=spawn 启动)',
-    )
-  }
-  return sessionRegistry
 }
 
 /**

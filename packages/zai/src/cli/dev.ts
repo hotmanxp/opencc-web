@@ -21,7 +21,7 @@ interface DevOptions {
   lan?: boolean;
   sdk?: boolean;
   /**
-   * `--runtimeCore <default|inproc|spawn>` — CLI flag 在
+   * `--runtimeCore <default|repl>` — CLI flag 在
    * packages/zai/src/cli/index.ts 的 action 包装里已经被
    * applyRuntimeCoreFlag 翻译成 env 写入,runDev 不再读。
    * 保留这个字段只为 commander .action 推断出来的 OptionValues 不会引入

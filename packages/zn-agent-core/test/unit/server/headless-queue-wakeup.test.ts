@@ -4,14 +4,14 @@
  * 背景(2026-08-29):
  *   vendor `cli/print.ts:2057` 的 `subscribeToCommandQueue` 回调只处理
  *   `'now'` 优先级的 abort,不 kick `run()`。在 headless 模式
- *   (`-p` / zai inproc / spawn 子进程)下,后台 agent 完成的瞬间
+ *   (`-p` / zai server)下,后台 agent 完成的瞬间
  *   (`enqueuePendingNotification` 写入 commandQueue)正好处于 vendor
  *   `run()` do-while 的两次巡检之间 —— `completeAsyncAgent` 已把
  *   task.status 改成 `'completed'`,但 `enqueueAgentNotification`
  *   还要再过两个 await 才能 fire。结果是:`hasRunningBg=false` 且
  *   `hasMainThreadQueued=false`,do-while 退出 → `run()` 返回 →
  *   `for await (structuredInput)` 挂起 → 通知进了 commandQueue
- *   但**没人 drain**。症状:zai inproc 下 Agent 工具完成后,主对话
+ *   但**没人 drain**。症状:zai server 下 Agent 工具完成后,主对话
  *   LLM 永远不产出收尾总结。
  *
  *   TUI/REPL 有 `hooks/useQueueProcessor.ts` 兜底;headless 没有等价
@@ -30,16 +30,15 @@
  *   4) `'now'` 优先级仍走 abort 分支(原行为不退化)
  *
  * `subscribeToCommandQueue` 是 vendor `utils/messageQueueManager.ts`
- * 的公开 API,且 inproc + REPL + spawn 都共享同一 module 单例
- * (subagentNotifier.ts:51-58 注释也认这个 invariant);所以从 bundle
- * 主入口 import 与真实 vendor 路径同实例。
+ * 的公开 API,且所有 runtime 路径都共享同一 module 单例;所以从
+ * bundle 主入口 import 与真实 vendor 路径同实例。
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 // 从 bundle 主入口拿(2026-08-29 zai patch 在 bundle-entry.ts 显式导出
 // 了这条 API)。bundle 与 vendor 内部路径是同一 module 实例 —
-// inproc + REPL + spawn 都共享同一份 commandQueue,见
-// subagentNotifier.ts:51-58 注释的 invariant 声明。
+// 所有 runtime 路径共享同一份 commandQueue,见
+// bundle-entry.ts 的 invariant 声明。
 import {
   enqueuePendingNotification,
   hasCommandsInQueue,

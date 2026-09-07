@@ -1,6 +1,6 @@
 # opencc-web REPL:vendor 原生 REPL vs zai 实现的 REPL — GAP 对比
 
-> **本文档定位**:zai 服务端"实现 REPL 行为"的方式 vs vendor 原生 REPL(`opencc-src/screens/REPL.tsx`,5366 行,Ink/React TUI)的真实差异。已删除之前文档中的 DSH / dsh-bridge / 跨厂商比较内容 — dsh-bridge 已废弃,本次只关注 zai ↔ vendor 原生 REPL 的 GAP。
+> **本文档定位**:zai 服务端"实现 REPL 行为"的方式 vs vendor 原生 REPL(`opencc-src/screens/REPL.tsx`,5366 行,Ink/React TUI)的真实差异。只关注 zai ↔ vendor 原生 REPL 的 GAP。
 >
 > **调研方法**:三路独立 Explore agent 并行,主对话综合交叉验证。每条结论标注来源子任务 ID,可追溯到子报告对应章节。
 >

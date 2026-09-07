@@ -2,9 +2,8 @@
  * zai patch (2026-08-27) — resolveAskBridgeCtx 的 sessionId 优先级:
  * ALS(runWithSessionId)> __zaiBridgeCtx.sessionId(全局指针)。
  *
- * 动机:inproc print track 每 session 的整个 runHeadless 链都包在
- * runWithSessionId 里,N 个并发 session 各自拿到自己的 sessionId;
- * 轻量 track 无 ALS → 回退全局指针,行为不变。
+ * 动机:并发 session(服务端多 session 共享进程)按 runWithSessionId
+ * 各自拿到自己的 sessionId;轻量运行时无 ALS → 回退全局指针,行为不变。
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { resolveAskBridgeCtx } from '../../../src/compat/tools/opencc/AskUserQuestionTool.js'

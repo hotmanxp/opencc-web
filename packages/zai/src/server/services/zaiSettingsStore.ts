@@ -235,17 +235,18 @@ export function isValidAutoUpdate(value: unknown): value is boolean {
 }
 
 /**
- * zai patch (2026-08-28): 核心运行时三态设置开关。与 `agentRuntime.ts` 的
+ * 核心运行时二态设置开关。与 `agentRuntime.ts` 的
  * `resolveRuntimeCore` 语义对齐(env `ZAI_RUNTIME_CORE` / `--runtimeCore`
  * flag 优先级更高,不在此函数职责内):把持久化的 `settings.runtimeCore`
- * 归一化为 'default' | 'inproc' | 'spawn' | 'repl' 供 UI 渲染
- * (缺失 / 非法 → 'repl',spec 2026-08-30 §5.1)。
+ * 归一化为 'default' | 'repl' 供 UI 渲染
+ * (缺失 / 非法 → 'repl',spec 2026-08-30 §5.1;已废弃值 inproc/spawn
+ * 一律落 'repl')。
  */
 export function resolveRuntimeCore(
   settings: ZaiSettings,
 ): RuntimeCore {
   const s = settings.runtimeCore
-  if (s === 'inproc' || s === 'spawn' || s === 'default' || s === 'repl') return s
+  if (s === 'default' || s === 'repl') return s
   return 'repl'
 }
 
@@ -253,12 +254,7 @@ export function resolveRuntimeCore(
 export function isValidRuntimeCore(
   value: unknown,
 ): value is RuntimeCore {
-  return (
-    value === 'default' ||
-    value === 'inproc' ||
-    value === 'spawn' ||
-    value === 'repl'
-  )
+  return value === 'default' || value === 'repl'
 }
 
 /**

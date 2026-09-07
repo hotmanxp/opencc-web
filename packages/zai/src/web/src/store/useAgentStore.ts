@@ -287,7 +287,7 @@ interface AgentState {
   // 的 turnIndex(同 session 内,monotonic 不降)。用于在 runtime.started
   // 入口判断"是否真正的新 turn":incomingTurn > lastSeen 才 bump
   // textSegmentRev 开新 bubble。原先用 prevStatus==='streaming' 守卫,
-  // 但 inproc-print 的 async-agent follow-up turnIndex 跳升时 status
+  // 但 async-agent follow-up 时 turnIndex 跳升而 status
   // 仍 'streaming'(子代理异步返回期间从未 idle),导致新 turn 的
   // text_delta 全部被 upsertStreamBlock 复用上一轮的 key,UI 上 follow-up
   // 文本"消失"。
@@ -1532,7 +1532,7 @@ export function createAgentStore() {
         // 显示流式动画与 elapsed 计时.
         //
         // zai patch (2026-08-30): turnIndex strict-greater-than 守卫。
-        // 原先 `prevStatus === 'streaming'` 守卫在 inproc-print 异步代理
+        // 原先 `prevStatus === 'streaming'` 守卫在 async-agent 异步
         // 场景失败:async-agent 派发 → 等 <task-notification> → 续写新 turn
         // 期间 status 始终是 'streaming',新 turn 的 runtime.started 到达
         // 时 prevStatus==='streaming',不 bump textSegmentRev,新 turn 的

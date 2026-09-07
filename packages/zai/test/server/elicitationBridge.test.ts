@@ -4,12 +4,11 @@
  * bridgeElicitPendingToPromptElicit 把 vendor tool_use:elicit_pending
  * 翻译成 zai 内部 prompt.elicit ServerEvent, 让前端 SSE 渠道收到。
  *
- * elicit_pending 是 vendor 控制协议(createPrintRuntime-impl.ts:268
- *   if (subtype === 'elicitation') → options.elicitationBridge(...))
- * 触发的 MCP Elicitation 弹窗请求。zai 的 ElicitationRegistry 通过
- * prompt.elicit SSE 渠道接收用户答复。翻译层只负责 emit, 不负责
- * 注册到 Registry(后者是 elicitBridge 在 createPrintRuntime 安装时
- * 提供的 callback, 见 agentRuntime.ts:948+)。
+ * elicit_pending 是 vendor 控制协议(MCP Elicitation 弹窗请求)触发的,
+ * zai 服务端由 `bridgeElicitPendingToPromptElicit`
+ * (src/server/services/agentRuntime.ts) 翻译成 prompt.elicit ServerEvent。
+ * zai 的 ElicitationRegistry 通过 prompt.elicit SSE 渠道接收用户答复。
+ * 翻译层只负责 emit, 不负责注册到 Registry。
  *
  * 测试覆盖:
  *   1. vendor emit elicit_pending → __zaiEventBus.emit('prompt.elicit')

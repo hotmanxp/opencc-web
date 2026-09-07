@@ -294,7 +294,7 @@ export type OpenccRuntime = {
 }
 
 /**
- * zai patch (2026-08-27, P1 inproc-print track): steering priorities,
+ * zai patch (2026-08-27): steering priorities,
  * mapped 1:1 onto the vendor command-queue semantics in cli/print.ts —
  *   - 'now'   preempts (aborts) the in-flight turn and starts immediately
  *   - 'next'  front of queue, drains at the next batch point
@@ -312,9 +312,9 @@ export type OpenccEnqueueInput = {
 }
 
 /**
- * zai patch (2026-08-27): V2 runtime contract for the in-process print
- * core runtime (`ZAI_RUNTIME_CORE=inproc`). Extends the frozen 8-method V1 shape
- * with the three capabilities the vendor print loop natively supports but
+ * V2 runtime contract (2026-09-07: origin 从 in-process print 轨道
+ * 泛化为所有扩展运行时)。Extends the frozen 8-method V1 shape
+ * with the three capabilities the native runtime loop supports but
  * the lightweight runtime lacks: mid-flight steering (enqueue/interrupt)
  * and per-session state introspection (getSessionState).
  *

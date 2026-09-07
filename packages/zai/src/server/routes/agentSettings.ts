@@ -378,7 +378,7 @@ router.put('/agent/settings/main-agent', async (req: Request, res: Response) => 
  * PUT /api/agent/settings/runtime-core — 持久化核心运行时开关
  * (zai patch 2026-08-28 命名统一,P3.1 加 'repl',2026-08-30 全部统一为
  * `runtimeCore` 字段)。Body 是
- * `{ runtimeCore: 'default' | 'inproc' | 'spawn' | 'repl' }`,写入 settings.runtimeCore。
+ * `{ runtimeCore: 'default' | 'repl' }`,写入 settings.runtimeCore。
  *
  * 生效时机:**重启实例后**——运行时在 `initAgentRuntime` 只解析一次;且
  * env `ZAI_RUNTIME_CORE` / `--runtimeCore` flag 优先级更高,会盖过本设置。
@@ -412,8 +412,8 @@ router.put(
 )
 
 /**
- * PUT /api/agent/settings/opencc-cli-dangerously-skip — 持久化 inproc 轨道
- * 的 bypass 可用性开关 (zai patch 2026-08-29, plan §A)。Body 是
+ * PUT /api/agent/settings/opencc-cli-dangerously-skip — 持久化 bypass 权限
+ * 可用性开关 (zai patch 2026-08-29, plan §A)。Body 是
  * `{ openccCliDangerouslySkip: boolean }`,写入 settings.openccCliDangerouslySkip。
  *
  * 生效时机:**重启实例后**——运行时在 `initAgentRuntime` 只解析一次;且

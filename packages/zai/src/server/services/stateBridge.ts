@@ -37,9 +37,8 @@ export function initStateBridge(): () => void {
   // 在同一 initStateBridge 调用链里, 保证 listener 先于 backgroundRuntime
   // 的第一次 emit 注册。
   //
-  // 备注 (继承自 2026-09-01): repl/inproc runtime 下 vendor drain 与
-  // BashNotifier 双链路并存, BashNotifier 内部已守 `getRuntimeCore() ===
-  // 'inproc'` 直接 return (bashNotifier.ts:140), 不重复注入。
+  // 备注 (继承自 2026-09-01): vendor drain 与 BashNotifier 双链路并存时,
+  // BashNotifier 内部按运行时去重, 避免同一完成事件双份 user 消息。
   //
   // dynamic import + .then 是 fire-and-forget, 不阻塞 initStateBridge
   // 返回。initStateBridge 自身保持同步签名(createApp:82 调用点)。

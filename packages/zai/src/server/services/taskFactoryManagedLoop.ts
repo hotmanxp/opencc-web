@@ -117,9 +117,21 @@ type StagnantTracker = {
 }
 const stagnantTrackers = new Map<string, StagnantTracker>()
 
+/** collectRecentEvents 的硬上限:回放 + 等待新事件最长 1.5s,超时即退。 */
+const RECENT_EVENTS_TIMEOUT_MS = 1500
+
+/**
+ * checkStagnantTasks 并发去重:tick 每 5s fire-and-forget 一次,若上一轮
+ * 尚未结束(多候选 × 1.5s 超时可能超过 tick 间隔)则跳过本轮,避免同一
+ * 停滞 key 被并发处理导致重复告警注入(lastReportedAt 在 await 后才写,
+ * 竞态窗口内不互斥)。
+ */
+let stagnantCheckRunning = false
+
 /** 测试用 —— 启动前清空 trackers,让单测从零状态开始。 */
 export function __resetStagnantTrackersForTests(): void {
   stagnantTrackers.clear()
+  stagnantCheckRunning = false
 }
 
 function isTerminal(task: { status?: string } | null | undefined): boolean {
@@ -187,13 +199,15 @@ async function collectRecentEvents(
   eventCount: number,
 ): Promise<unknown[]> {
   // 拉最近 5 条 TaskEvent 摘要:从 max(0, eventCount - 5) 开始订阅,事件流
-  // 会先回放历史(seq > fromSeq)再等待新增;任务已终态时流立即关闭,所以
-  // 拿到的事件最多 ~5 条(已达成完成);在线任务不会关闭流,这里仅取首个
-  // batch(用 break)就退出,避免长期挂着等新事件拖垮 tick。
+  // 会先回放历史(seq > fromSeq)再等待新增;任务已终态时流立即关闭。
+  // 注意:停滞任务恰恰意味着「没有新事件」,在线任务的流不会自行关闭,
+  // 若不设边界 for await 会永久挂起(checkStagnantTasks 卡死 + 每 tick 泄漏
+  // 一个 events 订阅)。这里用 AbortSignal.timeout 给回放+等待设硬上限,
+  // abort 后 generator 的 finally 会摘掉 emitter 监听,不残留订阅。
   const fromSeq = Math.max(0, eventCount - 5)
   const collected: unknown[] = []
   try {
-    for await (const ev of bg.events(taskId, fromSeq)) {
+    for await (const ev of bg.events(taskId, fromSeq, AbortSignal.timeout(RECENT_EVENTS_TIMEOUT_MS))) {
       collected.push({
         seq: ev.seq,
         eventId: ev.eventId,
@@ -211,6 +225,26 @@ async function collectRecentEvents(
 }
 
 async function checkStagnantTasks(
+  bg: ReturnType<typeof getBackgroundRuntime>,
+  candidates: Array<{
+    id: string
+    title?: string | null
+    executorTaskId?: string | null
+    verifierTaskId?: string | null
+  }>,
+  thresholdMs: number,
+  cooldownMs: number,
+): Promise<void> {
+  if (stagnantCheckRunning) return
+  stagnantCheckRunning = true
+  try {
+    await checkStagnantTasksInner(bg, candidates, thresholdMs, cooldownMs)
+  } finally {
+    stagnantCheckRunning = false
+  }
+}
+
+async function checkStagnantTasksInner(
   bg: ReturnType<typeof getBackgroundRuntime>,
   candidates: Array<{
     id: string

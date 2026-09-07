@@ -25,8 +25,6 @@ function statusLabel(status: ConversationInfo['status']): string {
 function runtimeCoreLabel(r: ConversationInfo['runtimeCore']): string {
   switch (r) {
     case 'default': return 'default'
-    case 'inproc': return 'inproc'
-    case 'spawn': return 'spawn'
     case 'repl': return 'repl'
     case null: return '—'
   }

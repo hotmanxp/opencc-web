@@ -253,7 +253,7 @@ pnpm --filter @zn-ai/zai dev -- --port 8103 --api-port 7717
 
 ## 明确不在 scope
 
-- 不动 dsh-bridge / 双轨改造相关逻辑
+- 不动双轨改造相关逻辑
 - 不改 lan-agent 移动客户端
 - 不改 `~/.claude/plugins/` 迁移逻辑
 - 不重写 `routes/superTasks.ts`(API 路由仍用 core 函数,工具层与路由层解耦)

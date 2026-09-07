@@ -21,7 +21,7 @@ interface StartOptions {
   lan?: boolean;
   sdk?: boolean;
   /**
-   * `--runtimeCore <default|inproc|spawn>` — 透传到 managed child,确保
+   * `--runtimeCore <default|repl>` — 透传到 managed child,确保
    * child 再次跑 `runStart` 时仍然按 CLI flag 强制覆盖 env;否则 child 只能
    * 从父进程 env 间接继承。详见 packages/zai/src/cli/runtimeCoreFlag.ts。
    */

@@ -5,10 +5,9 @@ const IS_WIN32 = process.platform === 'win32';
 /**
  * 终止一个子进程,win32 下连整棵进程树一起杀。
  *
- * 背景:Windows 上很多调用点(ReplSession 的 cmd/bash 包装、cliSpawn 经
- * resolveSpawnCommand 包装的 opencc .cmd shim)child 本身只是包装层
- * (cmd.exe),child.kill() 只杀包装层,真正的孙进程(opencc / npm / 用户
- * 命令)会残留成孤儿。taskkill /T 递归杀树,/F 强制。
+ * 背景:Windows 上很多调用点(ReplSession 的 cmd/bash 包装)child
+ * 本身只是包装层(cmd.exe),child.kill() 只杀包装层,真正的孙进程
+ * (opencc / npm / 用户命令)会残留成孤儿。taskkill /T 递归杀树,/F 强制。
  *
  * 非 win32:SIGTERM,force=true 时 SIGKILL。
  */

@@ -404,7 +404,7 @@ export class ReplRuntime {
  * zai patch (2026-09-06): legacy/单元测试 fallback plugin stub。
  * 生产路径总是由 initAgentRuntime 注入 openccRuntime(它带真实 plugins),
  * 此 stub 仅在未注入时兜底(单测 / 渐进迁移场景),保证 routes/plugins.ts
- * 不因 r.plugins === undefined 崩溃。形态与 SessionHostRuntimeAdapter
+ * 不因 r.plugins === undefined 崩溃。形态与共享 OpenccRuntime 的
  * createPluginStub 一致(同样的 Phase B+ 占位语义)。
  */
 function createPluginStub(): OpenccRuntime['plugins'] {

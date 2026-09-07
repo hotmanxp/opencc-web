@@ -144,6 +144,8 @@ export async function getCliStatuses(
     // codegraph 是 MCP 代码智能服务（@colbymchenry/codegraph），不是 AI CLI
     // 工具，所以 Dashboard 顶部统计不收录，但 Tools 页面要可安装/更新。
     { name: 'codegraph', pkg: '@colbymchenry/codegraph', bin: 'codegraph' },
+    // dsh 是 DeepSeek Harness 的 Agent 运行时 CLI（@deepseek-ai/dsh）。
+    { name: 'dsh', pkg: '@deepseek-ai/dsh', bin: 'dsh' },
     // zai 自身：本机 /tools 页要能看到自己是否已安装到 PATH、版本号。
     // 这里只查 `@zn-ai/zai`，前端别再写死 `installed: false`。
     { name: 'zai', pkg: '@zn-ai/zai', bin: 'zai' },

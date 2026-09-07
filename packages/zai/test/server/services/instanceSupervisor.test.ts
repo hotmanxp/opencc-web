@@ -359,12 +359,12 @@ describe('instanceSupervisor (4a — state machine)', () => {
   })
 
   // PATCH 设 runtimeCore 后,下一次 restart 用新值。
-  it('updateInstance({runtimeCore:inproc}) persists, restartInstance spawns --runtimeCore inproc', async () => {
+  it('updateInstance({runtimeCore:repl}) persists, restartInstance spawns --runtimeCore repl', async () => {
     const { deps, fakeChildren, spawnArgs } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
     const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
     fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
-    await getInstanceSupervisor().updateInstance(snap.id, { runtimeCore: 'inproc' })
+    await getInstanceSupervisor().updateInstance(snap.id, { runtimeCore: 'repl' })
     const stopP = getInstanceSupervisor().stopInstance(snap.id)
     fakeChildren[0]!.emitExit(0)
     await stopP
@@ -373,7 +373,7 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(spawnArgs[0]).not.toContain('--runtimeCore')
     const idx = spawnArgs[1]!.indexOf('--runtimeCore')
     expect(idx).toBeGreaterThanOrEqual(0)
-    expect(spawnArgs[1]![idx + 1]).toBe('inproc')
+    expect(spawnArgs[1]![idx + 1]).toBe('repl')
   })
 
   // PATCH runtimeCore=null → 清回 inherit(undefined on snapshot),restart 不再带 flag。
@@ -394,20 +394,20 @@ describe('instanceSupervisor (4a — state machine)', () => {
   })
 
   // Per-call override 优先于持久化值。
-  it('startInstance({runtimeCore:spawn}) override beats def.runtimeCore=inproc on the new spawn', async () => {
+  it('startInstance({runtimeCore:default}) override beats def.runtimeCore=repl on the new spawn', async () => {
     const { deps, fakeChildren, spawnArgs } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
-    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', runtimeCore: 'inproc' })
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', runtimeCore: 'repl' })
     fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
     const stopP = getInstanceSupervisor().stopInstance(snap.id)
     fakeChildren[0]!.emitExit(0)
     await stopP
-    await getInstanceSupervisor().restartInstance(snap.id, { runtimeCore: 'spawn' })
-    // First spawn was created with inproc → --runtimeCore inproc.
-    // Restart override swaps to spawn → --runtimeCore spawn.
-    expect(spawnArgs[0]).toContain('inproc')
+    await getInstanceSupervisor().restartInstance(snap.id, { runtimeCore: 'default' })
+    // First spawn was created with repl → --runtimeCore repl.
+    // Restart override swaps to default → --runtimeCore default.
+    expect(spawnArgs[0]).toContain('repl')
     const idx = spawnArgs[1]!.indexOf('--runtimeCore')
-    expect(spawnArgs[1]![idx + 1]).toBe('spawn')
+    expect(spawnArgs[1]![idx + 1]).toBe('default')
   })
 
   // ───────── 应用 profile（app）─────────

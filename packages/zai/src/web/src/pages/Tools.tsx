@@ -54,6 +54,13 @@ const TOOL_CARDS: ToolCardData[] = [
     desc: 'Agent Login — 凭证管理工具',
     configurable: false,
   },
+  {
+    key: 'dsh',
+    label: 'DSH',
+    icon: '🦾',
+    desc: 'DSH — DeepSeek Harness Agent 运行时',
+    configurable: false,
+  },
   // zai 自身：从 /api/cli 的 CliStatus 拿真实状态，不再写死 "未安装"。
   // 当前 server 进程就是 zai，全局安装到 PATH 后这里会显示"已安装"+ 当前版本。
   {

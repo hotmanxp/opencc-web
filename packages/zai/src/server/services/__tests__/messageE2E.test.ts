@@ -32,7 +32,15 @@ import { zaiEnqueuePendingNotification } from '../messageQueueAdapter.js'
 // filter 逻辑回归测试可重复。
 function simulateMidTurnDrain(cmdQueue, currentAgentId, isMainThread) {
   return cmdQueue.filter(cmd => {
-    if (isMainThread) return cmd.agentId === undefined
+    // zai patch (2026-09-07, fix 🔴-2): 与 query.ts 主线程分支同步 —— 主线程
+    // 也必须按 sessionId 路由, 否则任一活跃 session 吞掉其它 session 的
+    // 排队命令。无 sessionId 的 vendor 原生 cmd 保持原行为。
+    if (isMainThread) {
+      return (
+        cmd.agentId === undefined &&
+        (cmd.sessionId === undefined || cmd.sessionId === currentAgentId)
+      )
+    }
     return (
       cmd.mode === 'task-notification' &&
       ((cmd.sessionId === currentAgentId) ||
@@ -195,5 +203,23 @@ describe('messageE2E: zai session isolation (Phase 1.7)', () => {
     const mainDrain = simulateMidTurnDrain(mockQueue, 'sess-X', true)
     expect(mainDrain).toHaveLength(1)
     expect(mainDrain[0].mode).toBe('prompt')
+  })
+
+  // zai patch (2026-09-07, fix 🔴-2 回归): 两个活跃主线程 session 并发 drain。
+  // zai 入队命令 agentId 恒 undefined、sessionId 恒有值 —— 旧逻辑
+  // `cmd.agentId === undefined` 会让 sessionA 把 sessionB 的排队命令一并吞掉。
+  it('主线程 2 session 并发: sessionA 的 drain 不吞 sessionB 的排队命令', () => {
+    const mockQueue = [
+      { value: 'A prompt', mode: 'prompt', priority: 'next', sessionId: 'sess-A' },
+      { value: 'B notification', mode: 'task-notification', priority: 'later', sessionId: 'sess-B' },
+      { value: 'A notification', mode: 'task-notification', priority: 'later', sessionId: 'sess-A' },
+    ]
+    const drainA = simulateMidTurnDrain(mockQueue, 'sess-A', true)
+    expect(drainA.map(c => c.value)).toEqual(['A prompt', 'A notification'])
+    const drainB = simulateMidTurnDrain(mockQueue, 'sess-B', true)
+    expect(drainB.map(c => c.value)).toEqual(['B notification'])
+    // 第三个 session: 什么都拿不到, 也不清空别人的
+    const drainC = simulateMidTurnDrain(mockQueue, 'sess-C', true)
+    expect(drainC).toHaveLength(0)
   })
 })

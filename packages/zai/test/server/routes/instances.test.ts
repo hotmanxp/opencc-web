@@ -373,7 +373,7 @@ describe('routes/instances', () => {
     expect(res.body.error).toMatch(/app/)
   })
 
-  it.each(['default', 'inproc', 'spawn', 'repl'] as const)(
+  it.each(['default', 'repl'] as const)(
     'POST /api/instances accepts runtimeCore=%s',
     async (mode) => {
       const { app } = await bootstrap()
@@ -403,14 +403,17 @@ describe('routes/instances', () => {
     expect(res.body.error).toMatch(/runtimeCore/)
   })
 
-  it('POST /api/instances rejects unknown runtimeCore value with 400', async () => {
-    const { app } = await bootstrap()
-    const res = await request(app)
-      .post('/api/instances')
-      .send({ name: 'demo', cwd: '/tmp', runtimeCore: 'repll' })
-    expect(res.status).toBe(400)
-    expect(res.body.error).toMatch(/runtimeCore/)
-  })
+  it.each(['inproc', 'spawn', 'repll'] as const)(
+    'POST /api/instances rejects legacy/unknown runtimeCore=%s with 400',
+    async (mode) => {
+      const { app } = await bootstrap()
+      const res = await request(app)
+        .post('/api/instances')
+        .send({ name: 'demo', cwd: '/tmp', runtimeCore: mode })
+      expect(res.status).toBe(400)
+      expect(res.body.error).toMatch(/runtimeCore/)
+    },
+  )
 
   it('POST /api/instances rejects non-string runtimeCore with 400', async () => {
     const { app } = await bootstrap()
@@ -431,9 +434,9 @@ describe('routes/instances', () => {
     })
     const res = await request(app)
       .patch('/api/instances/inst_seed')
-      .send({ runtimeCore: 'inproc' })
+      .send({ runtimeCore: 'repl' })
     expect(res.status).toBe(200)
-    expect(res.body.instance.runtimeCore).toBe('inproc')
+    expect(res.body.instance.runtimeCore).toBe('repl')
   })
 
   it('PATCH /api/instances/:id with runtimeCore=null clears the override back to inherit', async () => {
@@ -455,18 +458,18 @@ describe('routes/instances', () => {
   it('PATCH /api/instances/:id with absent runtimeCore is a no-op', async () => {
     const { app } = await bootstrap({
       readFile: async () => ({
-        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z', runtimeCore: 'spawn' }],
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z', runtimeCore: 'repl' }],
         statuses: {},
       }),
     })
     // No runtimeCore field in the body at all → should NOT clobber the
-    // persisted `spawn`. Use a sibling field so the route doesn't
+    // persisted `repl`. Use a sibling field so the route doesn't
     // 400 with "no patchable fields supplied".
     const res = await request(app)
       .patch('/api/instances/inst_seed')
       .send({ lan: true })
     expect(res.status).toBe(200)
-    expect(res.body.instance.runtimeCore).toBe('spawn')
+    expect(res.body.instance.runtimeCore).toBe('repl')
   })
 
   it('PATCH /api/instances/:id rejects unknown runtimeCore value with 400', async () => {
