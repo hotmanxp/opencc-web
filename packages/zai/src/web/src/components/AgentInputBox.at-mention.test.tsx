@@ -145,19 +145,22 @@ describe("AgentInputBox — @-mention 文件补全", () => {
     });
   });
 
-  test("选中目录 → 也插入 chip(dir 类型,弹层关闭)", async () => {
-    render(<AgentInputBox />);
+  test("点击目录 → 下钻:token 变为 @src/ 纯文本,不落 chip", async () => {
+    const { container } = render(<AgentInputBox />);
     const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
     await typeText(ta, "@");
     const row = await screen.findByTestId("file-mention-row-src");
     fireEvent.mouseDown(row, { preventDefault: () => {} });
-    // dir 选择同样落为一个 chip:文本只留占位符,不继续把 @src/ 留在草稿
+    // dir 选择改为下钻:token 替换为 `@src/` 文本,不生成 chip
     await waitFor(() => {
-      expect(ta.value).toBe("\ufffc ");
+      expect(ta.value).toBe("@src/");
     });
+    expect(
+      container.querySelector('[data-testid="mention-chip"]'),
+    ).toBeNull();
   });
 
-  test("选中目录后弹层关闭(不再继续展开子内容)", async () => {
+  test("选中目录后弹层保持打开,继续列子条目", async () => {
     render(<AgentInputBox />);
     const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
     await typeText(ta, "@");
@@ -165,10 +168,11 @@ describe("AgentInputBox — @-mention 文件补全", () => {
     fireEvent.mouseDown(screen.getByTestId("file-mention-row-src"), {
       preventDefault: () => {},
     });
-    // 新语义:选目录即完成一次引用,popup 关闭
+    // 新语义:选目录 = 下钻,popup 不关闭,以 `src/` 为查询路径重新拉取
     await waitFor(() => {
-      expect(screen.queryByTestId("file-mention-popover")).not.toBeInTheDocument();
+      expect(screen.getByTestId("file-mention-popover")).toBeInTheDocument();
     });
+    await screen.findByTestId("file-mention-row-src/foo.ts");
   });
 
   test("键盘 ↑↓ + Enter 选中候选", async () => {
@@ -256,21 +260,29 @@ describe("AgentInputBox — @-mention 文件补全", () => {
     expect(ta.value).toBe("\ufffc ");
   });
 
-  test("选中 dir 候选后 → 也渲染 chip(dir 类型)", async () => {
+  test("目录 → 子文件连选:先点 src 下钻,再点 foo.ts 落为最终 chip", async () => {
     const { container } = render(<AgentInputBox />);
     const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
     await typeText(ta, "@");
     const row = await screen.findByTestId("file-mention-row-src");
     fireEvent.mouseDown(row, { preventDefault: () => {} });
     await waitFor(() => {
+      expect(ta.value).toBe("@src/");
+    });
+    // 子文件选中才是最终选择:token 替换为 chip,popup 关闭
+    const child = await screen.findByTestId("file-mention-row-src/foo.ts");
+    fireEvent.mouseDown(child, { preventDefault: () => {} });
+    await waitFor(() => {
       expect(ta.value).toBe("\ufffc ");
     });
-    // dir 引用同样是 chip:ref 保留尾部 / → chip type=dir
     const chip = container.querySelector(
-      '[data-testid="mention-chip"][data-mention-path="src/"]',
+      '[data-testid="mention-chip"][data-mention-path="src/foo.ts"]',
     );
     expect(chip).not.toBeNull();
-    expect(chip?.getAttribute("data-mention-type")).toBe("dir");
+    expect(chip?.getAttribute("data-mention-type")).toBe("file");
+    await waitFor(() => {
+      expect(screen.queryByTestId("file-mention-popover")).not.toBeInTheDocument();
+    });
   });
 
   test("typing 后输入框值正确,textarea 仍持有焦点(combobox 模式)", async () => {

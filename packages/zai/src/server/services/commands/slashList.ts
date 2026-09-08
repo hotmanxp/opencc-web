@@ -38,7 +38,11 @@ function parsePluginSkillName(rawName: string): { pluginName: string; displayNam
   return { pluginName, displayName }
 }
 
-export async function slashList(opts: { skills?: Array<{ name: string; description: string }> } = {}): Promise<SlashItem[]> {
+export async function slashList(
+  opts: {
+    skills?: Array<{ name: string; description: string; argumentHint?: string }>
+  } = {},
+): Promise<SlashItem[]> {
   const items: SlashItem[] = []
 
   // 1. built-in commands first
@@ -86,6 +90,7 @@ export async function slashList(opts: { skills?: Array<{ name: string; descripti
         kind: 'skill',
         name: s.name,
         description: s.description,
+        ...(s.argumentHint ? { argumentHint: s.argumentHint } : {}),
         displayName: parsed.displayName,
         pluginName: parsed.pluginName,
       })
@@ -94,6 +99,7 @@ export async function slashList(opts: { skills?: Array<{ name: string; descripti
         kind: 'skill',
         name: s.name,
         description: s.description,
+        ...(s.argumentHint ? { argumentHint: s.argumentHint } : {}),
       })
     }
   }

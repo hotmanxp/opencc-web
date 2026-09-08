@@ -29,14 +29,28 @@
  * task-factory `<task-command>` notices (and other unrecognized shapes)
  * fall back to a truncated plain-text rendering so the reminder block stays
  * bounded in length.
+ *
+ * zai patch (2026-09-08, steer-delivery fix, plan A+C): live debugging
+ * (M3-M12) proved the wire pipeline works end-to-end but user `steer`
+ * interjections were being IGNORED by the model. Root cause: steer was
+ * rendered as one ASCII bullet inside a generic "system events occurred"
+ * `<system-reminder>` block and PREPENDED at index 0 — buried under the
+ * ~17k-char session-context user message and phrased as soft "use this
+ * context" guidance. Now renderInboxReminder splits the lane contents:
+ *   - user/steer → dedicated `<user-steer>` block with imperative
+ *     "address this NOW" wording (one block per steer, emitted first).
+ *   - everything else → unchanged generic `<system-reminder>` block.
+ * The companion vendor change (query.ts) appends extraReminder at the END
+ * of the message array instead of prepending, so steer lands at the
+ * highest-attention position, immediately before the model's next output.
  */
 import { getSessionInbox, type InboxMessage } from './sessionInbox.js'
 
 /**
  * Drain the per-session SessionInbox.nextStep lane for `sessionId` and
- * render as a `<system-reminder>...</system-reminder>` block. Returns
- * null when the lane is empty (so callers can short-circuit and avoid
- * invalidating any prompt cache for no reason).
+ * render its contents (see renderInboxReminder). Returns null when the lane
+ * is empty (so callers can short-circuit and avoid invalidating any prompt
+ * cache for no reason).
  */
 export function drainInboxReminder(sessionId: string): string | null {
   const messages = getSessionInbox(sessionId).consumeNextStep(sessionId)
@@ -48,12 +62,55 @@ export function drainInboxReminder(sessionId: string): string | null {
  * tests can exercise formatting without spinning up a SessionInbox.
  * Returns null when `messages` is empty.
  *
- * Bullets are pure ASCII (no `<` / `>` characters), so the model's
- * XML/SGML parser sees exactly one well-formed `<system-reminder>` block.
+ * Split rendering (zai patch 2026-09-08, steer-delivery fix, plan A+C):
+ *   - user `steer` messages → a dedicated high-salience `<user-steer>` block
+ *     that instructs the model to address it NOW. These are the messages the
+ *     user actively interjected mid-turn; burying them in a generic
+ *     "use this context" bullet let them be ignored.
+ *   - all other notices (subagent / task-factory / system) → the generic
+ *     `<system-reminder>` "system events occurred" block.
+ * When both are present, the steer block(s) are emitted FIRST so the most
+ * urgent content leads the appended message.
  */
 export function renderInboxReminder(messages: InboxMessage[]): string | null {
   if (messages.length === 0) return null
 
+  const steers = messages.filter(isUserSteer)
+  const others = messages.filter(m => !isUserSteer(m))
+
+  const blocks: string[] = []
+  for (const s of steers) {
+    blocks.push(renderSteerBlock(s))
+  }
+  if (others.length > 0) {
+    blocks.push(renderGenericReminder(others))
+  }
+  return blocks.join('\n\n')
+}
+
+function isUserSteer(msg: InboxMessage): boolean {
+  return msg.source.kind === 'user' && msg.source.form === 'steer'
+}
+
+/**
+ * A single user interjection, rendered as a standalone high-attention block.
+ * The wording explicitly overrides "keep doing the current task" priority so
+ * the model cannot silently skip it the way it could a background bullet.
+ */
+function renderSteerBlock(msg: InboxMessage): string {
+  return (
+    '<user-steer>\n' +
+    'IMPORTANT: The user sent this message to you WHILE you were working on the current task.\n' +
+    'Stop and address this message NOW, before continuing your current work:\n' +
+    '\n' +
+    truncateForReminder(msg.content) +
+    '\n' +
+    '</user-steer>'
+  )
+}
+
+/** Generic "system events occurred" reminder for non-steer notices. */
+function renderGenericReminder(messages: InboxMessage[]): string {
   const bullets = messages.map(renderBullet).join('\n')
   return (
     '<system-reminder>\n' +
@@ -88,9 +145,8 @@ function renderBullet(msg: InboxMessage): string {
     // verbatim in a single truncated line (also bounded).
     return `- task-factory notice: ${truncateForReminder(msg.content)}`
   }
-  if (kind === 'user' && form === 'steer') {
-    return `- follow-up from user: ${truncateForReminder(msg.content)}`
-  }
+  // user/steer messages never reach renderBullet — they are split out in
+  // renderInboxReminder and rendered as a dedicated <user-steer> block.
   return `- ${kind} / ${form}: ${truncateForReminder(msg.content)}`
 }
 

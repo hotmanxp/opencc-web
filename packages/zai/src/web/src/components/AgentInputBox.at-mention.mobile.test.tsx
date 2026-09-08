@@ -114,7 +114,7 @@ describe("AgentInputBox — 移动端 @-mention 流程", () => {
     });
   });
 
-  test("移动端:选中目录 → 也插入 chip(dir 类型)", async () => {
+  test("移动端:选中目录 → 下钻为 @src/ 文本,popup 保持打开", async () => {
     render(<AgentInputBox />);
     const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
     await typeText(ta, "@");
@@ -126,9 +126,10 @@ describe("AgentInputBox — 移动端 @-mention 流程", () => {
     // atMenuIdx=0 是 src/foo.ts,选目录需要 ArrowDown 移到 src。
     fireEvent.keyDown(ta, { key: "ArrowDown" });
     fireEvent.keyDown(ta, { key: "Enter" });
-    // dir 引用也落为 chip(draft 只留占位符)
+    // 新语义:dir 选择是下钻,token 替换为 @src/ 文本,不落 chip
     await waitFor(() => {
-      expect(ta.value).toBe("\ufffc ");
+      expect(ta.value).toBe("@src/");
     });
+    expect(screen.getByTestId("file-mention-popover")).toBeInTheDocument();
   });
 });

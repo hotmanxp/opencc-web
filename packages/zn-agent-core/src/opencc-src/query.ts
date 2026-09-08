@@ -704,15 +704,18 @@ async function* queryLoop(
     // — we apply the same trim here.
     {
       // Vendor bg-daemon drain + zai-session-inbox drain (zai patch 2026-09-06).
-      // Concatenated so both sources share one `<system-reminder>` block.
+      // zai patch (2026-09-08, steer-delivery fix, plan A+C): the two sources
+      // are now injected at DIFFERENT positions. bg-daemon reminders keep the
+      // upstream prepend-at-index-0 semantics. The extraReminder (zai
+      // SessionInbox: user steers + notices) is APPENDED at the end of the
+      // message array — the highest-attention slot right before the model's
+      // next output. Live debugging (M3-M12) showed prepend-at-0 steers were
+      // delivered but silently ignored: buried under the ~17k-char session
+      // context user message and phrased as soft background guidance.
       const bgReminder = await buildInboxSystemReminder()
       const extraReminder = await runExtraReminderProviders(getSessionId())
-      const reminder =
-        bgReminder && extraReminder
-          ? `${bgReminder}\n\n${extraReminder}`
-          : bgReminder ?? extraReminder ?? null
-      if (reminder) {
-        const SYSTEM_REMINDER_END = '</system-reminder>'
+      const SYSTEM_REMINDER_END = '</system-reminder>'
+      if (bgReminder) {
         messagesForQuery = messagesForQuery.map(m => {
           if (m.type !== 'user') return m
           // Strip any leading `<system-reminder>...</system-reminder>`
@@ -732,11 +735,46 @@ async function* queryLoop(
         messagesForQuery = [
           {
             type: 'user',
-            message: {role: 'user', content: reminder},
+            message: {role: 'user', content: bgReminder},
             uuid: `bg-inbox-${Date.now()}`,
             timestamp: new Date().toISOString(),
           } as (typeof messagesForQuery)[number],
           ...messagesForQuery,
+        ]
+      }
+      if (extraReminder) {
+        // Strip leading reminder/steer blocks from the message we are about
+        // to follow so ephemeral injections never accumulate mid-loop.
+        messagesForQuery = messagesForQuery.map(m => {
+          if (m.type !== 'user') return m
+          let text =
+            typeof m.message.content === 'string' ? m.message.content : ''
+          if (!text) return m
+          while (
+            text.trimStart().startsWith('<system-reminder>') ||
+            text.trimStart().startsWith('<user-steer>')
+          ) {
+            const srEnd = text.indexOf(SYSTEM_REMINDER_END)
+            const usEnd = text.indexOf('</user-steer>')
+            const end =
+              srEnd === -1 ? usEnd : usEnd === -1 ? srEnd : Math.min(srEnd, usEnd)
+            if (end === -1) break
+            const closeLen = end === srEnd ? SYSTEM_REMINDER_END.length : '</user-steer>'.length
+            text = text.slice(end + closeLen).trimStart()
+          }
+          if (text === m.message.content) return m
+          return {...m, message: {...m.message, content: text}}
+        })
+        // Append the zai inbox reminder at the END — closest to the model's
+        // next generation, where attention is highest.
+        messagesForQuery = [
+          ...messagesForQuery,
+          {
+            type: 'user',
+            message: {role: 'user', content: extraReminder},
+            uuid: `zai-inbox-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+          } as (typeof messagesForQuery)[number],
         ]
       }
     }

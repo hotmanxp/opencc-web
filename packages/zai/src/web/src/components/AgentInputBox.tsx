@@ -111,7 +111,9 @@ export function deriveCommandToken(
   if (!m) return null;
   const name = m[1] ?? "";
   if (name.length === 0) return null;
-  const known = slashItems.some((it) => it.name === name);
+  const known = slashItems.some(
+    (it) => it.name === name || it.displayName === name,
+  );
   if (!known) return null;
   return { start: 0, end: 1 + name.length, name };
 }
@@ -136,6 +138,7 @@ function renderDraftDecorations(
   chips: readonly ChipDecoration[],
   commandToken: { start: number; end: number } | null,
   atToken: { start: number; end: number; prefix: string } | null,
+  ghostHint: string | null,
 ) {
   const result: React.ReactNode[] = [];
   type Instr =
@@ -189,6 +192,16 @@ function renderDraftDecorations(
   }
   if (pos < draft.length) {
     result.push(<span key="t-end">{draft.slice(pos)}</span>);
+  }
+  // 命令激活且尚未输入参数时,在行尾追一段灰色 argument-hint 幽灵文本
+  // (backdrop 是 aria-hidden 镜像层,不参与 textarea 内容/光标计算,
+  // 用户开始敲参数后 rest 非空 → hint 消失,不会与真实文本重叠)。
+  if (ghostHint) {
+    result.push(
+      <span key="cmd-hint" data-decoration="cmd-hint" className="agent-input-cmd-hint">
+        {ghostHint}
+      </span>,
+    );
   }
   return result;
 }
@@ -405,6 +418,22 @@ export default React.memo(function AgentInputBox({
     () => deriveCommandToken(input, slashItems),
     [input, slashItems],
   );
+
+  // 命令激活但未输入参数时,把该命令的 argumentHint 作为灰色幽灵提示
+  // 追在 `/name ` 之后(类 placeholder)。一旦用户敲了第一个参数字符,
+  // token 之后不再是纯空白 → hint 收起,不与真实文本重叠。
+  const commandGhostHint = useMemo(() => {
+    if (!commandToken) return null;
+    const rest = input.slice(commandToken.end);
+    if (rest.trim() !== "") return null;
+    const it = slashItems.find(
+      (s) => s.name === commandToken.name || s.displayName === commandToken.name,
+    );
+    if (!it?.argumentHint) return null;
+    // token 后已有空白(选中/Tab 补全会带尾空格)就直接贴 hint,否则补一个空格
+    const sep = /\s$/.test(rest) ? "" : " ";
+    return sep + it.argumentHint;
+  }, [commandToken, input, slashItems]);
 
   // 已完成 @-mention 扫描 + 维护:见下方 "showSkillMenu 之后的 @-mention 块"
   // (需要 atToken 互斥门控,先声明 atToken)。
@@ -674,10 +703,12 @@ export default React.memo(function AgentInputBox({
     }, 0);
   }, [sessionId, activeSessionId, commitDraft]);
 
-  // 选中一个 @-mention 候选:把 active @ token 整段替换为一个「引用 chip」。
-  // 事务语义(deepseek-harness insert-reference):span 被替换为 U+FFFC 占位符
-  // + occurrence 记录,尾随自动加一个空格。chip 是真实的 1 字符占位,不是
-  // 文本宽度对位的视觉假象 —— 长路径不会撑宽输入框,光标/换行天然对齐。
+  // 选中一个 @-mention 候选:
+  // - file → 把 active @ token 整段替换为一个「引用 chip」。
+  //   事务语义(deepseek-harness insert-reference):span 被替换为 U+FFFC 占位符
+  //   + occurrence 记录,尾随自动加一个空格。chip 是真实的 1 字符占位,不是
+  //   文本宽度对位的视觉假象 —— 长路径不会撑宽输入框,光标/换行天然对齐。
+  // - dir → 下钻:替换为 `@path/` 纯文本,弹层不关闭,继续列该目录子条目。
   const selectAtEntry = useCallback(
     (entry: FsSearchEntry) => {
       if (!atToken) return;
@@ -693,17 +724,50 @@ export default React.memo(function AgentInputBox({
       // end 是 prefix 的真实结束 offset,start = end - prefix.length 始终给出
       // prefix 的起始位置。
       const start = atToken.end - atToken.prefix.length;
-      // 引用实体路径:纯相对路径(dir 保留尾部 / 供 chip 判断 dir 类型);
+      const machine = machineRef.current;
+      if (!machine) return;
+      // 选中目录 = 下钻而非完成引用:把 token 替换为纯文本 `@path/`
+      // (formatFileMention 对 dir 已保证尾部 /;引号变体保持开引号),
+      // 不落 chip、不软关闭弹层。atToken.query 随之变为 `path/`,
+      // useFsMentionSearch 以该目录为查询路径列出子条目;用户之后选中
+      // 子文件才落 chip 作为最终选择(走下方 file 分支)。
+      if (entry.type === "dir") {
+        const draft = machine.state.draft;
+        const nextDraft =
+          draft.slice(0, start) + formatted + draft.slice(atToken.end);
+        if (nextDraft !== draft) {
+          machine.dispatch({
+            type: "draft-changed",
+            draft: nextDraft,
+            editRange: { start, end: atToken.end, insertedLength: formatted.length },
+          });
+          forceRender();
+        }
+        // 光标落在 `@path/` 末尾,token 保持 active,弹层继续展示子内容。
+        const dirCursor = start + formatted.length;
+        setCursor(dirCursor);
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (!el) return;
+          el.focus();
+          if (typeof el.setSelectionRange === "function") {
+            el.setSelectionRange(dirCursor, dirCursor);
+          } else {
+            el.selectionStart = dirCursor;
+            el.selectionEnd = dirCursor;
+          }
+        });
+        return;
+      }
+      // 引用实体路径:纯相对路径(文件,不带尾部 /);
       // 剪贴板/发送投影才是 formatted(@path 或 @"path")。
-      const refPath = entry.type === "dir" ? `${entry.path}/` : entry.path;
+      const refPath = entry.path;
       const reference: InputReference = {
         source: "fs",
         ref: refPath,
         label: refPath.replace(/\/+$/, "").split("/").filter(Boolean).pop() ?? refPath,
         clipboardText: formatted,
       };
-      const machine = machineRef.current;
-      if (!machine) return;
       machine.dispatch({
         type: "insert-reference",
         reference,
@@ -714,7 +778,7 @@ export default React.memo(function AgentInputBox({
       // 新光标 = 占位符(1) + 尾随空格(1),落在 chip 之后方便继续打字
       const newCursor = start + 2;
       setCursor(newCursor);
-      // 选中后即完成态,软关闭弹层(与旧 file 路径一致)
+      // 选中 file 即完成态,软关闭弹层
       setAtMenuDismissed(true);
       // rAF 只保留 DOM 焦点 + selection 同步(不参与 React 状态)。
       requestAnimationFrame(() => {
@@ -2063,6 +2127,7 @@ export default React.memo(function AgentInputBox({
                     atToken
                       ? { start: atToken.end - atToken.prefix.length, end: atToken.end, prefix: atToken.prefix }
                       : null,
+                    commandGhostHint,
                   )}
                 </div>
                 <textarea

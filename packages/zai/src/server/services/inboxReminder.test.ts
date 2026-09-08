@@ -96,7 +96,7 @@ describe('renderInboxReminder', () => {
     expect(out).not.toContain('agentType=')
   })
 
-  it('renders user / steer as follow-up from user', () => {
+  it('renders user / steer as a dedicated <user-steer> block (A+C fix)', () => {
     const out = renderInboxReminder([
       msg({
         id: 'steer-1',
@@ -104,8 +104,12 @@ describe('renderInboxReminder', () => {
         source: { kind: 'user', form: 'steer' },
       }),
     ])
-    expect(out).toContain('- follow-up from user:')
+    expect(out).toContain('<user-steer>')
+    expect(out).toContain('</user-steer>')
+    expect(out).toContain('address this message NOW')
     expect(out).toContain('please check the new test')
+    // steer must NOT be diluted inside the generic system-events block
+    expect(out).not.toContain('The following system events occurred')
   })
 
   it('falls back to `kind / form` label for unknown sources', () => {
@@ -119,18 +123,19 @@ describe('renderInboxReminder', () => {
     expect(out).toContain('- mystery / puzzle:')
   })
 
-  it('emits bullets in lane order, joined by newlines', () => {
+  it('emits steer blocks first, then generic reminder bullets in lane order', () => {
     const out = renderInboxReminder([
       msg({ id: 'a', content: 'A', source: { kind: 'subagent', form: 'notice' } }),
       msg({ id: 'b', content: 'B', source: { kind: 'task-factory', form: 'notice' } }),
       msg({ id: 'c', content: 'C', source: { kind: 'user', form: 'steer' } }),
     ])
+    // steer (c) leads as a dedicated block
+    const idxC = out!.indexOf('<user-steer>')
     const idxA = out!.indexOf('subagent notice')
     const idxB = out!.indexOf('task-factory notice')
-    const idxC = out!.indexOf('follow-up from user')
-    expect(idxA).toBeGreaterThan(-1)
+    expect(idxC).toBeGreaterThan(-1)
+    expect(idxA).toBeGreaterThan(idxC)
     expect(idxB).toBeGreaterThan(idxA)
-    expect(idxC).toBeGreaterThan(idxB)
   })
 
   it('falls back to truncated plain text when subagent content is not a task-notification shape', () => {

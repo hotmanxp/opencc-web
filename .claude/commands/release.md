@@ -1,15 +1,14 @@
 ---
 name: release-opencc
 description: "Release opencc-web packages to npm: bump version, build, publish, commit and tag"
-argument-hint:
-  - <version_type>
+argument-hint: '<patch|minor|major>'
 ---
 
 # Release opencc-web
 
 ## Version Bump
 
-**Type**: `{version_type=patch}`
+**Type**: `$ARGUMENTS`（若为空、或仍是字面量 `$ARGUMENTS`，默认按 `patch` 执行）
 
 升级类型(`scripts/release.mjs` 接管所有 bump/build/publish/commit+tag 工作,**禁止手写调用 `npm version` 或 `npm publish`**):
 
@@ -19,7 +18,7 @@ argument-hint:
 
 发布入口(委托给 pnpm scripts,内部走 `node scripts/release.mjs <type>`):
 ```bash
-pnpm release:{version_type}
+pnpm release:$ARGUMENTS
 ```
 
 ## What the script does

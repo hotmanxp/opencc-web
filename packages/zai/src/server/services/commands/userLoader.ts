@@ -59,7 +59,19 @@ function parseFrontmatter(raw: string): CommandFrontmatter | null {
   if (end < 0) return null
   const yamlBlock = raw.slice(3, end).trim()
   try {
-    return yaml.load(yamlBlock) as CommandFrontmatter
+    const data = yaml.load(yamlBlock) as Record<string, unknown> | null
+    if (!data || typeof data !== 'object') return null
+    // Claude 风格 command frontmatter 用 kebab-case(`argument-hint` /
+    // `allowed-tools` / `disable-model-invocation` / `when-to-use`),
+    // 而 CommandFrontmatter 字段是 camelCase。这里统一归一化;
+    // 已显式写了 camelCase 键的以 camelCase 为准,不被 kebab 覆盖。
+    const normalized: Record<string, unknown> = { ...data }
+    for (const [key, value] of Object.entries(data)) {
+      if (!key.includes('-')) continue
+      const camel = key.replace(/-([a-z])/g, (_m, c: string) => c.toUpperCase())
+      if (!(camel in normalized)) normalized[camel] = value
+    }
+    return normalized as CommandFrontmatter
   } catch {
     return null
   }

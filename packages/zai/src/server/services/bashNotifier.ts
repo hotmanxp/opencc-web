@@ -93,34 +93,68 @@ function markInjected(taskId: string): void {
   }
 }
 
-/** 补发某 session 暂存的后台 Bash 完成通知。主线 query 结束(agent.ts finally)时调用。 */
-export function flushPendingBashNotifications(sessionId: string): void {
-  const tasks = pendingNotifications.get(sessionId)
-  if (!tasks || tasks.length === 0) return
-  pendingNotifications.delete(sessionId)
-  // 主线已结束(idle),重新走 handle —— running 守卫放行,注入通知。
-  for (const task of tasks) {
-    void (notifier?.handle({ sessionId, task }) ?? Promise.resolve()).catch((err) =>
-      console.warn('[BashNotifier] flush failed:', err),
+// zai patch (2026-09-08, merge-batch-inject): 同一时刻多条后台 Bash 完成
+// 通知合并为**一条** prompt 注入 —— 每个任务各开一轮 notify query 时,模型
+// 会对每条通知单独"收到确认",多条通知 + 主线消息交织时表现为连环重复
+// (现场 sess-1788863156523:两条 stopped 通知 + /commit 主线,模型连回三次)。
+// 机制:per-session 攒批窗口 MERGE_WINDOW_MS,窗口内到达的通知合并 inject;
+// busy 路径仍入 pendingNotifications,由 flush 一次性合并补发。
+const MERGE_WINDOW_MS = 500
+
+const mergeBuf = new Map<string, BashTaskInfo[]>()
+const mergeTimers = new Map<string, NodeJS.Timeout>()
+
+function scheduleMerge(sessionId: string): void {
+  if (mergeTimers.has(sessionId)) return
+  const timer = setTimeout(() => {
+    mergeTimers.delete(sessionId)
+    const batch = mergeBuf.get(sessionId) ?? []
+    mergeBuf.delete(sessionId)
+    void notifier?.injectBatch(sessionId, batch).catch((err) =>
+      console.warn('[BashNotifier] merged inject failed:', err),
     )
-  }
+  }, MERGE_WINDOW_MS)
+  timer.unref()
+  mergeTimers.set(sessionId, timer)
 }
 
-/** 测试 seam:清空暂存队列。 */
+/** 补发某 session 暂存的后台 Bash 完成通知 —— 全部合并为一条 prompt 注入。
+ *  主线 query 结束(agent.ts finally / busyFlush)时调用。 */
+export function flushPendingBashNotifications(sessionId: string): void {
+  // 合并窗口仍攒着时一并取走,与 busy 暂存合并成一批补发。
+  const timer = mergeTimers.get(sessionId)
+  if (timer) {
+    clearTimeout(timer)
+    mergeTimers.delete(sessionId)
+  }
+  const batched = mergeBuf.get(sessionId)
+  if (batched) mergeBuf.delete(sessionId)
+  const tasks = pendingNotifications.get(sessionId)
+  pendingNotifications.delete(sessionId)
+  const batch = [...(batched ?? []), ...(tasks ?? [])]
+  if (batch.length === 0) return
+  // 主线已结束(idle),一次合并注入;injectBatch 内部仍有 busy 重入保护。
+  void (notifier?.injectBatch(sessionId, batch) ?? Promise.resolve()).catch((err) =>
+    console.warn('[BashNotifier] flush failed:', err),
+  )
+}
+
+/** 测试 seam:清空暂存队列 + 合并攒批。 */
 export function __resetBashNotifierPendingForTests(): void {
   pendingNotifications.clear()
+  for (const timer of mergeTimers.values()) clearTimeout(timer)
+  mergeTimers.clear()
+  mergeBuf.clear()
   // zai patch (2026-09-07, fix task-notification dup, worktree-dsh): 同步清
   // 空 dedup map,否则上一个 test case 注入过的 taskId 在 2s 内被静默吞掉。
   recentlyInjected.clear()
 }
 
 /**
- * 构造 <task-notification> 风格 user message 文本(基于 BashTaskInfo)。
- * summary 对齐 LocalShellTask.enqueueShellNotification 的措辞,并追加
- * "只确认结果、不续跑主任务"的引导 —— 通知 query 加载完整父上下文,不加
- * 引导的话模型会把通知误当成"继续干主任务"的信号(请求风暴的放大器)。
+ * 构造单个 <task-notification> 块(不含引导语)。
+ * summary 对齐 LocalShellTask.enqueueShellNotification 的措辞。
  */
-export function renderBashNotificationMessage(task: BashTaskInfo): string {
+export function renderBashNotificationBlock(task: BashTaskInfo): string {
   const status = task.status
   const exitCode = task.exitCode
   let summary: string
@@ -137,16 +171,31 @@ export function renderBashNotificationMessage(task: BashTaskInfo): string {
     default:
       summary = `Background command "${task.description}" ${status}`
   }
-  const guidance =
-    'This is a system notification about a background command. Acknowledge the result briefly; do not resume, restart, or continue the main task unless the result clearly requires it.'
   return (
     `<task-notification>\n` +
     `<task-id>${escapeXml(task.taskId)}</task-id>\n` +
     `<status>${status}</status>\n` +
     `<summary>${escapeXml(summary)}</summary>\n` +
-    `</task-notification>\n\n` +
-    guidance
+    `</task-notification>`
   )
+}
+
+const BASH_NOTIFICATION_GUIDANCE =
+  'These are system notifications about background commands. Acknowledge the results briefly; do not resume, restart, or continue the main task unless a result clearly requires it.'
+
+/**
+ * 构造 <task-notification> 风格 user message 文本(基于 BashTaskInfo)。
+ * 追加"只确认结果、不续跑主任务"的引导 —— 通知 query 加载完整父上下文,不加
+ * 引导的话模型会把通知误当成"继续干主任务"的信号(请求风暴的放大器)。
+ */
+export function renderBashNotificationMessage(task: BashTaskInfo): string {
+  return `${renderBashNotificationBlock(task)}\n\n${BASH_NOTIFICATION_GUIDANCE}`
+}
+
+/** 多条通知合并为一条 prompt:逐块拼接 <task-notification>,共享一段引导。 */
+export function renderMergedBashNotificationMessage(tasks: BashTaskInfo[]): string {
+  const blocks = tasks.map(renderBashNotificationBlock).join('\n')
+  return `${blocks}\n\n${BASH_NOTIFICATION_GUIDANCE}`
 }
 
 function escapeXml(s: string): string {
@@ -187,35 +236,45 @@ export class BashNotifier {
 
     // zai patch (2026-09-07, fix task-notification dup, worktree-dsh):
     // 同一 taskId 在 DEDUP_WINDOW_MS 内只 inject 一次。详见
-    // recentlyInjected 注释。dedup 放在 running 守卫之后:busy 路径
-    // 只入 pendingNotifications, 不算 inject, 也不标 injected(否则
-    // flush 时 handle 走 idle,被 dedup 吞掉, 永远不 inject)。
-    if (hasActiveQuery(sessionId)) {
-      const list = pendingNotifications.get(sessionId) ?? []
-      list.push(task)
-      pendingNotifications.set(sessionId, list)
-      return
-    }
-
-    // 真正要 inject 前查 dedup。已 inject 过的同 taskId 直接吞掉,
-    // 这是 bashTracker 二次 emit / 多 listener 重复触发场景的最后一道
-    // 兜底。
+    // recentlyInjected 注释。
+    // zai patch (2026-09-08, merge-batch-inject): 空闲路径不再逐条立即
+    // inject,而是进 per-session 合并窗口攒批;窗口到点由 injectBatch
+    // 一次性注入(多条通知 = 一条 prompt)。dedup 在入批前查(批内同
+    // taskId 也去重),injectBatch 内再查一次防窗口外重复。
     if (wasInjectedRecently(task.taskId)) {
       return
     }
+    const buf = mergeBuf.get(sessionId) ?? []
+    if (buf.some((t) => t.taskId === task.taskId)) return
+    buf.push(task)
+    mergeBuf.set(sessionId, buf)
+    scheduleMerge(sessionId)
+  }
 
-    // 标已 inject 在 await 前, 避免 inject 异步过程中同 taskId 第二次到达
-    // 通过守卫 → 第二次 runtime.query(虽然 DEDUP_WINDOW_MS 2s 远大于 inject
-    // 耗时, 但提前 set 杜绝该 race)。
-    markInjected(task.taskId)
+  /**
+   * 合并注入一批后台 Bash 通知(单条 query)。busy 时整批回灌
+   * pendingNotifications,主线结束 flush 时再合并补发;批内按
+   * recentlyInjected 去重,全部已注入过则静默丢弃。
+   */
+  async injectBatch(sessionId: string, batch: BashTaskInfo[]): Promise<void> {
+    if (batch.length === 0) return
+    if (hasActiveQuery(sessionId)) {
+      const list = pendingNotifications.get(sessionId) ?? []
+      list.push(...batch)
+      pendingNotifications.set(sessionId, list)
+      return
+    }
+    const fresh = batch.filter((t) => !wasInjectedRecently(t.taskId))
+    if (fresh.length === 0) return
+    for (const t of fresh) markInjected(t.taskId)
     try {
-      await this.inject(sessionId, task)
+      await this.inject(sessionId, fresh)
     } catch (err) {
       console.warn('[BashNotifier] inject failed:', err)
     }
   }
 
-  private async inject(sessionId: string, task: BashTaskInfo): Promise<void> {
+  private async inject(sessionId: string, tasks: BashTaskInfo[]): Promise<void> {
     const runtime = this.getRuntimeFn()
 
     // 保留并恢复 currentSessionId,避免通知注入影响后续状态(与 SubagentNotifier 一致)。
@@ -235,7 +294,7 @@ export class BashNotifier {
       // drain 永远取不到(请求风暴根因)。isMeta 保持 UI 隐藏(通知是系统注入,
       // 不该显示成用户消息)。
       const events = runtime.query({
-        prompt: renderBashNotificationMessage(task),
+        prompt: renderMergedBashNotificationMessage(tasks),
         cwd: process.cwd(),
         sessionId,
         model: resolvedModel,

@@ -1019,12 +1019,18 @@ async function loadAllSkills(): Promise<LoadedSkill[]> {
  * (superpowers 等), return a lightweight list suitable for the frontend
  * autocomplete UI.
  */
-export async function listSkills(): Promise<Array<{ name: string; description: string }>> {
+export async function listSkills(): Promise<
+  Array<{ name: string; description: string; argumentHint?: string }>
+> {
   const skills = await loadAllSkills()
-  return skills.map((s) => ({
-    name: s.name,
-    description: s.frontmatter?.description || s.description || '',
-  }))
+  return skills.map((s) => {
+    const hint = s.frontmatter?.['argument-hint']
+    return {
+      name: s.name,
+      description: s.frontmatter?.description || s.description || '',
+      ...(typeof hint === 'string' && hint ? { argumentHint: hint } : {}),
+    }
+  })
 }
 
 /**

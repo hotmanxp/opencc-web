@@ -641,6 +641,13 @@ body {
   -webkit-box-decoration-break: clone;
 }
 
+/* 命令 argument-hint 幽灵提示: 选中/敲完 `/name` 且未输入参数时,在
+   backdrop 行尾以暗色展示参数模板 (如 `<patch|minor|major>`)。纯视觉,
+   不在 textarea 内容里;用户敲参数后随 rest 非空自动消失。 */
+.agent-input-cmd-hint {
+  color: var(--text-dim-45);
+}
+
 /* ---- 文件引用 chip 的单元字体 ----
    一个 glyph 的字体:只把 U+FFFC 映射为 4em 空白单元(其余 codepoint 落
    到后续 font-family)。textarea 里的占位符与 backdrop chip 的 ::before

@@ -9,10 +9,11 @@ export interface RenderArgs {
 }
 
 /**
- * Replace `$ARGUMENTS`, `$1..$n`, `${name}` tokens in `body` based on
+ * Replace `$ARGUMENTS`, `$0..$n`, `${name}` tokens in `body` based on
  * whitespace-split `args` and optional `argNames` (positional mapping).
  * - `$ARGUMENTS` → full args string
- * - `$N` (1-indexed) → N-th whitespace token, or '' if missing
+ * - `$N` (0-indexed, matching vendor argumentSubstitution.ts) → N-th
+ *   whitespace token, or '' if missing
  * - `${name}` → if name appears in argNames, the corresponding positional token;
  *   otherwise literal text is preserved
  */
@@ -56,7 +57,7 @@ export function renderPrompt({ body, args, argNames }: RenderArgs): string {
       // parse number
       let j = i + 1
       while (j < body.length && /[0-9]/.test(body[j]!)) j++
-      const idx = Number(body.slice(i + 1, j)) - 1
+      const idx = Number(body.slice(i + 1, j))
       out += tokens[idx] ?? ''
       i = j
       continue

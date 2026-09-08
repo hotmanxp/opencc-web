@@ -230,6 +230,56 @@ describe('AgentInputBox — 已知命令输入框内 token 高亮', () => {
   })
 })
 
+// 命令激活(输入开头为已知命令且未输入参数)时,backdrop 行尾追加灰色
+// argument-hint 幽灵提示;用户开始敲参数后立即收起。
+describe('AgentInputBox — 激活命令后 argument-hint 幽灵提示', () => {
+  async function loadSlashItemsAndReset(ta: HTMLTextAreaElement) {
+    fireEvent.change(ta, { target: { value: "/" } })
+    await waitFor(() => {
+      expect(screen.getByText("/handoff")).toBeInTheDocument()
+    })
+    fireEvent.change(ta, { target: { value: "" } })
+  }
+
+  const hintSel = '[data-input-backdrop] [data-decoration="cmd-hint"]'
+
+  test('选中命令后 token 后仅有空白 → 行尾渲染 argumentHint', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    await loadSlashItemsAndReset(ta)
+    fireEvent.change(ta, { target: { value: "/handoff " } })
+    await waitFor(() => {
+      expect(document.querySelector(hintSel)).not.toBeNull()
+    })
+    expect(document.querySelector(hintSel)!.textContent).toBe("[--pick <filename>]")
+  })
+
+  test('token 后无空格(手敲命令名) → hint 前自动补一个空格分隔', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    await loadSlashItemsAndReset(ta)
+    fireEvent.change(ta, { target: { value: "/handoff" } })
+    await waitFor(() => {
+      expect(document.querySelector(hintSel)).not.toBeNull()
+    })
+    expect(document.querySelector(hintSel)!.textContent).toBe(" [--pick <filename>]")
+  })
+
+  test('开始输入参数后 hint 收起', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    await loadSlashItemsAndReset(ta)
+    fireEvent.change(ta, { target: { value: "/handoff " } })
+    await waitFor(() => {
+      expect(document.querySelector(hintSel)).not.toBeNull()
+    })
+    fireEvent.change(ta, { target: { value: "/handoff --pick x.md" } })
+    await waitFor(() => {
+      expect(document.querySelector(hintSel)).toBeNull()
+    })
+  })
+})
+
 describe('AgentInputBox — 状态行合并 v2 任务摘要', () => {
   test('空 v2 时状态行只显示 ● 就绪, 不展示任务摘要', () => {
     render(<AgentInputBox />);

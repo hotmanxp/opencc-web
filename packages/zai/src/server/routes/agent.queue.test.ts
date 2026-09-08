@@ -990,14 +990,14 @@ describe('POST /agent/queue/steer — 插话发送', () => {
     expect(callIdx).toBeGreaterThanOrEqual(1)
 
     // v2-r2 设计 (Item B, fix-busy-flush-v2-r2, worktree-dsh): steer 消息
-    // 不被 promote 搬走 — 设计语义是"等用户下次 prompt 时 prepend
-    // <system-reminder>", 与 vendor hook prepend 路径一致, 不应触发
-    // 立即新 turn。nextStep 仍含 steered 内容, drainInboxReminder 应返回
-    // 该 steer 的 <system-reminder> 块, 给下次 API call prepend 用。
+    // 不被 promote 搬走 — 设计语义是"等用户下次 prompt 时注入", 与 vendor
+    // hook prepend 路径一致, 不应触发立即新 turn。nextStep 仍含 steered 内容,
+    // drainInboxReminder 应返回该 steer 的 <user-steer> 块(A+C 修复后 steer
+    // 从高显著性独立块渲染), 给下次 API call append 用。
     const reminder = drainInboxReminder(sid)
     expect(reminder).not.toBeNull()
     expect(reminder).toContain('queued-two')
-    expect(reminder).toContain('<system-reminder>')
+    expect(reminder).toContain('<user-steer>')
   })
 
   it('steer 不存在的 promptId → queue-item-not-found', async () => {
