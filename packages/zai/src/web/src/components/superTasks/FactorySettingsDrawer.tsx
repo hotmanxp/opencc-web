@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react'
 import {
   Alert, Button, Drawer, Input, InputNumber, Select, Space, Spin, Tag, Typography, message,
 } from 'antd'
-import { CheckCircleFilled, CloseCircleFilled, ReloadOutlined } from '@ant-design/icons'
+import {
+  CheckCircleFilled, CloseCircleFilled, FolderOpenOutlined, ReloadOutlined,
+} from '@ant-design/icons'
+import DirectoryPicker from '../common/DirectoryPicker.js'
 import {
   fetchFactorySettings,
   fetchCliAgents,
@@ -88,6 +91,8 @@ export default function FactorySettingsDrawer({
   const [agents, setAgents] = useState<CliAgentStatus[]>([])
   const [registering, setRegistering] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // 当前正在用 DirectoryPicker 挑选的字段(null = picker 关闭)
+  const [picking, setPicking] = useState<'docsDir' | 'repoRoot' | null>(null)
 
   async function load(): Promise<void> {
     setLoading(true)
@@ -197,6 +202,13 @@ export default function FactorySettingsDrawer({
                     onChange={(e) => setDraft((p) => ({ ...p, docsDir: e.target.value }))}
                     placeholder="如 /Users/you/team/docs(绝对路径)"
                   />
+                  <Button
+                    icon={<FolderOpenOutlined />}
+                    data-testid="factory-settings-pick-docs-dir"
+                    onClick={() => setPicking('docsDir')}
+                  >
+                    选择
+                  </Button>
                   {hasSaved && (
                     <DirBadge
                       path={draft.docsDir}
@@ -219,6 +231,13 @@ export default function FactorySettingsDrawer({
                     onChange={(e) => setDraft((p) => ({ ...p, repoRoot: e.target.value }))}
                     placeholder="如 /Users/you/repos(绝对路径)"
                   />
+                  <Button
+                    icon={<FolderOpenOutlined />}
+                    data-testid="factory-settings-pick-repo-root"
+                    onClick={() => setPicking('repoRoot')}
+                  >
+                    选择
+                  </Button>
                   {hasSaved && (
                     <DirBadge
                       path={draft.repoRoot}
@@ -379,6 +398,14 @@ export default function FactorySettingsDrawer({
             保存
           </Button>
         </div>
+        <DirectoryPicker
+          open={picking !== null}
+          initialPath={picking ? draft[picking] : ''}
+          onCancel={() => setPicking(null)}
+          onSelect={(picked) => {
+            if (picking) setDraft((p) => ({ ...p, [picking]: picked }))
+          }}
+        />
       </div>
     </Drawer>
   )

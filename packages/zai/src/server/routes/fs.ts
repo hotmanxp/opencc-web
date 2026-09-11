@@ -14,7 +14,10 @@ import type {
 } from '../../shared/fs.js';
 import { classifyKind, mimeFromExt } from '../../shared/fileKind.js';
 import { dirname as pathDirname, relative as pathRelative, resolve as pathResolve } from 'node:path';
-const MAX_QUERY_LEN = 64;
+// 2026-09-11: 64 → 512。搜索框支持直接粘贴文件路径(含绝对路径),
+// macOS 下绝对路径很容易超过 64 字符被误拒。目录限定模式只做一次
+// readdir,走搜模式有 WALK_TIMEOUT_MS 兜底,放宽长度不构成滥用面。
+const MAX_QUERY_LEN = 512;
 const WALK_TIMEOUT_MS = 200;
 const IGNORED = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', '.cache', '.DS_Store',
@@ -705,6 +708,17 @@ fsRouter.get('/fs/search', async (req, res) => {
         caseSensitive,
         signal: ac.signal,
       });
+      // 路径粘贴兜底(2026-09-11):用户常贴"相对别的目录"的路径
+      // (如仓库根相对路径贴进子目录会话),relDir 拼上 cwd 后并不存在,
+      // readdir 空 → 界面显示"无匹配文件"。此时退化为按最后一段
+      // basename 在工作区内走搜,让粘贴的路径至少能命中同名文件。
+      // fragment 为空(纯目录浏览,如 "src/server/")不兜底 — 列表意图明确。
+      if (result.entries.length === 0 && fragment) {
+        result = await walkForSearch(safe.abs, fragment, {
+          caseSensitive,
+          signal: ac.signal,
+        });
+      }
     } else {
       result = await walkForSearch(safe.abs, q, {
         caseSensitive,

@@ -8,7 +8,8 @@
  * 保证两个 UI 在文件预览上体验一致。
  */
 import React, { useEffect, useState } from "react"
-import { Alert, Drawer, Spin } from "antd"
+import { Alert, Button, Drawer, Spin, Tooltip } from "antd"
+import { ColumnWidthOutlined } from "@ant-design/icons"
 import { useAgentStore } from "../../store/useAgentStore.js"
 import {
   FilePreviewBody,
@@ -36,12 +37,20 @@ function humanSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(2)} MB`
 }
 
+const DEFAULT_WIDTH = 720
+
 export function FilePreviewDrawer() {
   const path = useAgentStore((s) => s.filePreviewPath)
+  // 本地内容预览(系统拖入等无服务端路径场景):有 payload 时直接渲染,
+  // 跳过 /api/fs/preview fetch 管线。与 path 由 store 保证互斥。
+  const local = useAgentStore((s) => s.filePreviewLocal)
   const closeFilePreview = useAgentStore((s) => s.closeFilePreview)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [wire, setWire] = useState<WirePayload | null>(null)
+  // 宽度全屏开关: 点击后抽屉撑满屏幕宽度, 增加代码/markdown 可读面积。
+  // 状态跨开合保留(组件本身不随 destroyOnClose 卸载)。
+  const [fullWidth, setFullWidth] = useState(false)
 
   useEffect(() => {
     if (!path) {
@@ -71,19 +80,35 @@ export function FilePreviewDrawer() {
     return () => { cancelled = true }
   }, [path])
 
-  const open = path !== null
+  const open = path !== null || local !== null
+  const titleName = local ? basename(local.path) : path ? basename(path) : ''
+  const titleSize = local ? local.size : wire?.size ?? 0
 
   return (
     <Drawer
-      title={path ? `${basename(path)} (${humanSize(wire?.size ?? 0)})` : ''}
-      aria-label={path ? `${basename(path)} (${humanSize(wire?.size ?? 0)})` : '文件预览'}
+      title={open ? `${titleName} (${humanSize(titleSize)})` : ''}
+      aria-label={open ? `${titleName} (${humanSize(titleSize)})` : '文件预览'}
       placement="right"
-      width={720}
+      width={fullWidth ? '100vw' : DEFAULT_WIDTH}
       open={open}
       onClose={closeFilePreview}
       destroyOnClose
+      extra={
+        <Tooltip title={fullWidth ? '恢复默认宽度' : '宽度全屏'}>
+          <Button
+            type="text"
+            size="small"
+            aria-label={fullWidth ? '恢复默认宽度' : '宽度全屏'}
+            data-testid="preview-width-toggle"
+            icon={<ColumnWidthOutlined />}
+            onClick={() => setFullWidth((v) => !v)}
+          />
+        </Tooltip>
+      }
     >
-      {!path ? null : loading ? (
+      {!open ? null : local ? (
+        <FilePreviewBody payload={local} />
+      ) : loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
       ) : error ? (
         <Alert type="error" message={error} />

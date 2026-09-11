@@ -947,3 +947,92 @@ describe('instanceSupervisor (4e — fix round 2: shutdown SIGKILL escalation)',
     expect(sigkill).toHaveLength(0)
   })
 })
+
+describe('instanceSupervisor (4f — stale running reset after supervisor restart)', () => {
+  beforeEach(() => {
+    delete process.env.ZAI_DATA_DIR
+    vi.resetModules()
+  })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  const STALE_MS = 30 * 60_000
+  // Persisted status shape used by hydration: an "alive-looking" entry with
+  // every runtime field set, so a reset must clear port/pid/lastError while
+  // keeping lastHeartbeatAt.
+  const makeStatus = (state: string, tsIso: string) => ({
+    state, port: 9205, pid: 222, startedAt: tsIso, lastHeartbeatAt: tsIso,
+    lastError: { at: tsIso, message: 'boom' },
+  })
+
+  it('hydrate resets a stale running entry (no child, > 30min) to stopped; recent entry untouched', async () => {
+    const { deps, writes } = makeSupervisor()
+    const nowMs = 1_000000
+    const staleIso = new Date(nowMs - STALE_MS - 1).toISOString()
+    const freshIso = new Date(nowMs - 5 * 60_000).toISOString()
+    deps.readFile = async () => ({
+      definitions: [
+        { id: 'inst_stale', name: 'stale', cwd: '/tmp/s', createdAt: staleIso },
+        { id: 'inst_fresh', name: 'fresh', cwd: '/tmp/f', createdAt: freshIso },
+      ],
+      statuses: { inst_stale: makeStatus('running', staleIso), inst_fresh: makeStatus('running', freshIso) },
+    })
+    const { getInstanceSupervisor } = await initSup(deps)
+    const stale = getInstanceSupervisor().getSnapshots().find((s) => s.id === 'inst_stale')!
+    expect(stale.state).toBe('stopped')
+    expect(stale.port).toBeNull()
+    expect(stale.pid).toBeNull()
+    expect(stale.lastError).toBeNull()
+    // lastHeartbeatAt is kept so the UI can still show when it was last alive.
+    expect(stale.lastHeartbeatAt).toBe(staleIso)
+    const fresh = getInstanceSupervisor().getSnapshots().find((s) => s.id === 'inst_fresh')!
+    expect(fresh.state).toBe('running')
+    expect(fresh.port).toBe(9205)
+    // The reset is persisted: drain the write chain and check the last write.
+    await (getInstanceSupervisor() as unknown as { __flushPendingWrites: () => Promise<void> }).__flushPendingWrites()
+    const lastWrite = writes[writes.length - 1]!
+    expect((lastWrite.statuses.inst_stale as { state: string }).state).toBe('stopped')
+    expect((lastWrite.statuses.inst_fresh as { state: string }).state).toBe('running')
+  })
+
+  it('hydrate resets stale starting/stopping entries too', async () => {
+    const { deps } = makeSupervisor()
+    const staleIso = new Date(1_000000 - STALE_MS - 1).toISOString()
+    deps.readFile = async () => ({
+      definitions: [
+        { id: 'inst_starting', name: 'starting', cwd: '/tmp/s', createdAt: staleIso },
+        { id: 'inst_stopping', name: 'stopping', cwd: '/tmp/s', createdAt: staleIso },
+      ],
+      statuses: { inst_starting: makeStatus('starting', staleIso), inst_stopping: makeStatus('stopping', staleIso) },
+    })
+    const { getInstanceSupervisor } = await initSup(deps)
+    for (const id of ['inst_starting', 'inst_stopping']) {
+      expect(getInstanceSupervisor().getSnapshots().find((s) => s.id === id)!.state).toBe('stopped')
+    }
+  })
+
+  it('tickHeartbeat fallback resets a child-less entry that crossed the 30min window after hydrate', async () => {
+    const { deps, events, advance } = makeSupervisor()
+    const iso = new Date(1_000000).toISOString()
+    deps.readFile = async () => ({
+      definitions: [{ id: 'inst_orphan', name: 'orphan', cwd: '/tmp/o', createdAt: iso }],
+      statuses: { inst_orphan: makeStatus('running', iso) },
+    })
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snapOf = () => getInstanceSupervisor().getSnapshots().find((s) => s.id === 'inst_orphan')!
+    // Within the window: hydrate keeps it, and an explicit tick must not reset it.
+    expect(snapOf().state).toBe('running')
+    ;(getInstanceSupervisor() as unknown as { __tickHeartbeat?: () => void }).__tickHeartbeat?.()
+    expect(snapOf().state).toBe('running')
+    // Cross the stale threshold → the 5s tick fallback normalises to stopped
+    // and emits instance.changed for the orphan entry.
+    advance(1_000000 + STALE_MS + 1)
+    ;(getInstanceSupervisor() as unknown as { __tickHeartbeat?: () => void }).__tickHeartbeat?.()
+    expect(snapOf().state).toBe('stopped')
+    expect(snapOf().port).toBeNull()
+    const changed = events.some((e) => {
+      const ev = e as unknown as { type?: string; instanceId?: string; state?: string }
+      return ev.type === 'instance.changed' && ev.instanceId === 'inst_orphan' && ev.state === 'stopped'
+    })
+    expect(changed).toBe(true)
+  })
+})

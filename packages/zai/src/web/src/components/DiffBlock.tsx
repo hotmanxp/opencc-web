@@ -1,4 +1,6 @@
-import type { AgentMessage } from '../store/useAgentStore'
+import { Button, Space, Tooltip } from 'antd'
+import { EyeOutlined, FolderOpenOutlined } from '@ant-design/icons'
+import { useAgentStore, type AgentMessage } from '../store/useAgentStore'
 import { computeLineDiff, summarizeDiff, type DiffRow } from '../lib/diff'
 
 const MONO =
@@ -89,6 +91,15 @@ export default function DiffBlock({ msg }: { msg: AgentMessage }) {
 
   const headerLabel = isWrite ? 'Write' : 'Update'
 
+  const openPreview = useAgentStore((s) => s.openFilePreview)
+  const onReveal = () => {
+    void fetch('/api/fs/reveal', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: filePath }),
+    })
+  }
+
   return (
     <div style={{ marginBottom: 8, maxWidth: '100%' }}>
       {/* 头部: 状态点 + Update/Write(path) + 摘要 */}
@@ -117,6 +128,22 @@ export default function DiffBlock({ msg }: { msg: AgentMessage }) {
         </span>
         {summary && (
           <span style={{ color: GUTTER_FG, flexShrink: 0 }}>{summary}</span>
+        )}
+        {status === 'done' && filePath && (
+          <Space size={4} style={{ flexShrink: 0, marginLeft: 'auto' }}>
+            <Tooltip title="预览文件内容">
+              <Button
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => openPreview(filePath)}
+              >
+                预览
+              </Button>
+            </Tooltip>
+            <Button size="small" icon={<FolderOpenOutlined />} onClick={onReveal}>
+              打开目录
+            </Button>
+          </Space>
         )}
       </div>
 

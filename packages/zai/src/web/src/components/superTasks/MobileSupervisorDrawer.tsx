@@ -148,7 +148,15 @@ export default function MobileSupervisorDrawer({
           }}
         >
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <AgentConversation hideShareAndPlugin />
+            {/* bottomStackStyle: 与 NewSuperTaskModal / QuickCreateModal 同款,
+                输入区铺白底 + 顶部分隔线, 避免与 #eef2f7 消息区连成一片。 */}
+            <AgentConversation
+              hideShareAndPlugin
+              bottomStackStyle={{
+                background: 'var(--bg-card, #fff)',
+                borderTop: '1px solid var(--border-subtle, #e5e9f0)',
+              }}
+            />
           </div>
         </div>
       </Drawer>

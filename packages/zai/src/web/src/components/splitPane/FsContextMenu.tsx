@@ -4,6 +4,7 @@ import {
   AGENT_INPUT_INSERT_EVENT,
   type AgentInputInsertDetail,
 } from '../../lib/agentInputEvents.js';
+import { useAgentStore } from '../../store/useAgentStore.js';
 
 export interface FsContextMenuProps {
   /** Path relative to cwd (sent to server verbatim). */
@@ -70,6 +71,23 @@ export function FsContextMenu(props: FsContextMenuProps): JSX.Element | null {
   };
 
   const menuItems = useMemo(() => [
+    // 「预览」仅对文件展示:调 FilePreviewDrawer(右侧抽屉,复用
+    // useAgentStore.filePreviewPath → /api/fs/preview 现成管线)。
+    // 目录不进抽屉(/fs/preview 对目录返回 EISDIR),故隐藏该项。
+    ...(kind !== 'dir'
+      ? [
+          {
+            key: 'preview',
+            'data-testid': 'fs-cm-preview',
+            label: '预览',
+            onClick: () => {
+              useAgentStore.getState().openFilePreview(absPath);
+              onClose();
+            },
+          },
+          { type: 'divider' as const },
+        ]
+      : []),
     {
       key: 'insert',
       'data-testid': 'fs-cm-insert',

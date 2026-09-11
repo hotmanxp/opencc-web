@@ -15,6 +15,13 @@ import type { RuntimeCore } from '../../shared/settings.js'
 export const INSTANCE_BASE_PORT = 9201
 export const HEARTBEAT_TIMEOUT_MS = 20_000
 export const HEARTBEAT_POLL_MS = 5_000
+// After a supervisor restart, entries hydrated from disk have no live child,
+// so the 20s heartbeat-timeout path can never fire for them — an instance
+// that died while the supervisor was down would show `running` forever. Any
+// child-less entry still in an active state (running/starting/stopping) whose
+// last activity is older than this window is force-reset to `stopped` on
+// hydrate and on every heartbeat tick.
+export const STALE_RUNNING_RESET_MS = 30 * 60_000
 export const STOP_TIMEOUT_MS = 10_000
 export const SHUTDOWN_TIMEOUT_MS = 3_000
 export const CURRENT_INSTANCE_ID = '__current__'
@@ -157,6 +164,24 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     let writeChain: Promise<void> = Promise.resolve()
     const persistSafe = () => { writeChain = writeChain.then(() => persist().catch((err: unknown) => { const msg = err instanceof Error ? err.stack ?? err.message : String(err); console.warn(`[instanceSupervisor] persist failed: ${msg}`) })) }
     const setStatus = (entry: Entry, patch: Partial<InstanceStatus>) => { entry.status = { ...entry.status, ...patch }; return entry.status }
+    // Last known activity for an entry: freshest of heartbeat, start time,
+    // or creation time. Used to decide stale-running resets.
+    const lastActivityAt = (entry: Entry): number => {
+      const ts = entry.status.lastHeartbeatAt ?? entry.status.startedAt ?? entry.def.createdAt
+      return ts ? new Date(ts).getTime() : 0
+    }
+    // Force-reset a child-less entry stuck in an active state whose last
+    // activity predates STALE_RUNNING_RESET_MS. Keeps `lastHeartbeatAt` so
+    // the UI can still show when the instance was last alive; clears the
+    // runtime endpoints and any stale error. Returns true when reset.
+    const resetStaleActive = (entry: Entry, nowMs: number): boolean => {
+      if (entry.child) return false
+      const st = entry.status.state
+      if (st !== 'running' && st !== 'starting' && st !== 'stopping') return false
+      if (nowMs - lastActivityAt(entry) <= STALE_RUNNING_RESET_MS) return false
+      setStatus(entry, { state: 'stopped', port: null, pid: null, lastError: null })
+      return true
+    }
 
     // Schedule a deferred `kill()` (e.g. post-SIGINT SIGKILL escalation).
     // When the timeout fires we MUST resolve the waiter's promise too —
@@ -359,6 +384,12 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     const tickHeartbeat = () => {
       const nowMs = deps.now()
       for (const entry of entries.values()) {
+        // Fallback for child-less entries stuck in an active state (e.g.
+        // hydrated as `running` from a previous supervisor lifetime). They
+        // can never reach the SIGKILL path below, so force-reset once the
+        // stale window elapses. Entries WITH a live child are untouched here
+        // and keep the 20s → down behaviour.
+        if (resetStaleActive(entry, nowMs)) { emit(entry.def.id, entry.status); persistSafe(); continue }
         if (entry.status.state !== 'running') continue
         const last = entry.status.lastHeartbeatAt ? new Date(entry.status.lastHeartbeatAt).getTime() : 0
         if (nowMs - last <= HEARTBEAT_TIMEOUT_MS) continue
@@ -476,6 +507,16 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         const status: InstanceStatus = persisted ? { ...persisted } : { ...EMPTY_INSTANCE_STATUS }
         entries.set(def.id, { def, status, child: null, childState: null })
       }
+      // Server-authoritative stale reset: hydrated entries have no child, so
+      // a persisted active state is only trustworthy while its last activity
+      // is recent. Anything older than STALE_RUNNING_RESET_MS is normalised
+      // to `stopped` before the supervisor is exposed to callers.
+      const hydrateNow = deps.now()
+      let anyStaleReset = false
+      for (const entry of entries.values()) {
+        if (resetStaleActive(entry, hydrateNow)) anyStaleReset = true
+      }
+      if (anyStaleReset) persistSafe()
     } catch (err) {
       const msg = err instanceof Error ? err.stack ?? err.message : String(err)
       console.warn(`[instanceSupervisor] failed to hydrate from disk: ${msg}`)

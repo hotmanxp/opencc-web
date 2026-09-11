@@ -9,7 +9,9 @@ import { useFsSearch } from './useFsSearch.js';
 import { useFsContentSearch } from './useFsContentSearch.js';
 import { FsSearchList } from './FsSearchList.js';
 import { FsContentSearchList } from './FsContentSearchList.js';
-import type { FsFile } from '../../../shared/fs.js';
+import type { FsFile, FilePreviewPayload } from '../../../shared/fs.js';
+import { classifyKind } from '@shared/fileKind';
+import { useAgentStore } from '../../store/useAgentStore.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
 import { FsContextMenu } from './FsContextMenu.js';
@@ -221,6 +223,36 @@ export function buildAbsPath(cwd: string | null, relPath: string): string {
   const sep = cwd.includes('\\') ? '\\' : '/';
   const trimmed = cwd.replace(/[\\/]$/, '');
   return relPath ? `${trimmed}${sep}${relPath}` : trimmed;
+}
+
+/**
+ * 把系统拖入的 File 转成 FilePreviewDrawer 可消费的 payload(纯前端,不落盘)。
+ *
+ * 浏览器安全限制:从 Finder/资源管理器拖入的文件拿不到绝对路径
+ * (Chrome 已移除 File.path),因此只能读内容本地预览,不能像树里
+ * 选中的文件那样走 /api/fs/*(路径编辑/插入对话 @引用)。
+ * - image  → readAsDataURL 得 dataUrl(FilePreviewBody 直接喂 <img>)
+ * - html   → readAsText 得 utf8 content(iframe srcDoc 分支)
+ * - text   → readAsText 得 content
+ * - binary → 仅元数据 + ext,抽屉展示"不支持内联预览"提示
+ */
+async function fileToPreviewPayload(f: File): Promise<FilePreviewPayload> {
+  const kind = classifyKind(f.name);
+  const base = { path: f.name, size: f.size, mtime: f.lastModified };
+  if (kind === 'binary') {
+    const idx = f.name.lastIndexOf('.');
+    return { ...base, kind, ext: idx > 0 ? f.name.slice(idx).toLowerCase() : undefined };
+  }
+  if (kind === 'image') {
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result));
+      r.onerror = () => rej(r.error ?? new Error('readAsDataURL failed'));
+      r.readAsDataURL(f);
+    });
+    return { ...base, kind, dataUrl, mime: f.type || undefined };
+  }
+  return { ...base, kind, content: await f.text() };
 }
 
 /**
@@ -530,6 +562,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   // 'source' shows the markup. Driven by a Segmented control rendered
   // only when the active file is HTML (see below).
   const [htmlMode, setHtmlMode] = useState<HtmlMode>('preview');
+  // 系统拖入的悬浮高亮标记(拖入预览走 FilePreviewDrawer,见 handleFsDrop)
+  const [dropHover, setDropHover] = useState(false);
   // True only when the currently-selected file is an HTML preview.
   // Used to gate the Segmented control in the header so it doesn't
   // appear for unrelated file types.
@@ -638,6 +672,23 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setContextMenu({ path: p, absPath: buildAbsPath(cwd, p), x, y, kind });
   };
 
+  // 系统文件拖入 → 前端读取内容,生成 payload 后打开右侧 FilePreviewDrawer
+  // (与右键「预览」同一个抽屉,体验一致)。见 fileToPreviewPayload 注释:
+  // 浏览器拿不到拖入文件的绝对路径,故只预览、不产生 @引用。
+  const handleFsDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDropHover(false);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length === 0) return;
+    if (files.length > 1) void message.info(`检测到 ${files.length} 个文件,仅预览第一个(${files[0].name})`);
+    try {
+      const payload = await fileToPreviewPayload(files[0]);
+      useAgentStore.getState().openFilePreviewLocal(payload);
+    } catch (err) {
+      void message.error(`读取文件失败:${(err as Error).message}`);
+    }
+  };
+
   // Reset on cwd change.
   useEffect(() => {
     setSelected(null);
@@ -650,6 +701,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setPendingLine(null);
     setEditingPath(null);
     setDirtyPaths(new Set());
+    setDropHover(false);
   }, [cwd]);
 
   if (!cwd) {
@@ -778,7 +830,25 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const treeData = root.data?.ok && root.data.entries ? renderTree(root.data.entries) : [];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div
+      data-testid="fs-tab-root"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        outline: dropHover ? '2px dashed rgba(255,102,0,.55)' : 'none',
+        outlineOffset: -2,
+      }}
+      onDragOver={(e) => {
+        // 只响应系统文件拖入(Files 类型);其它拖拽不拦截
+        if (e.dataTransfer?.types?.includes('Files')) {
+          e.preventDefault();
+          setDropHover(true);
+        }
+      }}
+      onDragLeave={() => setDropHover(false)}
+      onDrop={(e) => void handleFsDrop(e)}
+    >
       <div
         data-testid="fs-tab-header"
         style={{

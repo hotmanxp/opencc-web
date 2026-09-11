@@ -105,10 +105,20 @@ export default function QuickCommandPopover({
       return [...cmds, ...sks].slice(0, MAX_VISIBLE);
     }
     const scoreItem = (it: SlashItem) => {
-      const nameScore = fuzzyMatch(q, it.name);
-      if (nameScore === 0) return 0;
+      const nameScore = Math.max(
+        fuzzyMatch(q, it.name),
+        // Plugin items display a prefix-stripped name; match it so typing
+        // the visible `/commit` hits `superpowers:commit`.
+        it.displayName ? fuzzyMatch(q, it.displayName) : 0,
+      );
+      // Align with vendor commandSuggestions.ts pluginNameKey (Fuse weight
+      // 1.5): the plugin name is an explicit boosted search field, so
+      // `superpowers` narrows to that plugin's commands/skills and ranks
+      // them together.
+      const pluginScore = it.pluginName ? fuzzyMatch(q, it.pluginName) * 1.5 : 0;
+      if (nameScore === 0 && pluginScore === 0) return 0;
       const descScore = fuzzyMatch(q, it.description);
-      return nameScore + (descScore > 0 ? descScore * 0.3 : 0);
+      return nameScore + pluginScore + (descScore > 0 ? descScore * 0.3 : 0);
     };
     const cmds = items
       .filter((i) => i.kind === "command")
@@ -126,9 +136,12 @@ export default function QuickCommandPopover({
   }, [items, search]);
 
   // 过滤结果变化时, activeIndex 归零, 避免越界.
+  // Depend on the `filtered` reference (not length): plugin-name weighted
+  // hits can keep the result count identical across queries, where a
+  // length-only dependency would leave a stale highlight.
   useEffect(() => {
     setActiveIndex(0);
-  }, [filtered.length]);
+  }, [filtered]);
 
   // 选中当前高亮项.
   const handleSelect = useCallback(

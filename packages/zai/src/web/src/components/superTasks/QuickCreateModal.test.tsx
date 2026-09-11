@@ -143,14 +143,15 @@ describe('QuickCreateModal (2026-09-06 tf-92b3cxad chat-mode-only)', () => {
       expect(screen.queryByTestId('quick-chat-design-ready')).toBeNull()
     })
 
-    it('「取消」按钮调 deleteAgentSession + onClose,无任务创建', async () => {
+    it('右上角 X 关闭走 handleCancel:调 deleteAgentSession + onClose,无任务创建', async () => {
       const onClose = vi.fn()
       render(<QuickCreateModal open onClose={onClose} />)
       await waitFor(() => {
         expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
       })
       ;(deleteAgentSession as unknown as { mockClear: () => void }).mockClear()
-      fireEvent.click(screen.getByTestId('quick-chat-cancel-button'))
+      // 2026-09-11: 底部「取消」按钮已移除,统一由 Modal 右上角 X 触发清理
+      fireEvent.click(document.querySelector('.ant-modal-close') as Element)
       await waitFor(() => {
         expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')
         expect(onClose).toHaveBeenCalled()
@@ -252,7 +253,7 @@ describe('QuickCreateModal (2026-09-06 tf-92b3cxad chat-mode-only)', () => {
     expect(screen.getByTestId('quick-mobile-drawer')).toBeTruthy()
   })
 
-  it('mobileAsDrawer=true:打开即 chat mode,无表单字段;状态栏 / AgentConversation / 取消 / 确认按钮就位', async () => {
+  it('mobileAsDrawer=true:打开即 chat mode,无表单字段;状态栏 / AgentConversation / 确认按钮就位', async () => {
     render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
     await waitFor(() => {
       expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
@@ -266,7 +267,7 @@ describe('QuickCreateModal (2026-09-06 tf-92b3cxad chat-mode-only)', () => {
     expect(screen.queryByTestId('quick-cwd-picker-trigger')).toBeNull()
     expect(screen.queryByTestId('quick-image-picker-trigger')).toBeNull()
     expect(screen.getByTestId('quick-chat-conversation-mock')).toBeTruthy()
-    expect(screen.getByTestId('quick-chat-cancel-button')).toBeTruthy()
+    expect(screen.queryByTestId('quick-chat-cancel-button')).toBeNull()
     expect(screen.getByTestId('quick-chat-confirm-button')).toBeTruthy()
   })
 

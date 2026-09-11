@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, type CSSProperties } from 'react'
 import { Typography, Button } from 'antd'
 import { RobotFilled, UpOutlined } from '@ant-design/icons'
 import {
@@ -33,7 +33,8 @@ export default function AgentConversation({
   toolbarRightSlot,
   showTranscriptRepair,
   hideShareAndPlugin,
-}: AgentInputBoxProps = {}) {
+  bottomStackStyle,
+}: AgentInputBoxProps & { bottomStackStyle?: CSSProperties } = {}) {
   const messages = useAgentStoreOrCtx((s) => s.messages)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
   const outputStyle = useAppStore((s) => s.outputStyle)
@@ -197,7 +198,7 @@ export default function AgentConversation({
         )}
         <PermissionConfirmCard />
       </div>
-      <div className="bottom-stack">
+      <div className="bottom-stack" style={bottomStackStyle}>
         <AgentInputBox
           toolbarLeftSlot={toolbarLeftSlot}
           toolbarRightSlot={toolbarRightSlot}

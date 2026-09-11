@@ -138,6 +138,26 @@ describe('routes/fsPicker', () => {
     // 没走到根 — 测试环境 tmp() 太深,跳过(不应该发生)
   });
 
+  test('GET /fs/picker allows navigating to the filesystem root itself', async () => {
+    // 回归:旧实现把 "parent 是根" 也判成 null,导致根下一级目录
+    // (POSIX /Users、Windows C:\Users)的上级按钮被禁用,永远选不到根。
+    // 从 root 逐 dirname 走到根下一级,断言其 parent 就是根(非 null)。
+    let cur = root;
+    for (let i = 0; i < 10; i++) {
+      const parent = join(cur, '..');
+      const parentRes = await request(makeApp()).get('/api/fs/picker').query({ path: parent });
+      const next = parentRes.body.path as string;
+      if (join(next, '..') === next) {
+        // next 是根 — 上一步的目录是根下一级,它的 parent 必须是根
+        expect(cur).toBeTruthy();
+        const oneBelow = await request(makeApp()).get('/api/fs/picker').query({ path: cur });
+        expect(oneBelow.body.parent).toBe(next);
+        return;
+      }
+      cur = next;
+    }
+  });
+
   test('GET /fs/picker navigates into a subdirectory correctly', async () => {
     const res = await request(makeApp())
       .get('/api/fs/picker')

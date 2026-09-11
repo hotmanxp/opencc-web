@@ -39,6 +39,15 @@ beforeEach(() => {
       if (String(url).includes('/register')) {
         return { ok: true, json: async () => ({ ok: true, restartRequired: true }) } as unknown as Response
       }
+      if (String(url).includes('/api/fs/picker')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true, path: '/picked/dir', parent: '/picked', home: '/Users/you',
+            entries: [{ name: 'sub', path: '/picked/dir/sub', type: 'dir' }],
+          }),
+        } as unknown as Response
+      }
       return { ok: true, json: async () => ({}) } as unknown as Response
     }),
   )
@@ -87,5 +96,19 @@ describe('FactorySettingsDrawer (tf-pnsl5m5e)', () => {
     const dshCard = await screen.findByTestId('factory-settings-agent-dsh')
     expect(dshCard.textContent).toContain('未找到') // which 探测失败
     expect(dshCard.textContent).toContain('未注册')
+  })
+
+  it('docsDir「选择」打开 DirectoryPicker,回填 picker 响应路径并写入草稿', async () => {
+    render(<FactorySettingsDrawer open onClose={vi.fn()} />)
+    const docs = (await screen.findByTestId('factory-settings-docs-dir')) as HTMLInputElement
+    await waitFor(() => expect(docs.value).toBe('/tmp/docs'))
+    fireEvent.click(screen.getByTestId('factory-settings-pick-docs-dir'))
+    // DirectoryPicker 挂载后 fetch /api/fs/picker,点「选择当前目录」回填
+    const selectBtn = await screen.findByTestId('picker-select')
+    await waitFor(() => expect(selectBtn).toBeEnabled())
+    fireEvent.click(selectBtn)
+    await waitFor(() => expect(docs.value).toBe('/picked/dir'))
+    // 选中后 picker 关闭
+    expect(screen.queryByTestId('quick-directory-picker')).toBeNull()
   })
 })

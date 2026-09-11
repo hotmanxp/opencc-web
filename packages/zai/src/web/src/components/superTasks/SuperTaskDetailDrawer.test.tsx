@@ -305,4 +305,120 @@ describe('SuperTaskDetailDrawer', () => {
       vi.unstubAllGlobals()
     }
   })
+
+  // 任务工厂事件流默认仅显示最近 20 条,可展开/收起全部 —— tf-zokf4lsg。
+  // 灌 25 条 system 帧 → rendered.length=25 > 20 → 应出现切换按钮,默认
+  // 只渲染最后 20 条 (timeline-item 数 === 20);点「显示全部」→ 25;
+  // 再点「收起」→ 回到 20。Tab 上的事件计数 badge 始终显示总数 25。
+  describe('事件流默认最近 20 条 + 切换按钮', () => {
+    const TOTAL = 25
+
+    /** 灌 N 条 system 帧的 SSE mock —— 每帧 subtype=`frame-{seq}` 便于区分。 */
+    function manyEventsStreamMock(n: number): { ok: boolean; body: ReadableStream<Uint8Array> } {
+      const frame = (seq: number): string =>
+        `id: ${seq}\nevent: system\ndata: ${JSON.stringify({
+          seq,
+          ts: seq,
+          type: 'system',
+          data: { subtype: `frame-${seq}` },
+        })}\n\n`
+      return {
+        ok: true,
+        body: new ReadableStream({
+          start(c) {
+            for (let i = 1; i <= n; i++) {
+              c.enqueue(new TextEncoder().encode(frame(i)))
+            }
+            c.close()
+          },
+        }),
+      }
+    }
+
+    it('>20 条事件时,默认只渲染最后 20 条 Timeline 行;Tab badge 仍显示总数', async () => {
+      useAppStore.setState({ isMobile: false })
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (String(url).endsWith('/events')) return manyEventsStreamMock(TOTAL)
+        return taskDetailsMock()
+      }))
+      try {
+        render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+        // Tab badge 显示全部总数 (25),不是 20 —— 这是 spec #4 不变行为
+        const badge = await screen.findByTestId('process-event-count')
+        expect(badge.textContent).toBe(String(TOTAL))
+        // 切换按钮出现,文案「显示全部 (25)」
+        const toggle = await screen.findByTestId('event-stream-toggle')
+        expect(toggle.textContent).toContain(`显示全部 (${TOTAL})`)
+        // Timeline 行数 === 20 (slice(-20))
+        await waitFor(() => {
+          expect(document.querySelectorAll('.ant-timeline-item').length).toBe(20)
+        })
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it('点击「显示全部」 → Timeline 行数等于渲染总数;按钮文案切到「收起」', async () => {
+      useAppStore.setState({ isMobile: false })
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (String(url).endsWith('/events')) return manyEventsStreamMock(TOTAL)
+        return taskDetailsMock()
+      }))
+      try {
+        render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+        const toggle = await screen.findByTestId('event-stream-toggle')
+        fireEvent.click(toggle)
+        // 展开后 timeline-item === TOTAL (25)
+        await waitFor(() => {
+          expect(document.querySelectorAll('.ant-timeline-item').length).toBe(TOTAL)
+        })
+        // 按钮文案切到「收起」
+        expect(toggle.textContent).toContain('收起')
+        // Tab badge 仍是 25(总数,不受 visible 影响)
+        const badge = await screen.findByTestId('process-event-count')
+        expect(badge.textContent).toBe(String(TOTAL))
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it('再次点击「收起」 → Timeline 回到最近 20 条;按钮文案恢复「显示全部 (N)」', async () => {
+      useAppStore.setState({ isMobile: false })
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (String(url).endsWith('/events')) return manyEventsStreamMock(TOTAL)
+        return taskDetailsMock()
+      }))
+      try {
+        render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+        const toggle = await screen.findByTestId('event-stream-toggle')
+        fireEvent.click(toggle) // 展开 → 25
+        await waitFor(() => {
+          expect(document.querySelectorAll('.ant-timeline-item').length).toBe(TOTAL)
+        })
+        fireEvent.click(toggle) // 收起 → 20
+        await waitFor(() => {
+          expect(document.querySelectorAll('.ant-timeline-item').length).toBe(20)
+        })
+        expect(toggle.textContent).toContain(`显示全部 (${TOTAL})`)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it('≤20 条事件时,不显示切换按钮', async () => {
+      useAppStore.setState({ isMobile: false })
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (String(url).endsWith('/events')) return manyEventsStreamMock(20)
+        return taskDetailsMock()
+      }))
+      try {
+        render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+        // 等待事件到达再断言
+        await screen.findByTestId('process-event-count')
+        expect(screen.queryByTestId('event-stream-toggle')).toBeNull()
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+  })
 })

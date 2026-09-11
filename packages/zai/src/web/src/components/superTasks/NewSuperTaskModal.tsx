@@ -357,8 +357,16 @@ export default function NewSuperTaskModal({
         <AgentStoreContext.Provider value={intakeStore}>
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {/* intake/supervisor 临时对话不需要「分享到 LAN」与「插件管理」
-                入口 — 调度器讨论是单设备内对齐意图的过程,挂上反而干扰。 */}
-            <AgentConversation hideShareAndPlugin />
+                入口 — 调度器讨论是单设备内对齐意图的过程,挂上反而干扰。
+                bottomStackStyle: 弹窗 body 与消息区同为 #eef2f7, 输入区
+                不单独设底会跟消息区连成一片; 铺白底 + 顶部分隔线与消息区分层。 */}
+            <AgentConversation
+              hideShareAndPlugin
+              bottomStackStyle={{
+                background: 'var(--bg-card, #fff)',
+                borderTop: '1px solid var(--border-subtle, #e5e9f0)',
+              }}
+            />
           </div>
         </AgentStoreContext.Provider>
       ) : (

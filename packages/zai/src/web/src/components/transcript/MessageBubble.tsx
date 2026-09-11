@@ -11,7 +11,7 @@
 // (module-private) — extraction of those helpers is out of scope for Task 3.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Button, Card, Collapse, Modal, Space, Tag, Typography, message } from "antd";
+import { Button, Card, Collapse, Modal, Space, Tag, Tooltip, Typography, message } from "antd";
 import {
   RobotFilled,
   UserOutlined,
@@ -21,9 +21,11 @@ import {
   CaretRightOutlined,
   CopyOutlined,
   CheckOutlined,
+  ExportOutlined,
 } from "@ant-design/icons";
 import { MarkdownText } from "../markdown/MarkdownText.js";
 import type { AgentMessage } from "../../store/useAgentStore.js";
+import { useAgentStore } from "../../store/useAgentStore.js";
 import { AttachmentStrip } from "../AttachmentStrip.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
 import { linkifyText } from "../../lib/linkify.js";
@@ -421,6 +423,36 @@ export function MessageCopyButton({
   );
 }
 
+// Read 工具折叠行上的 ↗ 预览图标: 点击唤起 FilePreviewDrawer。
+// 必须 flexShrink:0 —— 预览文字是 flex:1 + ellipsis,路径再长图标也不被挤掉。
+function ReadPreviewIcon({ path }: { path: string }) {
+  const openFilePreview = useAgentStore((s) => s.openFilePreview);
+  return (
+    <Tooltip title="预览文件">
+      <span
+        role="button"
+        aria-label="预览文件"
+        data-testid="read-preview-icon"
+        style={{
+          flexShrink: 0,
+          cursor: "pointer",
+          color: "var(--text-secondary)",
+          display: "inline-flex",
+          alignItems: "center",
+          fontSize: 12,
+        }}
+        onClick={(e) => {
+          // Collapse header 会吞点击展开面板,这里阻止冒泡只开抽屉
+          e.stopPropagation();
+          openFilePreview(path);
+        }}
+      >
+        <ExportOutlined />
+      </span>
+    </Tooltip>
+  );
+}
+
 function ToolUsePill({ name, status }: { name: string; status: ToolStatus }) {
   const c = TOOL_PILL_COLORS[status];
   return (
@@ -609,6 +641,9 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                     {preview}
                   </Text>
                 )}
+                {rawName === "Read" &&
+                  typeof input.file_path === "string" &&
+                  input.file_path && <ReadPreviewIcon path={input.file_path} />}
               </div>
             ),
             children: (

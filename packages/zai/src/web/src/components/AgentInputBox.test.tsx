@@ -118,6 +118,49 @@ describe('AgentInputBox — slash command UI visibility', () => {
     })
   })
 
+  test("粘贴绝对路径不被误判为 slash 命令: 直接 POST /agent/prompt 且写入 transcript", async () => {
+    vi.mocked(api.post).mockResolvedValue({ sessionId: "sess-new" } as any)
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: "/Users/foo/bar.png" } })
+    fireEvent.keyDown(ta, { key: "Enter", code: "Enter", shiftKey: false })
+    await waitFor(() => {
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/agent/prompt",
+        expect.objectContaining({ prompt: "/Users/foo/bar.png" }),
+        expect.anything(),
+      )
+    })
+    // 修复前: 任何 `/` 起首文本都先打 /agent/command; 路径文本现在不应触碰它
+    expect(
+      vi.mocked(api.post).mock.calls.some(([p]) => p === "/agent/command"),
+    ).toBe(false)
+    await waitFor(() => {
+      const msgs = useAgentStore.getState().messages
+      const tail = msgs[msgs.length - 1]
+      expect(tail).toMatchObject({
+        type: "user.text",
+        text: "/Users/foo/bar.png",
+      })
+    })
+  })
+
+  test("/agent/command 抛异常时恢复草稿, 用户输入不被吞掉", async () => {
+    vi.mocked(api.post).mockRejectedValueOnce(new Error("network down"))
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: "/greet alice" } })
+    fireEvent.keyDown(ta, { key: "Enter", code: "Enter", shiftKey: false })
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/agent/command",
+        expect.objectContaining({ name: "greet" }),
+      ),
+    )
+    // 修复前: catch 只 toast, draft 已在请求前 clear → 输入消失
+    await waitFor(() => expect(ta.value).toBe("/greet alice"))
+  })
+
   test("'/' 触发下拉里出现 handoff builtin 命令", async () => {
     // /api/slash mock (above beforeAll) 已返回 handoff 项.
     // 输入 "/" 后 dropdown 应该列出 handoff 命令.

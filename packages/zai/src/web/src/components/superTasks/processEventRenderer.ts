@@ -273,19 +273,122 @@ export function toRendered(frame: SseFrame): RenderedEvent | null {
   const raw = obj.data
   if (raw === null || raw === undefined || typeof raw !== 'object') return null
   const rawWrapped = raw as Record<string, unknown>
-  const rawObj = unwrapRaw(rawWrapped)
 
   // attach 帧的 RuntimeEvent type == frame.event(SSE event 字段;wire 内 type 同时存在但冗余)
   const t = frame.event
-  // 已知 RuntimeEvent 集合外:message_start / content_block_delta / ping 等显式 reject → null
-  if (t !== 'system' && t !== 'user' && t !== 'assistant') return null
 
+  // dsh(CliAgent attach)走 mapSubagentBgEventType 词汇表:assistant_message /
+  // tool_use / tool_result / subagent_turn_started / _completed。agent=opencc 的
+  // system|user|assistant 词汇表在下面 switch 分支保持原路径,完全不受影响。
   switch (t) {
+    case 'assistant_message': {
+      // 逐 token delta,文本取 data.text;相邻碎片由 mergeConsecutiveAssistantText 折叠。
+      const text = typeof rawWrapped.text === 'string' ? rawWrapped.text : ''
+      return { kind: 'assistant-text', seq: meta.seq, ts: meta.ts, text }
+    }
+    case 'tool_use': {
+      // dsh 把入参塞在 .raw.{id,name,input},input 是 JSON 字符串,且工具名为小写;
+      // 解析 + 规范大小写后复用 renderToolUse 的既有 summary 规则。
+      const payload = asRecord(rawWrapped.raw) ?? rawWrapped
+      const id = payload.id
+      const name = payload.name
+      if (typeof id !== 'string' || typeof name !== 'string') return null
+      return renderToolUse(meta, { id, name: canonicalToolName(name), input: parseToolInput(payload.input) })
+    }
+    case 'tool_result': {
+      // dsh tool_result 只带 tool_use_id(无 content)→ 空摘要;若带 content 则走原规则。
+      const payload = asRecord(rawWrapped.raw) ?? rawWrapped
+      const toolUseId = payload.tool_use_id
+      if (typeof toolUseId !== 'string') return null
+      if (payload.content === null || payload.content === undefined) {
+        return {
+          kind: 'tool-result',
+          seq: meta.seq,
+          ts: meta.ts,
+          toolUseId,
+          isError: payload.is_error === true,
+          summary: '',
+          fullContent: '',
+        }
+      }
+      return renderToolResult(meta, payload)
+    }
+    // 轮次标记不渲染(保持 Timeline 干净);未知/流式碎片(message_start /
+    // content_block_delta / commentary / ping)显式 null,绘制层跳过。
+    case 'subagent_turn_started':
+    case 'subagent_turn_completed':
+    case 'commentary':
+      return null
     case 'system':
-      return renderSystem(meta, rawObj)
+      return renderSystem(meta, unwrapRaw(rawWrapped))
     case 'user':
-      return renderUser(meta, rawObj)
+      return renderUser(meta, unwrapRaw(rawWrapped))
     case 'assistant':
-      return renderAssistant(meta, rawObj)
+      return renderAssistant(meta, unwrapRaw(rawWrapped))
+    default:
+      return null
   }
+}
+
+/**
+ * dsh provider 用小写工具名(read/bash/grep…),而 renderToolUse 的 8 条 summary
+ * 规则按 PascalCase(opencc 习惯)匹配。这里把已知小写名规范成 PascalCase,让 dsh
+ * 工具行也能拿到与 opencc 一致的摘要;未知名原样透传(命中 renderToolUse 的
+ * fallback 分支)。
+ */
+const DSH_TOOL_ALIASES: Record<string, string> = {
+  read: 'Read',
+  write: 'Write',
+  edit: 'Edit',
+  multiedit: 'MultiEdit',
+  bash: 'Bash',
+  grep: 'Grep',
+  glob: 'Glob',
+  agent: 'Agent',
+  task: 'Task',
+}
+
+function canonicalToolName(name: string): string {
+  return DSH_TOOL_ALIASES[name.toLowerCase()] ?? name
+}
+
+/** 解 dsh tool_use 的 input:字符串按 JSON.parse,对象直接用,其余给空对象。 */
+function parseToolInput(input: unknown): Record<string, unknown> {
+  if (typeof input === 'string') {
+    try {
+      const parsed = JSON.parse(input)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      // 非 JSON 字符串 → 空 input,renderToolUse 走 fallback 摘要
+    }
+    return {}
+  }
+  return asRecord(input) ?? {}
+}
+
+/** 非数组对象断言助手,否则 null。 */
+function asRecord(v: unknown): Record<string, unknown> | null {
+  if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>
+  return null
+}
+
+/**
+ * 把连续的 assistant-text 帧折叠成一条 —— dsh(CliAgent)以逐 token delta 上报
+ * assistant_message(单任务可达上千帧),不折叠会把 200 帧缓冲塞满碎片、Timeline
+ * 也无法阅读。合并后计数 badge / slice(-20) 窗口按「回合」而非碎片计,更合理。
+ * 合并保留每条 run 首帧的 seq/ts(rowKey 依赖 seq,保持稳定)。
+ */
+export function mergeConsecutiveAssistantText(events: RenderedEvent[]): RenderedEvent[] {
+  const out: RenderedEvent[] = []
+  for (const ev of events) {
+    const last = out[out.length - 1]
+    if (ev.kind === 'assistant-text' && last && last.kind === 'assistant-text') {
+      out[out.length - 1] = { ...last, text: last.text + ev.text }
+      continue
+    }
+    out.push(ev)
+  }
+  return out
 }

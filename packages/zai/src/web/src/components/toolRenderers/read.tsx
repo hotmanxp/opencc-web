@@ -25,10 +25,11 @@ export const readRenderer: ToolRenderer = {
   renderInput(input) {
     const offset = toNum(input.offset)
     const limit = toNum(input.limit)
+    const filePath = typeof input.file_path === "string" ? input.file_path : ""
     return (
       <div>
         <FieldLabel>文件</FieldLabel>
-        <PreBlock>{linkifyText(typeof input.file_path === "string" ? input.file_path : "")}</PreBlock>
+        <PreBlock>{linkifyText(filePath)}</PreBlock>
         {(offset != null || limit != null) && (
           <PreBlock>
             {`offset=${offset ?? 0}${limit != null ? `, limit=${limit}` : ""}`}

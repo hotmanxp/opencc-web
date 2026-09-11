@@ -185,4 +185,74 @@ describe("QuickCommandPopover", () => {
     expect(clearRow.textContent).toMatch(/command/);
     expect(explainRow.textContent).toMatch(/skill/);
   });
+
+  // Plugin command display/search — aligned with vendor TUI (plugin name
+  // shown as `(pluginName)` prefix, searchable as an independent field).
+  const PLUGIN_ITEMS: SlashItem[] = [
+    {
+      kind: "command",
+      name: "clear",
+      description: "清空当前会话历史",
+      type: "local",
+      isBuiltIn: true,
+    },
+    {
+      kind: "command",
+      name: "superpowers:commit",
+      displayName: "commit",
+      pluginName: "superpowers",
+      description: "生成 git 提交",
+      type: "prompt",
+    },
+    {
+      kind: "skill",
+      name: "plugin:superpowers:brainstorming",
+      displayName: "brainstorming",
+      pluginName: "superpowers",
+      description: "头脑风暴设计方案",
+    },
+    {
+      kind: "skill",
+      name: "frontend-design",
+      description: "前端设计",
+    },
+  ];
+
+  test("plugin 命令渲染插件源前缀 (superpowers) 与去前缀展示名 /commit", async () => {
+    renderPopover({ items: PLUGIN_ITEMS });
+    await screen.findByText("/commit");
+    // left column shows the stripped displayName, not the full prefixed name
+    expect(screen.getByText("/brainstorming")).toBeInTheDocument();
+    expect(screen.queryByText("/superpowers:commit")).toBeNull();
+    // plugin source badge in front of the description
+    expect(screen.getAllByText("(superpowers)")).toHaveLength(2);
+  });
+
+  test("按插件名搜索命中该插件的 commands 与 skills, 其它项被过滤", async () => {
+    renderPopover({ items: PLUGIN_ITEMS });
+    const search = await screen.findByTestId("quick-command-search");
+    fireEvent.change(search, { target: { value: "superpowers" } });
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("quick-command-row-superpowers:commit"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("quick-command-row-plugin:superpowers:brainstorming"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("quick-command-row-clear")).toBeNull();
+    expect(screen.queryByTestId("quick-command-row-frontend-design")).toBeNull();
+  });
+
+  test("按去前缀展示名搜索命中 plugin 命令", async () => {
+    renderPopover({ items: PLUGIN_ITEMS });
+    const search = await screen.findByTestId("quick-command-search");
+    fireEvent.change(search, { target: { value: "commit" } });
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("quick-command-row-superpowers:commit"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("quick-command-row-clear")).toBeNull();
+  });
 });

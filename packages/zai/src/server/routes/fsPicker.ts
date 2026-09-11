@@ -128,13 +128,13 @@ router.get('/fs/picker', async (req: Request, res) => {
     return a.name.localeCompare(b.name);
   });
 
-  // parent:normalize 后等于根 → null。
-  // Windows: C:\ 的 dirname 是 C:\;POSIX: / 的 dirname 是 /。
-  // 比较时要把"当前"看作根时返回 null — 否则 UI 永远能点"上级",陷入循环。
+  // parent:当前目录已是根 → null(POSIX `/` 与 Windows `C:\` 的 dirname
+  // 都等于自身,一个判断即可覆盖)。
+  // 注意不能用 "parent 本身是不是根" 来判:那会让 /Users(macOS)与
+  // C:\Users(Windows)这类根下一级目录的 parent 误判为 null,上级按钮
+  // 在距根还有一级时就禁用,用户永远选不到根目录。
   const parentRaw = dirname(normalized);
-  const parentIsSelf = parentRaw === normalized;
-  const parentIsRoot = parentRaw === dirname(parentRaw);
-  const parent = parentIsSelf || parentIsRoot ? null : parentRaw;
+  const parent = parentRaw === normalized ? null : parentRaw;
 
   const body: FsPickerList = {
     ok: true,

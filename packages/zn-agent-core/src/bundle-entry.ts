@@ -327,3 +327,13 @@ export type {
 // literal) and the wrap function is undefined at runtime — the model
 // then sees no CliAgent tool.
 export { wrapCliAgentToolAsOpencc } from './compat/tools/opencc/CliAgentTool.js'
+
+// zai patch (2026-09-10, tf-mynh1twy): plugin command channel — zai's registry
+// fill site (services/commands/registry.ts) registers vendor-loaded plugin
+// commands (source === 'plugin') into the compat command registry so slashList
+// surfaces them in the dropdown. Leaf export with no internal callers, so pin
+// it explicitly (esbuild re-export tree-shaking would otherwise drop it; same
+// invariant as the messageQueueManager block above). compat emits
+// dist/compat/commands/pluginCommands.d.ts, so the generated bundle-entry.d.ts
+// re-export target resolves without a DTS_PATH_REWRITE entry.
+export { getLoadedPluginCommands } from './compat/commands/pluginCommands.js'

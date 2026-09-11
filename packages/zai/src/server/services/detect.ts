@@ -30,6 +30,10 @@ const latestCache = new Map<string, { version: string | null; at: number }>();
 const IS_WIN32 = process.platform === 'win32';
 // Windows 下所有命令都经 cmd.exe 包装 + npm 冷启动，超时给宽裕一些。
 const CMD_TIMEOUT_MS = IS_WIN32 ? 15_000 : 5_000;
+// `npm view` 单独放宽超时：opencode-ai 的 packument 极大（版本很多），
+// 冷缓存下单包就要 ~13s（实测全新 cache），5s 会稳定超时拿 null，
+// 前端最新版本显示 "?"。串行 warmup 下最坏也就拖慢首次检测几秒。
+const VIEW_TIMEOUT_MS = IS_WIN32 ? 30_000 : 20_000;
 
 // Load cache from disk on module init (fire-and-forget — errors are
 // swallowed because an empty cache is still a valid starting state).
@@ -45,17 +49,17 @@ ensureManifestDir()
   })
   .catch(() => { /* noop — empty cache is fine */ });
 
-async function run(cmd: string, args: string[]): Promise<string> {
+async function run(cmd: string, args: string[], timeoutMs = CMD_TIMEOUT_MS): Promise<string> {
   // npm 在 Windows 上是 .cmd shim,execFile 不能直接执行(ENOENT)——
   // resolveSpawnCommand 在 win32 下改写为 cmd /c。
   const { command, args: resolvedArgs } = resolveSpawnCommand(cmd, args);
-  const { stdout } = await execFileAsync(command, resolvedArgs, { timeout: CMD_TIMEOUT_MS });
+  const { stdout } = await execFileAsync(command, resolvedArgs, { timeout: timeoutMs });
   return stdout.trim();
 }
 
-async function safeRun(cmd: string, args: string[]): Promise<string | null> {
+async function safeRun(cmd: string, args: string[], timeoutMs?: number): Promise<string | null> {
   try {
-    return await run(cmd, args);
+    return await run(cmd, args, timeoutMs);
   } catch {
     return null;
   }
@@ -156,13 +160,17 @@ export async function getCliStatuses(
 
   const registry = await getNpmConfig('registry');
 
-  // Warm the latestVersion cache BEFORE the per-CLI parallel loop. Even
-  // though npm serializes parallel view calls, doing them here in
-  // sequential order avoids the cross-CLI lock contention penalty and
-  // also lets later requests hit the cache. Each entry takes ~0.4s on a
-  // cold cache; ~50ms on warm. `forceRefresh=true` 让 getLatestVersion
+  // Warm the latestVersion cache BEFORE the per-CLI parallel loop, one at a
+  // time. Parallel `npm view` contends on npm's global cache lock and
+  // serializes anyway — with a cold cache the tail package (opencode-ai,
+  // whose packument is huge) took ~28s in parallel vs ~13s alone, so the
+  // contention pushed it past the timeout and the UI showed "?". Sequential
+  // warmup avoids the lock fight; each entry takes ~0.4s on a warm cache,
+  // ~20s worst case cold. `forceRefresh=true` 让 getLatestVersion
   // 跳过 TTL，重新查 npm view。
-  await Promise.all(selectedTargets.map((t) => getLatestVersion(t.pkg, registry, forceRefresh)));
+  for (const t of selectedTargets) {
+    await getLatestVersion(t.pkg, registry, forceRefresh);
+  }
 
   // which + version lookups are independent — run them concurrently per CLI
   // so a slow registry can't stack up across the 4 targets. 注意
@@ -252,7 +260,7 @@ async function getLatestVersion(pkg: string, registry: string, forceRefresh = fa
   // registry 取不到时不传 --registry(空串会让 npm 直接报错),退回它自己的默认配置。
   const viewArgs = ['view', pkg, 'version', '--workspaces=false', '--no-progress'];
   if (registry) viewArgs.splice(3, 0, '--registry', registry);
-  const version = await safeRun('npm', viewArgs);
+  const version = await safeRun('npm', viewArgs, VIEW_TIMEOUT_MS);
   const at = Date.now();
   latestCache.set(pkg, { version, at });
   // Persist to disk so the cache survives server restarts. null 结果也

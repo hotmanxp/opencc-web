@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { flushSync } from 'react-dom'
 import { createContext, useContext } from 'react'
 import type { ServerEvent } from '../../../shared/events.js'
+import type { FilePreviewPayload } from '../../../shared/fs.js'
 import type { ModelEntry } from '../../../shared/settings.js'
 import type { PermissionMode } from '@zn-ai/zn-agent-core'
 import type { BashTaskInfo, BackgroundTask, TaskStatus } from '../lib/taskApi.js'
@@ -358,7 +359,13 @@ interface AgentState {
   setTranscriptCollapsed: (collapsed: boolean) => void
   /** 当前打开预览的文件绝对路径;null = 关闭。 */
   filePreviewPath: string | null
+  /**
+   * 本地内容预览(系统拖入等无服务端路径的场景):非空时抽屉直接渲染
+   * payload,不再 fetch /api/fs/preview。与 filePreviewPath 互斥,同开。
+   */
+  filePreviewLocal: FilePreviewPayload | null
   openFilePreview: (path: string) => void
+  openFilePreviewLocal: (payload: FilePreviewPayload) => void
   closeFilePreview: () => void
   clearMessages: () => void
   loadSessions: () => Promise<void>
@@ -982,6 +989,7 @@ export function createAgentStore() {
   // 视觉态,直接设值;刷新回到 settings.outputStyle 决定的值.
   transcriptCollapsed: false,
   filePreviewPath: null,
+  filePreviewLocal: null,
   setStatus: (status: AgentStatus) => set({ status }),
   // queue.changed 快照覆盖排队列表 — 后端 per-session 串行队列的等待中
   // 命令 {id, text} 列表(不含正在执行的那条)。
@@ -1004,8 +1012,9 @@ export function createAgentStore() {
   }),
   setTranscriptCollapsed: (collapsed: boolean) =>
     set({ transcriptCollapsed: collapsed }),
-  openFilePreview: (path) => set({ filePreviewPath: path }),
-  closeFilePreview: () => set({ filePreviewPath: null }),
+  openFilePreview: (path) => set({ filePreviewPath: path, filePreviewLocal: null }),
+  openFilePreviewLocal: (payload) => set({ filePreviewPath: null, filePreviewLocal: payload }),
+  closeFilePreview: () => set({ filePreviewPath: null, filePreviewLocal: null }),
 
   clearMessages: () =>
     set((s) => {

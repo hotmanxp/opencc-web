@@ -12,14 +12,17 @@ export interface SlashItem {
   /** Only set when kind === 'command'. Drives frontend selection behavior. */
   type?: 'local' | 'prompt'
   /**
-   * Plugin skill 的展示名（去掉 `plugin:<pluginName>:` 前缀）。
-   * 仅 plugin skill 设置，前端用此渲染左列的 `/xxx`。
-   * 后端仍然按 `name` 匹配/调用，保证运行时行为不变。
+   * Display name for plugin items (strips the plugin prefix).
+   * Set for plugin skills (`plugin:<name>:<skill>` names) and plugin
+   * commands (`<pluginName>[:ns]:cmd` names); the frontend renders this
+   * in the left `/xxx` column while selection/invocation still match by
+   * the full `name`, keeping runtime behavior unchanged.
    */
   displayName?: string
   /**
-   * Plugin skill 所属的 plugin 名（如 `superpowers`）。
-   * 仅 plugin skill 设置，前端把它渲染到描述前缀 `(superpowers)` 中。
+   * Owning plugin name (e.g. `superpowers`).
+   * Set for plugin skills and plugin commands; the frontend renders it as
+   * a `(superpowers)` description prefix, aligned with the vendor TUI.
    */
   pluginName?: string
 }
@@ -35,6 +38,25 @@ function parsePluginSkillName(rawName: string): { pluginName: string; displayNam
   const pluginName = m[1]!
   // displayName 取最后一个 `:` 之后的真实 skill 名
   const displayName = m[2]!.includes(':') ? m[2]!.split(':').pop()! : m[2]!
+  return { pluginName, displayName }
+}
+
+/**
+ * Resolve `(pluginName, displayName)` for a registry command with
+ * `source === 'plugin'`. Plugin command names are shaped
+ * `pluginName[:namespace:]command` (vendor loadPluginCommands.ts), so the
+ * plugin name comes from the loaded manifest when present (mirroring the
+ * vendor `commandSuggestions.ts` pluginNameKey) and falls back to the name
+ * prefix. displayName strips the plugin (and namespace) prefix so the
+ * dropdown left column shows `/commit` while selection still inserts the
+ * full prefixed `/superpowers:commit` name.
+ */
+function resolvePluginCommandDisplay(cmd: {
+  name: string
+  pluginInfo?: { pluginManifest?: { name?: string } }
+}): { pluginName: string; displayName: string } {
+  const pluginName = cmd.pluginInfo?.pluginManifest?.name ?? cmd.name.split(':')[0]!
+  const displayName = cmd.name.split(':').pop()!
   return { pluginName, displayName }
 }
 
@@ -71,6 +93,26 @@ export async function slashList(
       ...(cmd.type === 'prompt' && cmd.whenToUse ? { whenToUse: cmd.whenToUse } : {}),
       isBuiltIn: false,
       ...(cmd.name.startsWith('user:') ? { isConflict: true } : {}),
+    })
+  }
+
+  // 2b. plugin commands — vendor loads plugin markdown commands with
+  // source 'plugin' and name `pluginName[:ns:]command`; emit them with
+  // pluginName/displayName so the dropdown shows `(pluginName) description`
+  // and searches by plugin name, aligned with the vendor TUI.
+  for (const cmd of getCommandRegistry().all()) {
+    if (cmd.source !== 'plugin') continue
+    const display = resolvePluginCommandDisplay(cmd)
+    items.push({
+      kind: 'command',
+      name: cmd.name,
+      description: cmd.description,
+      type: cmd.type,
+      ...(cmd.argumentHint ? { argumentHint: cmd.argumentHint } : {}),
+      ...(cmd.type === 'prompt' && cmd.whenToUse ? { whenToUse: cmd.whenToUse } : {}),
+      isBuiltIn: false,
+      displayName: display.displayName,
+      pluginName: display.pluginName,
     })
   }
 

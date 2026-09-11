@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Drawer, Empty, Tabs, Typography, Spin, Timeline, Collapse } from 'antd'
+import { Alert, Button, Drawer, Empty, Space, Tabs, Tag, Typography, Spin, Timeline, Collapse } from 'antd'
 import type { CSSProperties } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -7,7 +7,7 @@ import { MarkdownText } from '../markdown/MarkdownText.js'
 import { fetchSuperTaskDetail } from '../../lib/superTaskApi'
 import { subscribeTaskEvents } from '../../lib/taskApi'
 import type { TaskDetails, TaskSummary } from '../../lib/superTaskApi'
-import { toRendered, type RenderedEvent } from './processEventRenderer'
+import { toRendered, mergeConsecutiveAssistantText, type RenderedEvent } from './processEventRenderer'
 import { useAppStore } from '../../store/useAppStore'
 
 /**
@@ -48,6 +48,20 @@ interface Expansion {
 }
 
 /**
+ * Status badge colors for the drawer header (tf-3u5g7p4z): queued gray /
+ * processing blue / paused gold / verifying orange / done green / failed red.
+ * Labels reuse the same Chinese wording as SuperTaskCard's STATUS_TAG.
+ */
+const STATUS_BADGE: Record<string, { color: string; label: string }> = {
+  queued: { color: 'default', label: '排队' },
+  processing: { color: 'blue', label: '执行中' },
+  paused: { color: 'gold', label: '已暂停' },
+  verifying: { color: 'orange', label: '验证中' },
+  done: { color: 'green', label: '完成' },
+  failed: { color: 'red', label: '失败' },
+}
+
+/**
  * SuperTaskDetailDrawer — 任务详情抽屉（Task 10）。
  *
  * 抽屉打开后拉取任务详情（/api/super-tasks/:id），并在 open 期间每 3s 轮询
@@ -71,17 +85,23 @@ export default function SuperTaskDetailDrawer({
   const isMobile = useAppStore((s) => s.isMobile)
   const [detail, setDetail] = useState<TaskDetails | null>(null)
   const [events, setEvents] = useState<EventFrame[]>([])
+  // Timeline collapse/expand state — collapsed mode keeps only the latest 20 frames
+  // ("flowing window"); toggled via the button above the Timeline. Reset on taskId
+  // change so switching tasks does not inherit the previous task's expansion.
+  const [showAll, setShowAll] = useState(false)
 
   // 详情拉取 + 3s 轮询（抽屉 open 期间持续刷新 process.md / spec.md / plan.md）
   useEffect(() => {
     if (!taskId) {
       setDetail(null)
       setEvents([])
+      setShowAll(false)
       return
     }
     let cancelled = false
     setDetail(null)
     setEvents([])
+    setShowAll(false)
     const load = async (): Promise<void> => {
       try {
         const d = await fetchSuperTaskDetail(taskId)
@@ -121,16 +141,28 @@ export default function SuperTaskDetailDrawer({
     return () => ctrl.abort()
   }, [activeStreamId])
 
-  // 把 SSE 帧流翻译成结构化渲染事件 —— 翻译规则全在 processEventRenderer.ts
+  // 把 SSE 帧流翻译成结构化渲染事件 —— 翻译规则全在 processEventRenderer.ts。
+  // dsh(CliAgent)逐 token 上报 assistant_message,合并连续文本碎片为一行,
+  // 否则 200 帧缓冲会被碎片填满、Timeline 不可读;合并后 badge / slice(-20)
+  // 按「回合」计数而非碎片。
   const rendered = useMemo(
     () =>
-      events
-        .map((e) =>
-          toRendered({ id: e.id, event: e.event, data: e.data as unknown }),
-        )
-        .filter((r): r is RenderedEvent => r !== null),
+      mergeConsecutiveAssistantText(
+        events
+          .map((e) =>
+            toRendered({ id: e.id, event: e.event, data: e.data as unknown }),
+          )
+          .filter((r): r is RenderedEvent => r !== null),
+      ),
     [events],
   )
+
+  // Timeline 数据源：收起态（默认）走「最近 20 条」流动窗口，新事件到来
+  // 时旧头部自动挤出；展开态走全部 rendered。Tab 上的事件计数 badge
+  // 仍读 rendered.length（总数），不受 visible 影响。
+  const VISIBLE_WINDOW = 20
+  const visible = showAll ? rendered : rendered.slice(-VISIBLE_WINDOW)
+  const canToggle = rendered.length > VISIBLE_WINDOW
 
   // 工具调用展开状态 —— 用 Map<toolUseId, {...}>，null 表示已渲染的
   // task-ended 行不算「工具调用」，不进 map。
@@ -143,6 +175,12 @@ export default function SuperTaskDetailDrawer({
       return next
     })
   }
+
+  // Resolve the status badge once for the header; unknown statuses fall back
+  // to a default-gray tag showing the raw value.
+  const statusBadge = detail
+    ? STATUS_BADGE[detail.summary.status] ?? { color: 'default', label: detail.summary.status }
+    : null
 
   return (
     <Drawer
@@ -183,21 +221,59 @@ export default function SuperTaskDetailDrawer({
           <Typography.Title level={5} style={{ marginTop: 0, flexShrink: isMobile ? 0 : undefined }}>
             {detail.summary.title}
           </Typography.Title>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 8, flexShrink: isMobile ? 0 : undefined }}>
-            状态:{detail.summary.status} · Agent:{detail.summary.agent ?? 'default'}
-            {detail.summary.executorTaskId ? ` · 执行任务:${detail.summary.executorTaskId}` : ''}
-            {detail.summary.verifierTaskId ? ` · 验证任务:${detail.summary.verifierTaskId}` : ''}
-            {detail.summary.mode === 'quick' ? ' · 模式:quick' : ''}
-          </Typography.Paragraph>
+          {/* Header meta (tf-3u5g7p4z): colored status badge + light info tags,
+              replacing the old single grey text line for readability. */}
+          <Space
+            size={[6, 6]}
+            wrap
+            data-testid="task-status-badges"
+            style={{ marginBottom: 8, flexShrink: isMobile ? 0 : undefined }}
+          >
+            <Tag color={statusBadge?.color} style={{ marginInlineEnd: 0 }}>
+              状态:{statusBadge?.label}
+            </Tag>
+            <Tag style={{ marginInlineEnd: 0 }}>
+              Agent:{detail.summary.agent ?? 'default'}
+            </Tag>
+            {detail.summary.executorTaskId && (
+              <Tag style={{ marginInlineEnd: 0 }}>
+                执行任务:{detail.summary.executorTaskId}
+              </Tag>
+            )}
+            {detail.summary.verifierTaskId && (
+              <Tag style={{ marginInlineEnd: 0 }}>
+                验证任务:{detail.summary.verifierTaskId}
+              </Tag>
+            )}
+            {detail.summary.mode === 'quick' && (
+              <Tag style={{ marginInlineEnd: 0 }}>模式:quick</Tag>
+            )}
+          </Space>
           {/* zai patch (2026-09-04, quick-intake):quick 任务顶部加横幅明示,
               同时下文 Tabs 按 mode 过滤掉 plan.md / brainstorm.md Tab。 */}
           {detail.summary.mode === 'quick' && (
             <Alert
               type="info"
               showIcon
-              message="本任务为快速创建,无 plan.md / brainstorm.md"
-              description="任务目录只包含 task.yaml + process.md + 最小 docs/spec.md(title/description/priority/cwd 快照);验证走轻量路径(build + lint + 关键文件 diff 的 code review)。"
-              style={{ marginBottom: 12, flexShrink: isMobile ? 0 : undefined }}
+              message={
+                <span style={{ color: '#0958d9', fontWeight: 600 }}>
+                  本任务为快速创建,无 plan.md / brainstorm.md
+                </span>
+              }
+              description={
+                <span style={{ color: 'rgba(0,0,0,0.72)' }}>
+                  任务目录只包含 task.yaml + process.md + 最小 docs/spec.md(title/description/priority/cwd 快照);验证走轻量路径(build + lint + 关键文件 diff 的 code review)。
+                </span>
+              }
+              style={{
+                marginBottom: 12,
+                flexShrink: isMobile ? 0 : undefined,
+                // tf-3u5g7p4z: deepen the light-blue background and emphasize
+                // the left border so the banner is not missed at a glance.
+                background: '#e6f4ff',
+                border: '1px solid #91caff',
+                borderLeft: '4px solid #1677ff',
+              }}
               data-testid="quick-mode-banner"
             />
           )}
@@ -256,6 +332,23 @@ export default function SuperTaskDetailDrawer({
                         当前事件流来源:{active.role === 'verifier' ? '验证 Agent(verifier)' : '执行 Agent(executor)'}
                         {` · task ${activeStreamId}`}
                       </Typography.Text>
+                      {/* 展开/收起切换 —— 事件数 > 20 时显示,挂在 Timeline 上方;
+                          收起态显示「显示全部 (N)」,展开态显示「收起」。
+                          收起态 Timeline 只跑最近 20 条 (visible 切片),新事件到来
+                          时旧头部自动挤出(流动窗口)。≤20 条不显示按钮。 */}
+                      {canToggle && (
+                        <div style={{ marginTop: 4 }}>
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => setShowAll((s) => !s)}
+                            data-testid="event-stream-toggle"
+                            style={{ padding: 0, fontSize: 12 }}
+                          >
+                            {showAll ? '收起' : `显示全部 (${rendered.length})`}
+                          </Button>
+                        </div>
+                      )}
                       {rendered.length > 0 ? (
                         // mobile:flex:1 吃满 tab pane 剩余高度,scroll 在
                         // 这里完成(避免 drawer body 双重 scroll);desktop:
@@ -279,7 +372,7 @@ export default function SuperTaskDetailDrawer({
                           data-testid="process-timeline-scroll"
                         >
                           <Timeline
-                            items={rendered.map((r) => ({
+                            items={visible.map((r) => ({
                               key: rowKey(r),
                               color: dotColor(r),
                               children: (

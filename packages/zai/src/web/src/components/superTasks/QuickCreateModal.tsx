@@ -60,7 +60,8 @@ const DESIGN_READY_RE = /^[\s>]*(?:##\s*)?DESIGN_READY[\s]*$/im
  *   4. agent 出方案 → 「确认建任务」按钮 enabled → 用户点击 → 触发第二次
  *      `/agent/prompt` 发「确认」→ agent 在那一轮调 SuperTasksCreate(mode: "quick")
  *      → 服务端落盘 + SSE `task_factory.created` → modal 切换到完成条 + 「完成」按钮。
- *   5. 「取消」按钮随时可点:删除 intake 会话 + 关闭 modal,无任务创建。
+ *   5. 右上角 X 随时可点(2026-09-11 起取代原「取消」按钮):删除 intake
+ *      会话 + 关闭 modal,无任务创建。
  *   6. 「完成」按钮 → 删除 intake 会话 + clearLastCreated + 关闭 modal。
  *
  * 「设计方案」识别:agent 在每条 assistant.text 消息末尾输出 `## DESIGN_READY`
@@ -394,15 +395,6 @@ export default function QuickCreateModal({
         </Space>
         <Space size={8}>
           <Button
-            danger
-            size="small"
-            disabled={cancelling || confirming}
-            data-testid="quick-chat-cancel-button"
-            onClick={() => void handleCancel()}
-          >
-            取消
-          </Button>
-          <Button
             type="primary"
             size="small"
             icon={<CheckCircleOutlined />}
@@ -427,7 +419,16 @@ export default function QuickCreateModal({
       )}
       <AgentStoreContext.Provider value={intakeStore}>
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <AgentConversation hideShareAndPlugin />
+          {/* bottomStackStyle: 弹窗 body 与消息区同为 #eef2f7, 输入区不单独
+              设底会跟消息区连成一片; 铺白底 + 顶部分隔线与消息区分层
+              (同 NewSuperTaskModal)。 */}
+          <AgentConversation
+            hideShareAndPlugin
+            bottomStackStyle={{
+              background: 'var(--bg-card, #fff)',
+              borderTop: '1px solid var(--border-subtle, #e5e9f0)',
+            }}
+          />
         </div>
       </AgentStoreContext.Provider>
     </div>
@@ -460,10 +461,11 @@ export default function QuickCreateModal({
     </div>
   )
 
-  // Drawer 顶部 X 关闭按钮会触发 onClose;created 状态下走 handleDone,
-  // 其余直接 onClose(Modal / Drawer 行为对齐)。
+  // Modal / Drawer 右上角 X 与底部「取消」统一走 handleCancel:关闭 stream +
+  // 删除 intake 临时会话后退出,不留孤儿会话。created 状态下 X 无效
+  // (需走「完成」按钮的 handleDone)。
   const handleContainerClose = (): void => {
-    if (!createdTaskId) onClose()
+    if (!createdTaskId) void handleCancel()
   }
 
   if (mobileAsDrawer) {

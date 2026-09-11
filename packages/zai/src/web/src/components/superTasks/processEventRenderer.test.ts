@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toRendered } from './processEventRenderer'
+import { toRendered, mergeConsecutiveAssistantText, type RenderedEvent } from './processEventRenderer'
 
 describe('toRendered · task.ended 三态', () => {
   it('completed → task-ended', () => {
@@ -967,5 +967,258 @@ describe('toRendered · 真实 wire 形态 (data.data.raw.*)', () => {
       cwd: '/repo',
       agent: 'claude-code',
     })
+  })
+})
+
+/* ── dsh(CliAgent attach)词汇表:mapSubagentBgEventType 产出的事件名 ───── */
+
+describe('toRendered · dsh attach 词汇表 (assistant_message/tool_use/tool_result)', () => {
+  it('assistant_message → assistant-text(data.text)', () => {
+    expect(
+      toRendered({
+        id: 2,
+        event: 'assistant_message',
+        data: {
+          seq: 2,
+          ts: 1788926606664,
+          type: 'assistant_message',
+          data: { text: 'I', raw: { type: 'assistant/chunk' } },
+        },
+      }),
+    ).toEqual({ kind: 'assistant-text', seq: 2, ts: 1788926606664, text: 'I' })
+  })
+
+  it('assistant_message 缺 text → 空串兜底', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'assistant_message',
+        data: { seq: 1, ts: 1, type: 'assistant_message', data: { raw: {} } },
+      }),
+    ).toEqual({ kind: 'assistant-text', seq: 1, ts: 1, text: '' })
+  })
+
+  it('tool_use 小写名 + JSON 字符串 input → 规范 PascalCase + 复用 summary 规则 (grep→pattern)', () => {
+    expect(
+      toRendered({
+        id: 49,
+        event: 'tool_use',
+        data: {
+          seq: 49,
+          ts: 1788926609274,
+          type: 'tool_use',
+          data: {
+            raw: {
+              id: 'chatcmpl-tool-ae6b',
+              name: 'grep',
+              input: '{"pattern":"TODO","path":"/src"}',
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'tool-use',
+      seq: 49,
+      ts: 1788926609274,
+      name: 'Grep',
+      toolUseId: 'chatcmpl-tool-ae6b',
+      summary: 'TODO',
+      fullInput: { pattern: 'TODO', path: '/src' },
+    })
+  })
+
+  it('tool_use name=read → Read + file_path summary', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'tool_use',
+        data: {
+          seq: 1,
+          ts: 1,
+          type: 'tool_use',
+          data: { raw: { id: 'r1', name: 'read', input: '{"file_path":"/tmp/a.ts"}' } },
+        },
+      }),
+    ).toMatchObject({ kind: 'tool-use', name: 'Read', summary: '/tmp/a.ts', fullInput: { file_path: '/tmp/a.ts' } })
+  })
+
+  it('tool_use name=bash → Bash + command 前 80 字', () => {
+    const cmd = 'echo ' + 'x'.repeat(200)
+    const r = toRendered({
+      id: 1,
+      event: 'tool_use',
+      data: {
+        seq: 1,
+        ts: 1,
+        type: 'tool_use',
+        data: { raw: { id: 'b1', name: 'bash', input: JSON.stringify({ command: cmd }) } },
+      },
+    })
+    expect(r).toMatchObject({ kind: 'tool-use', name: 'Bash', summary: cmd.slice(0, 80) })
+  })
+
+  it('tool_use 未知名 → 原样透传,走 fallback JSON.stringify(input) 摘要', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'tool_use',
+        data: {
+          seq: 1,
+          ts: 1,
+          type: 'tool_use',
+          data: { raw: { id: 'u1', name: 'custom_tool', input: '{"foo":"bar"}' } },
+        },
+      }),
+    ).toMatchObject({ kind: 'tool-use', name: 'custom_tool', summary: '{"foo":"bar"}', fullInput: { foo: 'bar' } })
+  })
+
+  it('tool_use input 非 JSON 字符串 → 空对象,fallback "{}"', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'tool_use',
+        data: {
+          seq: 1,
+          ts: 1,
+          type: 'tool_use',
+          data: { raw: { id: 'u2', name: 'grep', input: 'not-json' } },
+        },
+      }),
+    ).toMatchObject({ kind: 'tool-use', name: 'Grep', summary: '{}', fullInput: {} })
+  })
+
+  it('tool_use 缺 id 或 name → null', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'tool_use',
+        data: { seq: 1, ts: 1, type: 'tool_use', data: { raw: { name: 'grep', input: '{}' } } },
+      }),
+    ).toBeNull()
+  })
+
+  it('tool_result 仅 tool_use_id(dsh 典型)→ 空摘要 tool-result', () => {
+    expect(
+      toRendered({
+        id: 50,
+        event: 'tool_result',
+        data: {
+          seq: 50,
+          ts: 1788926609527,
+          type: 'tool_result',
+          data: { raw: { tool_use_id: 'chatcmpl-tool-ae6b' } },
+        },
+      }),
+    ).toEqual({
+      kind: 'tool-result',
+      seq: 50,
+      ts: 1788926609527,
+      toolUseId: 'chatcmpl-tool-ae6b',
+      isError: false,
+      summary: '',
+      fullContent: '',
+    })
+  })
+
+  it('tool_result 带 content → 复用 renderToolResult 摘要规则', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'tool_result',
+        data: {
+          seq: 1,
+          ts: 1,
+          type: 'tool_result',
+          data: { raw: { tool_use_id: 't1', content: 'first line\nrest', is_error: false } },
+        },
+      }),
+    ).toMatchObject({ kind: 'tool-result', toolUseId: 't1', summary: 'first line (15 chars)', fullContent: 'first line\nrest' })
+  })
+
+  it('tool_result 缺 tool_use_id → null', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'tool_result',
+        data: { seq: 1, ts: 1, type: 'tool_result', data: { raw: {} } },
+      }),
+    ).toBeNull()
+  })
+
+  it('subagent_turn_started / _completed → null (轮次标记不渲染)', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'subagent_turn_started',
+        data: { seq: 1, ts: 1, type: 'subagent_turn_started', data: { raw: { type: 'turn/start' } } },
+      }),
+    ).toBeNull()
+    expect(
+      toRendered({
+        id: 1318,
+        event: 'subagent_turn_completed',
+        data: { seq: 1318, ts: 1, type: 'subagent_turn_completed', data: { raw: { type: 'turn/end' } } },
+      }),
+    ).toBeNull()
+  })
+
+  it('commentary / message_start 等 → null', () => {
+    expect(
+      toRendered({ id: 1, event: 'commentary', data: { seq: 1, ts: 1, type: 'commentary', data: { raw: {} } } }),
+    ).toBeNull()
+  })
+})
+
+describe('toRendered · dsh 端到端回放 (trqj6cdir 形态:碎片合并 + 工具行)', () => {
+  const mkMsg = (seq: number, text: string) => ({
+    id: seq,
+    event: 'assistant_message',
+    data: { seq, ts: 1000 + seq, type: 'assistant_message', data: { text, raw: { chunk: text } } },
+  })
+
+  it('逐 token 碎片 + 工具调用 → 合并为「文本/工具/结果/文本」4 行,碎片不占位', () => {
+    const frames = [
+      { id: 1, event: 'subagent_turn_started', data: { seq: 1, ts: 1, type: 'subagent_turn_started', data: { raw: {} } } },
+      mkMsg(2, 'I'),
+      mkMsg(3, "'ll"),
+      mkMsg(4, ' run'),
+      { id: 5, event: 'tool_use', data: { seq: 5, ts: 5, type: 'tool_use', data: { raw: { id: 't1', name: 'bash', input: '{"command":"ls"}' } } } },
+      { id: 6, event: 'tool_result', data: { seq: 6, ts: 6, type: 'tool_result', data: { raw: { tool_use_id: 't1' } } } },
+      mkMsg(7, 'done'),
+    ]
+    const rendered = mergeConsecutiveAssistantText(
+      frames.map((f) => toRendered(f as never)).filter((r): r is RenderedEvent => r !== null),
+    )
+    expect(rendered).toEqual([
+      { kind: 'assistant-text', seq: 2, ts: 1002, text: "I'll run" },
+      { kind: 'tool-use', seq: 5, ts: 5, name: 'Bash', toolUseId: 't1', summary: 'ls', fullInput: { command: 'ls' } },
+      { kind: 'tool-result', seq: 6, ts: 6, toolUseId: 't1', isError: false, summary: '', fullContent: '' },
+      { kind: 'assistant-text', seq: 7, ts: 1007, text: 'done' },
+    ])
+  })
+})
+
+describe('mergeConsecutiveAssistantText', () => {
+  const at = (seq: number, text: string): RenderedEvent => ({ kind: 'assistant-text', seq, ts: seq, text })
+
+  it('连续 assistant-text 折叠成一条,文本拼接,保留首帧 seq/ts', () => {
+    const out = mergeConsecutiveAssistantText([at(1, 'a'), at(2, 'b'), at(3, 'c')])
+    expect(out).toEqual([{ kind: 'assistant-text', seq: 1, ts: 1, text: 'abc' }])
+  })
+
+  it('被其它 kind 隔断的两段文本不合并', () => {
+    const tool: RenderedEvent = { kind: 'tool-use', seq: 2, ts: 2, name: 'Bash', toolUseId: 't', summary: 'ls', fullInput: {} }
+    const out = mergeConsecutiveAssistantText([at(1, 'a'), tool, at(3, 'b'), at(4, 'c')])
+    expect(out).toEqual([
+      { kind: 'assistant-text', seq: 1, ts: 1, text: 'a' },
+      tool,
+      { kind: 'assistant-text', seq: 3, ts: 3, text: 'bc' },
+    ])
+  })
+
+  it('无 assistant-text / 空数组 → 原样返回', () => {
+    const sys: RenderedEvent = { kind: 'system', seq: 1, ts: 1, sub: 'init' }
+    expect(mergeConsecutiveAssistantText([sys])).toEqual([sys])
+    expect(mergeConsecutiveAssistantText([])).toEqual([])
   })
 })
