@@ -6,11 +6,16 @@
  * 渲染管线由 FilePreviewBody 提供,与 Desktop preview 浮窗共享同一份
  * MarkdownText / SyntaxHighlighter / iframe / binary fallback 实现,
  * 保证两个 UI 在文件预览上体验一致。
+ *
+ * 移动端(/m 路由)从底部抽屉滑出,占满 90% 视口高度,跟
+ * SuperTaskDetailDrawer / MobileQuickDrawer 同款模式;桌面端保持
+ * 右侧 720px 抽屉不变,且支持全屏宽度切换。
  */
 import React, { useEffect, useState } from "react"
 import { Alert, Button, Drawer, Spin, Tooltip } from "antd"
 import { ColumnWidthOutlined } from "@ant-design/icons"
 import { useAgentStore } from "../../store/useAgentStore.js"
+import { useAppStore } from "../../store/useAppStore.js"
 import {
   FilePreviewBody,
   type FilePreviewPayload,
@@ -45,6 +50,10 @@ export function FilePreviewDrawer() {
   // 跳过 /api/fs/preview fetch 管线。与 path 由 store 保证互斥。
   const local = useAgentStore((s) => s.filePreviewLocal)
   const closeFilePreview = useAgentStore((s) => s.closeFilePreview)
+  // 移动端(/m 路由)从底部抽屉滑出,占满 90% 视口高度,跟
+  // SuperTaskDetailDrawer / MobileQuickDrawer 同款模式;桌面端保持
+  // 右侧 720px 抽屉不变。
+  const isMobile = useAppStore((s) => s.isMobile)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [wire, setWire] = useState<WirePayload | null>(null)
@@ -88,23 +97,36 @@ export function FilePreviewDrawer() {
     <Drawer
       title={open ? `${titleName} (${humanSize(titleSize)})` : ''}
       aria-label={open ? `${titleName} (${humanSize(titleSize)})` : '文件预览'}
-      placement="right"
-      width={fullWidth ? '100vw' : DEFAULT_WIDTH}
       open={open}
       onClose={closeFilePreview}
-      destroyOnClose
-      extra={
-        <Tooltip title={fullWidth ? '恢复默认宽度' : '宽度全屏'}>
-          <Button
-            type="text"
-            size="small"
-            aria-label={fullWidth ? '恢复默认宽度' : '宽度全屏'}
-            data-testid="preview-width-toggle"
-            icon={<ColumnWidthOutlined />}
-            onClick={() => setFullWidth((v) => !v)}
-          />
-        </Tooltip>
-      }
+      {...(isMobile
+        ? {
+            placement: 'bottom' as const,
+            height: '90%',
+            destroyOnClose: true,
+          }
+        : {
+            placement: 'right' as const,
+            width: fullWidth ? '100vw' : DEFAULT_WIDTH,
+            destroyOnClose: true,
+          })}
+      data-testid={isMobile ? 'mobile-file-preview-drawer' : 'desktop-file-preview-drawer'}
+      {...(!isMobile
+        ? {
+            extra: (
+              <Tooltip title={fullWidth ? '恢复默认宽度' : '宽度全屏'}>
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={fullWidth ? '恢复默认宽度' : '宽度全屏'}
+                  data-testid="preview-width-toggle"
+                  icon={<ColumnWidthOutlined />}
+                  onClick={() => setFullWidth((v) => !v)}
+                />
+              </Tooltip>
+            ),
+          }
+        : {})}
     >
       {!open ? null : local ? (
         <FilePreviewBody payload={local} />
@@ -120,7 +142,7 @@ export function FilePreviewDrawer() {
           : undefined
         const payload: FilePreviewPayload = {
           kind: wire.kind,
-          path: path,
+          path: path!,
           mime: wire.mime,
           content: wire.content,
           dataUrl,

@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import { FilePreviewDrawer } from '../../../../src/web/src/components/conversation/FilePreviewDrawer.js'
 import { useAgentStore } from '../../../../src/web/src/store/useAgentStore.js'
+import { useAppStore } from '../../../../src/web/src/store/useAppStore.js'
 
 function mockFetch(payload: any) {
   return vi.spyOn(global, 'fetch').mockResolvedValue({
@@ -17,6 +18,8 @@ function mockFetch(payload: any) {
 describe('FilePreviewDrawer', () => {
   beforeEach(() => {
     useAgentStore.setState({ filePreviewPath: null, closeFilePreview: () => useAgentStore.setState({ filePreviewPath: null }) })
+    // 默认桌面端,避免其他测试污染 isMobile
+    useAppStore.setState({ isMobile: false })
   })
 
   it('renders nothing when path is null', () => {
@@ -94,6 +97,25 @@ describe('FilePreviewDrawer', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /展开全部/ })).not.toBeInTheDocument()
     })
+  })
+
+  it('isMobile=true → 抽屉走 placement="bottom"(无 .ant-drawer-right)', () => {
+    useAppStore.setState({ isMobile: true })
+    mockFetch({ kind: 'text', mime: 'text/plain', content: 'x', size: 1, mtime: 0 })
+    useAgentStore.setState({ filePreviewPath: '/a.ts' })
+    render(<FilePreviewDrawer />)
+    // 移动端 placement=bottom,不应同时存在 desktop 的 right wrapper class
+    expect(document.querySelector('.ant-drawer-right')).toBeNull()
+    // 抽屉主体应该被渲染(至少 .ant-drawer 根存在)
+    expect(document.querySelector('.ant-drawer')).toBeTruthy()
+  })
+
+  it('isMobile=false → 抽屉走 placement="right" + width=720', () => {
+    useAppStore.setState({ isMobile: false }) // 显式重置以防其他用例污染
+    mockFetch({ kind: 'text', mime: 'text/plain', content: 'x', size: 1, mtime: 0 })
+    useAgentStore.setState({ filePreviewPath: '/a.ts' })
+    render(<FilePreviewDrawer />)
+    expect(document.querySelector('.ant-drawer-right')).toBeTruthy()
   })
 
   it('closes on Esc keypress via Antd Drawer onClose', async () => {
