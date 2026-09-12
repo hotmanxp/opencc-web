@@ -33,6 +33,7 @@ export default function AgentConversation({
   toolbarRightSlot,
   showTranscriptRepair,
   hideShareAndPlugin,
+  showModelPicker,
   bottomStackStyle,
 }: AgentInputBoxProps & { bottomStackStyle?: CSSProperties } = {}) {
   const messages = useAgentStoreOrCtx((s) => s.messages)
@@ -204,6 +205,7 @@ export default function AgentConversation({
           toolbarRightSlot={toolbarRightSlot}
           showTranscriptRepair={showTranscriptRepair}
           hideShareAndPlugin={hideShareAndPlugin}
+          showModelPicker={showModelPicker}
         />
       </div>
     </div>

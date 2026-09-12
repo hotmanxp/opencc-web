@@ -202,8 +202,10 @@ export default function SuperTasks(): JSX.Element {
             }}
           >
             {/* 任务工厂调度器会话不展示「分享到 LAN」与「插件管理」——
-                调度器对话是单设备内对齐意图的过程,挂上反而干扰。 */}
-            <AgentConversation hideShareAndPlugin />
+                调度器对话是单设备内对齐意图的过程,挂上反而干扰。
+                showModelPicker: 调度器栏没有 ConfigStatusBar, 在状态行右端补
+                一个模型切换入口 (2026-09-12)。 */}
+            <AgentConversation hideShareAndPlugin showModelPicker />
           </div>
         </div>
       )}

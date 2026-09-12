@@ -359,9 +359,15 @@ export default function NewSuperTaskModal({
             {/* intake/supervisor 临时对话不需要「分享到 LAN」与「插件管理」
                 入口 — 调度器讨论是单设备内对齐意图的过程,挂上反而干扰。
                 bottomStackStyle: 弹窗 body 与消息区同为 #eef2f7, 输入区
-                不单独设底会跟消息区连成一片; 铺白底 + 顶部分隔线与消息区分层。 */}
+                不单独设底会跟消息区连成一片; 铺白底 + 顶部分隔线与消息区分层。
+                showModelPicker: 弹窗没有 ConfigStatusBar, 在状态行右端补一个
+                模型切换入口 (2026-09-12)。这一处同时验证 ModelStatusButton /
+                ModelPickerPanel 的 store 路由走 useAgentStoreOrCtx —— 旧版
+                硬编码 useAgentStore (全局单例) 会读不到 intake store 的
+                session, 用户无法在该弹窗内切模型。 */}
             <AgentConversation
               hideShareAndPlugin
+              showModelPicker
               bottomStackStyle={{
                 background: 'var(--bg-card, #fff)',
                 borderTop: '1px solid var(--border-subtle, #e5e9f0)',

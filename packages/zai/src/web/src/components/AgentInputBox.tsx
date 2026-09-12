@@ -34,6 +34,7 @@ import SettingsButton from './SettingsButton'
 import PluginButton from './PluginButton'
 import SharePopover from "./SharePopover.js";
 import { toolbarIconButtonStyle, TOOLBAR_ACTIVE_COLOR } from "./toolbarStyles.js";
+import ModelPickerToolbarButton from "./ModelPickerToolbarButton.js";
 import TodoDropdown from "./TodoDropdown.js";
 import QuickCommandPopover from "./QuickCommandPopover.js";
 import type { SlashItem } from "./quickCommandTypes.js";
@@ -224,6 +225,16 @@ export interface AgentInputBoxProps {
    *  设备分享或换装插件的需求,挂上反而干扰 — 任务调度器对话由调用方传 true 隐藏。
    *  默认 false 保持 /agent、/m、/desktop 既有行为不变。 */
   hideShareAndPlugin?: boolean;
+  /**
+   * 在状态行右端渲染模型切换触发按钮(spacer 之后、+命令按钮之前)。
+   * 调用方没有 ConfigStatusBar(Desktop Agent 窗口 / SuperTasks 调度器 /
+   * MobileSupervisorDrawer / NewSuperTaskModal)时显式开启, 给这些场景补回
+   * 缺失的模型切换入口。
+   * 默认 false: /agent、/m 等已经挂了 ConfigStatusBar 的场景不出现重复入口,
+   * 由底栏 ModelStatusButton 承担切换职责。
+   * 2026-09-12 新增。
+   */
+  showModelPicker?: boolean;
 }
 
 export default React.memo(function AgentInputBox({
@@ -231,6 +242,7 @@ export default React.memo(function AgentInputBox({
   toolbarRightSlot,
   showTranscriptRepair = false,
   hideShareAndPlugin = false,
+  showModelPicker = false,
 }: AgentInputBoxProps = {}) {
   const status = useAgentStoreOrCtx((s) => s.status);
   const sessionId = useAgentStoreOrCtx((s) => s.sessionId);
@@ -1586,6 +1598,13 @@ export default React.memo(function AgentInputBox({
             minWidth:0 关键 — 不加时 flex item 默认 min-width:auto (= content 尺寸),
             在窄屏下 spacer 会反向挤压任务摘要到 0 宽, 表现为"被遮挡". */}
         <span style={{ flex: 1, minWidth: 0 }} />
+        {/* 模型切换触发按钮 (2026-09-12 新增): 仅在调用方传了
+            showModelPicker=true 时渲染, 补齐没有 ConfigStatusBar 的场景
+            (Desktop Agent 窗口 / SuperTasks 调度器 / MobileSupervisorDrawer /
+            NewSuperTaskModal) 的模型切换入口。位置在 spacer 之后、+命令按钮
+            之前 — 让用户在切换模型时不需要跨越整个工具栏, 但又把模型切换
+            (次高频) 与命令面板 (最高频) 区隔开。 */}
+        {showModelPicker && <ModelPickerToolbarButton />}
         {/* 「+ 命令」按钮: 桌面 + 移动端均挂载. 行为完全相同 — 点击弹出
             QuickCommandPopover (跨端复用). 移动端另保留 AppstoreAddOutlined
             按钮 (→ MobileQuickDrawer 3 Tab) 作为补充入口 (bash/prompt/git

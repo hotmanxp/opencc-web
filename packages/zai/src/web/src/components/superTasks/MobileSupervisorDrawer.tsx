@@ -149,9 +149,12 @@ export default function MobileSupervisorDrawer({
         >
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {/* bottomStackStyle: 与 NewSuperTaskModal / QuickCreateModal 同款,
-                输入区铺白底 + 顶部分隔线, 避免与 #eef2f7 消息区连成一片。 */}
+                输入区铺白底 + 顶部分隔线, 避免与 #eef2f7 消息区连成一片。
+                showModelPicker: 移动调度器抽屉没有 ConfigStatusBar, 在状态行
+                右端补一个模型切换入口 (2026-09-12)。 */}
             <AgentConversation
               hideShareAndPlugin
+              showModelPicker
               bottomStackStyle={{
                 background: 'var(--bg-card, #fff)',
                 borderTop: '1px solid var(--border-subtle, #e5e9f0)',

@@ -837,7 +837,11 @@ const activeId = useMemo(
                   </button>
                 )}
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                  <AgentConversation />
+                  {/* showModelPicker: Desktop 办公桌面的 Agent 窗口没有
+                      ConfigStatusBar (脱离 Layout 沉浸式), 在状态行右端补
+                      一个模型切换入口, 让用户可以在桌面 Agent 窗口里换模型
+                      (2026-09-12)。 */}
+                  <AgentConversation showModelPicker />
                 </div>
                 {sessionsOpen ? (
                   <div
