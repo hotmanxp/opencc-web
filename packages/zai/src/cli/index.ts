@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { registerProcessOutputErrorHandlers } from '@zn-ai/zn-agent-core';
 import { runDev } from './dev.js';
 import { runStart } from './start.js';
-import { applyRuntimeCoreFlag } from './runtimeCoreFlag.js';
 
 // 防御 stdout/stderr EPIPE — 上游管道 (nohup + 重定向、容器关闭、
 // detached TTY) 被关闭后, console.log 会触发 EPIPE. 不处理会让 zai
@@ -49,13 +48,8 @@ program
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
-  // --runtimeCore <default|repl>: 强制覆盖 settings.runtimeCore,
-  // 落到 env ZAI_RUNTIME_CORE。不传 → 不动 env,沿用 settings.json / 父进程
-  // env(默认 repl)。见 packages/zai/src/cli/runtimeCoreFlag.ts。
-  .option('--runtimeCore <mode>', "Core runtime: 'repl' (default). 'default' is deprecated; pass --runtimeCore repl (or omit) to silence the warning.")
   .option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定调度器 Agent')
   .action((options) => {
-    applyRuntimeCoreFlag(options.runtimeCore);
     // 应用 profile 透传到 env ZAI_APP：routes/agent.ts 据此把会话 mainAgent
     // 锁为 'task-factory'，routes/system.ts 据此在 /api/system 响应里回
     // 显当前 profile。`--app` 是 opt-in profile，未知值在 CLI 层不触发任何
@@ -71,7 +65,6 @@ program
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
-  .option('--runtimeCore <mode>', "Core runtime: 'repl' (default). 'default' is deprecated; pass --runtimeCore repl (or omit) to silence the warning.")
   .option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定调度器 Agent')
   // Internal marker: when the supervisor spawns a managed child it
   // re-invokes `zai start --managed-child ...` so the child recognises
@@ -80,7 +73,6 @@ program
   .allowUnknownOption(false)
   .option('--managed-child', 'internal: spawned by supervisor')
   .action((options) => {
-    applyRuntimeCoreFlag(options.runtimeCore);
     // 见上方 dev command 的说明。start 也按同口径透传（未知 profile 无害）。
     if (options.app) process.env.ZAI_APP = options.app;
     return runStart(options);

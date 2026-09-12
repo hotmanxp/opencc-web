@@ -21,14 +21,6 @@ interface StartOptions {
   lan?: boolean;
   sdk?: boolean;
   /**
-   * `--runtimeCore <default|repl>` — 透传到 managed child,确保
-   * child 再次跑 `runStart` 时仍然按 CLI flag 强制覆盖 env(2026-09-12
-   * 阶段 1 后,父进程若传 'default' 会 warn 并折叠成 'repl' 再透传);
-   * 否则 child 只能从父进程 env 间接继承。
-   * 详见 packages/zai/src/cli/runtimeCoreFlag.ts。
-   */
-  runtimeCore?: string;
-  /**
    * `--app <profile>` — 应用 profile（当前仅 `task-factory`）。`cli/index.ts`
    * 的两条 action 已经在进程早期把它落到 `process.env.ZAI_APP`；这里保留
    * 字段仅为 commander 类型完整 + 与 supervisor 透传的 `--app` flag 对齐。
@@ -80,10 +72,6 @@ export async function runStart(options: StartOptions): Promise<void> {
     if (options.port) childArgs.push('--port', options.port)
     if (options.lan) childArgs.push('--lan')
     if (options.sdk) childArgs.push('--sdk')
-    // 透传 --runtimeCore 到 child,否则 child 重新跑 runStart 时
-    // options.runtimeCore === undefined,只能靠 env 继承;flag 显式指定的
-    // 强制值(含 default)必须由 child 自己重新落到 env 上。
-    if (options.runtimeCore) childArgs.push('--runtimeCore', options.runtimeCore)
     // Always pass --no-open to the child so it does not double-open the
     // browser — the user's `--open` request was already handled by the
     // supervisor's direct invocation, and we don't want a second tab.
