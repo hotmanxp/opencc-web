@@ -54,19 +54,18 @@ const RUNTIME_METHODS = [
 
 describe('zai agentRuntime ↔ OpenccRuntime seam (Task 5)', () => {
   let prevDataDir: string | undefined
-  let prevRuntimeCore: string | undefined
   let tmpHome: string
 
   beforeEach(() => {
     // Reset module-level state so each test rebuilds the runtime.
     prevDataDir = process.env.ZAI_DATA_DIR
-    prevRuntimeCore = process.env.ZAI_RUNTIME_CORE
-    // 阶段 1(2026-09-12):runtimeCore 永远 'repl';本测试断言
-    // ReplRuntime 的 V2 partial shape(query / abort / enqueue / interrupt /
-    // getSessionState / shutdown),V1 8-method(getSession / listSessions /
-    // readTranscript / patchSession / removeSession)经模块级
-    // sharedOpenccRuntimeSingleton 暴露给 routes/sessions.ts。
-    process.env.ZAI_RUNTIME_CORE = 'repl'
+    // 阶段 3(2026-09-12):runtimeCore 概念完全移除;`initAgentRuntime`
+    // 永远走 REPL 路径(`createOpenccRuntime → ReplRuntime` 包装),
+    // 不读 ZAI_RUNTIME_CORE env。本测试断言 ReplRuntime 的 V2 partial
+    // shape(query / abort / enqueue / interrupt / getSessionState /
+    // shutdown),V1 8-method(getSession / listSessions / readTranscript
+    // / patchSession / removeSession)经模块级 sharedOpenccRuntimeSingleton
+    // 暴露给 routes/sessions.ts。
     // `resolveDataDir()` reads `ZAI_DATA_DIR` first; pin to a tmp dir so
     // we don't touch the user's real ~/.zn-agent. Also clear HOME so
     // resolveDataDir() falls back to the env override.
@@ -77,8 +76,6 @@ describe('zai agentRuntime ↔ OpenccRuntime seam (Task 5)', () => {
 
   afterEach(async () => {
     process.env.ZAI_DATA_DIR = prevDataDir
-    if (prevRuntimeCore === undefined) delete process.env.ZAI_RUNTIME_CORE
-    else process.env.ZAI_RUNTIME_CORE = prevRuntimeCore
     // Restore HOME to its original value (always set on macOS, but
     // be defensive).
     if (process.env.HOME === tmpHome) delete process.env.HOME

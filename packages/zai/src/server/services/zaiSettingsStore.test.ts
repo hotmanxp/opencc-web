@@ -156,20 +156,4 @@ describe('zaiSettingsStore', () => {
     expect(isValidOutputStyle(undefined)).toBe(false)
     expect(isValidOutputStyle({})).toBe(false)
   })
-
-  it("resolveRuntimeCore normalizes missing / invalid to 'repl' (spec 2026-08-30 §5.1)", async () => {
-    const { resolveRuntimeCore } = await import('./zaiSettingsStore.js')
-    // 未配置 / 非法值 → 'repl'(不再回落 'default')
-    expect(resolveRuntimeCore({})).toBe('repl')
-    expect(resolveRuntimeCore({ runtimeCore: undefined })).toBe('repl')
-    expect(resolveRuntimeCore({ runtimeCore: 'bogus' as never })).toBe('repl')
-    // 显式合法值原样保留
-    // 阶段 1(2026-09-12):'default' deprecated,运行时折叠成 'repl'。
-    expect(resolveRuntimeCore({ runtimeCore: 'default' })).toBe('repl')
-    expect(resolveRuntimeCore({ runtimeCore: 'repl' })).toBe('repl')
-    // 已废弃值(inproc/spawn,2026-09-07 轨道移除)视同未配置落 'repl'
-    // (类型面已不含,使用 as never 模拟磁盘遗留数据)
-    expect(resolveRuntimeCore({ runtimeCore: 'inproc' as never })).toBe('repl')
-    expect(resolveRuntimeCore({ runtimeCore: 'spawn' as never })).toBe('repl')
-  })
 })

@@ -1,12 +1,10 @@
 // @ts-nocheck
 import { initAgentRuntime, getRuntime } from '../agentRuntime.js'
 
-describe('agentRuntime runtimeCore=repl (P2 unified switch)', () => {
+describe('agentRuntime ReplRuntime shape (阶段 3:runtimeCore 概念移除,只验 ReplRuntime)', () => {
   beforeEach(async () => {
-    // zai patch (2026-08-30, plan P2, Task 6): 'repl' is a top-level
-    // runtimeCore value, unified under existing runtimeCore mechanism
-    // (ZAI_RUNTIME_CORE env). Legacy ZAI_RUNTIME_KERNEL env is removed.
-    process.env.ZAI_RUNTIME_CORE = 'repl'
+    // 阶段 3(2026-09-12):`initAgentRuntime` 不再读 ZAI_RUNTIME_CORE env,
+    // 永远走 REPL 路径(createOpenccRuntime → ReplRuntime 包装)。
     // Note: brief wrote `initAgentRuntime({ cwd: process.cwd() })` but
     // the actual signature is `initAgentRuntime(cwd: string, isSdk?)`.
     // Passing the object crashes on the post-runtime `initCommands` call
@@ -16,10 +14,10 @@ describe('agentRuntime runtimeCore=repl (P2 unified switch)', () => {
   })
 
   afterEach(() => {
-    delete process.env.ZAI_RUNTIME_CORE
+    // 阶段 3 兼容:无 env 可清,afterEach 保留为 no-op 占位。
   })
 
-  it('runtimeCore=repl returns a ReplRuntime instance', () => {
+  it('returns a ReplRuntime instance', () => {
     const runtime = getRuntime()
     expect(runtime).toBeDefined()
     expect(runtime.constructor.name).toBe('ReplRuntime')
