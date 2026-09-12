@@ -16,8 +16,11 @@
  */
 import type { RuntimeCore } from '../shared/settings.js';
 
-const VALID_VALUES: ReadonlySet<RuntimeCore> = new Set<RuntimeCore>([
-  'default',
+// 阶段 1(2026-09-12):保留 'default' 接受(磁盘遗留兼容)但运行时折叠 'repl'。
+// VALID_VALUES 在 `applyRuntimeCoreFlag` 中只用来拒绝非法值;'default' 的
+// 折叠处理在该函数内显式分支。
+const VALID_VALUES: ReadonlySet<string> = new Set<string>([
+  'default',  // deprecated,收到时 warn 并落 'repl'
   'repl',
 ])
 
@@ -45,14 +48,27 @@ export function applyRuntimeCoreFlag(raw: string | undefined): void {
   if (raw === undefined || raw === '') {
     return
   }
-  if (!VALID_VALUES.has(raw as RuntimeCore)) {
+  if (!VALID_VALUES.has(raw)) {
     console.error(
       `[zai] error: --runtimeCore expected one of [default, repl], got '${raw}'`,
     )
     process.exit(2)
   }
 
-  forcedRuntimeCore = raw as RuntimeCore
-  process.env.ZAI_RUNTIME_CORE = forcedRuntimeCore
-  console.log(`[zai] runtime flag: runtimeCore=${forcedRuntimeCore}`)
+  // 阶段 1(2026-09-12):'default' deprecated,折叠成 'repl' 写入 env。
+  // 保留 VALID_VALUES 接受 'default' 是为了不破坏既有客户端传参;
+  // 但运行时永远 'repl',与 settings / REST 端点语义一致。
+  let resolved: RuntimeCore
+  if (raw === 'default') {
+    console.warn(
+      `[zai] warn: --runtimeCore 'default' is deprecated; coercing to 'repl' (phase-1 runtime unification)`,
+    )
+    resolved = 'repl'
+  } else {
+    resolved = raw as RuntimeCore
+  }
+
+  forcedRuntimeCore = resolved
+  process.env.ZAI_RUNTIME_CORE = resolved
+  console.log(`[zai] runtime flag: runtimeCore=${resolved}`)
 }

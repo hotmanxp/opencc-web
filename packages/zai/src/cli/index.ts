@@ -52,7 +52,7 @@ program
   // --runtimeCore <default|repl>: 强制覆盖 settings.runtimeCore,
   // 落到 env ZAI_RUNTIME_CORE。不传 → 不动 env,沿用 settings.json / 父进程
   // env(默认 repl)。见 packages/zai/src/cli/runtimeCoreFlag.ts。
-  .option('--runtimeCore <mode>', 'Core runtime: default (in-process createOpenccRuntime) | repl (ReplRuntime, unconfigured default per spec 2026-08-30)')
+  .option('--runtimeCore <mode>', "Core runtime: 'repl' (default). 'default' is deprecated; pass --runtimeCore repl (or omit) to silence the warning.")
   .option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定调度器 Agent')
   .action((options) => {
     applyRuntimeCoreFlag(options.runtimeCore);
@@ -71,7 +71,7 @@ program
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
-  .option('--runtimeCore <mode>', 'Core runtime: default (in-process createOpenccRuntime) | repl (ReplRuntime, unconfigured default per spec 2026-08-30)')
+  .option('--runtimeCore <mode>', "Core runtime: 'repl' (default). 'default' is deprecated; pass --runtimeCore repl (or omit) to silence the warning.")
   .option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定调度器 Agent')
   // Internal marker: when the supervisor spawns a managed child it
   // re-invokes `zai start --managed-child ...` so the child recognises

@@ -22,8 +22,10 @@ interface StartOptions {
   sdk?: boolean;
   /**
    * `--runtimeCore <default|repl>` — 透传到 managed child,确保
-   * child 再次跑 `runStart` 时仍然按 CLI flag 强制覆盖 env;否则 child 只能
-   * 从父进程 env 间接继承。详见 packages/zai/src/cli/runtimeCoreFlag.ts。
+   * child 再次跑 `runStart` 时仍然按 CLI flag 强制覆盖 env(2026-09-12
+   * 阶段 1 后,父进程若传 'default' 会 warn 并折叠成 'repl' 再透传);
+   * 否则 child 只能从父进程 env 间接继承。
+   * 详见 packages/zai/src/cli/runtimeCoreFlag.ts。
    */
   runtimeCore?: string;
   /**
