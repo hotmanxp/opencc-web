@@ -2121,6 +2121,25 @@ export default React.memo(function AgentInputBox({
               }}
             />
           )}
+          {/* 输入框 + 右侧发送/停止 按钮的 flex 行容器 —
+              之前 mobile-stop-button 直接放在 drop-zone 内(无 flex 父),
+              表现为堆叠到输入框下方, 移动端用户根本看不到. 这里显式包一层
+              flex row, 保证 decorator-wrap(flex:1)与按钮组(flexShrink:0)
+              横向并排. 外层还有一层 display:flex 包裹(行 ~1952, 承载
+              slash / at-menu 弹层定位), 这一行不能自带 width, 必须 flex:1
+              把剩余宽度吃满 — 否则 decorator-wrap 退化成 content size,
+              输入框被压成只剩几像素宽. */}
+          <div
+            data-testid="agent-input-row"
+            style={{
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "stretch",
+              gap: 0,
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
           {/* Mirror-backdrop wrapper(追齐 deepseek-harness InputBar 的三层手法):
             唯一滚动容器 .scroll → .grow → [backdrop(可见装饰层)/ textarea
             (透明文本,只留 caret)/ mirror(隐藏,决定高度 → auto-grow)]。
@@ -2198,43 +2217,110 @@ export default React.memo(function AgentInputBox({
               </div>
             </div>
           </div>
-          {/* 移动端"停止"按钮: 替代桌面端的 Esc 键 —
-            物理键盘/软键盘都没有 Esc, 必须给移动用户提供一个等价入口.
-            - 仅 isMobile 时挂载 (桌面端继续靠 Esc keydown, 避免按钮占位);
-            - 仅 streaming 时显示, 非流式态 stop 无意义;
-            - 调用 storeApi.getState().stop() 与 AgentConversation 的
-              全局 Esc 处理路径完全一致 (AgentConversation.tsx:91-99),
-              走同一套后端 abort + status 流, 不会绕过任何清理逻辑. */}
-          {isMobile && status === "streaming" && (
-            <Button
-              data-testid="mobile-stop-button"
-              aria-label="停止生成"
-              onClick={() => {
-                void storeApi.getState().stop()
-              }}
-              style={{
-                flexShrink: 0,
-                marginLeft: 8,
-                height: "auto",
-                alignSelf: "stretch",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 4,
-                padding: "0 12px",
-                background: "rgba(255, 102, 0, 0.15)",
-                border: "1px solid #ff6600",
-                borderRadius: 6,
-                color: "#ff6600",
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: "pointer",
-              }}
-            >
-              <StopOutlined />
-              <span>停止</span>
-            </Button>
-          )}
+          {/* 输入框右侧"发送 / 停止"按钮组 —
+              - 桌面 + 移动端通用, 桌面端补回键盘快捷键的可视化入口(只读 Esc
+                提示不够显式), 移动端替代之前的 isMobile-only 停止按钮.
+              - 「发送」: 输入框非空 + 非 streaming + 非 creatingSession +
+                无 pendingAsk 时可点, 与 Enter 等价(handleSend);
+              - 「停止」: 仅 streaming 时显示, 与按 Esc 完全一致 — 调
+                storeApi.getState().stop(), 与 AgentConversation 的全局 Esc
+                处理路径走同一套后端 abort + status 流, 不绕过任何清理逻辑.
+              - 共用同一胶囊视觉, 颜色对比区分: 发送 = 橙底白字(主操作),
+                停止 = 浅橙底橙字(警告操作).
+              - 按钮占位相对固定, 用 flexShrink:0 防止挤压; 输入框仍
+                flex:1 自适应拉伸. */}
+          <div
+            style={{
+              flexShrink: 0,
+              marginLeft: 8,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "stretch",
+              justifyContent: "flex-end",
+              gap: 6,
+              alignSelf: "stretch",
+            }}
+          >
+            {status === "streaming" ? (
+              <Button
+                data-testid="agent-input-stop-button"
+                aria-label="停止生成"
+                onClick={() => {
+                  void storeApi.getState().stop();
+                }}
+                style={{
+                  height: "auto",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 4,
+                  padding: "6px 14px",
+                  background: "rgba(255, 102, 0, 0.15)",
+                  border: "1px solid #ff6600",
+                  borderRadius: 6,
+                  color: "#ff6600",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                <StopOutlined />
+                <span>停止</span>
+              </Button>
+            ) : (
+              <Button
+                data-testid="agent-input-send-button"
+                aria-label="发送消息"
+                onClick={() => {
+                  void handleSend();
+                }}
+                disabled={
+                  creatingSession ||
+                  pendingAsk?.status === "pending" ||
+                  input.trim().length === 0
+                }
+                style={{
+                  height: "auto",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 4,
+                  padding: "6px 14px",
+                  background:
+                    creatingSession ||
+                    pendingAsk?.status === "pending" ||
+                    input.trim().length === 0
+                      ? "var(--bg-faint-08)"
+                      : "#ff6600",
+                  border:
+                    creatingSession ||
+                    pendingAsk?.status === "pending" ||
+                    input.trim().length === 0
+                      ? "1px solid var(--border-subtle)"
+                      : "1px solid #ff6600",
+                  borderRadius: 6,
+                  color:
+                    creatingSession ||
+                    pendingAsk?.status === "pending" ||
+                    input.trim().length === 0
+                      ? "var(--text-tertiary)"
+                      : "#fff",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor:
+                    creatingSession ||
+                    pendingAsk?.status === "pending" ||
+                    input.trim().length === 0
+                      ? "not-allowed"
+                      : "pointer",
+                }}
+              >
+                <ArrowUpOutlined />
+                <span>发送</span>
+              </Button>
+            )}
+          </div>
+          </div>
         </div>
       </div>
 
