@@ -80,11 +80,12 @@ import type { RuntimeCore, ZaiSettings } from '../../shared/settings.js'
 export function resolveRuntimeCore(settings: ZaiSettings): RuntimeCore {
   const env = process.env.ZAI_RUNTIME_CORE
   if (env !== undefined && env !== '') {
-    if (env === 'default' || env === 'repl') return env
+    // 阶段 1(2026-09-12):'default' deprecated,env 也折叠 'repl'。
+    if (env === 'repl') return 'repl'
     return 'repl'
   }
   const s = settings.runtimeCore
-  if (s === 'default' || s === 'repl') return s
+  if (s === 'repl') return 'repl'
   return 'repl'
 }
 

@@ -246,7 +246,9 @@ export function resolveRuntimeCore(
   settings: ZaiSettings,
 ): RuntimeCore {
   const s = settings.runtimeCore
-  if (s === 'default' || s === 'repl') return s
+  // 阶段 1(2026-09-12):'default' deprecated,折叠成 'repl'。
+  // 保留类型面 'default' 只为磁盘遗留值兼容;运行时永远 'repl'。
+  if (s === 'repl') return 'repl'
   return 'repl'
 }
 

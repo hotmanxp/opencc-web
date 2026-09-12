@@ -83,10 +83,12 @@ export interface ZaiPermissions {
 }
 
 /**
- * 核心运行时二态(2026-09-07 移除 inproc / spawn 轨道后收敛):
- * - 'default' → 轻量 in-process `createOpenccRuntime`(legacy 兜底)
- * - 'repl'    → REPL 抽壳路径(`createReplSession`,默认)
- * 历史值('inproc' / 'spawn' / 其它非法值)由 resolveRuntimeCore 静默落
+ * 核心运行时二态(2026-09-12 阶段 1 收敛后):
+ * - 'repl'    → REPL 抽壳路径(`createReplSession`,唯一运行时形态,默认)
+ * - 'default' → **DEPRECATED,类型面保留供磁盘遗留值兼容**。
+ *              三处 `resolveRuntimeCore` 都把它折叠成 'repl',运行时永远走
+ *              repl 分支(initAgentRuntime 已删除 else 分支)。
+ * 历史值('inproc' / 'spawn' / 其它非法值)由 `resolveRuntimeCore` 静默落
  * 'repl';已废弃字段值不入类型面。详见
  * docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1。
  */
@@ -190,7 +192,10 @@ export interface ZaiSettings {
   /**
    * 核心运行时二态。见 RuntimeCore 的取值语义。生效优先级:
    * `--runtimeCore` flag > env `ZAI_RUNTIME_CORE` > 本设置。
-   * 缺失 / 非法值 → 'repl'(spec 2026-08-30 §5.1 把默认从 'default' 切到 'repl')。
+   * 缺失 / 非法值 / 'default' → 一律落 'repl'(spec 2026-08-30 §5.1)。
+   * 阶段 1(2026-09-12):'default' 已 deprecated,运行时只走 'repl';
+   * 本字段保留是为了兼容磁盘遗留 `runtimeCore: 'default'` 的旧 settings.json,
+   * 不会实际产生 'default' 运行时。
    */
   runtimeCore?: RuntimeCore
   /**
