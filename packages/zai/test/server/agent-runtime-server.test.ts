@@ -39,14 +39,16 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+// 阶段 1(2026-09-12):ReplRuntime 实现 V2 partial shape。V1 8-method
+// 契约(getSession / listSessions / readTranscript / patchSession /
+// removeSession)在 ReplRuntime 上不存在,这些方法走
+// sharedOpenccRuntimeSingleton(由 routes/sessions.ts 直接消费)。
 const RUNTIME_METHODS = [
   'query',
   'abort',
-  'getSession',
-  'listSessions',
-  'readTranscript',
-  'patchSession',
-  'removeSession',
+  'enqueue',
+  'interrupt',
+  'getSessionState',
   'shutdown',
 ] as const
 
@@ -59,14 +61,12 @@ describe('zai agentRuntime ↔ OpenccRuntime seam (Task 5)', () => {
     // Reset module-level state so each test rebuilds the runtime.
     prevDataDir = process.env.ZAI_DATA_DIR
     prevRuntimeCore = process.env.ZAI_RUNTIME_CORE
-    // Pin runtimeCore to legacy 'default' track — this seam test
-    // asserts the V1 8-method OpenccRuntime contract
-    // (`createOpenccRuntime`), not the partial V2 ReplRuntime adapter.
-    // Plan P2, Task 6 (2026-08-30) flipped the default to 'repl'; this
-    // test preserves its original intent by explicitly selecting the
-    // V1 'default' path (now using ZAI_RUNTIME_CORE, not the legacy
-    // ZAI_RUNTIME_KERNEL env that the brief originally referenced).
-    process.env.ZAI_RUNTIME_CORE = 'default'
+    // 阶段 1(2026-09-12):runtimeCore 永远 'repl';本测试断言
+    // ReplRuntime 的 V2 partial shape(query / abort / enqueue / interrupt /
+    // getSessionState / shutdown),V1 8-method(getSession / listSessions /
+    // readTranscript / patchSession / removeSession)经模块级
+    // sharedOpenccRuntimeSingleton 暴露给 routes/sessions.ts。
+    process.env.ZAI_RUNTIME_CORE = 'repl'
     // `resolveDataDir()` reads `ZAI_DATA_DIR` first; pin to a tmp dir so
     // we don't touch the user's real ~/.zn-agent. Also clear HOME so
     // resolveDataDir() falls back to the env override.

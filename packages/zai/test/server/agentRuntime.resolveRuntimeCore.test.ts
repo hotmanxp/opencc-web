@@ -50,17 +50,20 @@ describe('resolveRuntimeCore (agentRuntime priority chain)', () => {
 
   it("(d) explicit env values honored, flag(env) > settings", async () => {
     const { resolveRuntimeCore } = await mod()
+    // 阶段 1(2026-09-12):'default' deprecated,无论 env 还是 settings 都
+    // 折叠为 'repl';'repl' 仍走原通道。
     for (const v of ['default', 'repl'] as const) {
       process.env.ZAI_RUNTIME_CORE = v
       // env 显式值盖过 settings(模拟 --runtimeCore flag 经 env 强制覆盖)
-      expect(resolveRuntimeCore({ runtimeCore: 'repl' })).toBe(v)
+      expect(resolveRuntimeCore({ runtimeCore: 'repl' })).toBe('repl')
     }
   }, TEST_TIMEOUT_MS)
 
   it("(d') explicit settings values honored when env unset", async () => {
     const { resolveRuntimeCore } = await mod()
     const settings = (v: ZaiSettings['runtimeCore']): ZaiSettings => ({ runtimeCore: v })
-    expect(resolveRuntimeCore(settings('default'))).toBe('default')
+    // 阶段 1(2026-09-12):'default' 折叠成 'repl';inproc/spawn 仍落 'repl'。
+    expect(resolveRuntimeCore(settings('default'))).toBe('repl')
     expect(resolveRuntimeCore(settings('inproc'))).toBe('repl')
     expect(resolveRuntimeCore(settings('spawn'))).toBe('repl')
     expect(resolveRuntimeCore(settings('repl'))).toBe('repl')

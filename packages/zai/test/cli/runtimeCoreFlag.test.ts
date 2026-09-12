@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, afterAll } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import {
   applyRuntimeCoreFlag,
   getForcedRuntimeCoreFlag,
@@ -46,12 +46,23 @@ describe('runtimeCoreFlag: --runtimeCore 强制语义不被 settings.env 覆盖'
     expect(process.env[ENV]).toBe('repl')
   })
 
-  it("applyRuntimeCoreFlag('default') 强制 default 并盖过脏 env", () => {
+  it("applyRuntimeCoreFlag('default') 阶段 1: warn 并折叠为 'repl' (phase-1 runtime unification)", () => {
     process.env[ENV] = 'repl'
-    applyRuntimeCoreFlag('default')
-    expect(process.env[ENV]).toBe('default')
-    process.env[ENV] = 'repl'
-    reapplyRuntimeCoreFlag()
-    expect(process.env[ENV]).toBe('default')
+    // 阶段 1(2026-09-12):'default' deprecated,折叠成 'repl' 写入 env。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      applyRuntimeCoreFlag('default')
+      expect(process.env[ENV]).toBe('repl')
+      expect(getForcedRuntimeCoreFlag()).toBe('repl')
+      expect(warnSpy).toHaveBeenCalled()
+      const warnText = warnSpy.mock.calls.map((args) => String(args[0])).join('\n')
+      expect(warnText).toMatch(/deprecated/i)
+      // reapply 也得是 'repl'
+      process.env[ENV] = 'default'
+      reapplyRuntimeCoreFlag()
+      expect(process.env[ENV]).toBe('repl')
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })

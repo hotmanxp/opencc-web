@@ -54,7 +54,7 @@ describe('PUT /api/agent/settings/runtime-core', () => {
     expect(onDisk.runtimeCore).toBe('repl')
   })
 
-  it("persists 'default' and preserves other top-level keys", async () => {
+  it("collapses 'default' to 'repl' on PUT and preserves other top-level keys (phase-1)", async () => {
     mkdirSync(join(dataDir, '.zai'), { recursive: true })
     writeFileSync(
       join(dataDir, '.zai', 'settings.json'),
@@ -64,16 +64,28 @@ describe('PUT /api/agent/settings/runtime-core', () => {
       '../../src/server/services/zaiSettingsCache.js'
     )
     __resetCacheForTests()
-    const res = await request(app)
-      .put('/api/agent/settings/runtime-core')
-      .send({ runtimeCore: 'default' })
-    expect(res.status).toBe(200)
-    const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
-    )
-    expect(onDisk.runtimeCore).toBe('default')
-    expect(onDisk.theme).toBe('dark')
-    expect(onDisk.model).toBe('x')
+    // 阶段 1(2026-09-12):'default' deprecated,PUT 收到时 warn 并落盘为 'repl'。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const res = await request(app)
+        .put('/api/agent/settings/runtime-core')
+        .send({ runtimeCore: 'default' })
+      expect(res.status).toBe(200)
+      const onDisk = JSON.parse(
+        readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      )
+      expect(onDisk.runtimeCore).toBe('repl')
+      expect(onDisk.theme).toBe('dark')
+      expect(onDisk.model).toBe('x')
+      // 响应也回 'repl'(resolveRuntimeCore 折叠语义)
+      expect(res.body.runtimeCore).toBe('repl')
+      // 阶段 1 deprecation warn 文案至少出现一次
+      expect(warnSpy).toHaveBeenCalled()
+      const warnText = warnSpy.mock.calls.map((args) => String(args[0])).join('\n')
+      expect(warnText).toMatch(/deprecated/i)
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it.each(['inproc', 'spawn', 'print'] as const)(
