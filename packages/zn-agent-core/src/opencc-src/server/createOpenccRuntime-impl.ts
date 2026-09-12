@@ -46,6 +46,45 @@ import { getUserConfigJson } from '../utils/userConfigJson.js'
 import { getAgentRegistry } from './index.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult } from './serverTypes.js'
+// zai patch (2026-09-12, plan cron-fire-to-prompt, fix断链1): v2 runtime
+// (sharedRuntime per-server 单例) 启动时挂载 cron 调度器。旧 v1 走
+// createReplSession 时 setupScheduledTasks 自然被 createReplSession:157
+// 调到;repl-link-remove 计划之后 v2 路径不再调 createReplSession, 调度
+// 器从此消失, 任务永远不到点 fire。在 createOpenccRuntimeImpl 返回前挂
+// 单实例 scheduler, fire 时通过 globalThis seam (__zaiSessionInboxFollowup
+// / __zaiDispatchDshInbox) 路由到当前活跃 session 的 SessionInbox + dsh
+// inbox。sessionId 不入参: scheduler 是 per-server, 由 onFire 时读
+// globalThis.__zaiCurrentSessionId (setCurrentSessionId 写入) 拿到当前
+// 活跃 session。多 session 并发时每个 fire 都按"fire 时刻活跃 session"
+// 路由, 与 zai-web 单 session UI 语义一致 (用户切换 session 时
+// setCurrentSessionId 同步更新)。
+//
+// zai patch (2026-09-12, code-reviewer round-2 HIGH-1): module-level 单例
+// 守卫 —— 工厂 createOpenccRuntimeImpl 可被多次调用(server 重启 / 多 runtime
+// 测试场景),每次 mount 一个新 scheduler 会让旧 setInterval 永活,多 cronScheduler
+// 互掐。getOrCreateCronHandle 在 _cronHandle 已存在时复用同一实例;shutdown
+// 调 teardown 后置 null,支持 zai-server 重启时重新 mount。
+import { setupScheduledTasks, type SetupScheduledTasks } from '../../compat/repl/setup/setupCronScheduler.js'
+
+let _cronHandle: SetupScheduledTasks | null = null
+function getOrCreateCronHandle(opts: {
+  sessionId?: string
+  getAppState: () => unknown
+  isLoading: () => boolean
+}): SetupScheduledTasks {
+  if (_cronHandle) return _cronHandle
+  _cronHandle = setupScheduledTasks({
+    sessionId: opts.sessionId,
+    getAppState: opts.getAppState,
+    isLoading: opts.isLoading,
+  })
+  return _cronHandle
+}
+function releaseCronHandle(): void {
+  if (!_cronHandle) return
+  _cronHandle.teardown()
+  _cronHandle = null
+}
 
 export async function createOpenccRuntimeImpl(options) {
   const cwd = options.defaultCwd ?? process.cwd()
@@ -314,6 +353,23 @@ export async function createOpenccRuntimeImpl(options) {
   // 旧实现只 track 单个 currentQueryAbortController,并发下 abort 无法精确
   // 命中目标 session;per-session 后按 sessionId 查表。
   const queryAbortControllers = new Map<string, AbortController>()
+
+  // zai patch (2026-09-12, plan cron-fire-to-prompt, 断链1修复): 挂载 cron
+  // 调度器 —— v2 runtime 是 sharedRuntime 单例 (per-server), scheduler 也
+  // 单实例, fire 时按 globalThis.__zaiCurrentSessionId 把 prompt 路由到
+  // 当前活跃 session 的 SessionInbox + dsh inbox (Fix 2/3)。调用方传
+  // sessionId: '' 即可, onFire 内部 fallback 到 globalThis (避免 v2 路径
+  // 必须穿透 setCurrentSessionId 调用栈)。isLoading() 返回 false 让调度
+  // 器常驻唤醒 —— idle session 才是 cron 的主要触发场景, busy 状态的
+  // 会话已经有自己的 turn 在跑, cron 入 nextStep 等 turn 结束再合并。
+  //
+  // zai patch (2026-09-12, code-reviewer round-2 HIGH-1): 走 module-level
+  // 单例守卫,防止多次调工厂时挂多个 scheduler (setInterval 泄漏)。
+  const cronHandle = getOrCreateCronHandle({
+    sessionId: '',
+    getAppState: () => ctx.appState.getState(),
+    isLoading: () => false,
+  })
 
   async function buildComponentCounts(): Promise<Map<string, OpenccPluginComponentCounts>> {
     const counts = new Map<string, OpenccPluginComponentCounts>()
@@ -850,6 +906,15 @@ let initialMessages: Message[] | undefined
     async shutdown() {
       if (closed) return
       closed = true
+      // zai patch (2026-09-12, code-reviewer round-2 HIGH-2): 必须先停 cron
+      // 调度器 (cronHandle.teardown),再清 queryAbortControllers / engines。
+      // 否则 in-flight fire 回调可能在 engines.clear() 之后才执行到
+      // inboxFollowup / dispatchDshInbox, 投到一个"runtime 已死但 inbox /
+      // dispatch seam 还活着"的状态。先停 scheduler 防止新 fire 入,
+      // 老 fire 在 AbortController 中断后自然结束 (synchronous stop, 不
+      // 等待 setInterval 全部 drain —— vendor cronScheduler.stop 同步
+      // 清 timer + 标记 killed,后续 tick 不会再进入 onFire)。
+      releaseCronHandle()
       // Abort every in-flight query. We don't touch
       // initialAbortController (already done in QueryEngine) — that
       // single-use controller is unreferenced now and will be GC'd
