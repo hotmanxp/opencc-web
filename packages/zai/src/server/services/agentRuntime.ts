@@ -58,7 +58,6 @@ import {
   stopMemoryWatcher,
   hasExternalIncludes,
 } from '@zn-ai/zn-agent-core'
-import { reapplyRuntimeCoreFlag } from '../../cli/runtimeCoreFlag.js'
 import type { LoadedSkill } from '@zn-ai/zn-agent-core'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
@@ -66,38 +65,9 @@ import { PermissionRegistry } from './permissionRegistry.js'
 import { getSessionInbox, disposeSessionInbox, listSessionInboxIds, type InboxMessage } from './sessionInbox.js'
 import { resolveMainAgent } from './mainAgents.js'
 import { readZaiSettings } from './zaiSettingsStore.js'
-import type { RuntimeCore, ZaiSettings } from '../../shared/settings.js'
-
-/**
- * 核心运行时二态(2026-09-07 移除 inproc / spawn 两条轨道后):
- *   default → 轻量 in-process createOpenccRuntime
- *   repl    → ReplRuntime(createReplSession 抽壳路径,默认)
- * 解析优先级:`--runtimeCore` flag(落到 env)> env `ZAI_RUNTIME_CORE`
- * > settings.runtimeCore > 'repl'。已废弃值('inproc'/'spawn'/其它非法值)
- * 静默视同未配置,落 'repl'。见
- * docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md。
- */
-export function resolveRuntimeCore(settings: ZaiSettings): RuntimeCore {
-  const env = process.env.ZAI_RUNTIME_CORE
-  if (env !== undefined && env !== '') {
-    // 阶段 1(2026-09-12):'default' deprecated,env 也折叠 'repl'。
-    if (env === 'repl') return 'repl'
-    return 'repl'
-  }
-  const s = settings.runtimeCore
-  if (s === 'repl') return 'repl'
-  return 'repl'
-}
 
 let runtime: OpenccRuntime | null = null
 let currentSessionId: string | null = null
-// initAgentRuntime 解析出的核心运行时缓存,供下游读取当前生效路径
-// (agentSettings 状态端点等)。
-let activeRuntimeCore: RuntimeCore = 'repl'
-/** 当前核心运行时;'repl' 也是 initAgentRuntime 未跑完时的安全默认值(spec §5.1 未配置兜底)。 */
-export function getRuntimeCore(): RuntimeCore {
-  return activeRuntimeCore
-}
 /**
  * Legacy transcript accessor. Task 5 keeps a working `TranscriptStore`
  * around because route handlers (`routes/agent.ts`, `routes/transcript.ts`,
@@ -488,7 +458,6 @@ export function __resetAgentRuntimeForTests(): void {
   runtime = null
   transcriptStore = null
   serverCwd = null
-  activeRuntimeCore = 'repl'
   sessionControllers.clear()
   // zai patch (2026-09-06): drop per-session inboxes so the next test boot
   // starts with a clean registry. The module-level wake handler ref stays
@@ -731,39 +700,14 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // `streamingToolExecutor` tool loop → vendor's
   // `queryModelWithStreaming` → upstream API.
   // ---------------------------------------------------------------------
-  // 阶段 1(2026-09-12,plan repl-link-remove):runtimeCore 永远 'repl'。
-  // 下面的 if/else 已合并为单一 REPL 路径(createOpenccRuntime 构造
-  // sharedRuntime → ReplRuntime 包装);resolveRuntimeCore 把 'default'
-  // 与非法值折叠成 'repl'(见上面 assert)。
+  // 阶段 3(2026-09-12,plan repl-link-remove):runtimeCore 概念完全删除,
+  // 运行时唯一形态为 'repl'。createOpenccRuntime 构造 sharedRuntime →
+  // ReplRuntime 包装(query / slash command / P3 stub 路径)。
   // 保留 enableOpenccConfigs(vendor config system)与 zai 内部子系统
   // (PluginRuntime / eventBus / __zaiBridgeCtx / sessionInbox / sessionFacade)。
-  // ---------------------------------------------------------------------
-  // zai patch (2026-08-28): `enableOpenccConfigs()`(上一段)会把 settings.env
-  // 无条件 `Object.assign` 回 process.env,覆盖 CLI 入口处
-  // `applyRuntimeCoreFlag()` 写入的 `ZAI_RUNTIME_CORE`。在解析运行时之前恢复
-  // `--runtimeCore` flag 的强制语义,保住 "flag > env > settings" 的设计承诺。
-  reapplyRuntimeCoreFlag()
-  const settings = await readZaiSettings()
-  const runtimeCore = resolveRuntimeCore(settings)
-  // 阶段 1(2026-09-12)防御性 assert:initAgentRuntime 收到的 runtimeCore
-  // 一定是 'repl'(resolveRuntimeCore 已折叠 'default' / 非法值)。
-  // 若未来出现非 'repl',说明外部某条链路绕过了折叠,这里直接抛错
-  // 而不是静默跑 else 分支(已删)。
-  if (runtimeCore !== 'repl') {
-    throw new Error(
-      `[initAgentRuntime] unexpected runtimeCore=${runtimeCore}; phase-1 collapse to 'repl' is broken`,
-    )
-  }
-  activeRuntimeCore = runtimeCore
-
-  // zai patch (2026-09-12, plan repl-link-remove 阶段 1): 收敛完成。
-  // `initAgentRuntime` 现在永远走 REPL 路径:createOpenccRuntime 构造
-  // sharedRuntime(供 routes/sessions.ts 的 V1 8-method 契约)→ ReplRuntime
-  // 包装(query / slash command / P3 stub 路径)。
-  // 原 `else { runtimeCore === 'default' }` 分支(裸调 createOpenccRuntime,
-  // 不外包 ReplRuntime、不设置 sharedSingleton)已被删除——'default' 由
-  // resolveRuntimeCore 在进入 initAgentRuntime 前折叠成 'repl'。
   // Spec: docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1。
+  // ---------------------------------------------------------------------
+  const settings = await readZaiSettings()
   try {
     // zai patch (2026-08-30, plan P3.1-T1): ReplRuntime 现在是 OpenccRuntime
     // 的薄包装,而不是 createReplSession 的独立适配器。先构造 shared

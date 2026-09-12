@@ -1,7 +1,7 @@
 import { writeFile, rename, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
-import type { RuntimeCore, OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
+import type { OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
 // Re-export the cache API so existing `zaiSettingsStore` importers can reach
 // it without a second import path.
@@ -232,31 +232,6 @@ export function resolveAutoUpdate(settings: ZaiSettings): boolean {
 /** Validate a candidate auto-update value before persisting. */
 export function isValidAutoUpdate(value: unknown): value is boolean {
   return typeof value === 'boolean'
-}
-
-/**
- * 核心运行时二态设置开关。与 `agentRuntime.ts` 的
- * `resolveRuntimeCore` 语义对齐(env `ZAI_RUNTIME_CORE` / `--runtimeCore`
- * flag 优先级更高,不在此函数职责内):把持久化的 `settings.runtimeCore`
- * 归一化为 'default' | 'repl' 供 UI 渲染
- * (缺失 / 非法 → 'repl',spec 2026-08-30 §5.1;已废弃值 inproc/spawn
- * 一律落 'repl')。
- */
-export function resolveRuntimeCore(
-  settings: ZaiSettings,
-): RuntimeCore {
-  const s = settings.runtimeCore
-  // 阶段 1(2026-09-12):'default' deprecated,折叠成 'repl'。
-  // 保留类型面 'default' 只为磁盘遗留值兼容;运行时永远 'repl'。
-  if (s === 'repl') return 'repl'
-  return 'repl'
-}
-
-/** Validate a candidate runtimeCore value before persisting. */
-export function isValidRuntimeCore(
-  value: unknown,
-): value is RuntimeCore {
-  return value === 'default' || value === 'repl'
 }
 
 /**

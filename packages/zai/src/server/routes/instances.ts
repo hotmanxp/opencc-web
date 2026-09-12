@@ -1,7 +1,6 @@
 import { Router, type IRouter } from 'express'
 import { existsSync, statSync } from 'node:fs'
 import { getInstanceSupervisor, CURRENT_INSTANCE_ID } from '../services/instanceSupervisor.js'
-import type { RuntimeCore } from '../../shared/settings.js'
 
 const router: IRouter = Router()
 
@@ -90,44 +89,6 @@ function parsePortField(
   return { ok: true, value: v }
 }
 
-const RUNTIME_CORE_VALUES: readonly RuntimeCore[] = ['default', 'repl']
-
-/**
- * Parse an optional `runtimeCore` body field. Tri-state contract mirrors
- * `parsePortField` so the call-site in POST/PATCH can collapse both
- * fields into the same `undefined | value | null` shape:
- *
- * - `undefined` (absent) → `{ value: undefined }` so callers can forward
- *   "no override" through to the supervisor (used by /start, /restart);
- * - `null` → `{ value: null }` only meaningful for PATCH, where it
- *   explicitly clears the per-instance override back to "inherit global
- *   `settings.runtimeCore`". POST /instances treats `null` as 400 to
- *   match the `port` discipline (nothing to clear on a brand-new
- *   definition);
- * - string ∈ `'default' | 'repl'` → persisted as
- *   the per-instance override;
- * - anything else → 400.
- *
- * Validation intentionally mirrors `applyRuntimeCoreFlag`'s accepted
- * value set so a typo like `runtimeCore: 'repll'` fails at the HTTP
- * boundary instead of silently degrading to "inherit".
- */
-function parseRuntimeCoreField(
-  v: unknown,
-  field: string,
-  allowNull: boolean,
-): { ok: true; value: RuntimeCore | null | undefined } | { ok: false; error: string } {
-  if (v === undefined) return { ok: true, value: undefined }
-  if (v === null) {
-    if (!allowNull) return { ok: false, error: `${field} must be one of [default, repl]` }
-    return { ok: true, value: null }
-  }
-  if (typeof v !== 'string' || !RUNTIME_CORE_VALUES.includes(v as RuntimeCore)) {
-    return { ok: false, error: `${field} must be one of [default, repl]` }
-  }
-  return { ok: true, value: v as RuntimeCore }
-}
-
 router.get('/instances', (_req, res) => {
   if (!ensureNotInstanceChild(res)) return
   res.json({ instances: getInstanceSupervisor().getSnapshots() })
@@ -157,13 +118,8 @@ router.post('/instances', async (req, res) => {
   if (rawPort === null) return badRequest(res, 'port must be an integer between 1 and 65535')
   const port = parsePortField(rawPort, 'port')
   if (!port.ok) return badRequest(res, port.error)
-  // Same discipline as port: POST /instances never accepts `null` for
-  // `runtimeCore` — there's no override to clear on a brand-new
-  // definition, and `null` only carries meaning on PATCH.
-  const runtimeCore = parseRuntimeCoreField((req.body ?? {}).runtimeCore, 'runtimeCore', false)
-  if (!runtimeCore.ok) return badRequest(res, runtimeCore.error)
   // 应用 profile:仅允许 `undefined | 'task-factory'`。`null` 与未知字符串都 400,
-  // 对齐 POST 上其它字段(`port` / `runtimeCore`)无 null / 无 typo 的口径 —
+  // 对齐 POST 上其它字段(`port` 等)无 null / 无 typo 的口径 —
   // 创建路径没有"清除"语义,拒绝未知值避免给任务工厂实例错锁 mainAgent。
   const rawApp = (req.body ?? {}).app
   if (rawApp !== undefined && rawApp !== 'task-factory') {
@@ -175,7 +131,6 @@ router.post('/instances', async (req, res) => {
       cwd,
       lan: lan.value === true,
       port: port.value as number | undefined,
-      runtimeCore: runtimeCore.value as RuntimeCore | undefined,
       app: rawApp as 'task-factory' | undefined,
     })
     res.status(201).json({ instance })
@@ -248,16 +203,10 @@ router.patch('/instances/:id', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
-  // PATCH is the only surface where `runtimeCore: null` is meaningful:
-  // it explicitly clears the per-instance override back to "inherit
-  // global `settings.runtimeCore`". Allowed here, rejected on POST.
-  const runtimeCore = parseRuntimeCoreField((req.body ?? {}).runtimeCore, 'runtimeCore', true)
-  if (!runtimeCore.ok) return badRequest(res, runtimeCore.error)
   try {
-    const patch: { lan?: boolean; port?: number | null; runtimeCore?: RuntimeCore | null } = {}
+    const patch: { lan?: boolean; port?: number | null } = {}
     if (lan.value !== undefined) patch.lan = lan.value
     if (port.value !== undefined) patch.port = port.value
-    if (runtimeCore.value !== undefined) patch.runtimeCore = runtimeCore.value
     const instance = await getInstanceSupervisor().updateInstance(req.params.id, patch)
     res.json({ instance })
   } catch (err) {
