@@ -731,12 +731,11 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // `streamingToolExecutor` tool loop → vendor's
   // `queryModelWithStreaming` → upstream API.
   // ---------------------------------------------------------------------
-  // 二态分支(ZAI_RUNTIME_CORE,spec §5.6):
-  //   default → 进程内 createOpenccRuntime(legacy 兜底);
-  //   repl    → ReplRuntime(createReplSession 抽壳路径,默认)。
-  // 已废弃值(inproc / spawn / 其它)静默落 'repl'(resolveRuntimeCore 收敛)。
-  // settings 在分支前读一次;上下文注释见文档 spec。两条链路都保留上文
-  // enableOpenccConfigs(vendor config system)与 zai 内部子系统
+  // 阶段 1(2026-09-12,plan repl-link-remove):runtimeCore 永远 'repl'。
+  // 下面的 if/else 已合并为单一 REPL 路径(createOpenccRuntime 构造
+  // sharedRuntime → ReplRuntime 包装);resolveRuntimeCore 把 'default'
+  // 与非法值折叠成 'repl'(见上面 assert)。
+  // 保留 enableOpenccConfigs(vendor config system)与 zai 内部子系统
   // (PluginRuntime / eventBus / __zaiBridgeCtx / sessionInbox / sessionFacade)。
   // ---------------------------------------------------------------------
   // zai patch (2026-08-28): `enableOpenccConfigs()`(上一段)会把 settings.env
@@ -746,104 +745,73 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   reapplyRuntimeCoreFlag()
   const settings = await readZaiSettings()
   const runtimeCore = resolveRuntimeCore(settings)
+  // 阶段 1(2026-09-12)防御性 assert:initAgentRuntime 收到的 runtimeCore
+  // 一定是 'repl'(resolveRuntimeCore 已折叠 'default' / 非法值)。
+  // 若未来出现非 'repl',说明外部某条链路绕过了折叠,这里直接抛错
+  // 而不是静默跑 else 分支(已删)。
+  if (runtimeCore !== 'repl') {
+    throw new Error(
+      `[initAgentRuntime] unexpected runtimeCore=${runtimeCore}; phase-1 collapse to 'repl' is broken`,
+    )
+  }
   activeRuntimeCore = runtimeCore
 
-  // zai patch (2026-08-30, plan P2, Task 6): 'repl' is a top-level
-  // runtimeCore value, unified under the existing runtimeCore mechanism —
-  // not a sub-mode of anything and not a separate `runtime.kernel` field.
-  // repl branch instantiates ReplRuntime which wraps createReplSession as
-  // OpenccRuntimeV2 adapter. Default 'repl' makes the new path canonical
-  // (P2 complete); 'default' remains the legacy in-process fallback.
-  // Spec: docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1.
-  if (runtimeCore === 'repl') {
-    try {
-      // zai patch (2026-08-30, plan P3.1-T1): ReplRuntime 现在是 OpenccRuntime
-      // 的薄包装,而不是 createReplSession 的独立适配器。先构造 shared
-      // OpenccRuntime(供 routes/sessions.ts 的 5 个 RESTful 端点直接调用
-      // 8-method 契约),再注入到 ReplRuntime.query()。ReplRuntime 在
-      // openccRuntime.query() 不存在时(单元测试场景)回落到原 P3 stub 路径。
-      const { createOpenccRuntime: createOpenccRuntimeFactory } = await import(
-        '@zn-ai/zn-agent-core'
-      )
-      const sharedRuntime = await createOpenccRuntimeFactory({
-        dataDir,
-        runtimeId: 'zai-server',
-        defaultCwd: cwd,
-        // Fallback chain: explicit Sonnet env → small/fast env → vendor default (anthropic SDK picks).
-        defaultModel:
-          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
-          ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
-        // zai-server: skip MCP bootstrap so the headless runtime comes up
-        // even if user's `~/.zai.json` blocks MCP connect. QueryEngine's
-        // per-query MCP refresh + /mcp slash command reconnect on demand.
-        connectMcp: false,
-        interactive: !(isSdk ?? false),
-      })
-      // Set on the module-level singleton holder so routes/sessions.ts can
-      // call listSessions / getSession / readTranscript / patchSession /
-      // removeSession directly without going through the ReplRuntime
-      // adapter layer. Idempotent: a prior call (e.g. a hot-reloaded
-      // initAgentRuntime) keeps the original instance, matching the
-      // `if (runtime) return` guard at the top of initAgentRuntime.
-      if (!sharedOpenccRuntimeSingleton) sharedOpenccRuntimeSingleton = sharedRuntime
-      // ReplRuntime implements a partial OpenccRuntimeV2 shape (query /
-      // abort / enqueue / interrupt / getSessionState / shutdown). With
-      // sharedRuntime injected, query() delegates to it; without it,
-      // query() falls back to the P3 stub (createReplSession). The full
-      // V1 8-method contract (getSession, listSessions, readTranscript,
-      // patchSession, removeSession) is served via the module-level
-      // `sharedOpenccRuntimeSingleton` for routes/sessions.ts rather than
-      // through this adapter.
-      runtime = new ReplRuntime(sharedRuntime) as unknown as OpenccRuntime
-      const cleanup = () => {
-        if (runtime) void runtime.shutdown()
-        void sharedRuntime.shutdown().catch(() => {})
-      }
-      process.once('SIGTERM', cleanup)
-      process.once('SIGINT', cleanup)
-    } catch (err) {
-      console.error('[initAgentRuntime] ReplRuntime init failed:', err)
-      throw err
+  // zai patch (2026-09-12, plan repl-link-remove 阶段 1): 收敛完成。
+  // `initAgentRuntime` 现在永远走 REPL 路径:createOpenccRuntime 构造
+  // sharedRuntime(供 routes/sessions.ts 的 V1 8-method 契约)→ ReplRuntime
+  // 包装(query / slash command / P3 stub 路径)。
+  // 原 `else { runtimeCore === 'default' }` 分支(裸调 createOpenccRuntime,
+  // 不外包 ReplRuntime、不设置 sharedSingleton)已被删除——'default' 由
+  // resolveRuntimeCore 在进入 initAgentRuntime 前折叠成 'repl'。
+  // Spec: docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1。
+  try {
+    // zai patch (2026-08-30, plan P3.1-T1): ReplRuntime 现在是 OpenccRuntime
+    // 的薄包装,而不是 createReplSession 的独立适配器。先构造 shared
+    // OpenccRuntime(供 routes/sessions.ts 的 5 个 RESTful 端点直接调用
+    // 8-method 契约),再注入到 ReplRuntime.query()。ReplRuntime 在
+    // openccRuntime.query() 不存在时(单元测试场景)回落到原 P3 stub 路径。
+    const { createOpenccRuntime: createOpenccRuntimeFactory } = await import(
+      '@zn-ai/zn-agent-core'
+    )
+    const sharedRuntime = await createOpenccRuntimeFactory({
+      dataDir,
+      runtimeId: 'zai-server',
+      defaultCwd: cwd,
+      // Fallback chain: explicit Sonnet env → small/fast env → vendor default (anthropic SDK picks).
+      defaultModel:
+        process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+        ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
+      // zai-server: skip MCP bootstrap so the headless runtime comes up
+      // even if user's `~/.zai.json` blocks MCP connect. QueryEngine's
+      // per-query MCP refresh + /mcp slash command reconnect on demand.
+      connectMcp: false,
+      interactive: !(isSdk ?? false),
+    })
+    // Set on the module-level singleton holder so routes/sessions.ts can
+    // call listSessions / getSession / readTranscript / patchSession /
+    // removeSession directly without going through the ReplRuntime
+    // adapter layer. Idempotent: a prior call (e.g. a hot-reloaded
+    // initAgentRuntime) keeps the original instance, matching the
+    // `if (runtime) return` guard at the top of initAgentRuntime.
+    if (!sharedOpenccRuntimeSingleton) sharedOpenccRuntimeSingleton = sharedRuntime
+    // ReplRuntime implements a partial OpenccRuntimeV2 shape (query /
+    // abort / enqueue / interrupt / getSessionState / shutdown). With
+    // sharedRuntime injected, query() delegates to it; without it,
+    // query() falls back to the P3 stub (createReplSession). The full
+    // V1 8-method contract (getSession, listSessions, readTranscript,
+    // patchSession, removeSession) is served via the module-level
+    // `sharedOpenccRuntimeSingleton` for routes/sessions.ts rather than
+    // through this adapter.
+    runtime = new ReplRuntime(sharedRuntime) as unknown as OpenccRuntime
+    const cleanup = () => {
+      if (runtime) void runtime.shutdown()
+      void sharedRuntime.shutdown().catch(() => {})
     }
-  } else {
-    try {
-      const { createOpenccRuntime: factory } = await import(
-        '@zn-ai/zn-agent-core'
-      )
-      // zai patch (2026-08-29, plan §3.5): mainAgent / mainAgents 字段
-      // 已下沉 core 并由 AgentRegistry 接管;zai-server 端不再
-      // resolveMainAgent 调 createOpenccRuntime(它不再认这两个字段)。
-      // 当前会话的 mainAgent 走 routes/agent.ts prompt 路径的
-      // registryAgent(sessionId, agentId) 绑进 registry,createOpenccRuntime
-      // 内部直接 lookup registry slot。
-      runtime = await factory({
-        dataDir,
-        runtimeId: 'zai-server',
-        defaultCwd: cwd,
-        defaultModel:
-          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
-          ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
-        // zai-server: skip MCP bootstrap so the headless runtime comes
-        // up even if the user's `~/.zai.json` lists MCP servers that
-        // block the connect call. The QueryEngine's per-query MCP
-        // refresh + the `/mcp` slash command reconnect on demand.
-        connectMcp: false,
-        // Default is interactive (STATE.isInteractive = true, vendor
-        // branches run as an interactive OpenCC CLI — verified against
-        // the real Web UI: permission asks and AskUserQuestion still
-        // bridge to the web). `zai dev --sdk` / `zai start --sdk` opts
-        // into SDK/headless mode instead.
-        interactive: !(isSdk ?? false),
-      })
-      const cleanup = () => {
-        if (runtime) void runtime.shutdown()
-      }
-      process.once('SIGTERM', cleanup)
-      process.once('SIGINT', cleanup)
-    } catch (err) {
-      console.error('[initAgentRuntime] createOpenccRuntime failed:', err)
-      throw err
-    }
+    process.once('SIGTERM', cleanup)
+    process.once('SIGINT', cleanup)
+  } catch (err) {
+    console.error('[initAgentRuntime] ReplRuntime init failed:', err)
+    throw err
   }
 
   process.once('SIGTERM', () => stopMemoryWatcher())
