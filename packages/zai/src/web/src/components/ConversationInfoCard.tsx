@@ -19,19 +19,6 @@ function statusLabel(status: ConversationInfo['status']): string {
   }
 }
 
-// zai patch (2026-08-30): 把 runtimeCore 4 态枚举翻译成更短的展示值,
-// 去掉下划线 / camelCase 噪声;与 SettingsDrawer 的 label 保持一致用
-// 中文,方便用户对照「Agent 运行时」设置项。
-function runtimeCoreLabel(r: ConversationInfo['runtimeCore']): string {
-  switch (r) {
-    // 阶段 1(2026-09-12):'default' 已 deprecated,但磁盘遗留值仍可能读到;
-    // UI 显式标 (deprecated),让用户知道这个值不会实际生效。
-    case 'default': return 'repl (deprecated)'
-    case 'repl': return 'repl'
-    case null: return '—'
-  }
-}
-
 // zai patch (2026-08-09): 把 token 数字按 K 显示, 小于 1000 直接显示原文。
 // 1,000,000 → "1000K"(用户明确要求 K 单位, 即便 million 级别也走 K 不切 M),
 // 200 → "200"(< 1000 保留原文避免 0K 歧义)。
@@ -110,17 +97,6 @@ export default function ConversationInfoCard({ info }: Props) {
         </span>
       </Descriptions.Item>
       <Descriptions.Item label="状态">{statusLabel(info.status)}</Descriptions.Item>
-      {/* 阶段 1(2026-09-12):运行时永远 'repl';info.runtimeCore 与
-          info.activeRuntimeCore 一定相等。简化显示 activeRuntimeCore,
-          删掉不一致时的"高亮 + 需重启生效"分支(永远走不到)。
-          字段保留:info.runtimeCore 是持久化值(settings.json),可能为
-          'default'(磁盘遗留);步骤 5.4 runtimeCoreLabel 已折叠显示。
-          行为:fetch 还没回来(null)→ '—';否则显示 activeRuntimeCore。 */}
-      <Descriptions.Item label="运行时">
-        {info.activeRuntimeCore === null
-          ? '—'
-          : runtimeCoreLabel(info.activeRuntimeCore)}
-      </Descriptions.Item>
     </Descriptions>
   )
 }

@@ -650,13 +650,6 @@ function formatValue(row: SettingsRow): string {
 
 type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 
-// 核心运行时:settings.runtimeCore 二态(阶段 1 收敛后)。
-// 实际生效优先级:--runtimeCore flag / env ZAI_RUNTIME_CORE > 本设置;且
-// 运行时只在服务启动 initAgentRuntime 时解析一次,改后需重启实例生效。
-// 'default' 类型面保留(磁盘兼容),运行时永远 'repl';本下拉 UI 阶段 1
-// 保留为只读 + 单选项 'repl',后续阶段 2 改为隐藏整行。
-type RuntimeCoreOption = 'default' | 'repl'
-
 // 阶段 1 schema:对齐 spec 表里的 Model / Permission / Theme / Env Vars 字段,
 // 但用 opencc /config 风格文本行代替 Tabs + Form。
 //
@@ -674,7 +667,6 @@ function buildStaticSchema(
   autoUpdate: boolean,
   mainAgent: string,
   agentOptions: EnumOption[],
-  runtimeCore: RuntimeCoreOption,
 ): SettingsSchema {
   return [
     {
@@ -871,27 +863,6 @@ function buildStaticSchema(
         },
       ],
     },
-    {
-      // Agent 核心运行时 — 阶段 1 收敛后唯一形态是 'repl'。
-      // 'default' 类型面保留(磁盘遗留兼容)但运行时已折叠。
-      // UI 阶段 1:下拉只读 + 单选项 'repl';阶段 2 死代码清理后考虑
-      // 移除整行或保留为 info-only label。
-      // 改后需重启实例生效(运行时在 initAgentRuntime 一次性解析);
-      // env ZAI_RUNTIME_CORE 或 --runtimeCore flag 存在时会覆盖本设置。
-      section: '运行时',
-      rows: [
-        {
-          key: 'runtimeCore',
-          label: 'Agent 调度器 · 重启后生效',
-          kind: 'enum',
-          value: 'repl',
-          options: [
-            { value: 'repl', label: 'repl', description: '唯一运行时形态(阶段 1 收敛)' },
-          ],
-          disabled: true,
-        },
-      ],
-    },
   ]
 }
 
@@ -949,14 +920,9 @@ export default function SettingsDrawer() {
   const [agentOptions, setAgentOptions] = useState<EnumOption[]>(() => [
     { value: 'default', label: 'default' },
   ])
-  // 核心运行时:当前持久化值来自 GET /api/agent/settings.runtimeCore,
-  // 修改走 PUT /api/agent/settings/runtime-core(同 mainAgent 模式,
-  // 本地 state + 重启后生效)。
-  const [runtimeCore, setRuntimeCore] =
-    useState<RuntimeCoreOption>('repl')
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions, runtimeCore),
+    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions),
   )
   // mount 时拉一次 GET /api/agent/settings → 填充 agentOptions + 当前 mainAgent。
   // destroyOnClose 每次打开都会重新挂载,列表保持新鲜(新增外置 agent 文件后
@@ -980,15 +946,9 @@ export default function SettingsDrawer() {
           )
         }
         if (typeof data.mainAgent === 'string') setMainAgent(data.mainAgent)
-        if (
-          data.runtimeCore === 'default' ||
-          data.runtimeCore === 'repl'
-        ) {
-          setRuntimeCore(data.runtimeCore)
-        }
       })
       .catch(() => {
-        // swallow — 保持默认 'repl' 选项(spec 2026-08-30 §5.1 默认值翻为 'repl')
+        // swallow — agentOptions / mainAgent 保持默认
       })
     return () => {
       cancelled = true
@@ -1117,20 +1077,6 @@ export default function SettingsDrawer() {
       })),
     )
   }, [mainAgent])
-  // 同步 runtimeCore → schema 行(本地 state,选择后 PUT 持久化)。
-  useEffect(() => {
-    setSchema((prev) =>
-      prev.map((s) => ({
-        ...s,
-        rows: s.rows.map((r) => {
-          if (r.key === 'runtimeCore' && r.kind === 'enum') {
-            return { ...r, value: runtimeCore }
-          }
-          return r
-        }),
-      })),
-    )
-  }, [runtimeCore])
   // 同步 agentOptions → schema 行(拉取 mainAgents 列表后更新 options)。
   useEffect(() => {
     setSchema((prev) =>
@@ -1283,36 +1229,6 @@ export default function SettingsDrawer() {
         }).catch(() => {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
-      }
-      // 核心运行时 — PUT settings.runtimeCore。运行时在
-      // initAgentRuntime 一次性解析,改后需重启实例生效,提示用户。
-      // 阶段 1(2026-09-12):UI 已只读 + 单选项,但 handleChange 防御性兼容:
-      // 收到 'default' 时 warn 并仅写 'repl'(与后端一致);UI 也走 message.info
-      // 路径,不会让用户感到「选了但没生效」。
-      if (key === 'runtimeCore' && typeof value === 'string') {
-        const raw = value as RuntimeCoreOption
-        const next: RuntimeCoreOption = raw === 'default' ? 'repl' : raw
-        if (raw === 'default') {
-          console.warn(
-            '[SettingsDrawer] runtimeCore change to deprecated "default" coerced to "repl" (phase-1 runtime unification)',
-          )
-        }
-        setRuntimeCore(next)
-        void fetch('/api/agent/settings/runtime-core', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ runtimeCore: next }),
-        })
-          .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-          .then((data: { runtimeCore?: unknown }) => {
-            if (typeof data?.runtimeCore === 'string') {
-              setRuntimeCore(data.runtimeCore as RuntimeCoreOption)
-            }
-            message.info('运行时已保存,重启 zai 后生效')
-          })
-          .catch(() => {
-            message.warning('运行时保存失败,下次 GET 会重新对齐磁盘状态')
-          })
       }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>
