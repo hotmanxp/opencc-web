@@ -1,10 +1,9 @@
 // @ts-nocheck
 /**
  * zai patch (2026-09-12, plan cron-fire-to-prompt): E2E 测试 —
- * 验证 cron 到点 fire 时, 三条链路都被触发:
+ * 验证 cron 到点 fire 时, 两条链路都被触发:
  *   1. vendor commandQueue (zaiEnqueuePendingNotification) —— 原 fallback
  *   2. SessionInbox.followup (__zaiSessionInboxFollowup) —— idle wake / busy steer
- *   3. dsh inbox dispatch (__zaiDispatchDshInbox, kind='cron_fired') —— SSE emit
  *
  * 不 mock 真链路 (inboxMessageHandler.ts / messageQueueManager.ts 等):
  * 按 memory feedback-obsolete-tests.md 规则, 主链路测试不该 mock
@@ -45,11 +44,10 @@ vi.mock('../../../opencc-src/tools/ScheduleCronTool/prompt.js', () => ({
 import { setupScheduledTasks } from '../setup/setupCronScheduler.js'
 import { installMessageQueueAdapterBridges, __resetMessageQueueAdapterBridgesForTests } from '../../messageQueueAdapter.js'
 
-describe('cron fire → prompt triple dispatch (E2E)', () => {
+describe('cron fire → prompt dual dispatch (E2E)', () => {
   let enqueueSpy: ReturnType<typeof vi.fn>
   let enqueuePendingSpy: ReturnType<typeof vi.fn>
   let inboxFollowupSpy: ReturnType<typeof vi.fn>
-  let dispatchDshInboxSpy: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     // 1) vendor bridge spy —— 验 fallback 链路
@@ -60,11 +58,9 @@ describe('cron fire → prompt triple dispatch (E2E)', () => {
       enqueuePendingNotification: enqueuePendingSpy,
     })
 
-    // 2) zai-server install 的 inbox seams —— 验证 Fix 2/3 触发
+    // 2) zai-server install 的 inbox seam —— 验证 Fix 2 触发
     inboxFollowupSpy = vi.fn()
-    dispatchDshInboxSpy = vi.fn()
     ;(globalThis as any).__zaiSessionInboxFollowup = inboxFollowupSpy
-    ;(globalThis as any).__zaiDispatchDshInbox = dispatchDshInboxSpy
 
     // 3) zai-server 在 setCurrentSessionId 时写入, 这里设个测试 sessionId
     ;(globalThis as any).__zaiCurrentSessionId = 'test-session-123'
@@ -73,14 +69,13 @@ describe('cron fire → prompt triple dispatch (E2E)', () => {
   afterEach(() => {
     __resetMessageQueueAdapterBridgesForTests()
     delete (globalThis as any).__zaiSessionInboxFollowup
-    delete (globalThis as any).__zaiDispatchDshInbox
     delete (globalThis as any).__zaiCurrentSessionId
     mockOnFire = null
     mockStartCalled = 0
     mockStopCalled = 0
   })
 
-  it('fires all three dispatch paths within 50ms', async () => {
+  it('fires both dispatch paths within 50ms', async () => {
     const handle = setupScheduledTasks({
       sessionId: '', // v2 路径: 走 globalThis.__zaiCurrentSessionId fallback
       getAppState: () => ({}),
@@ -119,18 +114,6 @@ describe('cron fire → prompt triple dispatch (E2E)', () => {
       }),
     )
 
-    // 断言 3: dsh inbox dispatch 被调 (Fix 3)
-    expect(dispatchDshInboxSpy).toHaveBeenCalledTimes(1)
-    expect(dispatchDshInboxSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'cron_fired',
-        sessionId: 'test-session-123',
-        payload: expect.objectContaining({
-          prompt: '请检查一下今天的待办',
-        }),
-      }),
-    )
-
     handle.teardown()
     expect(mockStopCalled).toBe(1)
   })
@@ -152,19 +135,13 @@ describe('cron fire → prompt triple dispatch (E2E)', () => {
       'per-session-instance-abc',
       expect.objectContaining({ content: 'per-session prompt' }),
     )
-    expect(dispatchDshInboxSpy).toHaveBeenCalledTimes(1)
-    expect(dispatchDshInboxSpy.mock.calls[0][0]).toMatchObject({
-      kind: 'cron_fired',
-      sessionId: 'per-session-instance-abc',
-    })
 
     handle.teardown()
   })
 
   it('falls back silently when seams not installed (vendor unit test env)', async () => {
-    // 清理 inbox seams 模拟 "zai-server 还没启动" 的 vendor 单测场景
+    // 清理 inbox seam 模拟 "zai-server 还没启动" 的 vendor 单测场景
     delete (globalThis as any).__zaiSessionInboxFollowup
-    delete (globalThis as any).__zaiDispatchDshInbox
     delete (globalThis as any).__zaiCurrentSessionId
 
     const handle = setupScheduledTasks({
@@ -181,20 +158,16 @@ describe('cron fire → prompt triple dispatch (E2E)', () => {
 
     // vendor fallback 仍应触发 (主路径不依赖 seam)
     expect(enqueuePendingSpy).toHaveBeenCalledTimes(1)
-    // inbox/dispatch seams 静默跳过 (typeof check fail → no-op)
+    // inbox seam 静默跳过 (typeof check fail → no-op)
     expect(inboxFollowupSpy).not.toHaveBeenCalled()
-    expect(dispatchDshInboxSpy).not.toHaveBeenCalled()
 
     handle.teardown()
   })
 
-  it('isolated fire errors in inbox/dispatch do not break vendor fallback', async () => {
+  it('isolated fire errors in inbox do not break vendor fallback', async () => {
     // 模拟 seam 抛错 —— 主路径必须 robust
     ;(globalThis as any).__zaiSessionInboxFollowup = vi.fn(() => {
       throw new Error('inbox explosion')
-    })
-    ;(globalThis as any).__zaiDispatchDshInbox = vi.fn(() => {
-      throw new Error('dispatch explosion')
     })
 
     const handle = setupScheduledTasks({

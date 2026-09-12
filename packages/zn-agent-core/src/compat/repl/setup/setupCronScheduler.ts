@@ -43,14 +43,13 @@ export function setupScheduledTasks(opts: SetupScheduledTasksOpts): SetupSchedul
       onFire: prompt => {
         // zai patch (2026-09-12, plan cron-fire-to-prompt): 双断链修复 —— 除
         // 原 vendor commandQueue 兜底之外, 还把 fire 路由到 SessionInbox.followup
-        // (idle → nextTurn + wake; busy → nextStep) 和 dsh inbox dispatch
-        // (cron_fired → eventBus emit), 让 zai-server 真正拿到 prompt + SSE 推
-        // 前端。这两个 seam 由 zai-server 在 createApp 时 install (见
-        // agentRuntime.ts 的 __zaiSessionInboxFollowup / __zaiDispatchDshInbox);
-        // 未安装时静默 no-op (vendor 单测 / 离线构造场景), 不影响 fallback。
+        // (idle → nextTurn + wake; busy → nextStep), 让 zai-server 真正拿到
+        // prompt + SSE 推前端。这个 seam 由 zai-server 在 createApp 时 install
+        // (见 agentRuntime.ts 的 __zaiSessionInboxFollowup); 未安装时静默 no-op
+        // (vendor 单测 / 离线构造场景), 不影响 fallback。
         // sessionId 路由: 优先 opts.sessionId (per-session 实例), 其次
         // globalThis.__zaiCurrentSessionId (setCurrentSessionId 写入, zai-server
-        // 切换 active session 时更新), 都没有时静默跳过 inbox/dispatch (避免漏
+        // 切换 active session 时更新), 都没有时静默跳过 inbox (避免漏
         // sessionId 触发全局污染)。vendor fallback 是否生效取决于 sessionId
         // 是否能解析 —— 见下方注释 (1)。
         // 用 `||` 而非 `??`: v2 调用方传 sessionId: '' 时也该 fallback (空串
@@ -64,7 +63,7 @@ export function setupScheduledTasks(opts: SetupScheduledTasksOpts): SetupSchedul
         //    若 sessionId 完全无法解析 (zai-server 冷启动无 active session),
         //    zaiEnqueuePendingNotification 抛错被此处 try/catch 静默吞,
         //    vendor commandQueue 路径失效 —— 这是设计选择:冷启动无 session 时
-        //    inbox/dispatch 也跳过,fire 完全 no-op 而非污染全局 session 路由。
+        //    inbox 也跳过,fire 完全 no-op 而非污染全局 session 路由。
         try {
           zaiEnqueuePendingNotification({
             value: prompt,
@@ -103,30 +102,6 @@ export function setupScheduledTasks(opts: SetupScheduledTasksOpts): SetupSchedul
             } catch (err) {
               console.warn('[cron] inbox followup failed:', err)
             }
-          }
-        }
-
-        // Fix 3: dsh inbox dispatch —— 把 cron_fired 推到 eventBus, 前端 SSE 收到。
-        // 命名规范统一走 dispatchDshInbox(env) (inboxMessageHandler.ts:419), 让
-        // cron_fired / task-notification / bash_task.changed 共用一条分发链。
-        const dispatch = (
-          globalThis as {
-            __zaiDispatchDshInbox?: (env: {
-              kind: string
-              sessionId: string
-              payload: Record<string, unknown>
-            }) => unknown
-          }
-        ).__zaiDispatchDshInbox
-        if (typeof dispatch === 'function' && sid) {
-          try {
-            dispatch({
-              kind: 'cron_fired',
-              sessionId: sid,
-              payload: { prompt },
-            })
-          } catch (err) {
-            console.warn('[cron] dispatchDshInbox failed:', err)
           }
         }
 

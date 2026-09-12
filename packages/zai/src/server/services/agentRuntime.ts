@@ -111,7 +111,6 @@ const permissionRegistry = new PermissionRegistry()
 // setupCronScheduler.onFire (compat 层 vendor 模块) 调 followup 不必先
 // 拿到整个 inbox bridge 对象。语义同 __zaiSessionInbox.followup, 单独
 // 拆出便于 vendor 端 typed 调用 (seam 名固定, 不会随对象演进变字段名)。
-import { dispatchDshInbox as _dispatchDshInbox } from './inboxMessageHandler.js'
 ;(globalThis as any).__zaiSessionInboxFollowup = (
   sid: string,
   msg: {
@@ -122,19 +121,6 @@ import { dispatchDshInbox as _dispatchDshInbox } from './inboxMessageHandler.js'
   },
 ) => {
   getSessionInbox(sid).followup(sid, msg as InboxMessage)
-}
-
-// zai patch (2026-09-12, plan cron-fire-to-prompt): dispatchDshInbox 单
-// 函数 seam —— setupCronScheduler.onFire 直接把 cron_fired envelope 投到
-// 这里, 由 inboxMessageHandler 路由到对应 channel (cron_fired → eventBus.emit,
-// task-notification → SessionInbox.followup, 等)。同一函数 seam 让 vendor
-// 层不必感知 8 类 delivery kind 的 switch 内部实现。
-;(globalThis as any).__zaiDispatchDshInbox = (env: {
-  kind: string
-  sessionId: string
-  payload: Record<string, unknown>
-}) => {
-  _dispatchDshInbox(env as Parameters<typeof _dispatchDshInbox>[0])
 }
 
 // zai patch (2026-09-06): register zai's per-session SessionInbox drain as
