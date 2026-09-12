@@ -9,6 +9,14 @@
 > > (`createPrintRuntime*` / `headlessPrintSession` / `printSessionRuntime`)+ zai spawn 链路
 > > (`sessionHost/*` / `RuntimeAdapter` / `runtimeFlag`)+ print.ts 的 8 个 zai patch 撤回。
 > > 详见 `docs/superpowers/plans/2026-09-12-repl-link-unify-phase2.md`。
+>
+> **Status (2026-09-12, phase-3 完成)**: 阶段 3 runtimeCore 概念完全移除。RuntimeCore
+> > 类型 / `ZaiSettings.runtimeCore` 字段 / `InstanceDefinition.runtimeCore` 字段 /
+> > `PUT /api/agent/settings/runtime-core` 端点 / `--runtimeCore` CLI flag +
+> > `cli/runtimeCoreFlag.ts` 模块 / SettingsDrawer "运行时" section /
+> > ConversationInfoCard "运行时" 行 / 8 个测试文件 + 1 mock 字段全部删除。
+> > 运行时唯一形态为 'repl',无任何切换入口。版本 minor bump 到 0.7.0。
+> > 详见 `docs/superpowers/plans/2026-09-12-repl-link-unify-phase3.md`。
 
 **日期**:2026-08-30
 **状态**:draft (待评审)
