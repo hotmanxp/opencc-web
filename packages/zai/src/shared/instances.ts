@@ -1,8 +1,6 @@
 // Shared instance-manager types — single source of truth for backend + frontend.
 // See docs/superpowers/specs/2026-08-03-zai-agent-instance-manager-design.md.
 
-import type { RuntimeCore } from './settings.js'
-
 export type InstanceState = 'stopped' | 'starting' | 'running' | 'stopping' | 'down'
 
 export const INSTANCE_STATES: readonly InstanceState[] = [
@@ -40,20 +38,6 @@ export interface InstanceDefinition {
    * fields cannot share a name without one of them losing precision.
    */
   startPort?: number | null
-  /**
-   * Per-instance override for the core runtime. When set, the supervisor
-   * spawns the child with `--runtimeCore <value>` so this instance picks
-   * up a different runtime than the global `settings.runtimeCore`
-   * default. When `undefined` (the default), the child inherits the
-   * global setting — the supervisor forwards no `--runtimeCore` flag and
-   * the resolved value comes from `ZAI_RUNTIME_CORE` env /
-   * `settings.runtimeCore`. `null` is NOT valid here; clearing back to
-   * inherit is done by omitting the field on PATCH (the route handler
-   * treats `null` as 400 to keep the contract unambiguous).
-   *
-   * Mirrors lan-agent's `InstanceRuntimeCore` enum (0.7.3 added `repl`).
-   */
-  runtimeCore?: RuntimeCore
   /**
    * 启动 profile：'task-factory' = 任务工厂实例（打开 /super-tasks、锁定调度器 Agent）。
    * 该值经 supervisor spawn `--app` 传给子进程，并在 `/api/system` 回显。
