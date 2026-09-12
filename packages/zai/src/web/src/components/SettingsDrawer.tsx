@@ -395,6 +395,10 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
               // 不会被外层 onClick 重复触发.
               const handleRowClick = () => {
                 setSelectedIdx(globalIdx)
+                // 阶段 1(2026-09-12):行级 disabled(enum)不打开 overlay,
+                // 让"只读单选项"行为生效(典型场景:runtimeCore 永远 'repl')。
+                const isRowDisabled = 'disabled' in row && row.disabled === true
+                if (isRowDisabled) return
                 if (row.kind === 'boolean') toggleBoolean(row)
                 else if (row.kind === 'enum' && row.key !== 'workMode' && row.key !== 'mainAgent') openEnumOverlay(row)
                 else if (row.kind === 'number') openNumberEdit(row)
@@ -646,10 +650,11 @@ function formatValue(row: SettingsRow): string {
 
 type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 
-// 核心运行时:settings.runtimeCore 二态(inproc/spawn 轨道已于
-// 2026-09-07 移除,残留配置值服务端静默落 'repl')。
+// 核心运行时:settings.runtimeCore 二态(阶段 1 收敛后)。
 // 实际生效优先级:--runtimeCore flag / env ZAI_RUNTIME_CORE > 本设置;且
 // 运行时只在服务启动 initAgentRuntime 时解析一次,改后需重启实例生效。
+// 'default' 类型面保留(磁盘兼容),运行时永远 'repl';本下拉 UI 阶段 1
+// 保留为只读 + 单选项 'repl',后续阶段 2 改为隐藏整行。
 type RuntimeCoreOption = 'default' | 'repl'
 
 // 阶段 1 schema:对齐 spec 表里的 Model / Permission / Theme / Env Vars 字段,
@@ -867,8 +872,10 @@ function buildStaticSchema(
       ],
     },
     {
-      // Agent 核心运行时 — 写入 settings.runtimeCore。
-      // default:进程内 query 链路;repl:ReplRuntime(默认)。
+      // Agent 核心运行时 — 阶段 1 收敛后唯一形态是 'repl'。
+      // 'default' 类型面保留(磁盘遗留兼容)但运行时已折叠。
+      // UI 阶段 1:下拉只读 + 单选项 'repl';阶段 2 死代码清理后考虑
+      // 移除整行或保留为 info-only label。
       // 改后需重启实例生效(运行时在 initAgentRuntime 一次性解析);
       // env ZAI_RUNTIME_CORE 或 --runtimeCore flag 存在时会覆盖本设置。
       section: '运行时',
@@ -877,11 +884,11 @@ function buildStaticSchema(
           key: 'runtimeCore',
           label: 'Agent 调度器 · 重启后生效',
           kind: 'enum',
-          value: runtimeCore,
+          value: 'repl',
           options: [
-            { value: 'default', label: 'default', description: '进程内 query 链路' },
-            { value: 'repl', label: 'repl', description: 'in-process REPL' },
+            { value: 'repl', label: 'repl', description: '唯一运行时形态(阶段 1 收敛)' },
           ],
+          disabled: true,
         },
       ],
     },
@@ -1279,8 +1286,17 @@ export default function SettingsDrawer() {
       }
       // 核心运行时 — PUT settings.runtimeCore。运行时在
       // initAgentRuntime 一次性解析,改后需重启实例生效,提示用户。
+      // 阶段 1(2026-09-12):UI 已只读 + 单选项,但 handleChange 防御性兼容:
+      // 收到 'default' 时 warn 并仅写 'repl'(与后端一致);UI 也走 message.info
+      // 路径,不会让用户感到「选了但没生效」。
       if (key === 'runtimeCore' && typeof value === 'string') {
-        const next = value as RuntimeCoreOption
+        const raw = value as RuntimeCoreOption
+        const next: RuntimeCoreOption = raw === 'default' ? 'repl' : raw
+        if (raw === 'default') {
+          console.warn(
+            '[SettingsDrawer] runtimeCore change to deprecated "default" coerced to "repl" (phase-1 runtime unification)',
+          )
+        }
         setRuntimeCore(next)
         void fetch('/api/agent/settings/runtime-core', {
           method: 'PUT',

@@ -24,7 +24,9 @@ function statusLabel(status: ConversationInfo['status']): string {
 // 中文,方便用户对照「Agent 运行时」设置项。
 function runtimeCoreLabel(r: ConversationInfo['runtimeCore']): string {
   switch (r) {
-    case 'default': return 'default'
+    // 阶段 1(2026-09-12):'default' 已 deprecated,但磁盘遗留值仍可能读到;
+    // UI 显式标 (deprecated),让用户知道这个值不会实际生效。
+    case 'default': return 'repl (deprecated)'
     case 'repl': return 'repl'
     case null: return '—'
   }
@@ -108,31 +110,16 @@ export default function ConversationInfoCard({ info }: Props) {
         </span>
       </Descriptions.Item>
       <Descriptions.Item label="状态">{statusLabel(info.status)}</Descriptions.Item>
-      {/* zai patch (2026-08-30): 实际生效的 runtimeCore。`info.runtimeCore` 是
-          持久化值(settings.json),`info.activeRuntimeCore` 是 server 启动
-          时按 --runtimeCore flag > env ZAI_RUNTIME_CORE > settings > 'repl'
-          解析后缓存的实际值。两者一致:简化显示 activeRuntimeCore。
-          不一致:高亮 activeRuntimeCore(实际跑的),并把 settings 值放在
-          前面,显式告诉用户「env / flag 覆盖了 settings,需重启才一致」——
-          与 SettingsDrawer 的「重启后生效」语义对齐。null 时显示 —,
-          表示 settings fetch 还没回来。 */}
+      {/* 阶段 1(2026-09-12):运行时永远 'repl';info.runtimeCore 与
+          info.activeRuntimeCore 一定相等。简化显示 activeRuntimeCore,
+          删掉不一致时的"高亮 + 需重启生效"分支(永远走不到)。
+          字段保留:info.runtimeCore 是持久化值(settings.json),可能为
+          'default'(磁盘遗留);步骤 5.4 runtimeCoreLabel 已折叠显示。
+          行为:fetch 还没回来(null)→ '—';否则显示 activeRuntimeCore。 */}
       <Descriptions.Item label="运行时">
-        {info.runtimeCore === null || info.activeRuntimeCore === null ? (
-          '—'
-        ) : info.runtimeCore === info.activeRuntimeCore ? (
-          runtimeCoreLabel(info.activeRuntimeCore)
-        ) : (
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-            <Text type="secondary">{runtimeCoreLabel(info.runtimeCore)}</Text>
-            <Text type="secondary"> → </Text>
-            <Text strong style={{ color: 'var(--accent-warn, #d4880f)' }}>
-              {runtimeCoreLabel(info.activeRuntimeCore)}
-            </Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {' '}(需重启生效)
-            </Text>
-          </span>
-        )}
+        {info.activeRuntimeCore === null
+          ? '—'
+          : runtimeCoreLabel(info.activeRuntimeCore)}
       </Descriptions.Item>
     </Descriptions>
   )
