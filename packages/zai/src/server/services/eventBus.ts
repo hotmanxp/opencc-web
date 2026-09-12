@@ -115,6 +115,15 @@ export class ServerEventBus {
   // 全局单调 seq 计数器 — emit 时分配, 单进程内单调递增, 进程重启后从 0
   // 重新计数 (跨重启的排序由 history replay + eventId 兜底, 见 shared/events.ts Base.seq 注释).
   private seqCounter = 0
+
+  /**
+   * 读出下一个即将分配的 seq(不消费)。让非 emit 路径(如 SSE 路由
+   * 主动 push 合成 state 事件)能拿到一个高于当前 history 最大 seq 的
+   * 起点,保证客户端 batch reorder 时合成 state 排在 history replay 之后。
+   */
+  getNextSeq(): number {
+    return this.seqCounter + 1
+  }
   private history: ServerEvent[] = []
   // per-sid 历史切片, 给 SSE 路由按 sid replay 用. 仅缓存有 sessionId 的事件;
   // 全局事件 (session.* / system.*) 留在全局 history, 它们不归某个 sid.

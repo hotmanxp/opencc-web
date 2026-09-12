@@ -2,9 +2,23 @@ import { Router, type IRouter, type Request, type Response } from 'express'
 import type { ServerEvent } from '../../shared/events.js'
 import { eventBus, ServerEventBus } from '../services/eventBus.js'
 import { writeSse, SSE_HEADERS } from '../services/sse.js'
+import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 
 const router: IRouter = Router()
 const HEARTBEAT_MS = 15_000
+
+/**
+ * 拿 bg runtime,失败时返回 null(不抛)。
+ * dsh 模式 / 早期 boot 阶段 / 任何 init 异常都被吞掉,继续走 SSE 主流程
+ * — 没有合成 push 不影响历史 replay 和 live 订阅,只是退回到原 bug 行为。
+ */
+function safeGetBackgroundRuntime() {
+  try {
+    return getBackgroundRuntime()
+  } catch {
+    return null
+  }
+}
 
 // 从 query / header 里拿 wantedSid. query 优先 (EventSource URL 友好:
 // EventSource 自带重连时浏览器会重发 ?sid=xxx; header 是 fetch 兼容路径).
@@ -81,6 +95,42 @@ router.get('/event', async (req: Request, res: Response) => {
     } else {
       for (const ev of eventBus.getHistoryAfter(lastEventId)) {
         writeSse(res, ev as unknown as Parameters<typeof writeSse>[1])
+      }
+    }
+
+    // 2.5. 主动推送当前所有 bg task 的最新状态 (agent_task.changed 合成事件)
+    //    修复刷新后 CliAgent / 后台任务事件丢失的 bug:
+    //    背景 — agent_task.changed 是「状态型」事件,每条 task 只 emit 一次
+    //    (attach/dispatch 起 task 时),但 per-sid eventBus history 上限 256
+    //    (CAPACITY=256,超出后 arr.shift() 淘汰最老)。session 跑久后,
+    //    那 1 条 agent_task.changed 早就被 runtime.* 流量挤出 history;
+    //    客户端刷新页面时,新 SSE 连接 replay 拿不到这条事件 →
+    //    useAgentStore.agentTasksBySession[sid] 缺该 task → TaskDrawer 的
+    //    detail 是 null → 整段 body 因为 `detail && !isBashTask` 守卫被卸,
+    //    体感「没有任务的消息」(实际 task 事件流仍能正常到达 SSE,
+    //    只是 drawer body 不渲染)。
+    //    修法 — 新 SSE 连接建立后,服务端绕开 eventBus 容量上限,直接遍历
+    //    bg runtime 当前 task 列表,把每条 task 当作「合成的
+    //    agent_task.changed」事件通过本连接的 writeEvent 单独 push 给
+    //    新客户端 (不走 eventBus,不被淘汰)。wantedSid 有值时按
+    //    task.parentSessionId 过滤;wantedSid 为 null 时推全部 task
+    //    (旧 fallback 行为,非 agent 页面也用得到)。
+    //    seq 字段取自 eventBus 的下一个 seqCounter (走完 getHistoryAfter
+    //    之后此值最大),保证客户端 reorder 时合成的 state 排在 replay 之后。
+    const bg = safeGetBackgroundRuntime()
+    if (bg) {
+      let synthSeq = eventBus.getNextSeq()
+      for (const task of await bg.list()) {
+        if (wantedSid && task.parentSessionId !== wantedSid) continue
+        const synth: ServerEvent = {
+          type: 'agent_task.changed',
+          sessionId: task.parentSessionId ?? null,
+          task,
+          eventId: `synth-bgstate-${task.id}`,
+          ts: Date.now(),
+          seq: synthSeq++,
+        }
+        writeSse(res, synth as unknown as Parameters<typeof writeSse>[1])
       }
     }
 
