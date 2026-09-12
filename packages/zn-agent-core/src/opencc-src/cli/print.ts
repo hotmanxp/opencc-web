@@ -51,8 +51,6 @@ import {
   subscribeToCommandQueue,
   getCommandsByMaxPriority,
 } from 'src/utils/messageQueueManager.js'
-// zai patch (2026-08-29): EventDrivenPrint — wake on queue change
-import { subscribeToHeadlessWake } from '../utils/headlessLoopWake.js'
 import { notifyCommandLifecycle } from 'src/utils/commandLifecycle.js'
 import {
   getSessionState,
@@ -524,26 +522,18 @@ export async function runHeadless(
   // In headless mode there is no React tree, so the useSettingsChange hook
   // never runs. Subscribe directly so that settings changes (including
   // managed-settings / policy updates) are fully applied.
-  // zai patch (2026-08-27): capture unsubscribe — in-process sessions drain it
-  // via registerCleanup (routed to the per-session dispose bag), so N sessions
-  // don't accumulate cross-firing listeners. CLI still relies on process exit.
-  const unsubscribeSettingsChange = settingsChangeDetector.subscribe(
-    source => {
-      applySettingsChange(source, setAppState)
+  settingsChangeDetector.subscribe(source => {
+    applySettingsChange(source, setAppState)
 
-      // In headless mode, also sync the denormalized fastMode field from
-      // settings. The TUI manages fastMode via the UI so it skips this.
-      if (isFastModeEnabled()) {
-        setAppState(prev => {
-          const s = prev.settings as Record<string, unknown>
-          const fastMode = s.fastMode === true && !s.fastModePerSessionOptIn
-          return { ...prev, fastMode }
-        })
-      }
-    },
-  )
-  registerCleanup(async () => {
-    unsubscribeSettingsChange()
+    // In headless mode, also sync the denormalized fastMode field from
+    // settings. The TUI manages fastMode via the UI so it skips this.
+    if (isFastModeEnabled()) {
+      setAppState(prev => {
+        const s = prev.settings as Record<string, unknown>
+        const fastMode = s.fastMode === true && !s.fastModePerSessionOptIn
+        return { ...prev, fastMode }
+      })
+    }
   })
 
   // Proactive activation is now handled in main.tsx before getTools() so
@@ -824,9 +814,7 @@ export async function runHeadless(
     }
 
     // Rewind complete - exit successfully
-    // zai patch (2026-08-27): route through writeToStdout so in-process headless
-    // sessions capture this line via the per-session sink (identical in CLI mode).
-    writeToStdout(
+    process.stdout.write(
       `Files rewound to state at message ${options.rewindFiles}\n`,
     )
     heartbeat?.stop()
@@ -2020,47 +2008,6 @@ function runHeadlessStreaming(
     if (abortController && getCommandsByMaxPriority('now').length > 0) {
       abortController.abort('interrupt')
     }
-    // zai patch (2026-08-29): kick the headless loop awake on any non-'now'
-    // queue change. The 'now' branch above only handles in-flight abort;
-    // task-notifications / orphaned-permission / cron-prompt commands all
-    // arrive via the same `commandQueue` (see utils/messageQueueManager.ts)
-    // but were never wired to a wake in headless streaming mode. TUI/REPL
-    // gets this for free via hooks/useQueueProcessor.ts; -p (headless)
-    // doesn't, so a background agent completing while run()'s do-while is
-    // momentarily between iterations (completeAsyncAgent flipped task status
-    // to 'completed' but enqueueAgentNotification hasn't fired yet) sees
-    // waitingForAgents=false → do-while exits → run() returns → for-await
-    // on structuredInput suspends → the next enqueuePendingNotification
-    // lands with no consumer. Symptom in zai: agent completes, main
-    // LLM never produces the follow-up summary. The mutex `running` makes
-    // this safe mid-turn; the post-finally peek at the bottom of run() picks
-    // up items that arrived during the run window.
-    if (!running && !inputClosed && hasCommandsInQueue()) {
-      void run()
-    }
-  })
-
-  // zai patch (2026-08-29): EventDrivenPrint — wake run() on queue change.
-  // The do-while(waitingForAgents) loop above was replaced with a single
-  // drain; this subscription wakes run() again whenever a command is
-  // enqueued (e.g. enqueueAgentNotification firing <task-notification>).
-  // The `running` mutex inside run() collapses recursive wakes; the
-  // `inputClosed` predicate prevents wakes after shutdown.
-  //
-  // Note: inlined `cmd.agentId === undefined` here instead of referencing
-  // the `isMainThread` helper defined inside run() — the callback fires
-  // outside run()'s scope, so referencing the local would throw
-  // ReferenceError and crash the process under Node 22's strict
-  // unhandledRejection.
-  subscribeToHeadlessWake({
-    shouldWake: () => !running && !inputClosed,
-    hasMainThreadQueued: () =>
-      peek((cmd: QueuedCommand) => cmd.agentId === undefined) !== undefined,
-    getBgRunning: () =>
-      getRunningTasks(getAppState()).some(
-        t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
-      ),
-    onWake: () => void run(),
   })
 
   const run = async () => {
@@ -2568,28 +2515,47 @@ function runHeadlessStreaming(
         }
       }
 
-      // Drain SDK events (task_started, task_progress) before command queue
-      // so progress events precede task_notification on the stream.
-      for (const event of drainSdkEvents()) {
-        output.enqueue(event)
-      }
+      // Use a do-while loop to drain commands and then wait for any
+      // background agents that are still running. When agents complete,
+      // their notifications are enqueued and the loop re-drains.
+      do {
+        // Drain SDK events (task_started, task_progress) before command queue
+        // so progress events precede task_notification on the stream.
+        for (const event of drainSdkEvents()) {
+          output.enqueue(event)
+        }
 
-      runPhase = 'draining_commands'
-      options.heartbeat?.setPhase('draining_commands')
-      await drainCommandQueue()
+        runPhase = 'draining_commands'
+        options.heartbeat?.setPhase('draining_commands')
+        await drainCommandQueue()
 
-      // zai patch (2026-08-29): EventDrivenPrint — replace the legacy
-      // do-while(waitingForAgents) loop above with a single drain. The
-      // loop polled getRunningTasks() and slept 100ms between iterations,
-      // which could exit before enqueueAgentNotification landed a
-      // <task-notification> for a completed background agent — leaving
-      // the notification stranded with no consumer. Now we subscribe to
-      // command-queue changes (subscribeToHeadlessWake, registered
-      // outside run() at startup) and re-invoke run() on every enqueue.
-      // The mutex `running` keeps recursive wakes collapsing to one run;
-      // drainCommandQueue's internal while(dequeue) already pulls every
-      // queued main-thread command at once, so a single iteration is
-      // sufficient per wake.
+        // Check for running background tasks before exiting.
+        // Exclude in_process_teammate — teammates are long-lived by design
+        // (status: 'running' for their whole lifetime, cleaned up by the
+        // shutdown protocol, not by transitioning to 'completed'). Waiting
+        // on them here loops forever (gh-30008). Same exclusion already
+        // exists at useBackgroundTaskNavigation.ts:55 for the same reason;
+        // L1839 above is already narrower (type === 'local_agent') so it
+        // doesn't hit this.
+        waitingForAgents = false
+        {
+          const state = getAppState()
+          const hasRunningBg = getRunningTasks(state).some(
+            t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
+          )
+          const hasMainThreadQueued = peek(isMainThread) !== undefined
+          if (hasRunningBg || hasMainThreadQueued) {
+            waitingForAgents = true
+            if (!hasMainThreadQueued) {
+              runPhase = 'waiting_for_agents'
+              options.heartbeat?.setPhase('waiting_for_agents')
+              // No commands ready yet, wait for tasks to complete
+              await sleep(100)
+            }
+            // Loop back to drain any newly queued commands
+          }
+        }
+      } while (waitingForAgents)
 
       if (heldBackResult) {
         output.enqueue(heldBackResult)
@@ -2884,10 +2850,9 @@ function runHeadlessStreaming(
 
   // Cron scheduler: runs scheduled_tasks.json tasks in SDK/-p mode.
   // Mirrors REPL's useScheduledTasks hook. Fired prompts call enqueue()
-  // which synchronously notifies subscribeToCommandQueue subscribers —
-  // including subscribeToHeadlessWake (see L2058 above), which wakes
-  // run() if !running && !inputClosed. The run() mutex makes this safe
-  // during an active turn: the wake no-ops.
+  // which synchronously notifies subscribeToCommandQueue subscribers; the
+  // run() mutex makes this safe during an active turn: re-entrant wakes
+  // no-op while running is true.
   //
   let cronScheduler: import('../utils/cronScheduler.js').CronScheduler | null =
     null
@@ -5045,9 +5010,7 @@ function emitLoadError(
       uuid: randomUUID(),
       errors: [message],
     }
-    // zai patch (2026-08-27): route through writeToStdout for per-session sink
-    // capture in in-process headless mode (identical in CLI mode).
-    writeToStdout(jsonStringify(errorResult) + '\n')
+    process.stdout.write(jsonStringify(errorResult) + '\n')
   } else {
     process.stderr.write(message + '\n')
   }
