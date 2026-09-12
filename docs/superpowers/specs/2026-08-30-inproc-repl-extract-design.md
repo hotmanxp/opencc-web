@@ -1,5 +1,10 @@
 # Spec — zai inproc 链路从 print.ts 实例化迁移到 vendor REPL 命令式抽壳
 
+> **Status (2026-09-12)**: 部分 superseded by phase-1 runtime unification plan
+> > (`/Users/ethan/.zai/plans/dazzling-stargazing-rivest-agent-a8196e52643ac35a2.md`)。
+> > `else { runtimeCore === 'default' }` 分支已删除;运行时永远 'repl'。
+> > §5 阶段划分仍有效;但 §5.1 中 "Default 'repl'" 已从 P2 默认值升级为唯一形态。
+
 **日期**:2026-08-30
 **状态**:draft (待评审)
 **关联 spec**:

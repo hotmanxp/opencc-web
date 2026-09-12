@@ -1,5 +1,8 @@
 # Plan — zai runtime: 以 print.ts 骨架服务化到 SSE/Web
 
+> **OBSOLETE (2026-09-12)**: B1 子进程 spawn 规划,与
+> > `2026-08-24-zai-runtime-printts-sse-web-bridge.md` 同批过期。
+
 Implements `docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md`.
 
 **迁移原则**:显式开关 `ZAI_OPENCC_CLI`,默认 false,阶段 0-4 双轨共存,阶段 5 才把默认值翻 true 并删 legacy 路径(见 spec §5.6)。

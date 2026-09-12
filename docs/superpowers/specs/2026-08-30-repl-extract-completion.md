@@ -31,6 +31,10 @@
 - `packages/zai/src/server/services/agentRuntime.ts`(`resolveRuntimeCore` 默认值翻成 `'repl'`,删除旧的 `runtime.kernel` 子分支,把 `kernel === 'repl'` 改写成顶层 `runtimeCore === 'repl'`,与 default/inproc/spawn 平级)
 - `packages/zai/test/server/agent-runtime-server.test.ts`(beforeEach 显式 `ZAI_RUNTIME_CORE=default` 锁住 V1 全 8 方法契约)
 
+> **Note (2026-09-12)**: 文中 "RuntimeCore 四态" 描述已过期;
+> 当前类型面为 `'default' | 'repl'` 二态,'default' deprecated。
+> 见 phase-1 runtime unification plan。
+
 ### 删除
 - (T5 deferred)— packages/zn-agent-core/src/opencc-src/server/createPrintRuntime-impl.ts
 - (T5 deferred)— packages/zn-agent-core/src/opencc-src/server/createPrintRuntime.ts
@@ -46,6 +50,9 @@
 - ⏸️ ego-browser 12-path 真机验收 deferred — T6 implementer 完成实施后,用户/browser-operator 触发
 
 ## 4. 默认行为变化(2026-08-30 P2 完成后)
+
+> **Note (2026-09-12)**: "RuntimeCore 四态" 描述已过期;
+> 当前类型面为 `'default' | 'repl'` 二态,'inproc' / 'spawn' 已从类型面删除(磁盘遗留值由 `resolveRuntimeCore` 折叠到 'repl')。
 
 - `RuntimeCore` 类型新增 `'repl'` 成员,目前是 4 态:`'default' | 'inproc' | 'spawn' | 'repl'`
 - `resolveRuntimeCore()` 默认值从 `'default'` 改为 `'repl'`

@@ -1,5 +1,9 @@
 # Spec — zai runtime: 以 print.ts 骨架服务化到 SSE/Web
 
+> **OBSOLETE (2026-09-12)**: 本文 B1 子进程方案已被
+> > `2026-08-30-inproc-repl-extract-design.md` 取代;phase-1 收敛后
+> > 'default' 路径也删除。保留本文只为历史 audit。
+
 **Status**: draft (协议层已冒烟验证,实现待启动)
 **Implements**: 取代既有 `createOpenccRuntime` 头less bridge 的 zai server 主会话运行时方案
 **Code (current)**: `packages/zai/src/server/services/agentRuntime.ts`、`packages/zn-agent-core/src/opencc-src/server/createOpenccRuntime-impl.ts`

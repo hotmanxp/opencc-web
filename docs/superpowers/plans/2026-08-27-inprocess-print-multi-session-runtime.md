@@ -1,5 +1,9 @@
 # 改造规划:ZAI_OPENCC_CLI 轨道改为 in-process 多 session print 运行时
 
+> **OBSOLETE (2026-09-12)**: 本文 inproc 双轨方案已被
+> > `2026-08-30-inproc-repl-extract-p2-cleanup.md` 取代;phase-1 收敛后
+> > 完全移除非 repl 轨道。
+
 日期:2026-08-27
 状态:规划(待评审)
 关联 spec:`docs/superpowers/specs/2026-08-27-zai-headless-runtime-vs-vendor-repl-comparison.md`(§5.8)
