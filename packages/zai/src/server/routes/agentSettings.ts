@@ -8,6 +8,7 @@ import type { ModelEntry, OutputStyle, Theme, WorkMode, ZaiSettings } from '../.
 import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
 import { getRuntimeCore } from '../services/agentRuntime.js'
+import type { RuntimeCore } from '../../shared/settings.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import { profilesToModelEntries } from '../../shared/profileProjection.js'
 import {
@@ -392,8 +393,18 @@ router.put(
         .status(400)
         .json({ error: `invalid runtimeCore: ${String(candidate)}` })
     }
+    // 阶段 1(2026-09-12):'default' deprecated,PUT 收到时 warn 并落盘为 'repl'。
+    // 行为:HTTP 200、响应 runtimeCore='repl'、磁盘 settings.json 写盘 'repl'。
+    // 不返回 400/410 是为了不破坏既有客户端(老 SettingsDrawer schema 行
+    // 仍可能误传 'default');warn 文案让操作者知道。
+    const persistValue: RuntimeCore = candidate === 'default' ? 'repl' : candidate
+    if (candidate === 'default') {
+      console.warn(
+        `[zai] warn: PUT /api/agent/settings/runtime-core received deprecated 'default'; coercing to 'repl' (phase-1 runtime unification)`,
+      )
+    }
     try {
-      const next = await updateZaiSettings({ runtimeCore: candidate })
+      const next = await updateZaiSettings({ runtimeCore: persistValue })
       // zai patch (2026-08-30): also return the runtime-resolved value so
       // the client can show both "saved" (next.runtimeCore) and
       // "currently effective" (activeRuntimeCore). The latter only
