@@ -3,6 +3,11 @@
 > **OBSOLETE (2026-09-12)**: 本文 inproc 双轨方案已被
 > > `2026-08-30-inproc-repl-extract-p2-cleanup.md` 取代;phase-1 收敛后
 > > 完全移除非 repl 轨道。
+>
+> **OBSOLETE (2026-09-12, phase-2 完成)**: 阶段 2 已将本文方案的全部源头代码删除
+> > (`createPrintRuntime*` / `headlessPrintSession` / `printSessionRuntime`)。
+> > 保留作为历史参考,不删除文件。详见
+> > `docs/superpowers/plans/2026-09-12-repl-link-unify-phase2.md`。
 
 日期:2026-08-27
 状态:规划(待评审)

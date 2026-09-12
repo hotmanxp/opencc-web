@@ -4,6 +4,11 @@
 > > (`/Users/ethan/.zai/plans/dazzling-stargazing-rivest-agent-a8196e52643ac35a2.md`)。
 > > `else { runtimeCore === 'default' }` 分支已删除;运行时永远 'repl'。
 > > §5 阶段划分仍有效;但 §5.1 中 "Default 'repl'" 已从 P2 默认值升级为唯一形态。
+>
+> **Status (2026-09-12, phase-2 完成)**: 阶段 2 死代码清理已完成,删除 vendor inproc 链路
+> > (`createPrintRuntime*` / `headlessPrintSession` / `printSessionRuntime`)+ zai spawn 链路
+> > (`sessionHost/*` / `RuntimeAdapter` / `runtimeFlag`)+ print.ts 的 8 个 zai patch 撤回。
+> > 详见 `docs/superpowers/plans/2026-09-12-repl-link-unify-phase2.md`。
 
 **日期**:2026-08-30
 **状态**:draft (待评审)
