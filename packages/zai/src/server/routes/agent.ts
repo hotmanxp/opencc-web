@@ -879,6 +879,18 @@ type PendingPrompt = {
   contentBlocks?: z.infer<typeof PromptRequest>['contentBlocks']
   /** slash 指令的原始用户输入(`/cmd args`);有值时展开 prompt 以 isMeta 落盘 */
   displayText?: string
+  /**
+   * 来源是 SessionInbox 的 subagent task-notification / 系统注入消息。
+   * true 时 runQueryLoop 把这条 prompt 以 `isMeta: true` 落盘,
+   * reload 时前端 loadTranscriptMessages 按 isMeta 跳过 — 否则
+   * `<task-notification>...</task-notification>` XML 会作为 user 消息
+   * 泄漏到 UI,语义上它们不是用户输入。
+   *
+   * Why: vendor 的 isMeta 语义就是「LLM 可见 / UI 隐藏」,inbox 注入的
+   * 系统消息天然属于这一类。落盘标记跟 vendor 语义对齐,避免在
+   * 前端按 XML 标签兜底匹配(易误杀,约定破坏)。
+   */
+  fromInbox?: boolean
 }
 
 const sessionQueues = new Map<string, PendingPrompt[]>()
@@ -1003,6 +1015,9 @@ function inboxToPendingPrompt(sid: string, msg: InboxMessage): PendingPrompt {
     sessionId: sid,
     cwd: resolveInboxCwd(sid),
     prompt: msg.content,
+    // inbox 来源的 prompt (subagent <task-notification> / 系统注入) 走 isMeta
+    // 落盘路径,跟 vendor isMeta 语义对齐 — LLM 仍可见并据此响应,UI 隐藏。
+    fromInbox: true,
   }
 }
 
@@ -1198,7 +1213,7 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         0,
         null,
         transcriptCtx,
-        cmd.displayText ? { isMeta: true } : undefined,
+        cmd.displayText || cmd.fromInbox ? { isMeta: true } : undefined,
       )
     } catch (e) {
       if (process.env.ZAI_DEBUG === '1') {
