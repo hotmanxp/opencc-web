@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { getBuiltinMainAgents, WEIXIN_MAIN_AGENT_NAME } from '../../src/opencc-src/server/mainAgents.js'
+import { setWeixinFileSender, getWeixinFileSender } from '../../src/opencc-src/server/sendFileToUser.js'
 
 /** 构造一个覆盖各家族的假工具池(DisplayFiles/WebFetch/Workflow 等应被剔除)。 */
 function fakeTools(): { name: string }[] {
@@ -78,6 +79,16 @@ describe('weixin main agent (zai patch 2026-09-13)', () => {
     expect(names).toContain('TaskCreate')
   })
 
+  it('tools 槽:SendFileToUser 不在 origin 池也会被显式补挂且幂等', () => {
+    const wx = getBuiltinMainAgents().find((a) => a.name === 'weixin-bot')!
+    const names = (wx.tools!(fakeTools() as never) as { name: string }[]).map((t) => t.name)
+    expect(names).toContain('SendFileToUser')
+    // 幂等:origin 池已含时不重复挂
+    const withTool = [...fakeTools(), { name: 'SendFileToUser' }] as never
+    const once = (wx.tools!(withTool) as { name: string }[]).filter((t) => t.name === 'SendFileToUser')
+    expect(once).toHaveLength(1)
+  })
+
   it('systemPrompt:英文书写 + 身份前置 + 关键纪律段 + 剥离编码段', () => {
     const wx = getBuiltinMainAgents().find((a) => a.name === 'weixin-bot')!
     const origin = [
@@ -97,6 +108,8 @@ describe('weixin main agent (zai patch 2026-09-13)', () => {
     expect(joined).toContain('respond in Simplified Chinese')
     expect(joined).toContain('via the Agent tool')
     expect(joined).toContain('CronCreate')
+    // 文件交付:SendFileToUser 进入环境事实段
+    expect(joined).toContain('SendFileToUser')
     // 不再限制 markdown 与行数(微信可渲染 markdown)
     expect(joined).toContain('renders markdown')
     expect(joined).not.toContain('≤ 5 行')

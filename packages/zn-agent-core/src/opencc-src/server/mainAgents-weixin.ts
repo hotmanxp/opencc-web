@@ -5,8 +5,8 @@
  *   1. **指派型** —— 主会话只做拆解/派发/汇总,重活用 Agent 工具派给
  *      子 agent(general-purpose / Explore / Plan / code-reviewer),
  *      避免主会话上下文被长工具输出迅速撑满(微信会话是长期固定 session)。
- *   2. **无 Web UI** —— DisplayFiles 这类卡片展示工具不进工具池,
- *      文件类产出写盘后回路径(微信端不渲染文件卡片)。
+ *   2. **无 Web UI** —— DisplayFiles 这类卡片展示工具不进工具池;
+ *      文件类产出用 SendFileToUser 直接经微信推送(写盘 + 回路径兜底)。
  *   3. **定时任务** —— CronCreate/CronDelete/CronList 全量开放,提示词
  *      强调"用户表达周期性/延迟性意图时主动落 cron"。
  *
@@ -18,6 +18,7 @@
 import type { Tool } from '../Tool.js'
 import type { MainAgentConfig } from './mainAgents.js'
 import { stripCodingSections } from './mainAgents-promptSections.js'
+import { sendFileToUserTool } from './sendFileToUser.js'
 
 /** 微信机器人内置 agent 的固定 name(settings.mainAgent / transcript.meta 用)。 */
 export const WEIXIN_MAIN_AGENT_NAME = 'weixin-bot'
@@ -48,6 +49,8 @@ const WEIXIN_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
   'Grep', // GrepTool
   'WebSearch', // WebSearchTool
   'Skill', // SkillTool
+  // ── 文件交付 ──
+  'SendFileToUser', // 本地文件经微信 CDN 推给用户(sendFileToUser.ts)
   // ── 任务管理(Task v2)──
   'TaskCreate',
   'TaskGet',
@@ -85,7 +88,7 @@ WeChat renders markdown, so use it naturally — lists, bold, fenced code blocks
 
 ## Environment facts
 
-- You have no Web UI: no file cards, image previews, or browser panels. Deliver file-based output by writing to disk and returning the path.
+- You have no Web UI: no file cards, image previews, or browser panels. To deliver a file artifact (report, generated image, export, ...), write it to disk and send it with the **SendFileToUser** tool — it pushes the file directly into the user's WeChat chat (kind is inferred from the extension: image/video/voice/document). Always mention the absolute path in your reply as well, so the user can find it later. If SendFileToUser fails (e.g. file too large or channel disconnected), fall back to replying with the path only.
 - Never use or promise interactive question tools — they are not available on this channel. If you need a decision, ask the question in plain text within your reply.
 - User messages carry <weixin-message> attributes (sender-id / chat-type); the <weixin-memory> block carries long-term memory — maintain the memory file as instructed inside it.`
 
@@ -95,6 +98,13 @@ export const weixinMainAgent: MainAgentConfig = {
   description:
     'WeChat bot — delegation-first orchestrator: subagent dispatch, cron scheduling, markdown replies',
   systemPrompt: (origin) => [WEIXIN_SYSTEM_PROMPT, ...stripCodingSections(origin)],
-  tools: (origin) =>
-    origin.filter((tool: Tool) => WEIXIN_TOOL_ALLOWLIST.has(String(tool.name))),
+  tools: (origin) => {
+    const pool = origin.filter((tool: Tool) => WEIXIN_TOOL_ALLOWLIST.has(String(tool.name)))
+    // SendFileToUser 不在 vendor 基础工具池里(server-scoped 工具,
+    // 同 displayFilesOpenccTool 的挂载方式)—— 显式补挂。
+    if (!pool.some((t) => t.name === sendFileToUserTool.name)) {
+      pool.push(sendFileToUserTool)
+    }
+    return pool
+  },
 }

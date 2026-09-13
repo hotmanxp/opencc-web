@@ -40,6 +40,8 @@ import {
 } from './WeixinOwnerLock.js'
 import { weixinDiag } from './debug.js'
 import { getWeixinSessionMap } from './WeixinSessionMap.js'
+// zai patch (2026-09-13, send-file):注入 SendFileToUser 工具的微信发送实现。
+import { setWeixinFileSender } from '@zn-ai/zn-agent-core'
 import { getWeixinPairingStore } from './WeixinPairingStore.js'
 import { getWeixinPendingStore } from './WeixinPendingStore.js'
 import {
@@ -197,6 +199,34 @@ export class WeixinBotManager {
   constructor(deps?: Partial<WeixinBotManagerDeps>) {
     this.deps = { ...DEFAULT_DEPS, ...(deps ?? {}) }
     this.bridge = deps?.bridge ?? getWeixinInboundBridge()
+    this._registerFileSender()
+  }
+
+  /**
+   * 注入 SendFileToUser 工具(core 层 sendFileToUser.ts)的发送实现。
+   * 构造时注册一次;closure 动态读 this.adapter —— 通道断开时工具返回
+   * 明确错误文案,模型可降级为「写盘 + 回路径」,不会崩。
+   * 非微信绑定会话(lookupBySessionId 落空)同样返回错误文案。
+   */
+  private _registerFileSender(): void {
+    setWeixinFileSender(async ({ sessionId, filePath, kind }) => {
+      const binding = await getWeixinSessionMap().lookupBySessionId(sessionId)
+      if (!binding) {
+        return {
+          success: false,
+          error: 'this session is not bound to a WeChat conversation (file sending unavailable here)',
+        }
+      }
+      const a = this.adapter
+      if (!a) {
+        return { success: false, error: 'WeChat channel is not connected' }
+      }
+      const chatId = binding.chatId
+      if (kind === 'image') return a.sendImageFile(chatId, filePath)
+      if (kind === 'video') return a.sendVideo(chatId, filePath)
+      if (kind === 'voice') return a.sendVoice(chatId, filePath)
+      return a.sendDocument(chatId, filePath)
+    })
   }
 
   state(): WeixinManagerState { return this._state }

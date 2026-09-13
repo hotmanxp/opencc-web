@@ -74,6 +74,9 @@ export { createOpenccRuntime } from './createOpenccRuntime.js'
 
 // zai patch (2026-08-20): 主 Agent 插槽配置。
 export { getBuiltinMainAgents, WEIXIN_MAIN_AGENT_NAME } from './mainAgents.js'
+// zai patch (2026-09-13, send-file):SendFileToUser 工具的发送器注册表 ——
+// zai 的 WeixinBotManager 启动时注入实现。
+export { setWeixinFileSender, getWeixinFileSender } from './sendFileToUser.js'
 export type {
   MainAgentConfig,
   MainAgentLoadContext,
