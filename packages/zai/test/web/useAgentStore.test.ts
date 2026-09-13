@@ -915,3 +915,80 @@ describe('useAgentStore.patchSessionModel — {model, providerId} payload', () =
     expect(after!.providerId).toBe('provider_b')
   })
 })
+
+// zai patch (2026-09-12): 页面刷新 / SSE 重连后 status 被重置为 'idle',
+// 但 server 不会主动为已开始的 turn 重发 runtime.started, 而 SSE 重连
+// 路径又过滤 streaming events (eventBus.ts STREAMING_REPLAY_EXCLUDE)。
+// 收到 runtime.thinking / runtime.delta / runtime.tool_call 增量时若
+// status 仍是 'idle', 应切回 'streaming' 并同步 activeSessionId — 否则
+// UI 会一直卡在 "就绪", 用户场景: LLM 思考中刷新页面, 状态不再更新。
+//
+// 只覆盖 'idle'; 'aborted' / 'error' / 'retrying' 是有意停留的终态,
+// 不让迟到的 streaming 事件把它们冲掉。
+describe('useAgentStore — streaming 增量事件在 status=idle 时自愈到 streaming', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      sessionId: 's1',
+      activeSessionId: null,
+      status: 'idle',
+      queuedPrompts: [],
+      messages: [],
+    })
+  })
+
+  it('runtime.thinking 到达时 status=idle → 切 streaming + 同步 activeSessionId', () => {
+    useAgentStore.getState().applyRuntimeEvent({
+      eventId: 't1', ts: 1, sessionId: 's1', turnIndex: 0,
+      type: 'runtime.thinking', thinking: 'let me think...',
+    } as any)
+    expect(useAgentStore.getState().status).toBe('streaming')
+    expect(useAgentStore.getState().activeSessionId).toBe('s1')
+  })
+
+  it('runtime.delta 到达时 status=idle → 切 streaming + 同步 activeSessionId', () => {
+    useAgentStore.getState().applyRuntimeEvent({
+      eventId: 'd1', ts: 1, sessionId: 's1', turnIndex: 0,
+      type: 'runtime.delta', delta: 'hi',
+    } as any)
+    expect(useAgentStore.getState().status).toBe('streaming')
+    expect(useAgentStore.getState().activeSessionId).toBe('s1')
+  })
+
+  it('runtime.tool_call 到达时 status=idle → 切 streaming + 同步 activeSessionId', () => {
+    useAgentStore.getState().applyRuntimeEvent({
+      eventId: 'tc1', ts: 1, sessionId: 's1', turnIndex: 0,
+      type: 'runtime.tool_call',
+      toolUseId: 'toolu_x', toolName: 'Bash', input: { cmd: 'ls' },
+    } as any)
+    expect(useAgentStore.getState().status).toBe('streaming')
+    expect(useAgentStore.getState().activeSessionId).toBe('s1')
+  })
+
+  it('status=streaming 时收到 streaming 增量 → 状态不变 (避免冗余 set)', () => {
+    useAgentStore.setState({ status: 'streaming', activeSessionId: 's1' })
+    useAgentStore.getState().applyRuntimeEvent({
+      eventId: 'd2', ts: 1, sessionId: 's1', turnIndex: 0,
+      type: 'runtime.delta', delta: 'more',
+    } as any)
+    expect(useAgentStore.getState().status).toBe('streaming')
+    expect(useAgentStore.getState().activeSessionId).toBe('s1')
+  })
+
+  it('status=aborted 时收到迟到的 streaming 增量 → 保持 aborted (终态不被覆盖)', () => {
+    useAgentStore.setState({ status: 'aborted', activeSessionId: null })
+    useAgentStore.getState().applyRuntimeEvent({
+      eventId: 'd3', ts: 1, sessionId: 's1', turnIndex: 0,
+      type: 'runtime.delta', delta: 'late',
+    } as any)
+    expect(useAgentStore.getState().status).toBe('aborted')
+  })
+
+  it('status=error 时收到迟到的 streaming 增量 → 保持 error (终态不被覆盖)', () => {
+    useAgentStore.setState({ status: 'error', activeSessionId: null })
+    useAgentStore.getState().applyRuntimeEvent({
+      eventId: 't2', ts: 1, sessionId: 's1', turnIndex: 0,
+      type: 'runtime.thinking', thinking: 'late',
+    } as any)
+    expect(useAgentStore.getState().status).toBe('error')
+  })
+})

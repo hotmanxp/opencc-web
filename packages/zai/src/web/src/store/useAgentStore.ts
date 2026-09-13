@@ -1623,6 +1623,18 @@ export function createAgentStore() {
         // 沿用 store 内已有的 upsertStreamBlock. blockIndex 即 sendSeq:
         // 每次 sendMessage 都会递增 sendSeq, 跨轮次文本块 key 永不碰撞;
         // 拼上 turnIndex 即使同一 sendSeq 内出现多轮也保持稳定.
+        // zai patch (2026-09-12): status 守卫 — 页面刷新或 SSE 重连后,
+        // status 会被重置为 'idle', 但 server 会继续推 streaming 增量
+        // (运行时不会主动为已开始的 turn 重发 runtime.started, 而 SSE
+        // 重连路径又过滤 streaming events 避免与 transcript 重复,
+        // 详见 eventBus.ts STREAMING_REPLAY_EXCLUDE). 收到 delta 时若
+        // status 仍是 'idle', 切回 'streaming' 并同步 activeSessionId,
+        // 避免 UI 一直停留在 "就绪".
+        // 只覆盖 'idle'; 'aborted' / 'error' / 'retrying' 是有意停留的
+        // 终态, 不让迟到的 delta 把它们冲掉.
+        if (get().status === 'idle') {
+          set({ activeSessionId: sid, status: 'streaming' })
+        }
         const sendSeq = get().sendSeq
         const base: AgentMessage = {
           eventId: '',
@@ -1639,6 +1651,11 @@ export function createAgentStore() {
       case 'runtime.thinking': {
         // 思考块流式: 复用 upsertStreamBlock('thinking', ...) — 与 text 走
         // 独立 key, 不混淆. base type 留 'assistant.thinking' 标识.
+        // zai patch (2026-09-12): 同上, status 守卫避免刷新页面后
+        // LLM 还在思考但 UI 卡在 "就绪". 仅在 'idle' 时切 'streaming'.
+        if (get().status === 'idle') {
+          set({ activeSessionId: sid, status: 'streaming' })
+        }
         const sendSeq = get().sendSeq
         const base: AgentMessage = {
           eventId: '',
@@ -1658,6 +1675,12 @@ export function createAgentStore() {
         // 旧的 `tu_runtime_${sid}_${++counter}` 合成路径与 server 发出的
         // runtime.tool_result (用 upstream block.id) 不匹配, upsert 永远
         // 命中不到 start 条目, ToolCallBlock 停在 "调用中" 永远不变.
+        // zai patch (2026-09-12): status 守卫 — 工具调用发生在 LLM turn
+        // 内, 收到 tool_call 时若 status 仍 'idle' (例如刷新页面 + SSE
+        // 重连刚好错过 started) 也应切回 'streaming'.
+        if (get().status === 'idle') {
+          set({ activeSessionId: sid, status: 'streaming' })
+        }
         const tuId = event.toolUseId
         const startMsg: AgentMessage = {
           eventId: `tool-${tuId}`,
