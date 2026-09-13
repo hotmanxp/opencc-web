@@ -118,7 +118,10 @@ export type ILinkItemT = z.infer<typeof ILinkItem>
 
 /** 单条入站消息。group/dm 通用,chatType 通过 _guessChatType 派生 */
 export const ILinkInboundMessage = z.object({
-  message_id: z.string(),
+  // 2026-09-13 实测:iLink 对 message_id 有时发 number 有时发 string,
+  // schema 定成 string 会让整个 getUpdates 响应 parse 失败 → poll 循环
+  // 无限 reconnecting,消息全部丢在门外。统一归一化成 string。
+  message_id: z.union([z.string(), z.number()]).transform((v) => String(v)),
   from_user_id: z.string(),
   to_user_id: z.string().optional(),
   room_id: z.string().optional(),

@@ -237,6 +237,7 @@ router.post('/owner/takeover', async (_req: Request, res: Response) => {
 router.get('/diagnostics', async (_req: Request, res: Response) => {
   try {
     const manager = getManager()
+    const adapter = manager.getAdapter()
     const [status, bindings, pairings] = await Promise.all([
       manager.statusAsync(),
       manager.listSessionBindings(),
@@ -251,6 +252,8 @@ router.get('/diagnostics', async (_req: Request, res: Response) => {
       // sessionId(weixin:<acct>:...),按 zai sessionId 过滤的 SSE 收不到,
       // 所以从服务端环形缓冲取。
       recentInbound: manager.listRecentInbound(),
+      // adapter 内部状态(manager.state 是 manager 自己的,两者可能不一致)
+      adapterState: adapter ? adapter.status() : null,
     })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })

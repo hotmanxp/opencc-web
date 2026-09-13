@@ -198,22 +198,21 @@ export class ILinkClient {
       const raw = await this.post<unknown>(
         'ilink/bot/getupdates',
         {
+          // 2026-09-13:对齐 hermes weixin.py:508 —— payload 只有
+          // {get_updates_buf}。此前额外带的 bot_id / user_id 反而让 iLink
+          // 持续 msgs=0(hermes 生产从不带这俩字段,却能收到消息)。
           get_updates_buf: syncBuf,
-          // 2026-08-19:实测 iLink 路由需要 bot_id(来自 iLink 自己的 bot 身份
-          // 识别,不是 user_id)。不传 bot_id 时 iLink 把 getUpdates 视为匿名
-          // pull,绑定不到具体 bot,msgs 永远 0。user_id 仍带 —— 用来给 iLink
-          // 指明"绑定的 WeChat user",配合 bot_id 一起做 session routing。
-          bot_id: this.token.split(':')[0] ?? this.token,  // token 格式 <bot_id>:<hex>
-          ...(this.ilinkUserId ? { user_id: this.ilinkUserId } : {}),
         },
         timeoutMs,
         signal,
-        // BUG(2026-08-19):这三个 header 仅 getupdates 端点合法 —— 其它端点
-        // 收到任意一个都返 ret:-2 "invalid arguments",bot 出站被静默拒。
+        // 这三个 header hermes 每个端点都发(weixin.py:210-218);zai 实测
+        // sendmessage 带不带都行(探针 ③),保持 getupdates 专属即可。
+        // ClientVersion 必须是十进制字符串 "131584"((2<<16)|(2<<8)),hermes
+        // 同值;旧 '0x020200' 十六进制格式从未在生产验证过。
         {
           'X-WECHAT-UIN': this.stableWechatUin,
           'iLink-App-Id': 'bot',
-          'iLink-App-ClientVersion': '0x020200',
+          'iLink-App-ClientVersion': '131584',
         },
       )
       return ILinkGetUpdatesResponse.parse(raw)
