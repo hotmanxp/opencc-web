@@ -17,12 +17,14 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 // chokidar/clock/lock 链, 但保留 onFire → opts.sessionId/onFireTask
 // 同样的 contract, 让主测试只关心 fire 之后发生了什么。
 let mockOnFire: ((prompt: string) => void) | null = null
+let mockOnFireTask: ((task: any) => void) | null = null
 let mockStartCalled = 0
 let mockStopCalled = 0
 
 vi.mock('../../../opencc-src/utils/cronScheduler.js', () => ({
   createCronScheduler: (options: any) => {
     mockOnFire = options.onFire
+    mockOnFireTask = options.onFireTask ?? null
     mockStartCalled = 0
     mockStopCalled = 0
     return {
@@ -71,6 +73,7 @@ describe('cron fire → prompt dual dispatch (E2E)', () => {
     delete (globalThis as any).__zaiSessionInboxFollowup
     delete (globalThis as any).__zaiCurrentSessionId
     mockOnFire = null
+    mockOnFireTask = null
     mockStartCalled = 0
     mockStopCalled = 0
   })
@@ -134,6 +137,48 @@ describe('cron fire → prompt dual dispatch (E2E)', () => {
     expect(inboxFollowupSpy).toHaveBeenCalledWith(
       'per-session-instance-abc',
       expect.objectContaining({ content: 'per-session prompt' }),
+    )
+
+    handle.teardown()
+  })
+
+  it('routes task.sessionId first — even when another session is active (cron-fire-routing fix)', async () => {
+    const handle = setupScheduledTasks({
+      sessionId: '', // v2 路径
+      getAppState: () => ({}),
+      isLoading: () => false,
+    })
+
+    expect(mockOnFireTask).not.toBeNull()
+    // 模拟:微信会话(sess-weixin)创建的提醒,fire 时 Web session(sess-web)
+    // 是"最后活跃" —— 路由必须回 sess-weixin,而不是 sess-web。
+    ;(globalThis as any).__zaiCurrentSessionId = 'sess-web'
+    mockOnFireTask!({
+      id: 'abc123',
+      cron: '16 18 13 9 *',
+      prompt: '3 分钟到了,提醒用户',
+      createdAt: Date.now(),
+      sessionId: 'sess-weixin',
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    expect(inboxFollowupSpy).toHaveBeenCalledTimes(1)
+    expect(inboxFollowupSpy).toHaveBeenCalledWith(
+      'sess-weixin',
+      expect.objectContaining({ content: '3 分钟到了,提醒用户' }),
+    )
+    expect(enqueuePendingSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'sess-weixin' }),
+    )
+
+    // 无 sessionId 的任务(旧数据/文件任务)仍回落 __zaiCurrentSessionId
+    inboxFollowupSpy.mockClear()
+    mockOnFireTask!({ id: 'old1', cron: '* * * * *', prompt: 'legacy', createdAt: Date.now() })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(inboxFollowupSpy).toHaveBeenCalledWith(
+      'sess-web',
+      expect.objectContaining({ content: 'legacy' }),
     )
 
     handle.teardown()

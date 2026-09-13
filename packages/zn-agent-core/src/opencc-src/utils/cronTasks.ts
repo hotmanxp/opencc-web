@@ -67,6 +67,15 @@ export type CronTask = {
    * REPL's. Never written to disk (teammate crons are always session-only).
    */
   agentId?: string
+  /**
+   * Runtime-only (zai patch 2026-09-13, cron-fire-routing):创建任务的 session。
+   * CronCreateTool 在 call() 时记录 getSessionId()。zai-server v2 路径的
+   * scheduler 是 per-server 单例,fire 时旧实现路由到 globalThis.__zaiCurrentSessionId
+   * (最后活跃的 session)—— 微信会话创建的提醒会发进别的 session 或 no-op。
+   * 有 sessionId 的任务 fire 时优先路由回创建 session。durable 任务写盘时
+   * 与 durable/agentId 一样被 strip(重启后回落 __zaiCurrentSessionId 路由)。
+   */
+  sessionId?: string
 }
 
 type CronFile = { tasks: CronTask[] }
@@ -171,8 +180,10 @@ export async function writeCronTasks(
   // Strip the runtime-only `durable` flag — everything on disk is durable
   // by definition, and keeping the flag out means readCronTasks() naturally
   // yields durable: undefined without having to set it explicitly.
+  // sessionId 同为 runtime-only(创建 session 的 fire 路由),写盘无意义 ——
+  // 重启后进程内 session id 已无对应 runtime,回落 __zaiCurrentSessionId。
   const body: CronFile = {
-    tasks: tasks.map(({ durable: _durable, ...rest }) => rest),
+    tasks: tasks.map(({ durable: _durable, sessionId: _sessionId, ...rest }) => rest),
   }
   await writeFile(
     getCronFilePath(root),
@@ -197,6 +208,7 @@ export async function addCronTask(
   recurring: boolean,
   durable: boolean,
   agentId?: string,
+  sessionId?: string,
 ): Promise<string> {
   // Short ID — 8 hex chars is plenty for MAX_JOBS=50, avoids slice/prefix
   // juggling between the tool layer (shows short IDs) and disk.
@@ -209,11 +221,17 @@ export async function addCronTask(
     ...(recurring ? { recurring: true } : {}),
   }
   if (!durable) {
-    addSessionCronTask({ ...task, ...(agentId ? { agentId } : {}) })
+    addSessionCronTask({
+      ...task,
+      ...(agentId ? { agentId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    })
     return id
   }
+  // durable 任务也带 sessionId(仅 runtime 语义:同进程内 fire 路由回创建
+  // session;写盘时被 strip,重启后回落全局路由)。
   const tasks = await readCronTasks()
-  tasks.push(task)
+  tasks.push(sessionId ? { ...task, sessionId } : task)
   await writeCronTasks(tasks)
   return id
 }

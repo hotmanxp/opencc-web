@@ -134,6 +134,18 @@ export function renderWeixinPrompt(
   memory?: WeixinMemorySnapshot,
 ): string {
   const lines: string[] = []
+  // zai patch (2026-09-13, cron-clock):每条消息注入当前本地时间 —— 微信
+  // prompt 没有时钟时模型会瞎猜"现在",导致"3 分钟后提醒"算出错误 cron
+  // (实测错 5 小时)。消息级注入保证跨轮次/跨天都是新鲜时间。
+  {
+    const now = new Date()
+    const tz = now.toLocaleTimeString('en-US', { timeZoneName: 'short' }).split(' ').pop() ?? ''
+    lines.push(
+      `<weixin-env now="${now.toISOString()}" local="${now.toLocaleString('zh-CN', { hour12: false })}" tz="${tz}">` +
+        `Current local time of the user is shown above; use it as the reference for all relative time computations.`,
+    )
+    lines.push('')
+  }
   const attrs = [
     'platform="weixin"',
     `chat-type="${msg.chatType}"`,

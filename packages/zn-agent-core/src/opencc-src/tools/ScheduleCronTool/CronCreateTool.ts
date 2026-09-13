@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import { setScheduledTasksEnabled } from '../../bootstrap/state.js'
+import { getSessionId, setScheduledTasksEnabled } from '../../bootstrap/state.js'
 import type { ValidationResult } from '../../Tool.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { cronToHuman, parseCronExpression } from '../../utils/cron.js'
@@ -141,6 +141,11 @@ export const CronCreateTool = buildTool({
       recurring,
       effectiveDurable,
       getTeammateContext()?.agentId,
+      // zai patch (2026-09-13, cron-fire-routing):记录创建 session —— fire 时
+      // 路由回这里,而非"最后活跃的 session"(globalThis.__zaiCurrentSessionId)。
+      // 修的 BUG:微信会话创建的"3 分钟后提醒"在别的 session 活跃时 fire,
+      // prompt 被路由走,微信永远收不到。
+      getSessionId(),
     )
     // Enable the scheduler so the task fires in this session. The
     // useScheduledTasks hook polls this flag and will start watching
