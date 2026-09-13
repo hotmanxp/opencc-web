@@ -14,11 +14,16 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     setupFiles: ['test/setup.isolation.ts'],
-    // vitest 4.x + happy-dom 20 在全量并发跑测试时,跨文件偶发 ECONNRESET / 超时 /
-    // 事件计数偏差(desktopFs.test.ts、command.lifecycle.test.ts 等)。
-    // 单独跑或单独跑这些文件都稳定 100% 通过 —— 根因是 vitest 4.x 全量并发跑时
-    // happy-dom 的 fetch / supertest socket 在线程间偶发重置,不是产品代码 bug。
-    // 全局 retry=2 让 flaky test 自愈,不影响确定性失败的暴露。
+    // vitest 4.x 默认 `pool: 'threads'` + happy-dom 20 在 zai 大量测试
+    // (304 文件 / 2869 用例) 并发跑时出现严重卡死:跨文件 ECONNRESET / 单
+    // test 跑到 40s+ 才 timeout / module-level 单例跨 thread 共享污染。
+    // 单独跑任一文件 100% 通过 → 是并发执行的问题,不是产品代码 bug。
+    //
+    // 兜底:加 `fileParallelism: false` 让所有 test 串行跑(同进程,共享
+    // module cache,避开 happy-dom 资源竞争);retry=3 给纯网络侧偶发
+    // 问题(单独跑不复现)最后一次兜底。
+    fileParallelism: false,
     retry: 3,
+    testTimeout: 10_000,
   },
 });

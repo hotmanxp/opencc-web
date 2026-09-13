@@ -5,6 +5,9 @@ import { join } from 'node:path'
 import { AgentRegistryImpl } from '../../src/opencc-src/server/agentRegistry.js'
 
 describe('AgentRegistry load', () => {
+  // loadUserAgents 通过 await import() 解析测试 fixture,冷加载 +
+  // 并发 I/O 排队在 macOS 全量并发跑测试时偶尔超 5s 默认 testTimeout。
+  // 给这个 describe 单独 30s 兜底,不影响其它测试。
   let registry: AgentRegistryImpl
   beforeEach(() => {
     registry = new AgentRegistryImpl()
