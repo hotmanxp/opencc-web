@@ -166,10 +166,4 @@ export default defineConfig({
     // is not a function` error.
     include: ['lru-cache', '@anthropic-ai/sdk', '@orama/orama', '@orama/plugin-data-persistence'],
   },
-  test: {
-    // 全量并发跑测试时,部分用例(loadUserAgents 走 await import() 解析 CJS
-    // fixture + bundle self-check 冷加载)在 macOS 上偶发超过默认 5s。
-    // 全局 30s 兜底,不影响其他快测试。
-    testTimeout: 30_000,
-  },
 })
