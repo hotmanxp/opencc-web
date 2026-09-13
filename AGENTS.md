@@ -67,6 +67,11 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
   ```
   仅在以下情况才跑 `pnpm -r test`:跨 workspace 重构、合并前 sanity check、CI 镜像。**禁止**把全量测试当成"完成前必跑"——这是浪费 token 和时间,反馈回路越长越容易错过真实问题。
 
+- **样式规范:优先 Tailwind utility class**:`packages/zai` 已预装 Tailwind 3.4.15,`packages/zai/tailwind.config.ts` + `postcss.config.js` + `src/web/src/index.css`(`@tailwind base/components/utilities`) 链路完整,content 扫描 `./src/web/src/**/*.{ts,tsx}` + `index.html`。**新写 / 修改组件时一律用 Tailwind utility class,不要写 `style={{...}}`**。迁移基线:2026-09-13 已把 ~750 处 `style={{...}}` 转 className,剩 ~200 处保留 inline(均为运行时计算值)。参考 [`docs/superpowers/plans/2026-09-13-zai-inline-style-to-tailwind-migration.md`](docs/superpowers/plans/2026-09-13-zai-inline-style-to-tailwind-migration.md) 了解边界场景。
+  - **走 Tailwind class**:静态布局 / 间距 / 颜色 / 字体 / 边框 / 圆角 / 阴影 / 显隐。如 `{ padding: 24 }` → `p-6`,`{ display: 'flex', gap: 4 }` → `flex gap-1`,`{ fontSize: 12, color: 'var(--text-secondary)' }` → `text-xs text-[var(--text-secondary)]`。
+  - **CSS 变量值**:走 Tailwind arbitrary value,例如 `text-[var(--text-primary)]`、`bg-[var(--bg-elevated,#1c1c26)]`、`border-l-[3px] border-l-[var(--accent-start)]`。
+  - **保留 inline**的合法场景(7 类):(1) 运行时计算值 — 拖拽坐标 `left/top/width/height/zIndex`、动态 `maxWidth/maxHeight`、右键菜单位置 `ctx.x/ctx.y`;(2) `calc()` / `env()` 视口与安全区,如 `height: 'calc(100vh - 140px)'`、`paddingBottom: 'env(safe-area-inset-bottom)'`;(3) **AntD 组件的 `styles={{...}}` 语义槽位** — AntD cssinjs 注入 style 标签且优先级压 Tailwind,必须用 `styles` prop;(4) 事件驱动 DOM 修改 — `onMouseEnter={(e) => e.currentTarget.style.background = ...}` 保留或重构为 state + className 切换;(5) `keyframes` 动画属性 — `animation: 'zai-blink 1s steps(1) infinite'` 之类,`<style>{'@keyframes ...'}</style>` 块整体保留;(6) `writingMode`、复杂 `backdropFilter`(`blur(18px) saturate(1.4)`)、SVG 内联 `fill`/`stroke`;(7) AntD 组件单个 `style` prop(如 `<RobotFilled style={{ fontSize: 48, color: 'var(--accent-start)' }} />`,且不便拆为外层 wrapper)。
+  - **代码评审**:违反上述规则的新增 `style={{...}}` 应被驳回,除非 comment 注明属于上述 7 类合法场景之一。
 - **页面样式改动不跑单元测试**:`packages/zai/src/web/src/index.css` 或组件内 `style={{...}}` / `styles={{...}}` 的样式变更不需要跑 vitest。happy-dom/jsdom 不渲染真实 CSS cascade、不模拟 paint、不读浏览器合成层尺寸,跑过也不代表对齐正确,反倒容易把没意义的红绿当成"已验证"。完成前用 `/ego-browser` 真实浏览器验:`pnpm --filter @zn-ai/zai dev -- --port <空闲>` 起服务,ego 打开对应页面,**度量出像素级证据**(rect / getComputedStyle / 截图对比)才算数。仅改样式时禁止把单测当成完成门禁。
 
 ## 常用验证命令

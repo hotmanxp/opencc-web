@@ -171,37 +171,15 @@ export default function Agent() {
   // 用户期望的"按时间发生顺序展示".
 
   return (
-    <div
-      style={{
-        flex: 1,
-        maxWidth: "100%",
-        minHeight: 0,
-        display: "flex",
-        flexDirection: "row",
-      }}
-    >
+    <div className="flex-1 max-w-full min-h-0 flex flex-row">
       <div
+        className="pt-3 flex-shrink-0 flex flex-col border-r border-r-[color:var(--border-light)]"
         style={{
-          paddingTop: 12,
           width: sessionsCollapsed ? 40 : 140,
-          flexShrink: 0,
-          borderRight: "1px solid var(--border-light)",
-          // paddingRight: sessionsCollapsed ? 0 : 12,
-          display: "flex",
-          flexDirection: "column",
           transition: "width 0.18s ease",
         }}
       >
-        <div
-          style={{
-            fontWeight: 500,
-            marginBottom: 8,
-            color: 'var(--text-dim-65)',
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+        <div className="font-medium mb-2 text-[var(--text-dim-65)] flex justify-between items-center">
           {sessionsCollapsed ? (
             // 收起时也要暴露创建入口, 否则收起后用户没法开新会话.
             // 用 absolute + transform 让三个图标按钮绝对居中于 40px 列宽,
@@ -209,7 +187,7 @@ export default function Agent() {
             // 第 2 个 N 按钮 = 新 tab 打开 /agent?sid=newID (不影响当前 tab).
             // 第 3 个按钮 = "展开会话历史" 切换 (MenuUnfoldOutlined).
             // height = 96 让三个 28px 按钮 + 2 段 32px 间距全放下 (top 0/32/64).
-            <div style={{ position: "relative", width: "100%", height: 96 }}>
+            <div className="relative w-full h-24">
               <Button
                 type="text"
                 size="small"
@@ -222,18 +200,7 @@ export default function Agent() {
                     ? "对话进行中,请等待当前回复结束"
                     : "创建新会话"
                 }
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: 28,
-                  height: 28,
-                  padding: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
+                className="absolute top-0 left-1/2 -translate-x-1/2 w-7 h-7 p-0 inline-flex items-center justify-center"
               />
               {/* N 按钮: 在新 tab 打开全新会话, 保留当前 tab 会话状态不变. */}
               <Button
@@ -247,25 +214,7 @@ export default function Agent() {
                     : "在新标签页打开新会话"
                 }
                 data-testid="new-session-in-new-tab"
-                style={{
-                  position: "absolute",
-                  top: 32,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: 28,
-                  height: 28,
-                  padding: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  // 用等宽字体 + 粗体 + 紫色, 与 antd 图标按钮区分开,
-                  // 让用户一眼能识别这是"新 tab"语义 (与 Plus 不一样).
-                  color: "#722ed1",
-                  fontFamily:
-                    "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontWeight: 700,
-                  fontSize: 14,
-                }}
+                className="absolute top-8 left-1/2 -translate-x-1/2 w-7 h-7 p-0 inline-flex items-center justify-center text-[#722ed1] font-mono font-bold text-[14px]"
               >
                 N
               </Button>
@@ -276,23 +225,12 @@ export default function Agent() {
                 onClick={sessionPanel.expand}
                 aria-label="展开会话历史"
                 title="展开会话历史"
-                style={{
-                  position: "absolute",
-                  top: 64,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: 28,
-                  height: 28,
-                  padding: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
+                className="absolute top-16 left-1/2 -translate-x-1/2 w-7 h-7 p-0 inline-flex items-center justify-center"
               />
             </div>
           ) : (
             <>
-              <Space style={{ fontSize: 12 }}>
+              <Space className="text-xs">
                 <MessageOutlined />
                 历史
               </Space>
@@ -322,13 +260,7 @@ export default function Agent() {
                       : "在新标签页打开新会话"
                   }
                   data-testid="new-session-in-new-tab"
-                  style={{
-                    color: "#722ed1",
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, monospace",
-                    fontWeight: 700,
-                    fontSize: 14,
-                  }}
+                  className="text-[#722ed1] font-mono font-bold text-[14px]"
                 >
                   N
                 </Button>
@@ -349,17 +281,15 @@ export default function Agent() {
             ref={sessionListRef}
             // mousemove 重置 10s 倒计时 — 用户在列表里滚动/浏览的时候不收回去
             onMouseMove={() => sessionPanel.schedule()}
-            style={{ flex: 1, overflowY: "auto" }}
+            className="flex-1 overflow-y-auto"
           >
             {sessions.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--text-dim-45)', padding: "8px 4px" }}>
+              <div className="text-xs text-[var(--text-dim-45)] py-2 px-1">
                 暂无历史会话
               </div>
             ) : (
               <>
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 2 }}
-                >
+                <div className="flex flex-col gap-0.5">
                   {visibleSessions.map((s) => {
                     const active = s.sessionId === sessionId;
                     const hovered = s.sessionId === hoveredSessionId;
@@ -371,16 +301,7 @@ export default function Agent() {
                             ? "对话进行中,请等待当前回复结束"
                             : undefined
                         }
-                        style={{
-                          position: "relative",
-                          cursor: isBusy ? "not-allowed" : "pointer",
-                          padding: "6px 8px",
-                          borderRadius: 6,
-                          background: active
-                            ? 'rgba(255,102,0,0.10)'
-                            : "transparent",
-                          opacity: isBusy ? 0.6 : 1,
-                        }}
+                        className={`relative rounded-md py-1.5 px-2 ${active ? 'bg-[rgba(255,102,0,0.10)]' : 'bg-transparent'} ${isBusy ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                         onMouseEnter={() => {
                           setHoveredSessionId(s.sessionId);
                           // hover 任何会话项都重置 10s 倒计时,避免
@@ -403,19 +324,15 @@ export default function Agent() {
                         }}
                       >
                         <div
+                          className={`text-[13px] whitespace-nowrap overflow-hidden text-ellipsis ${active ? 'text-[#ff6600]' : ''}`}
                           style={{
-                            fontSize: 13,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
                             // 悬停时给删除按钮留出空间, 避免标题被图标压住.
                             paddingRight: hovered ? 20 : 0,
-                            color: active ? '#ff6600' : undefined,
                           }}
                         >
                           {s.title || "新会话"}
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-dim-45)' }}>
+                        <div className="text-[11px] text-[var(--text-dim-45)]">
                           {new Date(s.updatedAt).toLocaleString()}
                         </div>
                         <Popconfirm
@@ -439,23 +356,7 @@ export default function Agent() {
                                 ? "对话进行中,请等待当前回复结束"
                                 : "删除会话"
                             }
-                            style={{
-                              position: "absolute",
-                              top: 4,
-                              right: 4,
-                              width: 24,
-                              height: 24,
-                              padding: 0,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              // 始终挂载, 仅用透明度控制显隐. 若用 hovered 条件卸载,
-                              // 鼠标移向 Popconfirm 弹层会离开会话项触发 unmount,
-                              // 弹层随之消失.
-                              opacity: hovered ? 1 : 0,
-                              pointerEvents: hovered ? "auto" : "none",
-                              transition: "opacity 0.15s",
-                            }}
+                            className={`absolute top-1 right-1 w-6 h-6 p-0 inline-flex items-center justify-center transition-opacity duration-150 ${hovered ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
                           />
                         </Popconfirm>
                       </div>
@@ -466,11 +367,7 @@ export default function Agent() {
                   <Button
                     type="link"
                     size="small"
-                    style={{
-                      padding: 0,
-                      marginTop: 4,
-                      color: '#ff6600',
-                    }}
+                    className="p-0 mt-1 text-[#ff6600]"
                     onClick={() => setShowAllSessions((v) => !v)}
                     aria-label={showAllSessions ? "收起更多会话" : "展开更多会话"}
                   >
@@ -485,16 +382,7 @@ export default function Agent() {
         )}
       </div>
 
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          minWidth: 0,
-          maxWidth: "100%",
-          overflowX: "hidden"
-        }}
-      >
+      <div className="flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden">
         {/* 工具栏定制:分屏是本页面(SplitPane)专属能力,toggle 经右插槽注入;
             transcript 修复按钮(调试入口)也仅在此页开启。Desktop/Mobile 等
             复用 AgentConversation 的场景不传 → 两个按钮都不出现。 */}

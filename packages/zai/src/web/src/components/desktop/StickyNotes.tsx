@@ -10,6 +10,19 @@ const MIN_H = 60;
 // resize handle 命中区(outer):比内胆 12x12 略大,易点击;视觉仍克制(单条细斜线)。
 const RESIZE_HANDLE = 14;
 
+const LAYER_CLS = 'absolute inset-0 pointer-events-none';
+const NOTE_BASE_CLS = 'absolute flex flex-col pointer-events-auto overflow-hidden rounded-[10px] shadow-[0_6px_20px_rgba(0,0,0,0.28)]';
+const NOTE_HEADER_CLS = 'h-[26px] flex-shrink-0 cursor-grab bg-[rgba(0,0,0,0.08)] flex items-center justify-end px-1';
+const NOTE_DELETE_BTN_CLS = 'border-0 bg-transparent cursor-pointer text-[rgba(0,0,0,0.55)]';
+const NOTE_TEXTAREA_CLS = 'flex-1 border-0 outline-none bg-transparent resize-none px-2 py-1 text-xs leading-[1.5] text-[rgba(0,0,0,0.85)] font-inherit';
+const NOTE_RESIZE_CLS = 'absolute right-0 bottom-0 w-[14px] h-[14px] cursor-nwse-resize p-[2px] pointer-events-auto';
+const NOTE_RESIZE_GLYPH_CLS = 'block w-full h-full opacity-35';
+
+const RESIZE_GLYPH_STYLE: React.CSSProperties = {
+  background:
+    'linear-gradient(135deg, transparent 49%, var(--text-secondary, #aaa) 49%, var(--text-secondary, #aaa) 51%, transparent 51%)',
+};
+
 export interface StickyNotesProps {
   notes: StickyNote[];
   onChange: (id: string, patch: Partial<StickyNote>) => void;
@@ -68,7 +81,7 @@ export default function StickyNotes({ notes, onChange, onDelete, onFocus, viewpo
     // zIndex 参与桌面 root 的全局层叠。pointer-events:none 让容器不拦截,
     // 便签自身 pointer-events:auto 接管点击。便签默认 z=0(在所有窗口之下),
     // focus 时由 Desktop.tsx 把 z 拉到 max(windows z) + 1,确保聚焦便签置顶。
-    <div aria-label="便签层" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+    <div aria-label="便签层" className={LAYER_CLS}>
       {notes.map((n) => {
         const w = n.w ?? W;
         const h = n.h ?? H;
@@ -79,6 +92,7 @@ export default function StickyNotes({ notes, onChange, onDelete, onFocus, viewpo
             aria-label={`便签 ${n.id}`}
             onPointerMove={onMove}
             onPointerUp={endDrag}
+            className={NOTE_BASE_CLS}
             style={{
               position: 'absolute',
               left: n.x,
@@ -89,36 +103,16 @@ export default function StickyNotes({ notes, onChange, onDelete, onFocus, viewpo
               // 把目标 z 提到 max+1,实现"聚焦便签置顶"。
               zIndex: n.z ?? 0,
               background: n.color,
-              borderRadius: 10,
-              boxShadow: '0 6px 20px rgba(0,0,0,.28)',
-              display: 'flex',
-              flexDirection: 'column',
-              pointerEvents: 'auto',
-              overflow: 'hidden',
             }}
           >
             <div
               onPointerDown={startMove(n.id)}
-              style={{
-                height: HEADER,
-                flexShrink: 0,
-                cursor: 'grab',
-                background: 'rgba(0,0,0,.08)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                padding: '0 4px',
-              }}
+              className={NOTE_HEADER_CLS}
             >
               <button
                 aria-label="删除便签"
                 onClick={() => onDelete(n.id)}
-                style={{
-                  border: 0,
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  color: 'rgba(0,0,0,.55)',
-                }}
+                className={NOTE_DELETE_BTN_CLS}
               >
                 <CloseOutlined style={{ fontSize: 11 }} />
               </button>
@@ -128,18 +122,7 @@ export default function StickyNotes({ notes, onChange, onDelete, onFocus, viewpo
               aria-label={`便签内容 ${n.id}`}
               onPointerDown={focusTextarea(n.id)}
               onChange={(e) => onChange(n.id, { text: e.target.value })}
-              style={{
-                flex: 1,
-                border: 0,
-                outline: 'none',
-                background: 'transparent',
-                resize: 'none',
-                padding: '4px 8px',
-                fontSize: 12,
-                lineHeight: 1.5,
-                color: 'rgba(0,0,0,.85)',
-                fontFamily: 'inherit',
-              }}
+              className={NOTE_TEXTAREA_CLS}
             />
             {/* 右下角 resize handle:视觉与 DesktopWindow 对称(单条 1px 斜线,opacity 0.35)。
                 命中区 RESIZE_HANDLE(14px),让便签角落易拖但又不抢戏。 */}
@@ -147,20 +130,9 @@ export default function StickyNotes({ notes, onChange, onDelete, onFocus, viewpo
               aria-label="调整便签大小"
               data-testid={`sticky-resize-${n.id}`}
               onPointerDown={startResize(n.id, { x: n.x, y: n.y, w, h })}
-              style={{
-                position: 'absolute', right: 0, bottom: 0, width: RESIZE_HANDLE, height: RESIZE_HANDLE,
-                cursor: 'nwse-resize', padding: 2, pointerEvents: 'auto',
-              }}
+              className={NOTE_RESIZE_CLS}
             >
-              <span
-                aria-hidden
-                style={{
-                  display: 'block', width: '100%', height: '100%',
-                  background:
-                    'linear-gradient(135deg, transparent 49%, var(--text-secondary, #aaa) 49%, var(--text-secondary, #aaa) 51%, transparent 51%)',
-                  opacity: 0.35,
-                }}
-              />
+              <span aria-hidden className={NOTE_RESIZE_GLYPH_CLS} style={RESIZE_GLYPH_STYLE} />
             </div>
           </div>
         );

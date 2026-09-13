@@ -50,9 +50,9 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
       }
     >
       {sessions.length === 0 && (
-        <div style={{ padding: 16, color: 'var(--text-dim-45)', fontSize: 13 }}>暂无历史会话</div>
+        <div className="p-4 text-[var(--text-dim-45)] text-[13px]">暂无历史会话</div>
       )}
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="flex flex-col">
         {sessions.map((s) => {
           const active = s.sessionId === sessionId
           return (
@@ -69,28 +69,20 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
               }}
               data-testid={`mobile-session-item-${s.sessionId}`}
               style={{
-                padding: '12px 16px',
-                cursor: 'pointer',
-                borderBottom: '1px solid var(--border-faint)',
                 background: active ? 'rgba(255,102,0,0.10)' : 'transparent',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
               }}
+              className="py-3 px-4 cursor-pointer border-b border-[var(--border-faint)] flex items-center gap-2"
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="flex-1 min-w-0">
                 <div
                   style={{
-                    fontSize: 14,
                     color: active ? '#ff8533' : 'var(--text-primary)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
                   }}
+                  className="text-[14px] overflow-hidden text-ellipsis whitespace-nowrap"
                 >
                   {s.title || '新会话'}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim-45)', marginTop: 2 }}>
+                <div className="text-[11px] text-[var(--text-dim-45)] mt-0.5">
                   {new Date(s.updatedAt).toLocaleString()}
                 </div>
               </div>

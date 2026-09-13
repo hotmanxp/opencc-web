@@ -54,16 +54,14 @@ export function AttachmentStrip({
     : Math.max(14, Math.round(size * 0.25))
   return (
     <div
+      className={`flex flex-wrap gap-2 ${
+        align === 'end' ? 'justify-end' : 'justify-start'
+      } ${compact ? '' : 'py-2'}`}
       style={{
-        display: 'flex',
-        justifyContent: align === 'end' ? 'flex-end' : 'flex-start',
-        gap: 8,
-        flexWrap: 'wrap',
         // previewHeight 模式宽度由图撑开, maxWidth 上限防止外溢卡片,
         // 单张时宽度 = 图片按比例缩放到指定高度的宽度;
         // 多张时 flexWrap 让长截图也能在一行 / 多行展开.
         maxWidth: isPreviewMode ? previewMaxWidth ?? 480 : undefined,
-        padding: compact ? 0 : '8px 0',
       }}
     >
       {attachments.map((a) => {
@@ -137,20 +135,11 @@ export function AttachmentStrip({
                 style={imgStyle}
               />
             ) : a.status === 'error' ? (
-              <div
-                style={{
-                  fontSize: 10,
-                  color: '#ff4d4f',
-                  padding: 4,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  wordBreak: 'break-all',
-                }}
-              >
+              <div className="text-[10px] text-[#ff4d4f] p-1 overflow-hidden text-ellipsis break-all">
                 {a.error ?? '加载失败'}
               </div>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+              <div className="flex items-center justify-center h-full">
                 <Spin size="small" />
               </div>
             )}
@@ -166,19 +155,11 @@ export function AttachmentStrip({
                   onRemove(a.localId)
                 }}
                 title="移除"
+                className="absolute top-[2px] right-[2px] p-0 bg-[var(--text-dim-55)] text-white inline-flex items-center justify-center"
                 style={{
-                  position: 'absolute',
-                  top: 2,
-                  right: 2,
                   width: removeBtnSize,
                   height: removeBtnSize,
                   minWidth: removeBtnSize,
-                  padding: 0,
-                  background: 'var(--text-dim-55)',
-                  color: '#fff',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
                 }}
               />
             )}

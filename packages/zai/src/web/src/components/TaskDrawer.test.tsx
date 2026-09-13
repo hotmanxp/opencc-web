@@ -177,11 +177,12 @@ describe('MarkdownText (kind="text" 渲染器)', () => {
     expect(container.textContent).toContain('alert(1)')
   })
 
-  test('MarkdownText 输出带外层 div, lineHeight: 1.6 与 Agent.tsx 等价', () => {
+  test('MarkdownText 输出带外层 div, lineHeight 与 Agent.tsx 等价', () => {
     const { container } = render(<MarkdownText text="hello" />)
     const wrapper = container.firstChild as HTMLElement
     expect(wrapper.tagName).toBe('DIV')
-    expect(wrapper.style.lineHeight).toBe('1.6')
+    // leading-relaxed in Tailwind = line-height: 1.625; approximate 1.6 范围
+    expect(wrapper.className).toContain('leading-relaxed')
   })
 })
 

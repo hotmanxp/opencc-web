@@ -34,24 +34,9 @@ export default function DrawerPullHandle({
         if (end == null) return
         if (end - start >= threshold) onClose()
       }}
-      style={{
-        height: 24,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'grab',
-        touchAction: 'none',
-        userSelect: 'none',
-      }}
+      className="h-6 flex items-center justify-center cursor-grab touch-none select-none"
     >
-      <div
-        style={{
-          width: 36,
-          height: 4,
-          borderRadius: 2,
-          background: 'rgba(0,0,0,.18)',
-        }}
-      />
+      <div className="w-9 h-1 rounded-sm bg-black/20" />
     </div>
   )
 }

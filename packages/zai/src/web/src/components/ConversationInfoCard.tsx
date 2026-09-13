@@ -34,7 +34,7 @@ interface Props {
 export default function ConversationInfoCard({ info }: Props) {
   if (!info.sessionId) {
     return (
-      <div style={{ padding: 8, color: 'var(--text-dim-45)', fontSize: 13 }}>
+      <div className="p-2 text-[var(--text-dim-45)] text-[13px]">
         暂无活跃会话
       </div>
     )
@@ -60,12 +60,12 @@ export default function ConversationInfoCard({ info }: Props) {
       // 防止 "首条消息时间" / "API 请求次数" 这类 6 字 label 在窄屏
       // modal 内被强制换行。content 列随之自适应(Descriptions 用 table,
       // 单列布局下剩余宽度全部给 content,Session ID 仍走 break-all 折行)。
-      style={{ width: '100%' }}
+      className="w-full"
       labelStyle={{ width: 140, whiteSpace: 'nowrap', color: 'var(--text-dim-65)' }}
     >
       <Descriptions.Item label="Session ID">
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>
+        <span className="inline-flex items-center gap-[6px]">
+          <Text code className="text-xs break-all">
             {info.sessionId}
           </Text>
           <Button

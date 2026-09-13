@@ -11,7 +11,8 @@ describe('TodoPanel', () => {
     render(<TodoPanel todos={[item(), item({ id: 't-2', text: '评审', done: true })]} onAdd={() => {}} onToggle={() => {}} onDelete={() => {}} onClose={() => {}} />);
     expect(screen.getByText('写周报')).not.toBeNull();
     const done = screen.getByText('评审');
-    expect((done.closest('span')?.style.textDecoration || '')).toContain('line-through');
+    const doneSpan = done.closest('span') as HTMLElement | null;
+    expect(doneSpan?.className || '').toContain('line-through');
   });
   test('输入 + 回车 → onAdd 收到文本, 并触发清空(二次输入不重复)', () => {
     const onAdd = vi.fn();

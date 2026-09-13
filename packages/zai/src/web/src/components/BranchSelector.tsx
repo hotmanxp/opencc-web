@@ -141,7 +141,7 @@ export default function BranchSelector({
   // 防御其它调用方 (e.g. MobileQuickDrawer 它已经 `branch ?? '(无)'` 兜底,
   // 走不到分支). 极端情况: store 滞后 + prop=null 一起发生, 显示空字符串.
   if (!cwd || displayedBranch === null) {
-    return <span style={{ color: "var(--success)" }}>{displayedBranch ?? ''}</span>;
+    return <span className="text-[var(--success)]">{displayedBranch ?? ''}</span>;
   }
 
   return (
@@ -174,18 +174,13 @@ export default function BranchSelector({
           tabIndex={0}
           aria-label={`当前分支 ${displayedBranch},点击切换`}
           data-testid={`${testIdPrefix}trigger`}
+          className="text-[var(--success)] cursor-pointer inline-flex items-center rounded select-none"
           style={{
-            color: "var(--success)",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
             // 移动端走 ConfigStatusBar 状态栏: trigger 自身 padding 收紧到 0,
             // gap 缩到 2, 把视觉间距统一交给外层 ConfigStatusBar 的 gap 管控,
             // 避免 caret 右侧留出 "自身 padding 4px + 外层 gap 2px" 的双倍空隙.
             gap: isMobile ? 2 : 4,
             padding: isMobile ? "0" : "0 4px",
-            borderRadius: 3,
-            userSelect: "none",
             ...triggerStyle,
           }}
           onKeyDown={(e) => {
@@ -195,7 +190,7 @@ export default function BranchSelector({
             }
           }}
         >
-          <BranchesOutlined style={{ fontSize: 11, opacity: 0.85 }} />
+          <BranchesOutlined className="text-[11px] opacity-85" />
           {displayedBranch}
           <CaretDownOutlined style={{ fontSize: 10, opacity: 0.6, marginLeft: -4 }} />
         </span>
@@ -241,50 +236,14 @@ function BranchList({
       ? `显示前 ${MAX_BRANCHES}/${branches.length}`
       : `${branches.length} 个`;
 
-  const styles: Record<string, React.CSSProperties> = {
-    wrap: {
-      width: "min(280px, calc(100vw - 84px))",
-      background: "var(--bg-popup)",
-      borderRadius: 6,
-      padding: 10,
-      maxHeight: 320,
-      overflowY: "auto",
-      color: "#fff",
-      fontSize: 12,
-      fontFamily:
-        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-    },
-    header: {
-      fontSize: 11,
-      fontWeight: 600,
-      color: "var(--text-dim-55)",
-      marginBottom: 8,
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-    },
-    search: { marginBottom: 8 },
-    list: { listStyle: "none", padding: 0, margin: 0 },
-    item: {
-      display: "flex",
-      alignItems: "center",
-      gap: 6,
-      padding: "5px 6px",
-      borderRadius: 4,
-      cursor: "pointer",
-    },
-    empty: {
-      fontSize: 12,
-      color: "var(--text-dim-40)",
-      padding: "16px 8px",
-      textAlign: "center",
-    },
-  };
   return (
-    <div style={styles.wrap} data-testid={`${testIdPrefix}list`}>
-      <div style={styles.header}>
+    <div
+      className="w-[min(280px,calc(100vw-84px))] bg-[var(--bg-popup)] rounded-md p-[10px] max-h-[320px] overflow-y-auto text-white text-xs font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace]"
+      data-testid={`${testIdPrefix}list`}
+    >
+      <div className="text-[11px] font-semibold text-[var(--text-dim-55)] mb-2 flex justify-between items-center">
         <span>分支</span>
-        <span style={{ fontWeight: 400, color: "var(--text-dim-45)" }}>
+        <span className="font-normal text-[var(--text-dim-45)]">
           {headerCountLabel}
         </span>
       </div>
@@ -296,22 +255,25 @@ function BranchList({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         data-testid={`${testIdPrefix}list-search`}
-        style={styles.search}
+        className="mb-2"
       />
       {loading && branches.length === 0 ? (
-        <div style={{ ...styles.empty, display: "flex", justifyContent: "center" }}>
+        <div className="text-xs text-[var(--text-dim-40)] py-4 px-2 text-center flex justify-center">
           <Spin size="small" />
         </div>
       ) : error ? (
-        <div style={styles.empty} data-testid={`${testIdPrefix}list-error`}>
+        <div
+          className="text-xs text-[var(--text-dim-40)] py-4 px-2 text-center"
+          data-testid={`${testIdPrefix}list-error`}
+        >
           {error}
         </div>
       ) : filteredBranches.length === 0 ? (
-        <div style={styles.empty}>
+        <div className="text-xs text-[var(--text-dim-40)] py-4 px-2 text-center">
           {isSearching ? `无匹配 “${query.trim()}” 的分支` : "暂无分支"}
         </div>
       ) : (
-        <ul style={styles.list}>
+        <ul className="list-none p-0 m-0">
           {filteredBranches.map((b) => {
             const switching = switchingTo === b.name;
             return (
@@ -322,8 +284,8 @@ function BranchList({
                 aria-current={b.isCurrent ? "true" : undefined}
                 aria-label={`分支 ${b.name}${b.isCurrent ? " (当前)" : ""}`}
                 data-testid={`${testIdPrefix}list-item-${b.name}`}
+                className="flex items-center gap-[6px] py-[5px] px-[6px] rounded cursor-pointer"
                 style={{
-                  ...styles.item,
                   background: b.isCurrent
                     ? "rgba(82, 196, 26, 0.12)"
                     : "transparent",
@@ -344,23 +306,14 @@ function BranchList({
                 }}
               >
                 <span
-                  style={{
-                    width: 14,
-                    color: b.isCurrent ? "#52c41a" : "var(--text-dim-25)",
-                    fontSize: 11,
-                    textAlign: "center",
-                    flexShrink: 0,
-                  }}
+                  className="w-[14px] text-[11px] text-center flex-shrink-0"
+                  style={{ color: b.isCurrent ? "#52c41a" : "var(--text-dim-25)" }}
                 >
                   {switching ? <Spin size="small" /> : b.isCurrent ? <CheckOutlined /> : "·"}
                 </span>
                 <span
+                  className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
                   style={{
-                    flex: 1,
-                    minWidth: 0,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
                     color: b.isCurrent
                       ? "#52c41a"
                       : b.isRemote
@@ -372,16 +325,7 @@ function BranchList({
                   {b.name}
                 </span>
                 {b.isRemote && (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: "var(--text-dim-45)",
-                      border: "1px solid var(--border-subtle)",
-                      borderRadius: 3,
-                      padding: "0 4px",
-                      flexShrink: 0,
-                    }}
-                  >
+                  <span className="text-[10px] text-[var(--text-dim-45)] border border-[var(--border-subtle)] rounded-[3px] px-1 flex-shrink-0">
                     remote
                   </span>
                 )}

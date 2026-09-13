@@ -135,16 +135,11 @@ export default function ApproveDrawer(): JSX.Element {
       data-testid="approve-drawer"
       footer={
         <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 8,
-          }}
+          className="flex justify-between items-center gap-2"
         >
-          <div style={{ flex: 1 }}>
+          <div className="flex-1">
             {status === 'error' && errorMessage && (
-              <Text type="danger" style={{ fontSize: 12 }}>
+              <Text type="danger" className="!text-xs">
                 {errorMessage}
               </Text>
             )}
@@ -187,62 +182,40 @@ export default function ApproveDrawer(): JSX.Element {
         </div>
       }
     >
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="flex flex-col h-full">
         {summary && (
           <div
-            style={{
-              marginBottom: 12,
-              padding: 12,
-              background: 'var(--bg-faint-04)',
-              borderRadius: 4,
-            }}
+            className="mb-3 p-3 bg-[var(--bg-faint-04)] rounded"
           >
-            <Text type="secondary" style={{ fontSize: 13 }}>
+            <Text type="secondary" className="!text-[13px]">
               {summary}
             </Text>
           </div>
         )}
         {filePath && (
           <div
-            style={{
-              marginBottom: 8,
-              fontSize: 11,
-              color: 'var(--text-dim-55)',
-              fontFamily: 'ui-monospace, monospace',
-            }}
+            className="mb-2 text-[11px] text-[var(--text-dim-55)] font-mono"
           >
             Loaded from {filePath}
           </div>
         )}
-        <div style={{ flex: 1, overflow: 'auto', padding: '12px 0' }}>
+        <div className="flex-1 overflow-auto py-3">
           {fetchStatus === 'loading' ? (
             <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-                gap: 8,
-              }}
+              className="flex flex-col items-center justify-center h-full gap-2"
             >
               <Spin />
               <Text type="secondary">Loading document...</Text>
             </div>
           ) : fetchStatus === 'error' ? (
             <div
-              style={{
-                padding: 16,
-                border: '1px solid #ffccc7',
-                borderRadius: 4,
-                background: '#fff2f0',
-              }}
+              className="p-4 border border-solid border-[#ffccc7] rounded bg-[#fff2f0]"
             >
               <Text type="danger" strong>
                 Could not load document: {fetchError ?? 'unknown error'}
               </Text>
-              <div style={{ height: 8 }} />
-              <Text type="secondary" style={{ fontSize: 12 }}>
+              <div className="h-2" />
+              <Text type="secondary" className="!text-xs">
                 Approve / reject still works below — the AI gets your decision without the body.
               </Text>
             </div>
@@ -253,13 +226,9 @@ export default function ApproveDrawer(): JSX.Element {
           )}
         </div>
         <div
-          style={{
-            marginTop: 16,
-            borderTop: '1px solid #f0f0f0',
-            paddingTop: 16,
-          }}
+          className="mt-4 border-t border-solid border-[#f0f0f0] pt-4"
         >
-          <Text strong style={{ display: 'block', marginBottom: 6 }}>
+          <Text strong className="!block !mb-1.5">
             Comment (optional on Approve, required on Reject)
           </Text>
           <TextArea
@@ -270,7 +239,7 @@ export default function ApproveDrawer(): JSX.Element {
             rows={4}
             data-testid="approve-drawer-comment"
           />
-          <Text type="secondary" style={{ fontSize: 11 }}>
+          <Text type="secondary" className="!text-[11px]">
             {localComment.length}/{COMMENT_MAX}
           </Text>
         </div>

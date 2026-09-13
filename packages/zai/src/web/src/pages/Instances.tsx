@@ -395,7 +395,7 @@ export default function Instances(): JSX.Element {
         title={lan ? 'LAN 模式:该实例会以 --lan 启动并监听 0.0.0.0' : '仅本机访问 (127.0.0.1)。开启后下次启动会以 --lan 启动'}
       >
         <Space size={8}>
-          <span style={{ color: 'var(--text-dim-65)', fontSize: 12 }}>LAN</span>
+          <span className="text-xs text-[var(--text-dim-65)]">LAN</span>
           <Switch
             size="small"
             checked={lan}
@@ -405,14 +405,14 @@ export default function Instances(): JSX.Element {
             data-testid={`lan-switch-${row.id}`}
             onChange={(next) => void setLan(row.id, next)}
           />
-          {lan ? <Tag color="cyan" style={{ marginInlineEnd: 0 }}>--lan</Tag> : null}
+          {lan ? <Tag color="cyan" className="mr-0">--lan</Tag> : null}
         </Space>
       </Tooltip>
     )
   }
 
   return (
-    <div style={{ padding: 24 }}>
+    <div className="p-6">
       <Card
         title={<Typography.Title level={4} style={{ margin: 0 }}>实例管理</Typography.Title>}
         extra={
@@ -465,7 +465,7 @@ export default function Instances(): JSX.Element {
                 <Descriptions.Item label="启动端口">
                   <Space size={4} align="center">
                     {inst.startPort == null ? (
-                      <Tag color="default" style={{ marginInlineEnd: 0 }}>auto</Tag>
+                      <Tag color="default" className="mr-0">auto</Tag>
                     ) : (
                       <span data-testid={`startup-port-${inst.id}`}>{inst.startPort}</span>
                     )}
@@ -473,7 +473,7 @@ export default function Instances(): JSX.Element {
                       <Button
                         size="small"
                         type="link"
-                        style={{ padding: 0 }}
+                        className="p-0"
                         data-testid={`edit-port-${inst.id}`}
                         onClick={() => setPortEditRow(inst)}
                       >
@@ -501,7 +501,7 @@ export default function Instances(): JSX.Element {
                   </Descriptions.Item>
                 ) : null}
               </Descriptions>
-              <div style={{ marginTop: 12 }}>{renderActions(inst)}</div>
+              <div className="mt-3">{renderActions(inst)}</div>
             </Card>
           </Col>
         ))}
@@ -551,7 +551,7 @@ export default function Instances(): JSX.Element {
             label="工作目录"
             required
           >
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className="flex gap-2">
               <Form.Item
                 name="cwd"
                 noStyle
@@ -562,7 +562,7 @@ export default function Instances(): JSX.Element {
                   data-testid="cwd-input"
                   // Windows 上 placeholder 也用 / 风格 — 服务端 path.resolve 把
                   // / 与 \ 都视为分隔符,客户端无需预先规范。
-                  style={{ flex: 1 }}
+                  className="flex-1"
                 />
               </Form.Item>
               <Button
@@ -597,7 +597,7 @@ export default function Instances(): JSX.Element {
             tooltip="默认自动分配（从 9201 起）。开启后可手动指定端口；端口被占用时启动失败。"
             data-testid="port-form-item"
           >
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div className="flex gap-2 items-center">
               <Form.Item name="portEnabled" valuePropName="checked" noStyle>
                 <Switch
                   checkedChildren="手动"
@@ -616,10 +616,10 @@ export default function Instances(): JSX.Element {
                   placeholder="端口号"
                   disabled={portEnabled !== true}
                   data-testid="port-number"
-                  style={{ width: 180 }}
+                  className="w-[180px]"
                 />
               </Form.Item>
-              {portEnabled !== true ? <Tag color="default" style={{ marginInlineEnd: 0 }}>auto</Tag> : null}
+              {portEnabled !== true ? <Tag color="default" className="mr-0">auto</Tag> : null}
             </div>
           </Form.Item>
         </Form>
@@ -666,7 +666,7 @@ export default function Instances(): JSX.Element {
             label="启动端口"
             tooltip="默认自动分配（从 9201 起）。开启后可手动指定端口；端口被占用时启动失败。"
           >
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div className="flex gap-2 items-center">
               <Form.Item name="portEnabled" valuePropName="checked" noStyle>
                 <Switch
                   checkedChildren="手动"
@@ -685,10 +685,10 @@ export default function Instances(): JSX.Element {
                   placeholder="端口号"
                   disabled={editPortEnabled !== true}
                   data-testid="port-edit-number"
-                  style={{ width: 180 }}
+                  className="w-[180px]"
                 />
               </Form.Item>
-              {editPortEnabled !== true ? <Tag color="default" style={{ marginInlineEnd: 0 }}>auto</Tag> : null}
+              {editPortEnabled !== true ? <Tag color="default" className="mr-0">auto</Tag> : null}
             </div>
           </Form.Item>
         </Form>

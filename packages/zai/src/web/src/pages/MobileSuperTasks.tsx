@@ -154,12 +154,10 @@ export default function MobileSuperTasks(): JSX.Element {
 
   return (
     <div
+      className="h-full flex flex-col"
       style={{
         ...LIGHT_PAGE_VARS,
         background: '#eef2f7',
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
       }}
     >
       <ConfigProvider
@@ -179,26 +177,20 @@ export default function MobileSuperTasks(): JSX.Element {
       >
         {/* 顶栏 */}
         <div
+          className="shrink-0 py-2 px-3 bg-white flex items-center justify-between gap-2"
           style={{
-            flexShrink: 0,
-            padding: '8px 12px',
-            background: '#ffffff',
             borderBottom: '1px solid #e5e9f0',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
           }}
         >
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 600, fontSize: 16, color: '#0f172a' }}>任务工厂</div>
+          <div className="min-w-0">
+            <div className="font-semibold text-base text-[#0f172a]">任务工厂</div>
             {cwdName && (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {cwdName}
               </Typography.Text>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <div className="flex items-center gap-2 shrink-0">
             {/* 「开始所有任务」按钮(2026-09-05,tf-dkb8gj50):批量启动 queue 桶
                 全部任务。带待启动 N 徽标;空队列 disabled + tooltip 解释;
                 启动中 disabled + Spin 防重。视觉权重与「快速创建」对齐(同 type=primary
@@ -250,12 +242,7 @@ export default function MobileSuperTasks(): JSX.Element {
         </div>
 
         {/* Segmented */}
-        <div
-          style={{
-            flexShrink: 0,
-            padding: '8px 12px 0',
-          }}
-        >
+        <div className="shrink-0 pt-2 pb-0 px-3">
           <Segmented
             block
             value={tab}
@@ -269,29 +256,10 @@ export default function MobileSuperTasks(): JSX.Element {
         </div>
 
         {/* 列表区 */}
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: 'auto',
-            padding: '10px 12px',
-            paddingBottom: 88,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
+        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2.5 py-2.5 px-3 pb-[88px]">
           {showLanes ? (
             rows.length === 0 ? (
-              <div
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '40px 0',
-                }}
-              >
+              <div className="flex-1 flex items-center justify-center py-10">
                 <Empty description="暂无任务" />
               </div>
             ) : (
@@ -304,7 +272,7 @@ export default function MobileSuperTasks(): JSX.Element {
               ))
             )
           ) : (
-            <div style={{ padding: 24, textAlign: 'center' }}>
+            <div className="p-6 text-center">
               <Spin />
             </div>
           )}

@@ -96,7 +96,7 @@ export default function DirectoryPicker({
         </Button>,
       ]}
     >
-      <Space style={{ marginBottom: 8 }} wrap>
+      <Space className="mb-2" wrap>
         <Button icon={<HomeOutlined />} disabled={!home} onClick={() => void loadPath(home)}>
           主页
         </Button>
@@ -111,33 +111,19 @@ export default function DirectoryPicker({
         value={currentPath}
         readOnly
         // 在窄屏上 (<640px) 让 input 占满一行;Windows 长路径 (C:\Users\...) 也不溢出
-        style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+        className="font-[ui-monospace,SFMono-Regular,Menlo,monospace]"
       />
       <div
         data-testid="quick-directory-picker"
-        style={{
-          marginTop: 8,
-          minHeight: 240,
-          maxHeight: 360,
-          overflowY: 'auto',
-          border: '1px solid var(--border-light)',
-          borderRadius: 4,
-          background: 'var(--bg-popup)',
-          padding: '4px 0',
-        }}
+        className="mt-2 min-h-[240px] max-h-[360px] overflow-y-auto border border-[var(--border-light)] rounded bg-[var(--bg-popup)] py-1 px-0"
       >
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 32 }}>
+          <div className="text-center p-8">
             <Spin />
           </div>
         ) : entries.length === 0 ? (
           <div
-            style={{
-              padding: 24,
-              textAlign: 'center',
-              color: 'var(--text-dim-45)',
-              fontSize: 12,
-            }}
+            className="p-6 text-center text-[var(--text-dim-45)] text-xs"
           >
             空目录
           </div>
@@ -155,16 +141,7 @@ export default function DirectoryPicker({
                   void loadPath(entry.path)
                 }
               }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '6px 12px',
-                cursor: 'pointer',
-                color: 'var(--text-dim-85)',
-                fontSize: 13,
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-              }}
+              className="flex items-center gap-2 py-[6px] px-3 cursor-pointer text-[var(--text-dim-85)] text-[13px] font-[ui-monospace,SFMono-Regular,Menlo,monospace]"
               // hover 背景用 CSS 变量 --bg-faint-06,亮/暗主题各自的值在
               // index.css 的 :root / :root[data-theme='light'] 已定义
               // (暗: rgba(255,255,255,0.06);亮: rgba(0,0,0,0.06))。
@@ -176,11 +153,11 @@ export default function DirectoryPicker({
                 ;(e.currentTarget as HTMLDivElement).style.background = 'transparent'
               }}
             >
-              <span style={{ width: 16, textAlign: 'center' }}>
+              <span className="w-4 text-center">
                 <FolderOutlined />
               </span>
-              <span style={{ flex: 1 }}>{entry.name}</span>
-              <span style={{ fontSize: 11, color: 'var(--text-dim-45)' }}>打开</span>
+              <span className="flex-1">{entry.name}</span>
+              <span className="text-[11px] text-[var(--text-dim-45)]">打开</span>
             </div>
           ))
         )}
@@ -190,7 +167,7 @@ export default function DirectoryPicker({
           type="error"
           showIcon
           message={error}
-          style={{ marginTop: 8 }}
+          className="mt-2"
           data-testid="picker-error"
         />
       )}

@@ -123,25 +123,25 @@ export default function DesktopExplorer({ cwd, home, onOpenFile, onDragFile, def
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Tabs size="small" activeKey={tab} onChange={(k) => setTab(k as 'local' | 'online')} style={{ paddingLeft: 20 }} items={[
+    <div className="flex flex-col h-full">
+      <Tabs size="small" activeKey={tab} onChange={(k) => setTab(k as 'local' | 'online')} className="pl-5" items={[
         { key: 'local', label: '本地文件' },
         { key: 'online', label: '线上知识' },
       ]} />
       {tab === 'online' ? (
-        <Empty description="线上知识 · 待接入" style={{ marginTop: 64 }} />
+        <Empty description="线上知识 · 待接入" className="mt-16" />
       ) : (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px 6px' }}>
+          <div className="flex items-center gap-[6px] px-2 pb-[6px]">
             <Input size="small" value={pathInput} placeholder={currentPath ?? homePath}
               onChange={(e) => setPathInput(e.target.value)}
               onPressEnter={() => void go(pathInput.trim() || null)} style={{ flex: 1 }} />
             <button aria-label="上级" title="上级目录" onClick={() => parent && void go(parent)}
-              disabled={!parent} style={{ border: 0, background: 'transparent', cursor: parent ? 'pointer' : 'not-allowed' }}>
+              disabled={!parent} className={`border-0 bg-transparent ${parent ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
               <ArrowUpOutlined />
             </button>
           </div>
-          <div style={{ padding: '0 20px 6px' }}>
+          <div className="px-5 pb-[6px]">
             <Segmented
               size="small"
               value={startRoot}
@@ -155,9 +155,9 @@ export default function DesktopExplorer({ cwd, home, onOpenFile, onDragFile, def
           {error ? (
             <Alert type="error" message={error} showIcon style={{ margin: 8 }} />
           ) : loading ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><Spin size="small" /></div>
+            <div className="flex justify-center p-10"><Spin size="small" /></div>
           ) : (
-            <div style={{ flex: 1, overflow: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: 8, padding: 8, alignContent: 'start' }}>
+            <div className="flex-1 overflow-auto grid gap-2 p-2 content-start grid-cols-[repeat(auto-fill,minmax(88px,1fr))]">
               {entries.map((e) => (
                 <div key={e.path}
                   onClick={() => setSelectedPath(e.path)}
@@ -165,9 +165,11 @@ export default function DesktopExplorer({ cwd, home, onOpenFile, onDragFile, def
                   draggable // 文件与目录都可拖到附件区/桌面(路径引用, startDrag 已带 kind)
                   onDragStart={(ev) => startDrag(ev, e)}
                   data-testid={`entry-${e.name}`}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 8, borderRadius: 8, cursor: 'pointer', background: selectedPath === e.path ? 'rgba(255,102,0,.12)' : 'transparent' }}>
+                  className="flex flex-col items-center gap-1 p-2 rounded-lg cursor-pointer"
+                  style={{ background: selectedPath === e.path ? 'rgba(255,102,0,.12)' : 'transparent' }}
+                >
                   {e.kind === 'dir' ? <DirIcon name={e.name} open={false} size={30} /> : <FileIcon name={e.name} size={30} />}
-                  <span style={{ fontSize: 11, textAlign: 'center', wordBreak: 'break-all', maxWidth: '100%' }} title={e.name}>{e.name}</span>
+                  <span className="text-[11px] text-center break-all max-w-full" title={e.name}>{e.name}</span>
                 </div>
               ))}
               {entries.length === 0 && <Empty description="空目录" image={Empty.PRESENTED_IMAGE_SIMPLE} />}

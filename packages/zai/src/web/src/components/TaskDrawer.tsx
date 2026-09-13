@@ -67,36 +67,38 @@ function formatDuration(ms: number): string {
 }
 
 const CODE_BG = 'var(--bg-card)'
+const CODE_PRE_CLASS =
+  'my-1.5 px-3.5 py-3 rounded-md text-[12px] leading-[1.55] bg-[var(--bg-card)] text-[var(--text-primary)] font-mono overflow-auto whitespace-pre-wrap break-words'
 const CODE_FONT_FAMILY =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
 
 const markdownComponents = {
-  p: ({ children }: any) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
-  h1: ({ children }: any) => <h1 style={{ fontSize: 20, fontWeight: 600, margin: '12px 0 8px 0' }}>{children}</h1>,
-  h2: ({ children }: any) => <h2 style={{ fontSize: 18, fontWeight: 600, margin: '12px 0 8px 0' }}>{children}</h2>,
-  h3: ({ children }: any) => <h3 style={{ fontSize: 16, fontWeight: 600, margin: '10px 0 6px 0' }}>{children}</h3>,
-  h4: ({ children }: any) => <h4 style={{ fontSize: 14, fontWeight: 600, margin: '8px 0 4px 0' }}>{children}</h4>,
-  ul: ({ children }: any) => <ul style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ul>,
-  ol: ({ children }: any) => <ol style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ol>,
-  li: ({ children }: any) => <li style={{ marginBottom: 4 }}>{children}</li>,
+  p: ({ children }: any) => <p className="mb-2">{children}</p>,
+  h1: ({ children }: any) => <h1 className="text-xl font-semibold my-3">{children}</h1>,
+  h2: ({ children }: any) => <h2 className="text-lg font-semibold my-3">{children}</h2>,
+  h3: ({ children }: any) => <h3 className="text-base font-semibold mt-2.5 mb-1.5">{children}</h3>,
+  h4: ({ children }: any) => <h4 className="text-sm font-semibold mt-2 mb-1">{children}</h4>,
+  ul: ({ children }: any) => <ul className="mb-2 pl-5">{children}</ul>,
+  ol: ({ children }: any) => <ol className="mb-2 pl-5">{children}</ol>,
+  li: ({ children }: any) => <li className="mb-1">{children}</li>,
   code: ({ className, children }: any) => {
     const match = /language-(\w+)/.exec(className || '')
-    if (!match) return <code style={{ background: 'transparent', color: 'var(--accent-start)', padding: '1px 6px', borderRadius: 3, fontSize: '0.9em', fontFamily: CODE_FONT_FAMILY, fontWeight: 500 }}>{children}</code>
+    if (!match) return <code className="bg-transparent text-[var(--accent-start)] px-1.5 py-px rounded font-medium font-mono text-[0.9em]">{children}</code>
     // Lazy: SyntaxHighlighter pulls in prism once per session. Until then
     // show the raw text inside the same padding/background so the user
     // doesn't see a layout jump.
     return <LazyCode lang={match[1]} code={String(children).replace(/\n$/, '')} />
   },
   pre: ({ children }: any) => <>{children}</>,
-  table: ({ children }: any) => <table style={{ borderCollapse: 'collapse', margin: '4px 0 8px 0', fontSize: 13, width: '100%' }}>{children}</table>,
-  thead: ({ children }: any) => <thead style={{ background: 'var(--bg-card-hover)' }}>{children}</thead>,
+  table: ({ children }: any) => <table className="border-collapse my-1 text-[13px] w-full">{children}</table>,
+  thead: ({ children }: any) => <thead className="bg-[var(--bg-card-hover)]">{children}</thead>,
   tbody: ({ children }: any) => <tbody>{children}</tbody>,
-  tr: ({ children }: any) => <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>{children}</tr>,
-  th: ({ children }: any) => <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, border: '1px solid var(--border-subtle)' }}>{children}</th>,
-  td: ({ children }: any) => <td style={{ padding: '6px 10px', border: '1px solid var(--border-subtle)' }}>{children}</td>,
-  blockquote: ({ children }: any) => <blockquote style={{ borderLeft: '3px solid var(--border-subtle)', paddingLeft: 12, margin: '4px 0 8px 0', color: 'var(--text-secondary)' }}>{children}</blockquote>,
-  a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-start)', textDecoration: 'underline' }}>{children}</a>,
-  hr: () => <hr style={{ border: 'none', borderTop: '1px solid var(--border-subtle)', margin: '12px 0' }} />,
+  tr: ({ children }: any) => <tr className="border-b border-[var(--border-subtle)]">{children}</tr>,
+  th: ({ children }: any) => <th className="px-2.5 py-1.5 text-left font-semibold border border-[var(--border-subtle)]">{children}</th>,
+  td: ({ children }: any) => <td className="px-2.5 py-1.5 border border-[var(--border-subtle)]">{children}</td>,
+  blockquote: ({ children }: any) => <blockquote className="border-l-[3px] border-[var(--border-subtle)] pl-3 my-1 text-[var(--text-secondary)]">{children}</blockquote>,
+  a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-start)] underline">{children}</a>,
+  hr: () => <hr className="border-0 border-t border-[var(--border-subtle)] my-3" />,
 }
 
 /**
@@ -118,42 +120,14 @@ function LazyCode({ lang, code }: { lang: string; code: string }) {
   }, [])
   if (!oneDark) {
     return (
-      <pre
-        style={{
-          margin: '6px 0 10px 0',
-          padding: '12px 14px',
-          borderRadius: 6,
-          fontSize: 12,
-          lineHeight: 1.55,
-          background: CODE_BG,
-          color: 'var(--text-primary)',
-          fontFamily: CODE_FONT_FAMILY,
-          overflow: 'auto',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}
-      >
+      <pre className={CODE_PRE_CLASS}>
         <code>{code}</code>
       </pre>
     )
   }
   return (
     <Suspense fallback={
-      <pre
-        style={{
-          margin: '6px 0 10px 0',
-          padding: '12px 14px',
-          borderRadius: 6,
-          fontSize: 12,
-          lineHeight: 1.55,
-          background: CODE_BG,
-          color: 'var(--text-primary)',
-          fontFamily: CODE_FONT_FAMILY,
-          overflow: 'auto',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}
-      >
+      <pre className={CODE_PRE_CLASS}>
         <code>{code}</code>
       </pre>
     }>
@@ -174,12 +148,8 @@ function LazyCode({ lang, code }: { lang: string; code: string }) {
 export function MarkdownText({ text }: { text: string }) {
   return (
     <div
-      style={{
-        fontSize: 14,
-        lineHeight: 1.6,
-        color: 'inherit',
-        wordBreak: 'break-word',
-      }}
+      data-testid="markdown-text"
+      className="text-sm leading-relaxed text-inherit break-words"
     >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {text}
@@ -207,32 +177,18 @@ export function PromptBlock({ text }: { text: string }) {
   const clamped = !expanded && needsExpand
 
   return (
-    <div style={{ marginBottom: 8 }}>
+    <div className="mb-2">
       <div
-        style={{
-          fontSize: 11,
-          color: 'var(--text-secondary)',
-          marginBottom: 4,
-          letterSpacing: 0.5,
-        }}
+        className="text-[11px] text-[var(--text-secondary)] mb-1 tracking-wider"
       >
         Prompt:
       </div>
       <div
-        style={{
-          fontSize: 13,
-          color: 'var(--text-primary)',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          ...(clamped
-            ? {
-                display: '-webkit-box',
-                WebkitLineClamp: PROMPT_EXPAND_LINE_THRESHOLD,
-                WebkitBoxOrient: 'vertical' as const,
-                overflow: 'hidden',
-              }
-            : {}),
-        }}
+        className={
+          clamped
+            ? 'text-[13px] text-[var(--text-primary)] whitespace-pre-wrap break-words [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden'
+            : 'text-[13px] text-[var(--text-primary)] whitespace-pre-wrap break-words'
+        }
       >
         {text}
       </div>
@@ -241,7 +197,7 @@ export function PromptBlock({ text }: { text: string }) {
           type="link"
           size="small"
           onClick={() => setExpanded((e) => !e)}
-          style={{ padding: 0, marginTop: 2, fontSize: 11, height: 'auto' }}
+          className="!p-0 !mt-0.5 !text-[11px] !h-auto"
         >
           {expanded ? '收起' : '展开'}
         </Button>
@@ -286,17 +242,17 @@ export function BashTaskView({
   }
 
   return (
-    <div style={{ padding: '12px 20px' }}>
+    <div className="py-3 px-5">
       {/* 状态行 */}
-      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="text-[11px] text-[var(--text-secondary)] mb-2 flex items-center justify-between">
         <div>
           <span style={{ color: statusColor, fontWeight: 500 }}>
             {task.status === 'running' ? '⏳ ' : task.status === 'completed' ? '✅ ' : '❌ '}
             {statusMeta[task.status] ?? task.status}
           </span>
-          <span style={{ marginLeft: 12 }}>Runtime: {runtimeStr}</span>
+          <span className="ml-3">Runtime: {runtimeStr}</span>
           {task.exitCode !== undefined && (
-            <span style={{ marginLeft: 12 }}>exit: {task.exitCode}</span>
+            <span className="ml-3">exit: {task.exitCode}</span>
           )}
         </div>
         {task.status === 'running' && (
@@ -305,57 +261,39 @@ export function BashTaskView({
             size="small"
             loading={killing}
             onClick={handleKill}
-            style={{ fontSize: 11 }}
+            className="!text-[11px]"
           >
             {killing ? '终止中…' : '终止'}
           </Button>
         )}
       </div>
       {/* Command */}
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+      <div className="mb-2">
+        <div className="text-[10px] text-[var(--text-tertiary)] mb-0.5 uppercase tracking-wider">
           Command
         </div>
         <div
-          style={{
-            fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
-            fontSize: 12,
-            color: 'var(--text-primary)',
-            background: 'var(--bg-card-hover)',
-            padding: '6px 10px',
-            borderRadius: 4,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
+          className="font-mono text-[12px] text-[var(--text-primary)] bg-[var(--bg-card-hover)] py-1.5 px-2.5 rounded whitespace-pre-wrap break-all"
         >
           {task.command}
         </div>
       </div>
       {/* Output */}
       <div>
-        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', justifyContent: 'space-between' }}>
+        <div className="text-[10px] text-[var(--text-tertiary)] mb-0.5 uppercase tracking-wider flex justify-between">
           <span>Output</span>
           {isLongOutput && !expanded && (
-            <span style={{ color: 'var(--text-tertiary)', textTransform: 'none' }}>
+            <span className="text-[var(--text-tertiary)] normal-case">
               Showing {maxOutputLines} / {outputLines.length} lines · {Math.round(output.length / 1024 * 10) / 10}KB
             </span>
           )}
         </div>
         <pre
-          style={{
-            fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
-            fontSize: 11,
-            lineHeight: 1.5,
-            color: 'var(--text-primary)',
-            background: 'var(--bg-card-hover)',
-            padding: '8px 10px',
-            borderRadius: 4,
-            maxHeight: expanded ? 'none' : 360,
-            overflow: 'auto',
-            margin: 0,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
+          className={
+            expanded
+              ? 'font-mono text-[11px] leading-snug text-[var(--text-primary)] bg-[var(--bg-card-hover)] py-2 px-2.5 rounded overflow-auto m-0 whitespace-pre-wrap break-all'
+              : 'font-mono text-[11px] leading-snug text-[var(--text-primary)] bg-[var(--bg-card-hover)] py-2 px-2.5 rounded max-h-[360px] overflow-auto m-0 whitespace-pre-wrap break-all'
+          }
         >
           {visibleLines.join('\n') || '(空)'}
         </pre>
@@ -364,7 +302,7 @@ export function BashTaskView({
             type="link"
             size="small"
             onClick={() => setExpanded((e) => !e)}
-            style={{ padding: 0, marginTop: 2, fontSize: 11, height: 'auto', color: 'var(--accent-start)' }}
+            className="!p-0 !mt-0.5 !text-[11px] !h-auto !text-[var(--accent-start)]"
           >
             {expanded ? '收起' : `展开完整输出 (${outputLines.length} 行)`}
           </Button>
@@ -439,28 +377,11 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
   return (
     <div
       title={fullLine}
-      style={{
-        borderLeft: `3px solid ${statusColor}`,
-        background: 'var(--bg-card-hover)',
-        padding: '8px 12px',
-        borderRadius: 4,
-        margin: '6px 0',
-        fontSize: 12,
-        fontFamily: 'ui-monospace, monospace',
-        color: 'var(--text-primary)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        minWidth: 0,
-      }}
+      style={{ borderLeft: `3px solid ${statusColor}` }}
+      className="bg-[var(--bg-card-hover)] py-2 px-3 rounded my-1.5 text-[12px] font-mono text-[var(--text-primary)] flex items-center gap-2 min-w-0"
     >
       <span
-        style={{
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
+        className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
       >
         {inputLine}
       </span>
@@ -862,15 +783,15 @@ export function TaskDrawer({
   return (
     <Drawer
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="flex items-center gap-2">
           <span>{isBashTask ? 'Shell' : '后台 Agent'}</span>
           {detail && !isBashTask && (
-            <Tag color={meta?.color} style={{ margin: 0 }}>
+            <Tag color={meta?.color} className="!m-0">
               {meta?.icon} {meta?.label}
             </Tag>
           )}
           {detail && !isBashTask && duration && (
-            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{duration}</span>
+            <span className="text-[var(--text-secondary)] text-xs">{duration}</span>
           )}
           {bashTask && (
             <Tag
@@ -879,13 +800,13 @@ export function TaskDrawer({
                   : bashTask.status === 'running' ? 'var(--accent-start)'
                     :	'var(--error)'
               }
-              style={{ margin: 0 }}
+              className="!m-0"
             >
               {bashTask.status === 'completed' ? '✅ 完成' : bashTask.status === 'running' ? '⏳ 运行中' : '❌ 失败'}
             </Tag>
           )}
           {bashTask && (
-            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{formatDuration((bashTask.finishedAt ?? Date.now()) - bashTask.startedAt)}</span>
+            <span className="text-[var(--text-secondary)] text-xs">{formatDuration((bashTask.finishedAt ?? Date.now()) - bashTask.startedAt)}</span>
           )}
         </div>
       }
@@ -915,7 +836,7 @@ export function TaskDrawer({
       }
     >
       {loading && !detail && !bashTask && (
-        <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
+        <div className="p-6 text-center text-[var(--text-secondary)]">
           <LoadingOutlined /> 加载中...
         </div>
       )}
@@ -925,15 +846,9 @@ export function TaskDrawer({
       {detail && !isBashTask && (
         <>
           {/* 头部信息 */}
-          <div
-            style={{
-              padding: '12px 20px',
-              borderBottom: '1px solid var(--border-subtle)',
-              background: 'var(--bg-card-hover)',
-            }}
-          >
+          <div className="py-3 px-5 border-b border-[var(--border-subtle)] bg-[var(--bg-card-hover)]">
             <PromptBlock text={detail.input.prompt} />
-            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-secondary)' }}>
+            <div className="flex gap-3 text-[11px] text-[var(--text-secondary)]">
               {detail.input.model && <span>模型: {detail.input.model}</span>}
               {detail.input.cwd && (
                 <Tooltip title={detail.input.cwd}>
@@ -948,27 +863,14 @@ export function TaskDrawer({
                 重试 N-1 次". */}
             {detail.attemptCount !== undefined &&
               detail.attemptCount > 1 && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    fontSize: 11,
-                    color: 'var(--text-secondary)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '2px 8px',
-                    background: 'var(--bg-card-hover)',
-                    border: '1px solid var(--accent-start)',
-                    borderRadius: 4,
-                  }}
-                >
+                <div className="mt-2 text-[11px] text-[var(--text-secondary)] inline-flex items-center gap-1 py-0.5 px-2 bg-[var(--bg-card-hover)] border border-[var(--accent-start)] rounded">
                   ↻ 已重试 {detail.attemptCount - 1} 次 (529 / 429 / 5xx 瞬时错误)
                 </div>
               )}
           </div>
 
           {/* 时间线 */}
-          <div style={{ padding: '12px 20px', minHeight: 200 }}>
+          <div className="py-3 px-5 min-h-[200px]">
             {timeline.length === 0 ? (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -981,10 +883,7 @@ export function TaskDrawer({
                   return (
                     <div
                       key={item.key}
-                      style={{
-                        color: 'var(--text-primary)',
-                        padding: '6px 0',
-                      }}
+                      className="text-[var(--text-primary)] py-1.5"
                     >
                       <MarkdownText text={item.text} />
                     </div>
@@ -993,20 +892,17 @@ export function TaskDrawer({
                 if (item.kind === 'tool') {
                   return <ToolCallCard key={item.key} entry={item.entry} />
                 }
+                const toneColor =
+                  item.tone === 'err'
+                    ? 'var(--error)'
+                    : item.tone === 'ok'
+                      ? 'var(--success)'
+                      : 'var(--text-secondary)'
                 return (
                   <div
                     key={item.key}
-                    style={{
-                      fontSize: 11,
-                      padding: '6px 0',
-                      color:
-                        item.tone === 'err'
-                          ? 'var(--error)'
-                          : item.tone === 'ok'
-                            ? 'var(--success)'
-                            : 'var(--text-secondary)',
-                      fontFamily: 'ui-monospace, monospace',
-                    }}
+                    className="text-[11px] py-1.5 font-mono"
+                    style={{ color: toneColor }}
                   >
                     {item.label}
                   </div>

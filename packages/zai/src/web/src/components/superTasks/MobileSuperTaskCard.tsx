@@ -133,7 +133,7 @@ export default function MobileSuperTaskCard({
         aria-label={`删除任务 ${task.title}`}
         data-testid={`mobile-card-delete-${task.id}`}
         onClick={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+        className="absolute top-1.5 right-1.5 z-[1]"
       />
     </Tooltip>
   )
@@ -151,32 +151,17 @@ export default function MobileSuperTaskCard({
           onOpen(task.id)
         }
       }}
+      className="relative flex flex-col gap-1.5 px-3 py-2.5 rounded-[10px] bg-white border border-[#e5e9f0] cursor-pointer min-h-[108px] outline-none"
       style={{
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        padding: '10px 12px',
-        borderRadius: 10,
-        background: '#ffffff',
-        border: '1px solid #e5e9f0',
         borderLeft: `4px solid ${accent}`,
         boxShadow: '0 1px 3px rgba(15,23,42,.06)',
-        cursor: 'pointer',
-        // zai patch (2026-09-05, tf-7l9rsb47):根 div 抬到 processing 卡
-        // 实测基线 ≈108px(padding-top 10 + Tag 行 22 + gap 6 + title 行
-        // 20 + gap 6 + timestamp 行 24 + padding-bottom 10 ≈ 98,加 10px
-        // 安全余量 → 108,4 的倍数),让 queue / processing / verifying
-        // / finished 四 tab 内卡片高度齐顶齐底;display:flex + column
-        // (上方)+ timestamp 行 marginTop:'auto'(下方)双向锁定布局。
-        minHeight: 108,
-        outline: 'none',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div className="flex items-center gap-1.5 flex-wrap">
         <Tag
           color={statusTag.color}
-          style={{ marginInlineEnd: 0, fontSize: 12, lineHeight: '18px' }}
+          className="!text-xs !leading-[18px]"
+          style={{ marginInlineEnd: 0 }}
           data-testid={`mobile-status-tag-${task.id}`}
         >
           {statusTag.label}
@@ -184,7 +169,8 @@ export default function MobileSuperTaskCard({
         {priorityTag && (
           <Tag
             color={priorityTag.color}
-            style={{ marginInlineEnd: 0, fontSize: 12, lineHeight: '18px' }}
+            className="!text-xs !leading-[18px]"
+            style={{ marginInlineEnd: 0 }}
             data-priority={task.priority}
             data-testid={`mobile-priority-tag-${task.id}`}
           >
@@ -198,7 +184,8 @@ export default function MobileSuperTaskCard({
         {task.mode === 'quick' && (
           <Tag
             color="default"
-            style={{ marginInlineEnd: 0, fontSize: 12, lineHeight: '18px' }}
+            className="!text-xs !leading-[18px]"
+            style={{ marginInlineEnd: 0 }}
             data-mode="quick"
             data-testid={`quick-tag-${task.id}`}
           >
@@ -218,39 +205,16 @@ export default function MobileSuperTaskCard({
           空时退化到 description 首行(截 30 字),再退化到 task.id。卡片
           100% 有可见标题,不再让 quick 任务 / 历史损坏数据的「空白行」溜过去。 */}
       <div
-        style={{
-          fontSize: 14,
-          lineHeight: 1.4,
-          fontWeight: 600,
-          color: '#0f172a',
-          letterSpacing: 0.1,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          paddingRight: 28, // 给右上角 × 按钮留位,避免标题被遮
-          flexShrink: 0, // zai patch 2026-09-05 tf-a64bsonu:list 容器 223px 塞 26 张卡片时,
-                          // flex 算法把 title div 压到 height:0,被 overflow:hidden 裁没。
-                          // 锁住 lineHeight 19.6px 让卡片自然撑高,scroll 容器 overflowY:auto 兜底。
-        }}
+        className="text-sm font-semibold text-[#0f172a] tracking-[0.1px] whitespace-nowrap overflow-hidden text-ellipsis pr-7 flex-shrink-0 leading-[1.4]"
         title={displayTitle}
         data-testid={`mobile-card-title-${task.id}`}
       >
         {displayTitle}
       </div>
       <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 8,
-          // zai patch (2026-09-05, tf-7l9rsb47):根 div flex column 布局下,
-          // timestamp 行 marginTop:'auto' 把它推到卡底,保证短内容卡
-          // (单行 tag、标题短)跟长内容卡齐底;与 minHeight:108 配合实现
-          // 「齐顶齐底」,视觉上四个 tab 内卡片高度一致。
-          marginTop: 'auto',
-        }}
+        className="flex justify-between items-center gap-2 mt-auto"
       >
-        <span style={{ fontSize: 12, color: '#94a3b8' }}>
+        <span className="text-xs text-[#94a3b8]">
           {formatRelative(ts)}
         </span>
         {/* zai patch (2026-09-05, tf-fjdn0n4v):queue 卡片默认显示「启动」按钮,
@@ -283,13 +247,8 @@ export default function MobileSuperTaskCard({
               icon={<ClockCircleOutlined />}
               color="processing"
               data-testid={`mobile-card-queued-${task.id}`}
-              style={{
-                pointerEvents: 'none',
-                cursor: 'default',
-                marginInlineEnd: 0,
-                fontSize: 12,
-                lineHeight: '18px',
-              }}
+              className="pointer-events-none !cursor-default !text-xs !leading-[18px]"
+              style={{ marginInlineEnd: 0 }}
             >
               已排队
             </Tag>

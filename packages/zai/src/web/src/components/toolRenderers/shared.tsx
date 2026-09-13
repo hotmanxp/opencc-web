@@ -69,16 +69,8 @@ export function DetailsSection({
   children: React.ReactNode
 }) {
   return (
-    <details style={{ marginTop: 6 }}>
-      <summary
-        style={{
-          fontSize: 11,
-          color: "var(--text-dim-55)",
-          cursor: "pointer",
-          textTransform: "uppercase",
-          letterSpacing: 0.5,
-        }}
-      >
+    <details className="mt-[6px]">
+      <summary className="text-[11px] text-[var(--text-dim-55)] cursor-pointer uppercase tracking-[0.5px]">
         {summary}
       </summary>
       <PreBlock>{children}</PreBlock>

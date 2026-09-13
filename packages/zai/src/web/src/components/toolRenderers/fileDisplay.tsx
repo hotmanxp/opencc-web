@@ -98,14 +98,14 @@ function FileCard({ file }: { file: FileMeta }) {
         : '文件过大,请在文件管理器中打开'
 
   return (
-    <Card size="small" style={{ marginBottom: 8 }}>
-      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+    <Card size="small" className="mb-2">
+      <Space direction="vertical" size={4} className="w-full">
         <Space>
           {kindIcon(file.kind)}
           <Typography.Text strong>{file.name}</Typography.Text>
           {file.error && <Tag color="error">{errorLabel(file.error.code)}</Tag>}
         </Space>
-        <Space size="small" style={{ color: 'var(--text-dim-65)', fontSize: 12 }}>
+        <Space size="small" className="text-[var(--text-dim-65)] text-xs">
           <span>{humanSize(file.size)}</span>
           {file.mtime > 0 && <span>{new Date(file.mtime).toLocaleString()}</span>}
           <Typography.Text type="secondary" ellipsis style={{ maxWidth: 400 }}>

@@ -627,13 +627,10 @@ const activeId = useMemo(
   return (
     <div
       data-testid="desktop-root"
+      className="fixed inset-0 overflow-hidden select-none"
       style={{
-        position: 'fixed',
-        inset: 0,
-        overflow: 'hidden',
         background: wallpaperBg,
         color: 'var(--text-primary, #eaeaea)',
-        userSelect: 'none',
       }}
     >
       {/* 图标区(壁纸与窗口之间) */}
@@ -643,19 +640,11 @@ const activeId = useMemo(
           if (e.dataTransfer.types?.includes(DND_MIME)) e.preventDefault();
         }}
         onDrop={handleIconDrop}
+        className="absolute left-6 top-14 bottom-[88px] grid items-start content-start gap-1.5 z-[1]"
         style={{
-          position: 'absolute',
-          left: 24,
-          top: 56,
-          bottom: 88,
-          right: 'auto',
           width: 220,
-          display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, 84px)',
           gridAutoRows: '92px',
-          gap: 6,
-          alignContent: 'start',
-          zIndex: 1,
         }}
       >
         {shortcuts.map((sc) => (
@@ -676,30 +665,19 @@ const activeId = useMemo(
               e.preventDefault();
               setCtx({ path: sc.path, x: e.clientX, y: e.clientY });
             }}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 4,
-              padding: 8,
-              borderRadius: 8,
-              cursor: 'pointer',
-            }}
+            className="flex flex-col items-center gap-1 p-2 rounded-lg cursor-pointer"
             title={sc.path}
           >
             {sc.kind === 'dir' ? (
-              <FolderOutlined style={{ fontSize: 36, color: '#facc15' }} />
+              <FolderOutlined className="text-[36px] text-[#facc15]" />
             ) : (
-              <FileOutlined style={{ fontSize: 32, color: 'var(--desktop-icon-color, rgba(255,255,255,.85))' }} />
+              <FileOutlined className="text-[32px] text-[var(--desktop-icon-color,rgba(255,255,255,.85))]" />
             )}
             <span
+              className="text-xs text-center break-all max-w-full"
               style={{
-                fontSize: 12,
                 color: 'var(--desktop-label-color, rgba(255,255,255,.95))',
                 textShadow: 'var(--desktop-label-shadow, 0 1px 3px rgba(0,0,0,.7))',
-                textAlign: 'center',
-                wordBreak: 'break-all',
-                maxWidth: '100%',
               }}
             >
               {sc.name}
@@ -719,7 +697,7 @@ const activeId = useMemo(
 
       {/* 窗口区(仅定位上下文:不可命中, 窗口自身 section 拦截点击;
           否则全屏容器会盖住其下方的便签层/图标区, 便签拖不动也点不到) */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none' }}>
+      <div className="absolute inset-0 z-[2] pointer-events-none">
         {windows.map((w) => (
           <DesktopWindow
             key={w.id}
@@ -740,71 +718,55 @@ const activeId = useMemo(
                 aria-label="标题栏新建会话"
                 data-testid="desktop-title-new-session"
                 title={sessionBusy ? '对话进行中,请等待当前回复结束' : '新建会话'}
-                style={{
-                  border: 0,
-                  background: 'transparent',
-                  color: 'var(--text-secondary, #aaa)',
-                  cursor: sessionBusy ? 'not-allowed' : 'pointer',
-                  padding: '2px 6px',
-                  borderRadius: 4,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  opacity: sessionBusy ? 0.5 : 1,
-                }}
+                className={`border-0 bg-transparent inline-flex items-center rounded px-1.5 py-0.5 ${sessionBusy ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                style={{ color: 'var(--text-secondary, #aaa)' }}
               >
-                <PlusOutlined style={{ fontSize: 12 }} />
+                <PlusOutlined className="text-xs" />
               </button>
             ) : undefined}
           >
             {w.id === 'agent' ? (
               <div
-                style={{ display: 'flex', height: '100%' }}
+                className="flex h-full"
                 onDragOver={(e) => { if (e.dataTransfer.types?.includes(DND_MIME)) e.preventDefault(); }}
                 onDrop={handleAgentDrop}
               >
                 {attachmentsOpen ? (
                   <div
                     data-testid="agent-attachments-panel"
+                    className="w-[220px] flex-shrink-0 flex flex-col"
                     style={{
-                      width: 220,
-                      flexShrink: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
                       borderRight: '1px solid var(--border-subtle, rgba(128,128,128,.25))',
                       background: 'rgba(128,128,128,.04)',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px 2px 10px' }}>
-                      <span style={{ fontSize: 12, color: 'var(--text-secondary, #aaa)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <PaperClipOutlined style={{ fontSize: 12 }} /> 附件
+                    <div className="flex items-center justify-between py-[6px] pl-2.5 pr-2">
+                      <span className="text-xs inline-flex items-center gap-1.5" style={{ color: 'var(--text-secondary, #aaa)' }}>
+                        <PaperClipOutlined className="text-xs" /> 附件
                       </span>
                       <button
                         type="button"
                         onClick={() => setAttachmentsOpen(false)}
                         aria-label="收起附件区"
-                        style={{ border: 0, background: 'transparent', color: 'var(--text-secondary, #aaa)', cursor: 'pointer', padding: 2, borderRadius: 4 }}
+                        className="border-0 bg-transparent cursor-pointer p-0.5 rounded"
+                        style={{ color: 'var(--text-secondary, #aaa)' }}
                       >
-                        <MenuFoldOutlined style={{ fontSize: 11 }} />
+                        <MenuFoldOutlined className="text-[11px]" />
                       </button>
                     </div>
-                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                    <div className="flex-1 min-h-0 overflow-y-auto">
                       <AttachmentZone refs={refs} onAddRef={onAddRef} onRemoveRef={onRemoveRef} />
                     </div>
-                    <div style={{ padding: 6 }}>
+                    <div className="p-1.5">
                       <button
                         type="button"
                         onClick={insertMentions}
                         disabled={refs.length === 0}
                         aria-label="并入输入框"
+                        className={`w-full rounded-md bg-transparent text-xs py-1 ${refs.length === 0 ? 'cursor-not-allowed' : 'cursor-pointer'}`}
                         style={{
-                          width: '100%',
                           border: '1px solid var(--border-subtle, rgba(128,128,128,.4))',
-                          borderRadius: 6,
-                          background: 'transparent',
                           color: 'var(--text-secondary, #aaa)',
-                          cursor: refs.length === 0 ? 'not-allowed' : 'pointer',
-                          padding: '4px 0',
-                          fontSize: 12,
                         }}
                       >
                         并入输入框
@@ -817,26 +779,18 @@ const activeId = useMemo(
                     onClick={() => setAttachmentsOpen(true)}
                     aria-label="展开附件区"
                     data-testid="agent-attachments-collapsed"
+                    className="w-7 flex-shrink-0 border-0 cursor-pointer flex flex-col items-center justify-center gap-1"
                     style={{
-                      width: 28,
-                      flexShrink: 0,
-                      border: 0,
                       borderRight: '1px solid var(--border-subtle, rgba(128,128,128,.25))',
                       background: 'rgba(128,128,128,.04)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 4,
                       color: 'var(--text-secondary, #aaa)',
                     }}
                   >
-                    <PaperClipOutlined style={{ fontSize: 13 }} />
-                    <span style={{ writingMode: 'vertical-rl', fontSize: 10 }}>附件</span>
+                    <PaperClipOutlined className="text-[13px]" />
+                    <span className="text-[10px]" style={{ writingMode: 'vertical-rl' }}>附件</span>
                   </button>
                 )}
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                <div className="flex-1 min-w-0 flex flex-col">
                   {/* showModelPicker: Desktop 办公桌面的 Agent 窗口没有
                       ConfigStatusBar (脱离 Layout 沉浸式), 在状态行右端补
                       一个模型切换入口, 让用户可以在桌面 Agent 窗口里换模型
@@ -846,20 +800,17 @@ const activeId = useMemo(
                 {sessionsOpen ? (
                   <div
                     data-testid="agent-sessions-panel"
+                    className="w-[220px] flex-shrink-0 flex flex-col"
                     style={{
-                      width: 220,
-                      flexShrink: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
                       borderLeft: '1px solid var(--border-subtle, rgba(128,128,128,.25))',
                       background: 'rgba(128,128,128,.04)',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px 2px 10px' }}>
-                      <span style={{ fontSize: 12, color: 'var(--text-secondary, #aaa)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <MessageOutlined style={{ fontSize: 12 }} /> 会话
+                    <div className="flex items-center justify-between py-[6px] pl-2.5 pr-2">
+                      <span className="text-xs inline-flex items-center gap-1.5" style={{ color: 'var(--text-secondary, #aaa)' }}>
+                        <MessageOutlined className="text-xs" /> 会话
                       </span>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <span className="inline-flex items-center gap-0.5">
                         <button
                           type="button"
                           onClick={() => void createNewSession()}
@@ -867,35 +818,29 @@ const activeId = useMemo(
                           aria-label="新建会话"
                           data-testid="desktop-new-session"
                           title={sessionBusy ? '对话进行中,请等待当前回复结束' : '新建会话'}
-                          style={{
-                            border: 0,
-                            background: 'transparent',
-                            color: 'var(--text-secondary, #aaa)',
-                            cursor: sessionBusy ? 'not-allowed' : 'pointer',
-                            padding: 2,
-                            borderRadius: 4,
-                            opacity: sessionBusy ? 0.5 : 1,
-                          }}
+                          className={`border-0 bg-transparent p-0.5 rounded ${sessionBusy ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                          style={{ color: 'var(--text-secondary, #aaa)' }}
                         >
-                          <PlusOutlined style={{ fontSize: 11 }} />
+                          <PlusOutlined className="text-[11px]" />
                         </button>
                         <button
                           type="button"
                           onClick={() => setSessionsOpen(false)}
                           aria-label="收起会话栏"
-                          style={{ border: 0, background: 'transparent', color: 'var(--text-secondary, #aaa)', cursor: 'pointer', padding: 2, borderRadius: 4 }}
+                          className="border-0 bg-transparent cursor-pointer p-0.5 rounded"
+                          style={{ color: 'var(--text-secondary, #aaa)' }}
                         >
-                          <MenuUnfoldOutlined style={{ fontSize: 11 }} />
+                          <MenuUnfoldOutlined className="text-[11px]" />
                         </button>
                       </span>
                     </div>
-                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '4px 6px' }}>
+                    <div className="flex-1 min-h-0 overflow-y-auto py-1 px-1.5">
                       {sessions.length === 0 ? (
-                        <div style={{ fontSize: 12, color: 'var(--text-secondary, #aaa)', padding: '8px 4px' }}>
+                        <div className="text-xs py-2 px-1" style={{ color: 'var(--text-secondary, #aaa)' }}>
                           暂无历史会话
                         </div>
                       ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div className="flex flex-col gap-0.5">
                           {sessions.map((s) => {
                             const active = s.sessionId === currentSessionId;
                             return (
@@ -908,26 +853,17 @@ const activeId = useMemo(
                                   setCurrentSession(s.sessionId);
                                   void loadTranscript(s.sessionId);
                                 }}
-                                style={{
-                                  cursor: sessionBusy ? 'not-allowed' : 'pointer',
-                                  padding: '6px 8px',
-                                  borderRadius: 6,
-                                  background: active ? 'rgba(255,102,0,0.10)' : 'transparent',
-                                  opacity: sessionBusy ? 0.6 : 1,
-                                }}
+                                className={`rounded-md py-1.5 px-2 ${active ? 'bg-[rgba(255,102,0,0.10)]' : 'bg-transparent'} ${sessionBusy ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                               >
                                 <div
+                                  className={`text-[13px] whitespace-nowrap overflow-hidden text-ellipsis ${active ? 'text-[#ff6600]' : ''}`}
                                   style={{
-                                    fontSize: 13,
-                                    whiteSpace: 'nowrap',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
                                     color: active ? '#ff6600' : 'var(--text-primary, #eaeaea)',
                                   }}
                                 >
                                   {s.title || '新会话'}
                                 </div>
-                                <div style={{ fontSize: 11, color: 'var(--text-secondary, #aaa)' }}>
+                                <div className="text-[11px]" style={{ color: 'var(--text-secondary, #aaa)' }}>
                                   {new Date(s.updatedAt).toLocaleString()}
                                 </div>
                               </div>
@@ -943,35 +879,25 @@ const activeId = useMemo(
                     onClick={() => setSessionsOpen(true)}
                     aria-label="展开会话栏"
                     data-testid="agent-sessions-collapsed"
+                    className="w-7 flex-shrink-0 border-0 cursor-pointer relative flex flex-col items-center justify-center gap-1"
                     style={{
-                      width: 28,
-                      flexShrink: 0,
-                      border: 0,
                       borderLeft: '1px solid var(--border-subtle, rgba(128,128,128,.25))',
                       background: 'rgba(128,128,128,.04)',
-                      cursor: 'pointer',
-                      position: 'relative',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 4,
                       color: 'var(--text-secondary, #aaa)',
                     }}
                   >
-                    <MessageOutlined style={{ fontSize: 13 }} />
-                    <span style={{ writingMode: 'vertical-rl', fontSize: 10 }}>会话</span>
+                    <MessageOutlined className="text-[13px]" />
+                    <span className="text-[10px]" style={{ writingMode: 'vertical-rl' }}>会话</span>
                     {currentSessionId && (
                       <span
                         aria-hidden
                         title="当前会话"
+                        className="absolute rounded-full"
                         style={{
-                          position: 'absolute',
                           top: 6,
                           right: 5,
                           width: 5,
                           height: 5,
-                          borderRadius: '50%',
                           background: 'var(--accent-start, #ff6600)',
                         }}
                       />
@@ -1017,41 +943,37 @@ const activeId = useMemo(
           onClose={closePreview}
           onChange={patchPreviewWindow}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div className="flex flex-col h-full">
             <div
+              className="flex items-center px-2.5 py-1 gap-2 shrink-0 text-xs"
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '4px 10px',
                 borderBottom: '1px solid var(--border-subtle, rgba(128,128,128,.25))',
-                fontSize: 12,
                 color: 'var(--text-secondary, #aaa)',
-                gap: 8,
-                flexShrink: 0,
               }}
             >
               <PictureOutlined />
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={preview.path}>
+              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap" title={preview.path}>
                 {preview.path}
               </span>
               <button
                 type="button"
                 onClick={closePreview}
                 aria-label="关闭预览"
-                style={{ border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '0 4px' }}
+                className="border-0 bg-transparent cursor-pointer px-1"
+                style={{ color: 'inherit' }}
               >
                 ×
               </button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 8, display: 'flex', alignItems: 'stretch', justifyContent: 'center' }}>
+            <div className="flex-1 min-h-0 overflow-auto p-2 flex items-stretch justify-center">
               {previewLoading ? (
-                <span style={{ color: 'var(--text-secondary, #aaa)', alignSelf: 'center' }}>加载中…</span>
+                <span className="self-center" style={{ color: 'var(--text-secondary, #aaa)' }}>加载中…</span>
               ) : previewData == null ? (
-                <span style={{ color: 'var(--text-secondary, #aaa)', alignSelf: 'center' }}>无内容</span>
+                <span className="self-center" style={{ color: 'var(--text-secondary, #aaa)' }}>无内容</span>
               ) : 'error' in previewData ? (
-                <span style={{ color: 'var(--error, #ff7875)', alignSelf: 'center' }}>{previewData.error}</span>
+                <span className="self-center" style={{ color: 'var(--error, #ff7875)' }}>{previewData.error}</span>
               ) : (
-                <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <div className="w-full h-full flex flex-col">
                   <FilePreviewBody payload={previewData} />
                 </div>
               )}
@@ -1064,17 +986,13 @@ const activeId = useMemo(
       {ctx && (
         <div
           data-testid="shortcut-context-menu"
+          className="fixed z-[10000] rounded-md py-1 min-w-[140px]"
           style={{
-            position: 'fixed',
             left: ctx.x,
             top: ctx.y,
-            zIndex: 10000,
             background: 'var(--bg-elevated, #1c1c26)',
             border: '1px solid var(--border-subtle, rgba(128,128,128,.3))',
-            borderRadius: 6,
             boxShadow: '0 6px 20px rgba(0,0,0,.4)',
-            padding: '4px 0',
-            minWidth: 140,
           }}
         >
           <button
@@ -1096,47 +1014,28 @@ const activeId = useMemo(
 
       {/* 顶栏 */}
       <div
+        className="absolute top-0 left-0 right-0 h-8 flex items-center justify-between px-2.5 text-xs z-[100]"
         style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 32,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 10px',
           background: 'var(--desktop-chrome-bg, rgba(0,0,0,.35))',
           backdropFilter: 'blur(8px)',
-          zIndex: 100,
           color: 'var(--text-primary, #eaeaea)',
-          fontSize: 12,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => navigate('/agent')}
             aria-label="退出桌面"
-            style={{
-              border: 0,
-              background: 'transparent',
-              color: 'inherit',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '2px 6px',
-              borderRadius: 4,
-            }}
+            className="border-0 bg-transparent inline-flex items-center gap-1 px-1.5 py-0.5 rounded cursor-pointer"
+            style={{ color: 'inherit' }}
           >
             <ArrowLeftOutlined /> 退出桌面
           </button>
-          <span aria-label="时钟" data-testid="desktop-clock" style={{ fontFamily: 'ui-monospace, monospace' }}>
+          <span aria-label="时钟" data-testid="desktop-clock" className="font-mono">
             {clockText}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="flex items-center gap-3">
           <Switch
             size="small"
             checked={isLight}
@@ -1151,9 +1050,9 @@ const activeId = useMemo(
             onOpenChange={setWallpaperOpen}
             placement="bottomRight"
             content={
-              <div style={{ width: 220 }}>
-                <div style={{ marginBottom: 6, fontSize: 12 }}>预设</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+              <div className="w-[220px]">
+                <div className="mb-1.5 text-xs">预设</div>
+                <div className="flex flex-col gap-1.5 mb-2.5">
                   {PRESET_WALLPAPERS.map((p) => (
                     <button
                       key={p}
@@ -1162,21 +1061,17 @@ const activeId = useMemo(
                         setWallpaper(p);
                         setWallpaperOpen(false);
                       }}
+                      className="rounded-md h-9 cursor-pointer text-xs text-white"
                       style={{
                         border: wallpaper === p ? '2px solid var(--accent-start, #ff6600)' : '1px solid rgba(128,128,128,.3)',
-                        borderRadius: 6,
-                        height: 36,
                         background: WALLPAPER_PRESET_BG[p],
-                        color: '#fff',
-                        cursor: 'pointer',
-                        fontSize: 12,
                       }}
                     >
                       {WALLPAPER_LABEL[p] ?? p}
                     </button>
                   ))}
                 </div>
-                <div style={{ marginBottom: 6, fontSize: 12 }}>上传图片</div>
+                <div className="mb-1.5 text-xs">上传图片</div>
                 {/* onUploaded 身份稳定 → 该子树在壁纸 state 更新时不会收到新 props,
                     避免 React commitUpdate 回写 file input value 抛 InvalidStateError
                     (见 WallpaperUploadField 头注) */}
@@ -1187,7 +1082,8 @@ const activeId = useMemo(
             <button
               type="button"
               aria-label="壁纸设置"
-              style={{ border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '2px 6px', borderRadius: 4 }}
+              className="border-0 bg-transparent cursor-pointer px-1.5 py-0.5 rounded"
+              style={{ color: 'inherit' }}
             >
               <PictureOutlined /> 壁纸
             </button>

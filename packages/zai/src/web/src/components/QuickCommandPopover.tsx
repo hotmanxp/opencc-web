@@ -189,32 +189,10 @@ export default function QuickCommandPopover({
       role="listbox"
       aria-label="命令/技能列表"
       onKeyDown={onKeyDown}
-      style={{
-        position: "absolute",
-        bottom: "calc(100% + 6px)",
-        left: 0,
-        right: 0,
-        background: "var(--bg-card)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 8,
-        boxShadow: "0 4px 24px var(--text-dim-50)",
-        zIndex: 1100,
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        maxHeight: 360,
-      }}
+      className="absolute bottom-[calc(100%+6px)] left-0 right-0 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg shadow-[0_4px_24px_var(--text-dim-50)] z-[1100] flex flex-col overflow-hidden max-h-[360px]"
     >
       {/* 顶部条: 搜索框 + 关闭按钮 */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "6px 8px",
-          borderBottom: "1px solid var(--border-faint)",
-        }}
-      >
+      <div className="flex items-center gap-[6px] py-[6px] px-2 border-b border-[var(--border-faint)]">
         <Input
           ref={searchRef}
           size="small"
@@ -230,39 +208,18 @@ export default function QuickCommandPopover({
           onClick={onClose}
           aria-label="关闭"
           data-testid="quick-command-close"
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--text-dim-45)",
-            cursor: "pointer",
-            padding: 4,
-            borderRadius: 4,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
+          className="bg-transparent border-none text-[var(--text-dim-45)] cursor-pointer p-1 rounded inline-flex items-center justify-center"
         >
           <CloseOutlined />
         </button>
       </div>
 
       {/* 列表区 */}
-      <div
-        style={{
-          overflowY: "auto",
-          maxHeight: 320,
-          padding: "4px 0",
-        }}
-      >
+      <div className="overflow-y-auto max-h-[320px] py-1 px-0">
         {filtered.length === 0 && (
           <div
             data-testid="quick-command-empty"
-            style={{
-              padding: "16px 12px",
-              fontSize: 12,
-              color: "var(--text-dim-45)",
-              textAlign: "center",
-            }}
+            className="py-4 px-3 text-xs text-[var(--text-dim-45)] text-center"
           >
             {search.trim() ? "没有匹配的命令/技能" : "暂无可用命令/技能"}
           </div>
@@ -282,49 +239,25 @@ export default function QuickCommandPopover({
                 e.preventDefault();
                 handleSelect(item);
               }}
+              className="py-2 px-3 cursor-pointer flex items-center gap-3 transition-colors duration-100 border-l-[3px]"
               style={{
-                padding: "8px 12px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
                 background: isActive
                   ? "rgba(255,102,0,0.15)"
                   : "transparent",
-                borderLeft: isActive
-                  ? "3px solid #ff6600"
-                  : "3px solid transparent",
-                transition: "background 0.1s",
+                borderLeftColor: isActive ? "#ff6600" : "transparent",
               }}
             >
               <span
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#a78bfa",
-                  fontFamily:
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                  whiteSpace: "nowrap",
-                  minWidth: 140,
-                  flexShrink: 0,
-                }}
+                className="text-[13px] font-semibold text-[#a78bfa] font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] whitespace-nowrap min-w-[140px] flex-shrink-0"
               >
                 /{item.displayName ?? item.name}
               </span>
               {item.description && (
                 <span
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-dim-45)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    flex: 1,
-                    minWidth: 0,
-                  }}
+                  className="text-xs text-[var(--text-dim-45)] overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0"
                 >
                   {item.pluginName && (
-                    <span style={{ color: "rgba(167,139,250,0.75)" }}>
+                    <span className="text-[rgba(167,139,250,0.75)]">
                       ({item.pluginName}){" "}
                     </span>
                   )}
@@ -333,20 +266,14 @@ export default function QuickCommandPopover({
                 </span>
               )}
               <span
+                className="text-[10px] font-semibold py-[2px] px-[6px] rounded uppercase tracking-[0.5px] flex-shrink-0"
                 style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  padding: "2px 6px",
-                  borderRadius: 4,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
                   color:
                     item.kind === "command" ? "#a78bfa" : "var(--text-dim-45)",
                   background:
                     item.kind === "command"
                       ? "rgba(167,139,250,0.18)"
                       : "var(--bg-faint-08)",
-                  flexShrink: 0,
                 }}
               >
                 {item.kind}

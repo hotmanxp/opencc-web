@@ -56,23 +56,13 @@ export default function ConfigStatusBar({
   return (
     <div
       data-testid="config-status-bar"
-      style={{
-        background: "var(--bg-card-hover)",
-        borderTop: "1px solid var(--border-subtle)",
-        padding,
-        fontSize: 12,
-        fontFamily:
-          "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-        color: "var(--text-tertiary)",
-        display: "flex",
-        alignItems: "center",
-        gap,
-      }}
+      className="bg-[var(--bg-card-hover)] border-t border-[var(--border-subtle)] text-xs font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] text-[var(--text-tertiary)] flex items-center"
+      style={{ padding, gap }}
     >
       {/* ModeStatusButton 内部从 useAppStore.isMobile 自动判断移动端.
           splitPaneOpen 是分屏局部状态, 仍以 prop 形式传入. */}
       <ModeStatusButton compact={splitPaneOpen} />
-      <span style={{ color: "#eab308" }}>{displayName}</span>
+      <span className="text-[#eab308]">{displayName}</span>
       {/*
         非 Git 目录: branch=null. 整段 [· <BranchSelector> ·] 都不渲染,
         状态栏从 `dir · main · model · tasks` 收缩为 `dir · model · tasks`.
@@ -85,15 +75,15 @@ export default function ConfigStatusBar({
       */}
       {branch !== null && (
         <>
-          <span style={{ color: "var(--text-tertiary)" }}>·</span>
+          <span className="text-[var(--text-tertiary)]">·</span>
           <BranchSelector cwd={cwd} branch={branch} />
         </>
       )}
-      <span style={{ color: "var(--text-tertiary)" }}>·</span>
-      <span style={{ color: "var(--accent-start)" }}>
+      <span className="text-[var(--text-tertiary)]">·</span>
+      <span className="text-[var(--accent-start)]">
         <ModelStatusButton compact={splitPaneOpen} />
       </span>
-      <span style={{ color: "var(--text-tertiary)" }}>·</span>
+      <span className="text-[var(--text-tertiary)]">·</span>
       <TaskDock onSelect={onTaskSelect} compact={splitPaneOpen} />
     </div>
   );

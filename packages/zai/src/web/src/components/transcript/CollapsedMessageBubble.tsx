@@ -72,22 +72,15 @@ export function CollapsedMessageBubble({
   // Assistant text: 左对齐, antd Card (深底浅字) + RobotFilled 图标, 与 expanded 一致
   if (t === 'assistant.text') {
     return (
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-start',
-          marginBottom: 16,
-          marginRight: 20,
-        }}
-      >
+      <div className="flex justify-start mb-4 mr-5">
         <Card
           size="small"
-          style={{ width: '100%', maxWidth: '100%', borderRadius: 12, position: 'relative' }}
+          className="w-full max-w-full rounded-xl relative"
         >
           <MessageCopyButton text={(m.text as string) || ''} variant="ai" />
-          <Space align="start" size={8} style={{ width: '100%' }}>
+          <Space align="start" size={8} className="w-full">
             <RobotFilled style={{ color: 'var(--accent-start)', fontSize: 18 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="flex-1 min-w-0">
               <AssistantTextBody
                 text={(m.text as string) || ''}
                 streaming={streaming}
@@ -111,32 +104,20 @@ export function CollapsedMessageBubble({
     return (
       <div
         data-testid="user-bubble-container"
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          marginBottom: 16,
-        }}
+        className="flex justify-end mb-4"
       >
         <Card
           size="small"
+          className="rounded-xl relative"
           style={{
             maxWidth: expandUserBubble ? '100%' : '70%',
-            borderRadius: 12,
-            position: 'relative',
           }}
         >
           {/* 横向 flex: [copy inline] [text+attachments flex:1] [UserOutlined]
               copy 与 expanded 视图一致用 inline 嵌最左, 避免短消息 + 右上绝对按钮盖住文字. */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 8,
-              minWidth: 0,
-            }}
-          >
+          <div className="flex items-start gap-2 min-w-0">
             <MessageCopyButton text={text} variant="user" placement="inline" />
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div className="flex-1 min-w-0 flex flex-col gap-1">
               {attachments.length > 0 && (
                 <AttachmentStrip
                   attachments={attachments}
@@ -155,7 +136,7 @@ export function CollapsedMessageBubble({
                 {linkifyText(text)}
               </Paragraph>
             </div>
-            <UserOutlined style={{ flexShrink: 0, marginTop: 2 }} />
+            <UserOutlined className="flex-shrink-0 mt-0.5" />
           </div>
         </Card>
       </div>
@@ -168,9 +149,9 @@ export function CollapsedMessageBubble({
     const text = (m.text as string) ?? (m.content as string) ?? ''
     return (
       <div
+        className="py-1 px-2"
         style={{
           color: '#cf1322',
-          padding: '4px 8px',
           borderLeft: '3px solid #cf1322',
         }}
       >
@@ -199,16 +180,15 @@ export function CollapsedMessageBubble({
     // 强制 background:var(--bg-card),普通 inline style 覆盖不掉,必须
     // className 叠加选择器提优先级)。tf-k93br2hc,2026-09-05。
     return (
-      <div style={{ marginBottom: 8 }}>
+      <div className="mb-2">
         <Card
           size="small"
-          className="runtime-error-card"
+          className="runtime-error-card rounded-xl"
           style={{
             borderColor: 'var(--accent-end)',
-            borderRadius: 12,
           }}
         >
-          <Text type="danger" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          <Text type="danger" className="whitespace-pre-wrap break-words">
             <strong>错误: </strong>
             {message}
             {category ? ` (${category})` : ''}
@@ -221,7 +201,7 @@ export function CollapsedMessageBubble({
   // 兜底: 未知文本类型 — 纯文本 + clamp, 至少不丢内容
   const text = (m.text as string) ?? (m.content as string) ?? ''
   return (
-    <Card size="small" style={{ marginBottom: 8, borderRadius: 12 }}>
+    <Card size="small" className="mb-2 rounded-xl">
       <Paragraph
         ellipsis={{
           rows: CLAMP_LINES,
@@ -291,7 +271,7 @@ function AssistantTextBody({
           size="small"
           aria-label={expanded ? '收起内容' : '显示更多'}
           onClick={() => setExpanded((x) => !x)}
-          style={{ padding: 0, marginTop: 4 }}
+          className="p-0 mt-1"
         >
           {expanded ? '收起' : '显示更多'}
         </Button>

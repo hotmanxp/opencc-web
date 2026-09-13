@@ -168,34 +168,32 @@ export default function FactorySettingsDrawer({
     >
       <div
         data-testid="factory-settings-drawer"
+        className="h-full flex flex-col"
         style={{
           ...LIGHT_PAGE_VARS,
           background: '#ffffff',
           color: 'var(--text-primary, #1f2937)',
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
         }}
       >
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 16 }}>
+        <div className="flex-1 min-h-0 overflow-y-auto p-4">
           {loadError && (
             <Alert
               type="error"
               showIcon
               message={loadError}
-              style={{ marginBottom: 12 }}
+              className="mb-3"
               action={<Button size="small" onClick={() => void load()}>重试</Button>}
             />
           )}
           <Spin spinning={loading}>
-            <Space direction="vertical" size={20} style={{ width: '100%' }}>
+            <Space direction="vertical" size={20} className="w-full">
               {/* ── 目录配置(软引导) ─────────────────────────────── */}
               <div>
                 <Typography.Text strong>需求文档目录(docsDir)</Typography.Text>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', margin: '2px 0 6px' }}>
+                <div className="text-xs text-[var(--text-secondary,#6b7280)] my-0.5 mb-1.5">
                   需求讨论(task-intake)会话以此为工作目录;留空 = 维持现状。
                 </div>
-                <Space.Compact style={{ width: '100%' }}>
+                <Space.Compact className="w-full">
                   <Input
                     data-testid="factory-settings-docs-dir"
                     value={draft.docsDir}
@@ -221,10 +219,10 @@ export default function FactorySettingsDrawer({
 
               <div>
                 <Typography.Text strong>代码库目录(repoRoot)</Typography.Text>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', margin: '2px 0 6px' }}>
+                <div className="text-xs text-[var(--text-secondary,#6b7280)] my-0.5 mb-1.5">
                   软引导任务 cwd 落在此目录下(不校验不拦截)。
                 </div>
-                <Space.Compact style={{ width: '100%' }}>
+                <Space.Compact className="w-full">
                   <Input
                     data-testid="factory-settings-repo-root"
                     value={draft.repoRoot}
@@ -251,7 +249,7 @@ export default function FactorySettingsDrawer({
               {/* ── 并行上限(服务端强约束) ────────────────────────── */}
               <div>
                 <Typography.Text strong>最大并行任务</Typography.Text>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', margin: '2px 0 6px' }}>
+                <div className="text-xs text-[var(--text-secondary,#6b7280)] my-0.5 mb-1.5">
                   托管循环在 processing 达到该数时暂停派发(整数 2–8,accept 不受限)。
                 </div>
                 <InputNumber
@@ -261,14 +259,14 @@ export default function FactorySettingsDrawer({
                   precision={0}
                   value={draft.maxParallelTasks}
                   onChange={(v) => setDraft((p) => ({ ...p, maxParallelTasks: v }))}
-                  style={{ width: 120 }}
+                  className="w-[120px]"
                 />
               </div>
 
               {/* ── 历史归档阈值 ─────────────────────────────────── */}
               <div>
                 <Typography.Text strong>历史归档阈值(小时)</Typography.Text>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', margin: '2px 0 6px' }}>
+                <div className="text-xs text-[var(--text-secondary,#6b7280)] my-0.5 mb-1.5">
                   已完成/失败任务超过该时长后,任务列表轮询时自动移入 history-tasks 收纳(整数 1–8760,默认 48)。
                 </div>
                 <InputNumber
@@ -278,21 +276,21 @@ export default function FactorySettingsDrawer({
                   precision={0}
                   value={draft.historyArchiveHours}
                   onChange={(v) => setDraft((p) => ({ ...p, historyArchiveHours: v }))}
-                  style={{ width: 120 }}
+                  className="w-[120px]"
                 />
               </div>
 
               {/* ── 优先 cliAgent ───────────────────────────────── */}
               <div>
                 <Typography.Text strong>优先 cliAgent</Typography.Text>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', margin: '2px 0 6px' }}>
+                <div className="text-xs text-[var(--text-secondary,#6b7280)] my-0.5 mb-1.5">
                   任务调度器委派执行(CliAgent / SuperTasksCreate 的 agent 字段)时优先使用。仅「活跃」的 provider 可选。
                 </div>
                 {agents.length > 0 && !anyActive && (
                   <Alert
                     type="info"
                     showIcon
-                    style={{ marginBottom: 8 }}
+                    className="mb-2"
                     message="当前没有可用的 cliAgent provider"
                     description="请在下方「cliAgent 管理」注册 opencc / dsh / opencode,重启 zai 服务后即出现在此列表。"
                   />
@@ -301,7 +299,7 @@ export default function FactorySettingsDrawer({
                   data-testid="factory-settings-prefer-agent"
                   allowClear
                   placeholder="未指定"
-                  style={{ width: 240 }}
+                  className="w-60"
                   value={draft.preferCliAgent ?? undefined}
                   onChange={(v) => setDraft((p) => ({ ...p, preferCliAgent: (v ?? null) as Draft['preferCliAgent'] }))}
                   options={agents.map((a) => ({
@@ -315,35 +313,30 @@ export default function FactorySettingsDrawer({
               {/* ── cliAgent 管理 ───────────────────────────────── */}
               <div>
                 <Typography.Text strong>cliAgent 管理</Typography.Text>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', margin: '2px 0 10px' }}>
+                <div className="text-xs text-[var(--text-secondary,#6b7280)] my-0.5 mb-2.5">
                   写入 ~/.zai/settings.json 的 subagents.&lt;name&gt;(enabled: true,其余键不动);注册后需重启 zai 生效。
                 </div>
-                <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Space direction="vertical" size={10} className="w-full">
                   {agents.map((a) => (
                     <div
                       key={a.name}
                       data-testid={`factory-settings-agent-${a.name}`}
-                      style={{
-                        border: '1px solid var(--border-subtle, #e5e9f0)',
-                        borderRadius: 8,
-                        padding: 12,
-                        background: 'var(--bg-card, #ffffff)',
-                      }}
+                      className="border border-[var(--border-subtle,#e5e9f0)] rounded-lg p-3 bg-[var(--bg-card,#ffffff)]"
                     >
                       <Space size={8} wrap>
                         <Typography.Text strong>{a.name}</Typography.Text>
                         <Tag color={a.active ? 'success' : 'default'}>{a.active ? '活跃' : '未激活'}</Tag>
                       </Space>
-                      <div style={{ marginTop: 6, fontSize: 13 }}>
+                      <div className="mt-1.5 text-[13px]">
                         全局命令:{' '}
                         {a.commandFound
                           ? <Tag color="success" icon={<CheckCircleFilled />}>已安装</Tag>
                           : <Tag color="error" icon={<CloseCircleFilled />}>未找到</Tag>}
                         {a.commandPath && (
-                          <Typography.Text code style={{ fontSize: 12 }}>{a.commandPath}</Typography.Text>
+                          <Typography.Text code className="text-xs">{a.commandPath}</Typography.Text>
                         )}
                       </div>
-                      <div style={{ marginTop: 4, fontSize: 13 }}>
+                      <div className="mt-1 text-[13px]">
                         settings.json 注册:{' '}
                         {a.registered
                           ? <Tag color="success" icon={<CheckCircleFilled />}>已注册</Tag>
@@ -361,7 +354,7 @@ export default function FactorySettingsDrawer({
                           </Button>
                         )}
                         {a.registered && !a.active && (
-                          <span style={{ color: 'var(--text-secondary, #6b7280)', fontSize: 12 }}>
+                          <span className="text-[var(--text-secondary,#6b7280)] text-xs">
                             {' '}已注册,重启 zai 服务后生效
                           </span>
                         )}
@@ -376,14 +369,7 @@ export default function FactorySettingsDrawer({
 
         {/* 底部操作条:保存(PUT)+ 重新加载(回读服务端) */}
         <div
-          style={{
-            borderTop: '1px solid var(--border-subtle, #e5e9f0)',
-            padding: '10px 16px',
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 8,
-            background: '#ffffff',
-          }}
+          className="border-t border-[var(--border-subtle,#e5e9f0)] py-2.5 px-4 flex justify-end gap-2 bg-white"
         >
           <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={loading}>
             重新加载

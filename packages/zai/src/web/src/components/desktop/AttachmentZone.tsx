@@ -24,6 +24,12 @@ interface AttachmentZoneProps {
   max?: number;
 }
 
+const ZONE_BASE_CLS = 'flex flex-col items-stretch gap-[6px] py-[4px] px-[10px] border-b border-[var(--border-subtle,rgba(128,128,128,0.25))]';
+const HINT_CLS = 'flex-1 text-[11px] text-[var(--text-dim-45,#888)] bg-[rgba(128,128,128,0.06)] px-2 py-[4px] rounded';
+const CHIP_CLS = 'inline-flex items-center gap-[3px] max-w-full bg-[rgba(255,102,0,0.15)] rounded-md py-[1px] px-[6px]';
+const CHIP_NAME_CLS = 'overflow-hidden text-ellipsis whitespace-nowrap text-xs max-w-[130px]';
+const REMOVE_BTN_STYLE: React.CSSProperties = { width: 18, height: 18, minWidth: 18, padding: 0, fontSize: 10, flexShrink: 0 };
+
 export default function AttachmentZone({ refs, onAddRef, onRemoveRef, max = DEFAULT_MAX }: AttachmentZoneProps) {
   const [hover, setHover] = useState(false);
 
@@ -46,10 +52,8 @@ export default function AttachmentZone({ refs, onAddRef, onRemoveRef, max = DEFA
       onDragOver={(e) => { if (e.dataTransfer.types?.includes(DND_MIME)) { e.preventDefault(); setHover(true); } }}
       onDragLeave={() => setHover(false)}
       onDrop={onDrop}
+      className={ZONE_BASE_CLS}
       style={{
-        display: 'flex',
-        flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '4px 10px',
-        borderBottom: '1px solid var(--border-subtle, rgba(128,128,128,.25))',
         background: hover ? 'rgba(255,102,0,.08)' : 'transparent',
         minHeight: refs.length === 0 ? 28 : undefined,
       }}
@@ -57,14 +61,7 @@ export default function AttachmentZone({ refs, onAddRef, onRemoveRef, max = DEFA
       {refs.length === 0 ? (
         <span
           data-testid="attachment-zone-hint"
-          style={{
-            flex: 1,
-            fontSize: 11,
-            color: 'var(--text-dim-45, #888)',
-            background: 'rgba(128,128,128,.06)',
-            padding: '4px 8px',
-            borderRadius: 4,
-          }}
+          className={HINT_CLS}
         >
           拖拽文件到此处作为上下文
         </span>
@@ -78,16 +75,16 @@ export default function AttachmentZone({ refs, onAddRef, onRemoveRef, max = DEFA
               key={r.id}
               data-testid="attachment-chip"
               title={r.path}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, maxWidth: '100%', background: 'rgba(255,102,0,.15)', borderRadius: 6, padding: '1px 6px' }}
+              className={CHIP_CLS}
             >
               {r.kind === 'dir' ? (
                 <FolderOutlined style={{ color: '#facc15', fontSize: 12, flexShrink: 0 }} />
               ) : (
                 <FileOutlined style={{ color: 'var(--text-dim-45, #888)', fontSize: 12, flexShrink: 0 }} />
               )}
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, maxWidth: 130 }}>{r.name}</span>
+              <span className={CHIP_NAME_CLS}>{r.name}</span>
               <Button size="small" type="text" aria-label="移除附件" icon={<CloseOutlined />}
-                onClick={() => onRemoveRef(r.id)} style={{ width: 18, height: 18, minWidth: 18, padding: 0, fontSize: 10, flexShrink: 0 }} />
+                onClick={() => onRemoveRef(r.id)} style={REMOVE_BTN_STYLE} />
             </span>
           ))}
         </>

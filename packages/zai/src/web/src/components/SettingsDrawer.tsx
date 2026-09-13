@@ -333,54 +333,33 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
 
   return (
     <div
-      style={{
-        fontFamily:
-          'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-        fontSize: 13,
-        lineHeight: 1.5,
-        padding: '8px 4px',
-      }}
+      className="font-mono text-[13px] leading-relaxed py-2 px-1"
       data-testid="settings-list"
     >
       {searchMode && (
-        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ color: 'var(--text-dim-45)' }}>搜索:</span>
+        <div className="mb-3 flex items-center gap-1.5">
+          <span className="text-[var(--text-dim-45)]">搜索:</span>
           <input
             data-testid="settings-search-input"
             autoFocus
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="输入关键词过滤…"
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              borderBottom: '1px solid var(--border-strong)',
-              outline: 'none',
-              font: 'inherit',
-            }}
+            className="flex-1 bg-transparent border-0 border-b border-[var(--border-strong)] outline-none font-mono text-[13px] leading-relaxed"
           />
         </div>
       )}
 
       {filteredFlatRows.length === 0 ? (
-        <div style={{ color: 'var(--text-dim-45)', padding: '12px 8px' }}>
+        <div className="text-[var(--text-dim-45)] py-3 px-2">
           无匹配设置项
         </div>
       ) : (
         filteredSchema.map((section, sIdx) => (
-          <div key={section.section + sIdx} style={{ marginBottom: 16 }}>
+          <div key={section.section + sIdx} className="mb-4">
             <div
               data-section-header="true"
-              style={{
-                color: 'var(--text-dim-55)',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                fontSize: 11,
-                letterSpacing: 0.5,
-                marginBottom: 4,
-                paddingLeft: 12,
-              }}
+              className="text-[var(--text-dim-55)] font-semibold uppercase text-[11px] tracking-wider mb-1 pl-3"
             >
               {section.section}
             </div>
@@ -410,34 +389,22 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                   data-selected={isSelected ? 'true' : 'false'}
                   onClick={handleRowClick}
                   style={{
-                    display: 'flex',
-                    padding: '3px 12px',
-                    background: isSelected
-                      ? 'var(--bg-faint-08)'
-                      : 'transparent',
-                    cursor: 'pointer',
+                    background: isSelected ? 'var(--bg-faint-08)' : 'transparent',
                   }}
+                  className="flex py-0.5 px-3 cursor-pointer"
                 >
                   <span
-                    style={{
-                      width: 16,
-                      color: isSelected
-                        ? 'var(--accent-start)'
-                        : 'transparent',
-                      fontWeight: 'bold',
-                    }}
+                    className={
+                      isSelected
+                        ? 'w-4 text-[var(--accent-start)] font-bold'
+                        : 'w-4 text-transparent font-bold'
+                    }
                   >
                     {isSelected ? '›' : ''}
                   </span>
-                  <span style={{ flex: 1 }}>{row.label}</span>
+                  <span className="flex-1">{row.label}</span>
                   {row.kind === 'number' ? (
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                      }}
-                    >
+                    <span className="inline-flex items-center gap-1">
                       <Button
                         size="small"
                         data-testid={`number-row-minus-${row.key}`}
@@ -458,23 +425,12 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                           value={numberEditBuffer}
                           onChange={(e) => setNumberEditBuffer(e.target.value)}
                           onClick={(e) => e.stopPropagation()}
-                          style={{
-                            width: 56,
-                            textAlign: 'center',
-                            background: 'transparent',
-                            border: '1px solid var(--border-strong)',
-                            outline: 'none',
-                            font: 'inherit',
-                            padding: '0 4px',
-                          }}
+                          className="w-14 text-center bg-transparent border border-[var(--border-strong)] outline-none font-mono text-[13px] px-1 py-0"
                         />
                       ) : (
                         <span
                           data-testid={`number-row-value-${row.key}`}
-                          style={{
-                            minWidth: 28,
-                            textAlign: 'center',
-                          }}
+                          className="min-w-[28px] text-center"
                         >
                           {displayValue}
                         </span>
@@ -516,21 +472,12 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                       optionRender={(option) => {
                         const d = option.data
                         return (
-                          <div style={{ lineHeight: 1.4 }}>
-                            <div style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+                          <div className="leading-snug">
+                            <div className="text-[var(--text-primary)] text-[13px]">
                               {d.label}
                             </div>
                             {d.description && (
-                              <div
-                                style={{
-                                  color: 'var(--text-dim-40)',
-                                  fontSize: 11,
-                                  marginTop: 2,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
+                              <div className="text-[var(--text-dim-40)] text-[11px] mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap">
                                 {d.description}
                               </div>
                             )}
@@ -544,14 +491,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                     />
                   ) : (
                     <span
-                      style={{
-                        color: 'var(--text-dim-65)',
-                        textAlign: 'right',
-                        maxWidth: '55%',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
+                      className="text-[var(--text-dim-65)] text-right max-w-[55%] overflow-hidden text-ellipsis whitespace-nowrap"
                     >
                       {displayValue}
                     </span>
@@ -566,27 +506,12 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
       {enumOverlay && (
         <div
           data-testid="settings-enum-overlay"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'var(--bg-theme-6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-          }}
+          className="fixed inset-0 bg-[var(--bg-theme-6)] flex items-center justify-center z-[1000]"
           onClick={() => setEnumOverlay(null)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'var(--bg-popup)',
-              border: '1px solid var(--border-light)',
-              padding: '12px 0',
-              minWidth: 280,
-              maxWidth: 480,
-              borderRadius: 4,
-            }}
+            className="bg-[var(--bg-popup)] border border-[var(--border-light)] py-3 min-w-[280px] max-w-[480px] rounded"
           >
             {enumOverlay.options.map((opt, idx) => {
               const isHighlight = idx === enumOverlay.selectedIdx
@@ -596,33 +521,27 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                   data-overlay-option-value={opt.value}
                   data-overlay-highlight={isHighlight ? 'true' : 'false'}
                   style={{
-                    padding: '6px 16px',
                     background: isHighlight
                       ? 'rgba(249, 115, 22, 0.15)'
                       : 'transparent',
                     color: isHighlight
                       ? 'var(--accent-start)'
                       : 'var(--ui-text-color)',
-                    cursor: 'pointer',
                   }}
+                  className="py-1.5 px-4 cursor-pointer"
                   onClick={() => {
                     onChange?.(enumOverlay.rowKey, opt.value)
                     setEnumOverlay(null)
                   }}
                 >
-                  <div style={{ lineHeight: 1.4 }}>{opt.label}</div>
+                  <div className="leading-snug">{opt.label}</div>
                   {opt.description && (
                     <div
+                      className="text-[11px] leading-snug mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap"
                       style={{
-                        fontSize: 11,
-                        lineHeight: 1.4,
-                        marginTop: 2,
                         color: isHighlight
                           ? 'var(--accent-start)'
                           : 'var(--text-dim-40)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
                       }}
                     >
                       {opt.description}
@@ -1300,7 +1219,7 @@ export default function SettingsDrawer() {
       }
       styles={{ body: { padding: '12px 16px' } }}
       footer={
-        <div style={{ fontSize: 11, color: 'var(--text-dim-45)' }}>
+        <div className="text-[11px] text-[var(--text-dim-45)]">
           Space 修改 · Enter 弹出选项 · / 搜索 · Esc 取消
         </div>
       }
@@ -1308,15 +1227,10 @@ export default function SettingsDrawer() {
       {open && showServiceSection && (
         <div
           data-testid="settings-service-section"
-          style={{
-            marginBottom: 16,
-            padding: 12,
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 6,
-          }}
+          className="mb-4 p-3 border border-[var(--border-subtle)] rounded-md"
         >
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>服务</div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div className="font-semibold mb-2">服务</div>
+          <div className="flex gap-2 flex-wrap">
             <Button
               danger
               onClick={() => {

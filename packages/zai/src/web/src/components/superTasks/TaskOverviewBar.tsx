@@ -65,15 +65,7 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
   }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
-        flexWrap: 'wrap',
-      }}
-    >
+    <div className="flex items-center justify-between gap-3 flex-wrap">
       <Space size={8} wrap>
         {STAT_KEYS.map((s) => {
           const active = filter === s.key
@@ -83,25 +75,22 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
               key={s.key}
               data-testid={`stat-${s.key}`}
               onClick={() => onFilterChange(active ? 'all' : s.key)}
+              className={`flex flex-col items-center min-w-[72px] py-1.5 px-[18px] rounded-lg cursor-pointer transition-opacity duration-150 ${
+                filter !== 'all' && !active ? 'opacity-45' : 'opacity-100'
+              }`}
               style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                minWidth: 72,
-                padding: '6px 18px',
-                borderRadius: 8,
                 border: active ? `2px solid ${c.border}` : `1px solid ${c.border}`,
                 background: c.bg,
-                cursor: 'pointer',
-                opacity: filter !== 'all' && !active ? 0.45 : 1,
-                transition: 'opacity .15s ease',
               }}
               title={`点击${active ? '取消' : ''}筛选「${s.label}」`}
             >
-              <span style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.2, color: c.text }}>
+              <span className="text-xl font-semibold" style={{ lineHeight: 1.2, color: c.text }}>
                 {counts[s.key]}
               </span>
-              <span style={{ fontSize: 12, color: s.danger && counts[s.key] > 0 ? c.text : 'var(--text-secondary, #666)' }}>
+              <span
+                className="text-xs"
+                style={{ color: s.danger && counts[s.key] > 0 ? c.text : 'var(--text-secondary, #666)' }}
+              >
                 {s.label}
                 {s.danger && counts[s.key] > 0 ? ' ⚠' : ''}
               </span>
@@ -195,7 +184,7 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
             </Button>
           </Tooltip>
         )}
-        {loading && <span style={{ color: 'var(--text-secondary, #666)' }}>刷新中…</span>}
+        {loading && <span className="text-[var(--text-secondary,#666)]">刷新中…</span>}
       </Space>
     </div>
   )

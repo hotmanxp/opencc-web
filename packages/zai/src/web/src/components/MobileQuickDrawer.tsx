@@ -94,14 +94,9 @@ function GitTab({ cwd }: GitTabProps) {
   return (
     <div data-testid="mobile-quick-drawer-git">
       <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 8,
-        }}
+        className="flex justify-between items-center mb-2"
       >
-        <span style={{ fontSize: 12, color: 'var(--text-dim-55)' }}>
+        <span className="text-xs text-[var(--text-dim-55)]">
           Git
           {/* BranchSelector 内部处理 store 兜底 + 移动端 Popover placement='bottom'.
               cwd 不传(未开启会话)时它退化为只读 span, 跟旧 Tag 行为一致. */}
@@ -111,7 +106,7 @@ function GitTab({ cwd }: GitTabProps) {
             triggerStyle={{ marginLeft: 6 }}
             testIdPrefix="mobile-branch-"
           />
-          <span style={{ marginLeft: 8, color: 'var(--text-dim-35)' }}>
+          <span className="ml-2 text-[var(--text-dim-35)]">
             {files.length} 项变更
           </span>
         </span>
@@ -127,25 +122,25 @@ function GitTab({ cwd }: GitTabProps) {
       </div>
 
       {!cwd && (
-        <div style={{ padding: 16 }}>
+        <div className="p-4">
           <Empty description="请先开启会话" />
         </div>
       )}
 
       {cwd && status.error && !status.data?.ok && (
-        <div style={{ padding: 16 }}>
+        <div className="p-4">
           <Empty description={status.error} />
         </div>
       )}
 
       {cwd && !status.error && status.loading && files.length === 0 && (
-        <div style={{ padding: 16, textAlign: 'center' }}>
+        <div className="p-4 text-center">
           <Spin />
         </div>
       )}
 
       {cwd && !status.error && files.length === 0 && !status.loading && (
-        <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
+        <div className="text-[var(--text-dim-45)] p-4">
           没有变更
         </div>
       )}
@@ -167,54 +162,27 @@ function GitTab({ cwd }: GitTabProps) {
               }}
               data-testid={`mobile-quick-drawer-git-row-${file.path}`}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '10px 12px',
-                borderBottom: '1px solid var(--border-faint)',
-                cursor: 'pointer',
                 background: isSel ? 'rgba(255,102,0,0.12)' : 'transparent',
               }}
+              className="flex items-center gap-2 py-2.5 px-3 border-b border-[var(--border-faint)] cursor-pointer"
             >
               <span
                 style={{
-                  display: 'inline-block',
-                  width: 20,
-                  textAlign: 'center',
                   color: STATUS_COLORS[file.status as GitStatusChar],
-                  fontWeight: 700,
-                  fontFamily:
-                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                  flexShrink: 0,
                 }}
+                className="inline-block w-5 text-center font-bold font-mono flex-shrink-0"
               >
                 {file.status === '??' ? '?' : file.status}
               </span>
               <span
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  fontFamily:
-                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                  fontSize: 13,
-                }}
+                className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[13px]"
                 title={file.path}
               >
                 {file.path}
               </span>
               {file.staged && (
                 <span
-                  style={{
-                    fontSize: 10,
-                    color: 'rgba(167,139,250,0.85)',
-                    border: '1px solid rgba(167,139,250,0.35)',
-                    borderRadius: 3,
-                    padding: '0 4px',
-                    flexShrink: 0,
-                  }}
+                  className="text-[10px] text-[rgba(167,139,250,0.85)] border border-solid border-[rgba(167,139,250,0.35)] rounded-sm px-1 flex-shrink-0"
                 >
                   staged
                 </span>
@@ -258,7 +226,7 @@ function GitTab({ cwd }: GitTabProps) {
         styles={{ body: { padding: 12 } }}
       >
         {diff.loading ? (
-          <div style={{ textAlign: 'center', padding: 24 }}>
+          <div className="text-center p-6">
             <Spin />
           </div>
         ) : diff.error ? (
@@ -394,7 +362,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
         </Button>
       }
     >
-      <div style={{ marginBottom: 12 }}>
+      <div className="mb-3">
         <Segmented<'bash' | 'prompt' | 'git'>
           block
           value={effectiveTab}
@@ -409,7 +377,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
 
       {tab === 'bash' && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <div className="flex justify-end mb-2">
             <Button
               size="small"
               icon={<ReloadOutlined />}
@@ -420,12 +388,12 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
             </Button>
           </div>
           {!effectiveSid && (
-            <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
+            <div className="text-[var(--text-dim-45)] p-4">
               请先开启会话
             </div>
           )}
           {effectiveSid && topCommands.length === 0 && (
-            <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
+            <div className="text-[var(--text-dim-45)] p-4">
               暂无历史命令
             </div>
           )}
@@ -442,21 +410,12 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
                 }
               }}
               data-testid={`mobile-quick-drawer-bash-row-${entry.command}`}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 12,
-                padding: '10px 12px',
-                borderBottom: '1px solid var(--border-faint)',
-                cursor: 'pointer',
-                fontFamily: 'ui-monospace, Menlo, monospace',
-                fontSize: 13,
-              }}
+              className="flex justify-between gap-3 py-2.5 px-3 border-b border-[var(--border-faint)] cursor-pointer font-mono text-[13px]"
             >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap">
                 {entry.command}
               </span>
-              <span style={{ color: 'var(--text-dim-45)', fontSize: 11, flexShrink: 0 }}>
+              <span className="text-[var(--text-dim-45)] text-[11px] flex-shrink-0">
                 ×{entry.count}
               </span>
             </div>
@@ -466,7 +425,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
 
       {tab === 'prompt' && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <div className="flex justify-end mb-2">
             <Button
               size="small"
               type="primary"
@@ -478,7 +437,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
             </Button>
           </div>
           {adding && (
-            <div style={{ marginBottom: 12 }}>
+            <div className="mb-3">
               <AntApp>
                 <Input.TextArea
                   rows={3}
@@ -489,7 +448,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
                   data-testid="mobile-quick-drawer-prompt-input"
                 />
               </AntApp>
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <div className="flex gap-2 mt-2">
                 <Button
                   type="primary"
                   size="small"
@@ -511,12 +470,12 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
             </div>
           )}
           {!effectiveSid && (
-            <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
+            <div className="text-[var(--text-dim-45)] p-4">
               无会话
             </div>
           )}
           {effectiveSid && prompts.length === 0 && (
-            <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
+            <div className="text-[var(--text-dim-45)] p-4">
               暂无常用指令,点「+ 新增」添加
             </div>
           )}
@@ -533,16 +492,9 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
                 }
               }}
               data-testid={`mobile-quick-drawer-prompt-row-${p.id}`}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '10px 12px',
-                borderBottom: '1px solid var(--border-faint)',
-                cursor: 'pointer',
-              }}
+              className="flex items-center gap-2 py-2.5 px-3 border-b border-[var(--border-faint)] cursor-pointer"
             >
-              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                 {p.text}
               </span>
               <Button
@@ -559,7 +511,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
             </div>
           ))}
           {effectiveSid && prompts.length > 0 && (
-            <div style={{ marginTop: 12 }}>
+            <div className="mt-3">
               <Button
                 danger
                 type="text"

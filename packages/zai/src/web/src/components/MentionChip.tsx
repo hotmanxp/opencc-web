@@ -48,13 +48,11 @@ export default function MentionChip({ data, onMouseDown }: MentionChipProps) {
       <span className="agent-input-ref-chip-label">
         {isDir ? (
           <FolderOutlined
-            className="agent-input-ref-chip-icon"
-            style={{ color: "#facc15" }}
+            className="agent-input-ref-chip-icon text-[#facc15]"
           />
         ) : (
           <FileOutlined
-            className="agent-input-ref-chip-icon"
-            style={{ color: "var(--text-dim-45)" }}
+            className="agent-input-ref-chip-icon text-[var(--text-dim-45)]"
           />
         )}
         <span>{label}</span>

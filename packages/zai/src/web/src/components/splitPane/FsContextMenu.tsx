@@ -56,7 +56,7 @@ export function FsContextMenu(props: FsContextMenuProps): JSX.Element | null {
       title: '确认删除',
       content: (
         <span>
-          确定要删除 <strong style={{ wordBreak: 'break-all' }}>{path}</strong> 吗？此操作不可撤销。
+          确定要删除 <strong className="break-all">{path}</strong> 吗？此操作不可撤销。
         </span>
       ),
       okText: '删除',

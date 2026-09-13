@@ -32,44 +32,18 @@ export default function ModelPickerToolbarButton() {
       aria-label={`切换模型,当前 ${badgeText ?? '未知'}`}
       data-testid="model-picker-toolbar-trigger"
       data-test-active={currentModel ? 'true' : 'false'}
-      style={{
-        // 对齐 toolbarIconButtonStyle 的视觉风格 (toolbarStyles.ts):
-        // 圆角 8 + flex 居中 + flexShrink:0 + 跟同行按钮同高 32px。
-        // 宽度改成 auto 容纳 "图标 + 模型名 + caret" 文本, maxWidth 避免撑爆
-        // 状态行右端。
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 4,
-        height: 32,
-        maxWidth: 220,
-        padding: '0 8px',
-        borderRadius: 8,
-        border: '1px solid transparent',
-        background: 'transparent',
-        color: 'var(--text-secondary)',
-        fontFamily:
-          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-        fontSize: 12,
-        cursor: 'pointer',
-        flexShrink: 0,
-        transition: 'color 120ms, border-color 120ms',
-      }}
+      // 对齐 toolbarIconButtonStyle 的视觉风格 (toolbarStyles.ts):
+      // 圆角 8 + flex 居中 + flexShrink:0 + 跟同行按钮同高 32px。
+      // 宽度改成 auto 容纳 "图标 + 模型名 + caret" 文本, maxWidth 避免撑爆
+      // 状态行右端。
+      className="inline-flex items-center justify-center gap-1 h-8 max-w-[220px] px-2 rounded-lg border border-transparent bg-transparent text-[var(--text-secondary)] font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] text-xs cursor-pointer flex-shrink-0 transition-colors duration-100"
       title={`当前模型: ${tooltipText ?? '未知'}\n点击切换`}
     >
-      <SwapOutlined style={{ fontSize: 13, flexShrink: 0 }} />
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
+      <SwapOutlined className="text-[13px] flex-shrink-0" />
+      <span className="flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis">
         {badgeText ?? '未知'}
       </span>
-      <CaretDownOutlined style={{ fontSize: 10, opacity: 0.7, flexShrink: 0 }} />
+      <CaretDownOutlined className="text-[10px] opacity-70 flex-shrink-0" />
     </button>
   )
 

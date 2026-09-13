@@ -30,15 +30,8 @@ function WorkingStickman({ status }: { status: 'processing' | 'verifying' }): JS
       aria-label={title}
       title={title}
       data-testid={`stickman-${status}`}
-      style={{
-        color,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-        width: 22,
-        height: 22,
-      }}
+      className="inline-flex items-center justify-center flex-shrink-0 w-[22px] h-[22px]"
+      style={{ color }}
     >
       <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
         {/* 头(执行中随身体弹,验证中微微点头) */}
@@ -204,23 +197,16 @@ export default function SuperTaskCard({
       data-detail-id={task.id}
       data-testid={`card-${task.id}`}
       onClick={() => onOpenDetail(task.id)}
+      className={[
+        'flex flex-col gap-1.5 px-3 py-2.5 rounded-[10px] bg-white border border-[#e5e9f0] cursor-pointer transition-opacity duration-150',
+        dimmed ? 'opacity-35 pointer-events-none' : 'opacity-100 pointer-events-auto',
+      ].join(' ')}
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        padding: '10px 12px',
-        borderRadius: 10,
-        background: '#ffffff',
-        border: '1px solid #e5e9f0',
         borderLeft: `4px solid ${accent}`,
         boxShadow: '0 1px 3px rgba(15,23,42,.06)',
-        cursor: 'pointer',
-        opacity: dimmed ? 0.35 : 1,
-        pointerEvents: dimmed ? 'none' : 'auto',
-        transition: 'opacity .15s ease',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+      <div className="flex items-start gap-2">
         <div onClick={stop} onMouseDown={stop}>
           <Checkbox
             checked={selected}
@@ -228,26 +214,16 @@ export default function SuperTaskCard({
             aria-label={`选择任务 ${task.title}`}
           />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="flex-1 min-w-0">
           <div
-            style={{
-              // 2026-09-02 task.yaml 化后,title 改为 task.yaml 顶层字段,
-              // 卡片上让它更醒目一点:稍大字号 + 字色更深 + 收紧字间距。
-              fontSize: 14,
-              lineHeight: 1.4,
-              fontWeight: 600,
-              color: '#0f172a',
-              letterSpacing: 0.1,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
+            className="text-sm font-semibold text-[#0f172a] tracking-[0.1px] overflow-hidden text-ellipsis whitespace-nowrap"
+            style={{ lineHeight: 1.4 }}
             title={task.title}
           >
             {task.title}
           </div>
         </div>
-        <Space size={4} style={{ flexShrink: 0 }}>
+        <Space size={4} className="flex-shrink-0">
           <Tag color={tag.color} style={{ marginInlineEnd: 0 }}>
             {tag.label}
           </Tag>
@@ -294,13 +270,11 @@ export default function SuperTaskCard({
 
       {task.description ? (
         <div
+          className="text-xs text-[var(--text-secondary,#666)] overflow-hidden"
           style={{
-            fontSize: 12,
-            color: 'var(--text-secondary, #666)',
             display: '-webkit-box',
             WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
           }}
         >
           {task.description}
@@ -308,20 +282,14 @@ export default function SuperTaskCard({
       ) : null}
 
       <div
-        style={{
-          fontSize: 12,
-          color: 'var(--text-secondary, #666)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
+        className="text-xs text-[var(--text-secondary,#666)] overflow-hidden text-ellipsis whitespace-nowrap"
         title={task.cwd}
       >
         📎 {task.cwd}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-tertiary, #999)' }}>
+      <div className="flex justify-between items-center gap-2">
+        <span className="text-xs text-[var(--text-tertiary,#999)]">
           {task.createdAt ? new Date(task.createdAt).toLocaleString() : '-'}
         </span>
         <Space size={4}>

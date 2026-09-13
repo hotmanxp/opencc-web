@@ -16,10 +16,10 @@ type Props = {
 /** "已安装" Tab — 加载骨架 / 失败提示 / 空态 / 插件行 + 底部重载入口. */
 export function InstalledPanel({ data, status, writing, onToggle, onUpdate, onUninstall, onReload }: Props) {
   if (status === 'loading' || status === 'idle') {
-    return <Skeleton active style={{ padding: 16 }} />
+    return <Skeleton active className="p-4" />
   }
   if (status === 'error') {
-    return <Alert type="error" message="加载失败" showIcon style={{ margin: 16 }} />
+    return <Alert type="error" message="加载失败" showIcon className="m-4" />
   }
   return (
     <div>
@@ -30,11 +30,11 @@ export function InstalledPanel({ data, status, writing, onToggle, onUpdate, onUn
           description={data.errors.join('；')}
           showIcon
           closable
-          style={{ margin: 12 }}
+          className="m-3"
         />
       )}
       {data.plugins.length === 0 ? (
-        <Empty description="尚未安装任何插件" style={{ marginTop: 40 }} />
+        <Empty description="尚未安装任何插件" className="mt-10" />
       ) : (
         data.plugins.map((p) => (
           <PluginRow
@@ -47,7 +47,7 @@ export function InstalledPanel({ data, status, writing, onToggle, onUpdate, onUn
           />
         ))
       )}
-      <div style={{ textAlign: 'right', padding: 8 }}>
+      <div className="text-right p-2">
         <Typography.Link data-testid="plugin-reload" onClick={onReload}>
           重载插件
         </Typography.Link>

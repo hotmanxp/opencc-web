@@ -69,11 +69,11 @@ describe('SuperTaskPanel（看板）', () => {
     const doneCard = screen.getByTestId('card-tf-q') // 排队任务卡片
     // 点「已完成」卡 → 排队任务降透明且不可点
     fireEvent.click(screen.getByTestId('stat-done'))
-    expect(doneCard.style.opacity).toBe('0.35')
-    expect(doneCard.style.pointerEvents).toBe('none')
+    expect(doneCard.className).toContain('opacity-35')
+    expect(doneCard.className).toContain('pointer-events-none')
     // 清除筛选 → 恢复
     fireEvent.click(screen.getByTestId('stat-done'))
-    expect(doneCard.style.opacity).toBe('1')
+    expect(doneCard.className).toContain('opacity-100')
   })
 
   it('verifying 栏存在且显示验证中任务(2026-09-02 新增)', () => {

@@ -81,12 +81,12 @@ function WallpaperUploadField({ onUploaded }: WallpaperUploadFieldProps) {
         type="file"
         accept="image/*"
         onChange={onChange}
-        style={{ width: '100%', fontSize: 12, color: 'inherit' }}
+        className="w-full text-xs text-inherit"
       />
       {busy && (
         <div
           data-testid="wallpaper-uploading"
-          style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary, #aaa)' }}
+          className="mt-[6px] text-xs text-[var(--text-secondary,#aaa)]"
         >
           壁纸上传中…
         </div>

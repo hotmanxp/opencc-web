@@ -1475,19 +1475,7 @@ export default React.memo(function AgentInputBox({
           追加 `· 1/3 任务 · 1 进行中`, 让任务行合并到此处, 减少一行高度. */}
       <div
         data-testid="agent-input-status-row"
-        style={{
-          borderTop: "1px solid var(--border-light)",
-          borderBottom: "1px solid var(--border-light)",
-          padding: "6px 10px",
-          fontSize: 12,
-          fontFamily:
-            "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-          color: "var(--text-tertiary)",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          flexWrap: "wrap",
-        }}
+        className="border-y border-[var(--border-light)] py-1.5 px-2.5 text-xs font-mono text-[var(--text-tertiary)] flex items-center gap-2 flex-wrap"
       >
         {/* 最左侧插槽 — 场景专属按钮由此注入(● 状态指示之前)。 */}
         {toolbarLeftSlot}
@@ -1521,7 +1509,7 @@ export default React.memo(function AgentInputBox({
         {streamState === "reconnecting" && (
           <span
             data-testid="conn-reconnecting"
-            style={{ color: "var(--warning, #d4a72c)", marginLeft: 4 }}
+            className="text-[var(--warning,#d4a72c)] ml-1"
           >
             重连中… ({streamAttempt}/3)
           </span>
@@ -1529,12 +1517,12 @@ export default React.memo(function AgentInputBox({
         {streamState === "error" && (
           <span
             data-testid="conn-error"
-            style={{ color: "var(--danger, #ff4d4f)", marginLeft: 4 }}
+            className="text-[var(--danger,#ff4d4f)] ml-1"
           >
             连接已断开
             <a
               onClick={() => window.location.reload()}
-              style={{ marginLeft: 6, textDecoration: "underline", cursor: "pointer" }}
+              className="ml-1.5 underline cursor-pointer"
             >
               重连
             </a>
@@ -1558,20 +1546,13 @@ export default React.memo(function AgentInputBox({
             <Tooltip title="点击查看任务详情" placement="top">
               <span
                 data-testid="agent-input-task-summary"
+                className="text-[var(--text-secondary)] cursor-pointer flex-shrink-0 whitespace-nowrap overflow-hidden text-ellipsis transition-opacity"
                 style={{
-                  color: "var(--text-secondary)",
-                  cursor: "pointer",
-                  // 关键 flex 保护: 不让右端 spacer + 按钮把这段挤没.
-                  flexShrink: 0,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
                   // 流式期间降透明, 让 spinner 成为视觉焦点, 任务信息仍可读.
                   opacity: status === "streaming" ? 0.7 : 1,
-                  transition: "opacity 0.2s",
                 }}
               >
-                <span style={{ color: "var(--text-tertiary)", marginRight: 4 }}>·</span>
+                <span className="text-[var(--text-tertiary)] mr-1">·</span>
                 <span style={{ color: doneTasks === totalTasks ? "var(--success)" : "var(--text-primary)" }}>
                   {doneTasks}/{totalTasks} 任务
                 </span>
@@ -1583,7 +1564,7 @@ export default React.memo(function AgentInputBox({
             物理/虚拟键盘没有 Esc 键, 文字提示对移动用户没意义.
             桌面端保留是为了让键盘用户能记住快捷键. */}
         {status === "streaming" && !isMobile && (
-          <span style={{ color: "var(--text-tertiary)" }}>· esc 中断</span>
+          <span className="text-[var(--text-tertiary)]">· esc 中断</span>
         )}
         {attachments.length > 0 && (
           <AttachmentStrip
@@ -1597,7 +1578,7 @@ export default React.memo(function AgentInputBox({
         {/* spacer: flex:1 把右端按钮推到底部右边.
             minWidth:0 关键 — 不加时 flex item 默认 min-width:auto (= content 尺寸),
             在窄屏下 spacer 会反向挤压任务摘要到 0 宽, 表现为"被遮挡". */}
-        <span style={{ flex: 1, minWidth: 0 }} />
+        <span className="flex-1 min-w-0" />
         {/* 模型切换触发按钮 (2026-09-12 新增): 仅在调用方传了
             showModelPicker=true 时渲染, 补齐没有 ConfigStatusBar 的场景
             (Desktop Agent 窗口 / SuperTasks 调度器 / MobileSupervisorDrawer /
@@ -1811,41 +1792,16 @@ export default React.memo(function AgentInputBox({
         {queuedPrompts.length > 0 && (
           <div
             data-testid="queued-prompts-preview"
-            style={{
-              border: "1px solid var(--border-subtle)",
-              borderBottom: "none",
-              borderRadius: "8px 8px 0 0",
-              background: "var(--bg-card)",
-              maxHeight: 120,
-              overflowY: "auto",
-              padding: "4px 8px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-            }}
+            className="border border-[var(--border-subtle)] border-b-0 rounded-t-lg bg-[var(--bg-card)] max-h-[120px] overflow-y-auto py-1 px-2 flex flex-col gap-0.5"
           >
             {queuedPrompts.map((p) => (
               <div
                 key={p.id}
                 data-testid={`queued-prompt-${p.id}`}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  padding: "2px 4px",
-                  borderRadius: 4,
-                }}
+                className="flex items-center gap-2 text-xs text-[var(--text-secondary)] py-0.5 px-1 rounded"
               >
                 <span
-                  style={{
-                    flexShrink: 0,
-                    color: "#a78bfa",
-                    fontWeight: 600,
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                  }}
+                  className="flex-shrink-0 text-[#a78bfa] font-semibold font-mono"
                 >
                   排队中
                 </span>
@@ -1861,22 +1817,12 @@ export default React.memo(function AgentInputBox({
                     onKeyDown={(e) => {
                       if (e.key === "Escape") cancelEditQueued();
                     }}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      fontSize: 12,
-                      padding: "1px 8px",
-                    }}
+                    className="flex-1 min-w-0 !text-xs"
+                    style={{ padding: "1px 8px" }}
                   />
                 ) : (
                   <span
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
+                    className="flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis"
                   >
                     {p.text}
                   </span>
@@ -1889,13 +1835,7 @@ export default React.memo(function AgentInputBox({
                       icon={<CheckOutlined />}
                       onClick={() => void saveEditQueued()}
                       aria-label="保存排队消息"
-                      style={{
-                        flexShrink: 0,
-                        width: 20,
-                        height: 20,
-                        fontSize: 10,
-                        color: "var(--text-secondary)",
-                      }}
+                      className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-secondary)]"
                     />
                     <Button
                       type="text"
@@ -1903,13 +1843,7 @@ export default React.memo(function AgentInputBox({
                       icon={<CloseOutlined />}
                       onClick={cancelEditQueued}
                       aria-label="取消编辑排队消息"
-                      style={{
-                        flexShrink: 0,
-                        width: 20,
-                        height: 20,
-                        fontSize: 10,
-                        color: "var(--text-dim-45)",
-                      }}
+                      className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-dim-45)]"
                     />
                   </>
                 ) : (
@@ -1924,13 +1858,7 @@ export default React.memo(function AgentInputBox({
                         onClick={() => void steerQueued(p.id)}
                         disabled={status !== "streaming" || editingQueuedId !== null}
                         aria-label="插入提示"
-                        style={{
-                          flexShrink: 0,
-                          width: 20,
-                          height: 20,
-                          fontSize: 10,
-                          color: "var(--text-dim-45)",
-                        }}
+                        className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-dim-45)]"
                       />
                     </Tooltip>
                     <Button
@@ -1940,13 +1868,7 @@ export default React.memo(function AgentInputBox({
                       onClick={() => startEditQueued(p)}
                       disabled={editingQueuedId !== null}
                       aria-label="编辑排队消息"
-                      style={{
-                        flexShrink: 0,
-                        width: 20,
-                        height: 20,
-                        fontSize: 10,
-                        color: "var(--text-dim-45)",
-                      }}
+                      className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-dim-45)]"
                     />
                     <Button
                       type="text"
@@ -1954,13 +1876,7 @@ export default React.memo(function AgentInputBox({
                       icon={<CloseOutlined />}
                       onClick={() => void cancelQueued(p.id)}
                       aria-label="取消排队消息"
-                      style={{
-                        flexShrink: 0,
-                        width: 20,
-                        height: 20,
-                        fontSize: 10,
-                        color: "var(--text-dim-45)",
-                      }}
+                      className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-dim-45)]"
                     />
                   </>
                 )}
@@ -1969,30 +1885,13 @@ export default React.memo(function AgentInputBox({
           </div>
         )}
         <div
-          style={{
-            display: "flex",
-            alignItems: "stretch",
-            position: "relative",
-          }}
+          className="flex items-stretch relative"
         >
           {/* Slash 自动补全下拉菜单 */}
           {showSkillMenu && filteredSlash.length > 0 && (
             <div
               ref={skillMenuRef}
-              style={{
-                position: "absolute",
-                bottom: "100%",
-                left: 0,
-                right: 0,
-                marginBottom: 4,
-                background: "var(--bg-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: 8,
-                maxHeight: 240,
-                overflowY: "auto",
-                zIndex: 1000,
-                boxShadow: "0 4px 24px var(--text-dim-50)",
-              }}
+              className="absolute bottom-full left-0 right-0 mb-1 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg max-h-[240px] overflow-y-auto z-[1000] shadow-[0_4px_24px_var(--text-dim-50)]"
             >
               {filteredSlash.map((item, idx) => (
                 <div
@@ -2002,11 +1901,6 @@ export default React.memo(function AgentInputBox({
                     void selectSlashItem(item);
                   }}
                   style={{
-                    padding: "8px 12px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
                     background:
                       idx === skillMenuIdx
                         ? "rgba(255,102,0,0.15)"
@@ -2015,42 +1909,21 @@ export default React.memo(function AgentInputBox({
                       idx === skillMenuIdx
                         ? "3px solid #ff6600"
                         : "3px solid transparent",
-                    transition: "background 0.1s",
                   }}
+                  className="py-2 px-3 cursor-pointer flex items-center gap-3 transition-colors duration-100"
                   onMouseEnter={() => setSkillMenuIdx(idx)}
                 >
                   <span
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      // 命令/Skill 名视觉 identity: 与输入框内 mark 共享
-                      // var(--cmd-token-color) — 深色主题 #a78bfa 紫,
-                      // 浅色主题 var(--accent-start) 橙. 输入框敲 `/name`
-                      // 时出现的 mark 与 dropdown 选条完全同色,反馈一致。
-                      color: "var(--cmd-token-color)",
-                      fontFamily:
-                        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                      whiteSpace: "nowrap",
-                      minWidth: 180,
-                      flexShrink: 0,
-                    }}
+                    className="text-[13px] font-semibold text-[var(--cmd-token-color)] font-mono whitespace-nowrap min-w-[180px] flex-shrink-0"
                   >
                     /{item.displayName ?? item.name}
                   </span>
                   {item.description && (
                     <span
-                      style={{
-                        fontSize: 12,
-                        color: "var(--text-dim-45)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        flex: 1,
-                        minWidth: 0,
-                      }}
+                      className="text-xs text-[var(--text-dim-45)] overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0"
                     >
                       {item.pluginName && (
-                        <span style={{ color: "rgba(167,139,250,0.75)" }}>
+                        <span className="text-[rgba(167,139,250,0.75)]">
                           ({item.pluginName}){" "}
                         </span>
                       )}
@@ -2060,12 +1933,6 @@ export default React.memo(function AgentInputBox({
                   )}
                   <span
                     style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      padding: "2px 6px",
-                      borderRadius: 4,
-                      textTransform: "uppercase",
-                      letterSpacing: 0.5,
                       color:
                         item.kind === "command"
                           ? "#a78bfa"
@@ -2074,8 +1941,8 @@ export default React.memo(function AgentInputBox({
                         item.kind === "command"
                           ? "rgba(167,139,250,0.18)"
                           : "var(--bg-faint-08)",
-                      flexShrink: 0,
                     }}
+                    className="text-[10px] font-semibold py-0.5 px-1.5 rounded uppercase tracking-wider flex-shrink-0"
                   >
                     {item.kind}
                   </span>
@@ -2150,14 +2017,7 @@ export default React.memo(function AgentInputBox({
               输入框被压成只剩几像素宽. */}
           <div
             data-testid="agent-input-row"
-            style={{
-              display: "flex",
-              flexDirection: "row",
-              alignItems: "stretch",
-              gap: 0,
-              flex: 1,
-              minWidth: 0,
-            }}
+            className="flex flex-row items-stretch gap-0 flex-1 min-w-0"
           >
           {/* Mirror-backdrop wrapper(追齐 deepseek-harness InputBar 的三层手法):
             唯一滚动容器 .scroll → .grow → [backdrop(可见装饰层)/ textarea
@@ -2249,16 +2109,7 @@ export default React.memo(function AgentInputBox({
               - 按钮占位相对固定, 用 flexShrink:0 防止挤压; 输入框仍
                 flex:1 自适应拉伸. */}
           <div
-            style={{
-              flexShrink: 0,
-              marginLeft: 8,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "stretch",
-              justifyContent: "flex-end",
-              gap: 6,
-              alignSelf: "stretch",
-            }}
+            className="flex-shrink-0 ml-2 flex flex-col items-stretch justify-end gap-1.5 self-stretch"
           >
             {status === "streaming" ? (
               <Button
@@ -2267,21 +2118,7 @@ export default React.memo(function AgentInputBox({
                 onClick={() => {
                   void storeApi.getState().stop();
                 }}
-                style={{
-                  height: "auto",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 4,
-                  padding: "6px 14px",
-                  background: "rgba(255, 102, 0, 0.15)",
-                  border: "1px solid #ff6600",
-                  borderRadius: 6,
-                  color: "#ff6600",
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
+                className="!h-auto flex items-center justify-center gap-1 py-1.5 px-3.5 !bg-[rgba(255,102,0,0.15)] !border !border-solid !border-[#ff6600] !rounded-md !text-[#ff6600] !font-semibold !text-[13px] cursor-pointer"
               >
                 <StopOutlined />
                 <span>停止</span>
@@ -2299,6 +2136,8 @@ export default React.memo(function AgentInputBox({
                   input.trim().length === 0
                 }
                 style={{
+                  // 发送按钮的动态视觉态(条件 + CSS var + 实际 hex 混合)用 inline
+                  // 表达更顺,Tailwind 写四组 disabled-state 不直观,保留 inline.
                   height: "auto",
                   display: "flex",
                   alignItems: "center",
@@ -2348,7 +2187,7 @@ export default React.memo(function AgentInputBox({
         type="file"
         accept="image/*"
         multiple
-        style={{ display: "none" }}
+        className="hidden"
         onChange={handleFilePick}
       />
     </div>

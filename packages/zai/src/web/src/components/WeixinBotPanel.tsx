@@ -209,22 +209,22 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
     >
       <Spin spinning={loading}>
         {/* 1. StatusBanner */}
-        <div style={{ marginBottom: 16 }}>
+        <div className="mb-4">
           <h4>状态</h4>
           {status ? (
             <div>
               <Tag color={stateColor(status.state)}>{status.state}</Tag>
               {status.accountId && (
-                <span style={{ marginLeft: 8 }}>accountId: <code>{status.accountId}</code></span>
+                <span className="ml-2">accountId: <code>{status.accountId}</code></span>
               )}
               {status.lastError && (
                 <Alert
                   type="error"
                   message={status.lastError}
-                  style={{ marginTop: 8 }}
+                  className="mt-2"
                 />
               )}
-              <div style={{ marginTop: 8 }}>
+              <div className="mt-2">
                 {status.state === 'connected' ? (
                   <Button onClick={handleDisconnect}>断开</Button>
                 ) : (
@@ -241,16 +241,16 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
 
         {/* 2. SetupSection */}
         {(!status?.configured || status?.state === 'unconfigured') && (
-          <div style={{ marginBottom: 16 }}>
+          <div className="mb-4">
             <h4>扫码登录</h4>
             {setup.qrcodeUrl ? (
               <div>
                 <img
                   src={setup.qrcodeUrl}
                   alt="WeChat QR"
-                  style={{ width: 200, height: 200, border: '1px solid #ddd' }}
+                  className="w-[200px] h-[200px] border border-[#ddd]"
                 />
-                <p style={{ marginTop: 8 }}>
+                <p className="mt-2">
                   请用微信扫描,状态: <Tag>{setup.status}</Tag>
                 </p>
                 <Button onClick={handleCancelSetup}>取消</Button>
@@ -263,15 +263,15 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
 
         {/* 3. SettingsForm */}
         {status?.configured && (
-          <div style={{ marginBottom: 16 }}>
+          <div className="mb-4">
             <h4>设置</h4>
-            <div style={{ marginBottom: 8 }}>
+            <div className="mb-2">
               <label>DM policy:&nbsp;</label>
               <Select
                 aria-label="DM policy"
                 value={dmPolicy}
                 onChange={setDmPolicy}
-                style={{ width: 180 }}
+                className="w-[180px]"
                 options={[
                   { value: 'open', label: 'open' },
                   { value: 'allowlist', label: 'allowlist' },
@@ -280,13 +280,13 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
                 ]}
               />
             </div>
-            <div style={{ marginBottom: 8 }}>
+            <div className="mb-2">
               <label>Group policy:&nbsp;</label>
               <Select
                 aria-label="Group policy"
                 value={groupPolicy}
                 onChange={setGroupPolicy}
-                style={{ width: 180 }}
+                className="w-[180px]"
                 options={[
                   { value: 'open', label: 'open' },
                   { value: 'allowlist', label: 'allowlist' },
@@ -294,17 +294,17 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
                 ]}
               />
             </div>
-            <div style={{ marginBottom: 8 }}>
+            <div className="mb-2">
               <label>Allow From (user IDs, 逗号分隔):&nbsp;</label>
               <Input
                 value={allowFrom}
                 onChange={(e) => setAllowFrom(e.target.value)}
                 placeholder="user_id_1,user_id_2"
-                style={{ width: 280 }}
+                className="w-[280px]"
               />
             </div>
             <Button onClick={handleSaveSettings}>应用</Button>
-            <p style={{ fontSize: 12, color: '#999', marginTop: 8 }}>
+            <p className="text-xs text-[#999] mt-2">
               实际值持久化在 ~/.zai/settings.json (zaiSettings.weixinBot)。
               应用后会请重启 zai 触发 reload。
             </p>
@@ -315,17 +315,17 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
         <div>
           <h4>最近入站消息 (实时)</h4>
           {inbox.length === 0 ? (
-            <p style={{ color: '#999' }}>暂无消息</p>
+            <p className="text-[#999]">暂无消息</p>
           ) : (
-            <div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid #eee', padding: 8 }}>
+            <div className="max-h-[240px] overflow-auto border border-[#eee] p-2">
               {inbox.map((item) => (
-                <div key={item.id} style={{ borderBottom: '1px solid #f0f0f0', padding: 4 }}>
-                  <div style={{ fontSize: 12, color: '#666' }}>
+                <div key={item.id} className="border-b border-[#f0f0f0] p-1">
+                  <div className="text-xs text-[#666]">
                     [{item.chatType}] {item.senderId} → {item.chatId} · {new Date(item.ts).toLocaleTimeString()}
                   </div>
-                  <div style={{ marginTop: 2 }}>{item.text || <i>(空)</i>}</div>
+                  <div className="mt-[2px]">{item.text || <i>(空)</i>}</div>
                   {item.mediaPaths.length > 0 && (
-                    <div style={{ fontSize: 11, color: '#999' }}>
+                    <div className="text-[11px] text-[#999]">
                       媒体: {item.mediaPaths.length} 个
                     </div>
                   )}

@@ -288,6 +288,7 @@ export default function NewSuperTaskModal({
 
   const bodyContent = (
     <div
+      className="flex flex-col"
       style={{
         ...LIGHT_PAGE_VARS,
         // Modal / Drawer 都走 portal 挂在 document.body 下,拿不到页面根 div 上的
@@ -295,8 +296,6 @@ export default function NewSuperTaskModal({
         // 会解析回全局暗色主题 → 黑底 + 暗色文字低对比(2026-09-02 用户反馈)。
         background: '#eef2f7',
         color: 'var(--text-primary, #1f2937)',
-        display: 'flex',
-        flexDirection: 'column',
         height: innerHeight,
       }}
     >
@@ -355,7 +354,7 @@ export default function NewSuperTaskModal({
       )}
       {intakeSid && sessionId === intakeSid ? (
         <AgentStoreContext.Provider value={intakeStore}>
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="flex-1 min-h-0 flex flex-col">
             {/* intake/supervisor 临时对话不需要「分享到 LAN」与「插件管理」
                 入口 — 调度器讨论是单设备内对齐意图的过程,挂上反而干扰。
                 bottomStackStyle: 弹窗 body 与消息区同为 #eef2f7, 输入区
@@ -376,7 +375,7 @@ export default function NewSuperTaskModal({
           </div>
         </AgentStoreContext.Provider>
       ) : (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="flex-1 flex items-center justify-center">
           <Typography.Text type="secondary">
             {busy ? '正在准备需求讨论会话…' : resumeDraft ? '请选择继续未完成的讨论,或新开一轮。' : '准备中…'}
           </Typography.Text>
@@ -397,7 +396,7 @@ export default function NewSuperTaskModal({
         title={(
           <div>
             <DrawerPullHandle testId="new-task-drawer-handle" onClose={() => void handleClose()} />
-            <span style={{ display: 'block', fontWeight: 500, paddingBottom: 8 }}>新建任务 · 需求讨论</span>
+            <span className="block font-medium pb-2">新建任务 · 需求讨论</span>
           </div>
         )}
         styles={{ body: { padding: 0 } }}

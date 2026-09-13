@@ -36,14 +36,13 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
     // 不再抢占 LLM 文字气泡的浅绿 (#f6ffed) 视觉.
     <Card
       size="small"
+      className="mb-2 mr-5 rounded-xl"
       style={{
-        marginBottom: 8,
         // 减去与 LLM 气泡相同的 marginRight(20), 让卡片实际渲染宽度
         // 与 #f6ffed 文字气泡一致, 而不是被 100% + 20px marginRight
         // 撑得比文字气泡长一截.
         width: 'calc(100% - 20px)',
         maxWidth: 'calc(100% - 20px)',
-        marginRight: 20,
         // 与 LLM 文字气泡 (#f6ffed 浅绿) 形成稳定对比:
         // 工具面板用半透明底 + 紫色左边条, 表达"工具调用汇总".
         // 透明度从 0.04 提到 0.08, 让面板在深色页面背景上清晰可见.
@@ -51,7 +50,6 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
         background: 'var(--tool-group-bg, rgba(139,92,246,0.08))',
         borderColor: 'var(--tool-group-border, rgba(139,92,246,0.40))',
         borderLeft: '3px solid var(--thinking-accent, #8b5cf6)',
-        borderRadius: 12,
       }}
       styles={{
         // 头部背景: 与卡片体同色系深浅层次.
@@ -61,15 +59,15 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
         body: { padding: 12 },
       }}
       title={
-        <span style={{ fontSize: 13 }}>
+        <span className="text-[13px]">
           {titleText}
           {summary && entries.length > 1 && (
-            <span style={{ marginLeft: 8, color: 'var(--text-dim-55)' }}>
+            <span className="ml-2 text-[var(--text-dim-55)]">
               · {summary}
             </span>
           )}
           {errs > 0 && (
-            <Tag color="red" style={{ marginLeft: 8 }}>{errs} 个失败</Tag>
+            <Tag color="red" className="ml-2">{errs} 个失败</Tag>
           )}
         </span>
       }
@@ -96,7 +94,7 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
           )
         })}
       {!expanded && (
-        <div style={{ color: 'var(--text-dim-55)', fontSize: 12 }}>
+        <div className="text-xs text-[var(--text-dim-55)]">
           {entries.some((e) => e.status === 'pending') ? '工具调用中…' : '折叠显示'}
         </div>
       )}

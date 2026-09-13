@@ -8,11 +8,11 @@ import type { BashTaskInfo } from '../lib/taskApi.js'
 import { useAppStore } from '../store/useAppStore.js'
 
 const STATUS_ICON: Record<string, JSX.Element> = {
-  running: <LoadingOutlined style={{ color: 'var(--accent-start)' }} spin />,
-  queued: <CaretRightOutlined style={{ color: 'var(--ui-text-color)' }} />,
-  completed: <CheckCircleFilled style={{ color: 'var(--success)' }} />,
-  failed: <CloseCircleFilled style={{ color: 'var(--error)' }} />,
-  cancelled: <CloseCircleFilled style={{ color: 'var(--ui-text-color)' }} />,
+  running: <LoadingOutlined className="text-[var(--accent-start)]" spin />,
+  queued: <CaretRightOutlined className="text-[var(--ui-text-color)]" />,
+  completed: <CheckCircleFilled className="text-[var(--success)]" />,
+  failed: <CloseCircleFilled className="text-[var(--error)]" />,
+  cancelled: <CloseCircleFilled className="text-[var(--ui-text-color)]" />,
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -38,21 +38,12 @@ function Row({
   return (
     <div
       onClick={() => onSelect(task.taskId)}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '6px 10px',
-        cursor: 'pointer',
-        borderRadius: 4,
-        color: 'var(--text-primary)',
-        fontSize: 12,
-      }}
+      className="flex items-center gap-2 py-1.5 px-2.5 cursor-pointer rounded text-[var(--text-primary)] text-xs"
       onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-start)')}
       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
-      <span style={{ fontSize: 11 }}>{STATUS_ICON[task.status]}</span>
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span className="text-[11px]">{STATUS_ICON[task.status]}</span>
+      <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
         {truncatePrompt(task.prompt || '(空 prompt)')}
       </span>
       {/* 重试角标: attemptCount > 1 时显示, 让用户在 dock 列表里一眼看到
@@ -60,31 +51,22 @@ function Row({
       {task.detail?.attemptCount !== undefined && task.detail.attemptCount > 1 && (
         <Tooltip title={`BackgroundRuntime 自动重试了 ${task.detail.attemptCount - 1} 次`}>
           <span
-            style={{
-              fontSize: 10,
-              padding: '0 4px',
-              background: 'var(--accent-start)',
-              border: '1px solid',
-              borderColor: 'var(--accent-start)', // TODO: use borderSubtle CSS var when available
-              borderRadius: 3,
-              color: 'var(--accent-start)',
-              fontWeight: 500,
-            }}
+            className="text-[10px] px-1 bg-[var(--accent-start)] border border-solid border-[var(--accent-start)] rounded-sm text-[var(--accent-start)] font-medium"
           >
             ↻{task.detail.attemptCount - 1}
           </span>
         </Tooltip>
       )}
-      <span style={{ color: 'var(--ui-text-color)', fontSize: 11 }}>{STATUS_LABEL[task.status]}</span>
+      <span className="text-[var(--ui-text-color)] text-[11px]">{STATUS_LABEL[task.status]}</span>
     </div>
   )
 }
 
 const BASH_STATUS_ICON: Record<string, JSX.Element> = {
-  running: <CodeOutlined style={{ color: 'var(--accent-start)' }} spin />,
-  completed: <CheckCircleFilled style={{ color: 'var(--success)' }} />,
-  failed: <CloseCircleFilled style={{ color: 'var(--error)' }} />,
-  killed: <CloseCircleFilled style={{ color: 'var(--ui-text-color)' }} />,
+  running: <CodeOutlined className="text-[var(--accent-start)]" spin />,
+  completed: <CheckCircleFilled className="text-[var(--success)]" />,
+  failed: <CloseCircleFilled className="text-[var(--error)]" />,
+  killed: <CloseCircleFilled className="text-[var(--ui-text-color)]" />,
 }
 
 function BashRow({
@@ -97,24 +79,15 @@ function BashRow({
   return (
     <div
       onClick={() => onSelect(task.taskId)}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '6px 10px',
-        cursor: 'pointer',
-        borderRadius: 4,
-        color: 'var(--text-primary)',
-        fontSize: 12,
-      }}
+      className="flex items-center gap-2 py-1.5 px-2.5 cursor-pointer rounded text-[var(--text-primary)] text-xs"
       onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-start)')}
       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
-      <span style={{ fontSize: 11 }}>{BASH_STATUS_ICON[task.status]}</span>
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span className="text-[11px]">{BASH_STATUS_ICON[task.status]}</span>
+      <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
         {truncatePrompt(task.description || task.command)}
       </span>
-      <span style={{ color: 'var(--ui-text-color)', fontSize: 11 }}>
+      <span className="text-[var(--ui-text-color)] text-[11px]">
         {STATUS_LABEL[task.status] ?? task.status}
       </span>
     </div>
@@ -156,29 +129,10 @@ export function TaskDock({
 
   const content = (
       <div
-        style={{
-          // 自适应容器宽度: 桌面 Popover 内 popover 自带 360px 容器足够,
-          // 移动 Modal 内 modal 是 90vw, 这里用 100% 跟随. 避免固定 360px
-          // 在窄屏 (<400px) 把 modal 撑破.
-          width: '100%',
-          background: 'var(--bg-card)',
-          borderRadius: 6,
-          padding: 8,
-          maxHeight: 480,
-          overflowY: 'auto',
-          boxSizing: 'border-box',
-        }}
+        className="w-full bg-[var(--bg-card)] rounded-md p-2 max-h-[480px] overflow-y-auto box-border"
       >
         <div
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: 'var(--ui-text-color)',
-            marginBottom: 6,
-            padding: '0 4px',
-            display: 'flex',
-            justifyContent: 'space-between',
-          }}
+          className="text-[11px] font-semibold text-[var(--ui-text-color)] mb-1.5 px-1 flex justify-between"
         >
           <span>后台任务</span>
           <span>
@@ -188,12 +142,7 @@ export function TaskDock({
 
         {runningTasks.length === 0 && recentTasks.length === 0 && bashTasks.length === 0 && (
           <div
-            style={{
-              fontSize: 12,
-              color: 'var(--ui-text-color)',
-              padding: '16px 8px',
-              textAlign: 'center',
-            }}
+            className="text-xs text-[var(--ui-text-color)] py-4 px-2 text-center"
           >
             暂无后台任务
           </div>
@@ -202,13 +151,7 @@ export function TaskDock({
         {runningTasks.length > 0 && (
           <>
             <div
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: 'var(--accent-start)',
-                textTransform: 'uppercase',
-                padding: '4px 4px',
-              }}
+              className="text-[10px] font-semibold text-[var(--accent-start)] uppercase py-1 px-1"
             >
               运行中
             </div>
@@ -228,13 +171,7 @@ export function TaskDock({
         {recentTasks.length > 0 && (
           <>
             <div
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: 'var(--ui-text-color)',
-                textTransform: 'uppercase',
-                padding: '8px 4px 4px',
-              }}
+              className="text-[10px] font-semibold text-[var(--ui-text-color)] uppercase pt-2 pb-1 px-1"
             >
               最近
             </div>
@@ -254,13 +191,7 @@ export function TaskDock({
         {bashTasks.length > 0 && (
           <>
             <div
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: 'var(--accent-start)',
-                textTransform: 'uppercase',
-                padding: '8px 4px 4px',
-              }}
+              className="text-[10px] font-semibold text-[var(--accent-start)] uppercase pt-2 pb-1 px-1"
             >
               Bash {bashRunning} 运行中 / {bashTasks.length - bashRunning} 结束
             </div>
@@ -283,24 +214,20 @@ export function TaskDock({
   const trigger = (
     <span
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        cursor: 'pointer',
-        fontSize: 12,
-        color: total > 0 ? '#a78bfa' : 'var(--ui-text-color)', // kept: #a78bfa (purple accent — no CSS var mapping)
+        color: total > 0 ? '#a78bfa' : 'var(--ui-text-color)',
       }}
+      className="inline-flex items-center gap-1 cursor-pointer text-xs"
     >
       <Badge count={total} size="small" offset={isLite ? [2, -2] : [4, -2]} color="#a78bfa">
         {isLite ? (
           // isLite (分屏展开 / 移动端) 模式: 只显示图标,省掉"后台任务"文本.
           // 视觉与 ModeStatusButton 在 compact 下的精简策略一致.
           <AppstoreOutlined
-            style={{ padding: '0 4px', fontSize: 14, lineHeight: 1 }}
+            className="px-1 text-[14px] leading-none"
             aria-label="后台任务"
           />
         ) : (
-          <span style={{ padding: '0 4px', fontSize: 12, lineHeight: 1 }}>后台任务</span>
+          <span className="px-1 text-xs leading-none">后台任务</span>
         )}
       </Badge>
     </span>

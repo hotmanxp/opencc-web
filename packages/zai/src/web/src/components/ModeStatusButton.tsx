@@ -114,27 +114,19 @@ function Row({ mode, isCurrent, isSelected, onClick, onMouseEnter }: RowProps) {
       data-selected={isSelected ? 'true' : 'false'}
       onClick={onClick}
       onMouseEnter={onMouseEnter}
+      className="flex items-center gap-[10px] py-2 px-[10px] rounded-md mb-[2px]"
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '8px 10px',
-        borderRadius: 6,
         cursor: isCurrent ? 'default' : 'pointer',
         background: isSelected ? 'rgba(168,139,250,0.10)' : 'transparent',
         border: isSelected
           ? '1px solid rgba(168,139,250,0.35)'
           : '1px solid transparent',
-        marginBottom: 2,
       }}
     >
       {/* Current-mode ● marker — kept verbatim from the original implementation. */}
       <span
+        className="w-2 text-[#a78bfa] text-xs text-center"
         style={{
-          width: 8,
-          color: '#a78bfa',
-          fontSize: 12,
-          textAlign: 'center',
           visibility: isCurrent ? 'visible' : 'hidden',
         }}
       >
@@ -143,47 +135,21 @@ function Row({ mode, isCurrent, isSelected, onClick, onMouseEnter }: RowProps) {
 
       {/* Icon block. */}
       <span
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 6,
-          background: 'var(--bg-faint-05)',
-          border: '1px solid var(--border-light)',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: tint,
-          fontSize: 16,
-          flexShrink: 0,
-        }}
+        className="w-8 h-8 rounded-md bg-[var(--bg-faint-05)] border border-[var(--border-light)] inline-flex items-center justify-center text-base flex-shrink-0"
+        style={{ color: tint }}
       >
         <IconFor mode={mode} />
       </span>
 
       {/* Two-line text. */}
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+      <div className="flex flex-col min-w-0 flex-1">
         <span
-          style={{
-            fontSize: 13,
-            fontWeight: isCurrent ? 600 : 500,
-            lineHeight: 1.3,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
+          className="text-[13px] leading-[1.3] whitespace-nowrap overflow-hidden text-ellipsis"
+          style={{ fontWeight: isCurrent ? 600 : 500 }}
         >
           {body.title}
         </span>
-        <span
-          style={{
-            fontSize: 11,
-            color: 'var(--text-dim-55)',
-            lineHeight: 1.3,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
+        <span className="text-[11px] text-[var(--text-dim-55)] leading-[1.3] whitespace-nowrap overflow-hidden text-ellipsis">
           {body.description}
         </span>
       </div>
@@ -234,35 +200,19 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
     <div
       data-testid="mode-picker-content"
       tabIndex={-1}
-      style={{
-        width: 380,
-        background: 'var(--bg-popup)',
-        borderRadius: 10,
-        padding: 10,
-      }}
+      className="w-[380px] bg-[var(--bg-popup)] rounded-[10px] p-[10px]"
     >
       {/* Header: "Modes" title + keycap hint */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 8,
-        }}
-      >
+      <div className="flex justify-between items-center mb-2">
         <span
           data-testid="mode-picker-title"
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: 'var(--text-dim-85)',
-          }}
+          className="text-[13px] font-semibold text-[var(--text-dim-85)]"
         >
           Modes
         </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <span className="inline-flex items-center gap-1">
           <span style={KBD_BASE}>⇧</span>
-          <span style={{ color: 'var(--text-dim-45)', fontSize: 11 }}>+</span>
+          <span className="text-[var(--text-dim-45)] text-[11px]">+</span>
           <span style={KBD_BASE}>tab</span>
         </span>
       </div>
@@ -280,15 +230,7 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
       ))}
 
       {/* Footer — unchanged text + styling */}
-      <div
-        style={{
-          fontSize: 11,
-          color: 'var(--text-dim-30)',
-          borderTop: '1px solid var(--border-light)',
-          paddingTop: 6,
-          marginTop: 4,
-        }}
-      >
+      <div className="text-[11px] text-[var(--text-dim-30)] border-t border-[var(--border-light)] pt-[6px] mt-1">
         click to select · shift+tab to cycle
       </div>
     </div>
@@ -307,13 +249,9 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
         data-testid="mode-status-button"
         aria-label={isMobile ? `当前 mode: ${meta.label}` : `切换 mode,当前 ${meta.label}`}
         title={isMobile ? undefined : `当前 mode: ${meta.label}\n点击切换`}
+        className="opacity-90 text-xs font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] px-[6px]"
         style={{
           color: meta.color,
-          opacity: 0.9,
-          fontSize: 12,
-          fontFamily:
-            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-          padding: '0 6px',
         }}
       >
         <span style={{ color: meta.color }}>{meta.icon}</span>

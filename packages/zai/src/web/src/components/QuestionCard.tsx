@@ -36,17 +36,17 @@ function PreviewText({ text }: { text: string }) {
   if (!text) return null
   if (text.length <= PREVIEW_LIMIT) {
     return (
-      <pre style={{ fontSize: 11, margin: '4px 0 0 0', padding: '6px 8px', background: 'var(--bg-faint-04)', borderRadius: 4, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace' }}>
+      <pre className="text-[11px] mt-1 mb-0 px-2 py-1.5 bg-[var(--bg-faint-04)] rounded whitespace-pre-wrap font-mono">
         {text}
       </pre>
     )
   }
   return (
     <div>
-      <pre style={{ fontSize: 11, margin: '4px 0 0 0', padding: '6px 8px', background: 'var(--bg-faint-04)', borderRadius: 4, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace' }}>
+      <pre className="text-[11px] mt-1 mb-0 px-2 py-1.5 bg-[var(--bg-faint-04)] rounded whitespace-pre-wrap font-mono">
         {expanded ? text : text.slice(0, PREVIEW_LIMIT) + '…'}
       </pre>
-      <Button type="link" size="small" aria-label={expanded ? '收起详情' : '展开更多详情'} style={{ padding: 0, fontSize: 11 }} onClick={() => setExpanded((v) => !v)}>
+      <Button type="link" size="small" aria-label={expanded ? '收起详情' : '展开更多详情'} className="!p-0 !text-[11px]" onClick={() => setExpanded((v) => !v)}>
         {expanded ? 'Show less' : 'Show more'}
       </Button>
     </div>
@@ -129,8 +129,8 @@ function QuestionPanel({
 
   return (
     <div>
-      <Text strong style={{ color: 'var(--text-primary)' }}>{q.question}</Text>
-      <div style={{ marginTop: 8 }}>
+      <Text strong className="!text-[var(--text-primary)]">{q.question}</Text>
+      <div className="mt-2">
         {q.multiSelect ? (
           <>
             <Checkbox.Group
@@ -140,14 +140,14 @@ function QuestionPanel({
                 const list = vals as string[]
                 onAnswer(q.question, list.join(', '))
               }}
-              style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+              className="flex flex-col gap-1.5"
             >
               {q.options.map((opt: any) => (
                 <Checkbox key={opt.label} value={opt.label} aria-label={opt.label}>
                   <div>
-                    <div style={{ fontWeight: 500 }}>{opt.label}</div>
+                    <div className="font-medium">{opt.label}</div>
                     {opt.description && (
-                      <Text type="secondary" style={{ fontSize: 12 }}>
+                      <Text type="secondary" className="!text-xs">
                         {linkifyText(opt.description)}
                       </Text>
                     )}
@@ -156,11 +156,11 @@ function QuestionPanel({
                 </Checkbox>
               ))}
               <Checkbox key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE} aria-label={OTHER_OPTION_LABEL}>
-                <div style={{ fontWeight: 500 }}>{OTHER_OPTION_LABEL}</div>
+                <div className="font-medium">{OTHER_OPTION_LABEL}</div>
               </Checkbox>
             </Checkbox.Group>
             {checkboxOtherActive && (
-              <div style={{ marginTop: 6, marginLeft: 24 }}>
+              <div className="mt-1.5 ml-6">
                 <Input
                   autoFocus
                   placeholder="请输入..."
@@ -176,14 +176,14 @@ function QuestionPanel({
               aria-label={q.question}
               value={currentAnswer}
               onChange={handleRadioChange}
-              style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+              className="flex flex-col gap-1.5"
             >
               {q.options.map((opt: any) => (
                 <Radio key={opt.label} value={opt.label} aria-label={opt.label}>
                   <div>
-                    <div style={{ fontWeight: 500 }}>{opt.label}</div>
+                    <div className="font-medium">{opt.label}</div>
                     {opt.description && (
-                      <Text type="secondary" style={{ fontSize: 12 }}>
+                      <Text type="secondary" className="!text-xs">
                         {linkifyText(opt.description)}
                       </Text>
                     )}
@@ -192,11 +192,11 @@ function QuestionPanel({
                 </Radio>
               ))}
               <Radio key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE} aria-label={OTHER_OPTION_LABEL}>
-                <div style={{ fontWeight: 500 }}>{OTHER_OPTION_LABEL}</div>
+                <div className="font-medium">{OTHER_OPTION_LABEL}</div>
               </Radio>
             </Radio.Group>
             {isOtherSelected && (
-              <div style={{ marginTop: 6, marginLeft: 24 }}>
+              <div className="mt-1.5 ml-6">
                 <Input
                   autoFocus
                   placeholder="请输入..."
@@ -208,15 +208,15 @@ function QuestionPanel({
           </>
         )}
       </div>
-      <div style={{ marginTop: 12 }}>
-        <Text type="secondary" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>附加说明 (可选)</Text>
+      <div className="mt-3">
+        <Text type="secondary" className="!text-xs !text-[var(--text-secondary)]">附加说明 (可选)</Text>
         <TextArea
           rows={2}
           maxLength={NOTES_MAX}
           value={annotations[q.question]?.notes ?? ''}
           onChange={(e) => onNotesChange(q.question, e.target.value)}
           placeholder="补充任何额外信息..."
-          style={{ marginTop: 4 }}
+          className="!mt-1"
         />
       </div>
     </div>
@@ -282,20 +282,20 @@ function ReviewPanel({
           display = ans
         }
         return (
-          <div key={q.question} style={{ marginBottom: 8 }}>
-            <Text strong style={{ color: 'var(--text-primary)' }}>{q.question}</Text>
-            <div style={{ marginTop: 2 }}>
-              <Text style={{ color: 'var(--text-primary)' }}>{display || <Text type="secondary" style={{ color: 'var(--text-tertiary)' }}>未回答</Text>}</Text>
+          <div key={q.question} className="mb-2">
+            <Text strong className="!text-[var(--text-primary)]">{q.question}</Text>
+            <div className="mt-0.5">
+              <Text className="!text-[var(--text-primary)]">{display || <Text type="secondary" className="!text-[var(--text-tertiary)]">未回答</Text>}</Text>
             </div>
             {annotations[q.question]?.notes && (
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2, color: 'var(--text-secondary)' }}>
+              <Text type="secondary" className="!text-xs !block !mt-0.5 !text-[var(--text-secondary)]">
                 备注: {annotations[q.question].notes}
               </Text>
             )}
           </div>
         )
       })}
-      <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+      <div className="mt-4 flex gap-2">
         <Button type="primary" disabled={!allAnswered || status === 'submitting'} onClick={onSubmit} loading={status === 'submitting'}>
           Submit answers
         </Button>
@@ -317,28 +317,21 @@ export default function QuestionCard(props: QuestionCardProps) {
     const q = firstQuestion
     return (
       <div
-        className="question-card-scope"
-        style={{
-          margin: '12px 24px',
-          padding: '12px 14px',
-          background: 'var(--bg-card-ansi)',
-          borderTop: '3px solid var(--accent-start)',
-          borderRadius: 6,
-        }}
+        className="question-card-scope my-3 mx-6 p-3 bg-[var(--bg-card-ansi)] border-t-[3px] border-t-[var(--accent-start)] rounded-md"
       >
-        <div style={{ marginBottom: 10 }}>
-          <Text strong style={{ color: 'var(--text-primary)' }}>请回答以下问题</Text>
+        <div className="mb-2.5">
+          <Text strong className="!text-[var(--text-primary)]">请回答以下问题</Text>
         </div>
 
         {status === 'error' && errorMessage && (
-          <div style={{ marginBottom: 10, padding: '6px 10px', background: 'var(--bg-body)', border: '1px solid var(--error)', borderRadius: 4 }}>
-            <Text type="danger" style={{ fontSize: 12 }}>{errorMessage}</Text>
+          <div className="mb-2.5 px-2.5 py-1.5 bg-[var(--bg-body)] border border-[var(--error)] rounded">
+            <Text type="danger" className="!text-xs">{errorMessage}</Text>
           </div>
         )}
 
-        <div style={{ marginBottom: 6 }}>
-          <Tag style={{ marginRight: 4, background: '#a78bfa', borderColor: '#a78bfa', color: '#fff' }}>{q.header}</Tag>
-          <span style={{ color: 'var(--text-secondary)', marginLeft: 4 }}>
+        <div className="mb-1.5">
+          <Tag className="!mr-1 !bg-[#a78bfa] !border-[#a78bfa] !text-white">{q.header}</Tag>
+          <span className="text-[var(--text-secondary)] ml-1">
             {q.multiSelect ? '多选' : '单选'}
           </span>
         </div>
@@ -352,9 +345,9 @@ export default function QuestionCard(props: QuestionCardProps) {
           onOtherChange={onOtherChange}
         />
 
-        <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div className="mt-4 flex gap-2 justify-end">
           <Popconfirm title="确认取消?" onConfirm={onReject} okText="是" cancelText="否">
-            <Button type="text" style={{ color: 'var(--text-secondary)' }}>取消</Button>
+            <Button type="text" className="!text-[var(--text-secondary)]">取消</Button>
           </Popconfirm>
           <Button type="primary" disabled={!allAnswered || status === 'submitting'} onClick={onSubmit} loading={status === 'submitting'}>
             Submit answers
@@ -367,25 +360,18 @@ export default function QuestionCard(props: QuestionCardProps) {
   // 多问题: 走 Tabs + Review 流程
   return (
     <div
-      className="question-card-scope"
-      style={{
-        margin: '12px 24px',
-        padding: '12px 14px',
-        background: 'var(--bg-card-ansi)',
-        borderTop: '3px solid var(--accent-start)',
-        borderRadius: 6,
-      }}
+      className="question-card-scope my-3 mx-6 p-3 bg-[var(--bg-card-ansi)] border-t-[3px] border-t-[var(--accent-start)] rounded-md"
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <Text strong style={{ color: 'var(--text-primary)' }}>请回答以下问题</Text>
+      <div className="flex justify-between items-center mb-2.5">
+        <Text strong className="!text-[var(--text-primary)]">请回答以下问题</Text>
         <Popconfirm title="确认取消?" onConfirm={onReject} okText="是" cancelText="否">
           <Button size="small">取消</Button>
         </Popconfirm>
       </div>
 
       {status === 'error' && errorMessage && (
-        <div style={{ marginBottom: 10, padding: '6px 10px', background: 'var(--bg-body)', border: '1px solid var(--error)', borderRadius: 4 }}>
-          <Text type="danger" style={{ fontSize: 12 }}>{errorMessage}</Text>
+        <div className="mb-2.5 px-2.5 py-1.5 bg-[var(--bg-body)] border border-[var(--error)] rounded">
+          <Text type="danger" className="!text-xs">{errorMessage}</Text>
         </div>
       )}
 
@@ -397,8 +383,8 @@ export default function QuestionCard(props: QuestionCardProps) {
             key: q.question,
             label: (
               <span>
-                <Tag style={{ marginRight: 4, background: '#a78bfa', borderColor: '#a78bfa', color: '#fff' }}>{q.header}</Tag>
-                <span style={{ color: 'var(--text-secondary)', marginLeft: 4 }}>
+                <Tag className="!mr-1 !bg-[#a78bfa] !border-[#a78bfa] !text-white">{q.header}</Tag>
+                <span className="text-[var(--text-secondary)] ml-1">
                   {q.multiSelect ? '多选' : '单选'}
                 </span>
               </span>

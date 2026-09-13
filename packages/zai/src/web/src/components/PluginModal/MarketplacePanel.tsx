@@ -15,13 +15,13 @@ type Props = {
  */
 export function MarketplacePanel({ plugins, status, writing, onInstall }: Props) {
   if (status === 'loading' || status === 'idle') {
-    return <Skeleton active style={{ padding: 16 }} />
+    return <Skeleton active className="p-4" />
   }
   if (status === 'error') {
-    return <Alert type="error" message="加载失败" showIcon style={{ margin: 16 }} />
+    return <Alert type="error" message="加载失败" showIcon className="m-4" />
   }
   if (plugins.length === 0) {
-    return <Empty description="市场里没有可安装的插件" style={{ marginTop: 40 }} />
+    return <Empty description="市场里没有可安装的插件" className="mt-10" />
   }
   return (
     <div>
@@ -29,19 +29,14 @@ export function MarketplacePanel({ plugins, status, writing, onInstall }: Props)
         <div
           key={p.id}
           data-testid="marketplace-row"
-          style={{
-            display: 'flex',
-            gap: 12,
-            padding: '10px 12px',
-            borderBottom: '1px solid var(--border-subtle)',
-            alignItems: 'flex-start',
-          }}
+          className="flex gap-3 py-2.5 px-3 items-start"
+          style={{ borderBottom: '1px solid var(--border-subtle)' }}
         >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
               <Typography.Text strong>{p.name}</Typography.Text>
               {p.version && (
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                <Typography.Text type="secondary" className="text-xs">
                   v{p.version}
                 </Typography.Text>
               )}
@@ -49,7 +44,7 @@ export function MarketplacePanel({ plugins, status, writing, onInstall }: Props)
               {p.category && <Tag style={{ margin: 0 }}>{p.category}</Tag>}
             </div>
             {p.description && (
-              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
+              <Typography.Text type="secondary" className="text-xs block mt-0.5">
                 {p.description}
               </Typography.Text>
             )}

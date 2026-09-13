@@ -78,24 +78,20 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
       value: e.command,
       // label 显示命令 + 频次,让用户一眼看出高频命令
       label: (
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-          <span style={{ fontFamily: 'ui-monospace, monospace' }}>{e.command}</span>
-          <span style={{ color: 'var(--text-dim-45)', fontSize: 11 }}>×{e.count}</span>
+        <div className="flex justify-between gap-3">
+          <span className="font-mono">{e.command}</span>
+          <span className="text-[11px]" style={{ color: 'var(--text-dim-45)' }}>×{e.count}</span>
         </div>
       ),
     }))
   }, [topCommands, input])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="flex flex-col h-full">
       <div
+        className="flex items-center justify-between py-1.5 px-3 text-xs"
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '6px 12px',
           borderBottom: '1px solid var(--border-light)',
-          fontSize: 12,
           color: 'var(--text-dim-55)',
         }}
       >
@@ -110,15 +106,10 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
       <div
         ref={outputRef}
         data-testid="bash-output"
+        className="flex-1 min-h-0 overflow-auto p-3 text-xs"
         style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: 'auto',
-          overflowY: 'auto',
           maxHeight: 'calc(100vh - 150px)',
-          padding: 12,
           fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
-          fontSize: 12,
           lineHeight: 1.55,
           color: 'var(--text-dim-85)',
         }}
@@ -134,10 +125,8 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
             return (
               <div
                 key={`${row.execId}-${row.streamKind}-${i}`}
-                style={{
-                  whiteSpace: 'pre-wrap',
-                  ...(row.streamKind === 'stderr' ? { color: '#ef4444' } : null),
-                }}
+                className="whitespace-pre-wrap"
+                style={row.streamKind === 'stderr' ? { color: '#ef4444' } : undefined}
               >
                 <AnsiText text={row.text} />
               </div>
@@ -145,7 +134,7 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
           }
           if (row.kind === 'error') {
             return (
-              <div key={`${row.execId}-err-${i}`} style={{ color: '#ef4444', fontWeight: 600 }}>
+              <div key={`${row.execId}-err-${i}`} className="font-semibold" style={{ color: '#ef4444' }}>
                 ✗ {row.message}
               </div>
             )
@@ -162,15 +151,11 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
       </div>
 
       <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          padding: 8,
-          borderTop: '1px solid var(--border-light)',
-        }}
+        className="flex gap-2 p-2"
+        style={{ borderTop: '1px solid var(--border-light)' }}
       >
         <AutoComplete
-          style={{ flex: 1 }}
+          className="flex-1"
           options={autoOptions}
           value={input}
           disabled={busy}
@@ -203,14 +188,10 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
             type="button"
             onClick={() => void abort()}
             data-testid="bash-abort"
+            className="px-3 rounded-md bg-transparent text-[13px] cursor-pointer"
             style={{
-              padding: '0 12px',
               border: '1px solid #ff4d4f',
-              borderRadius: 6,
-              background: 'transparent',
               color: '#ff4d4f',
-              fontSize: 13,
-              cursor: 'pointer',
             }}
           >
             终止

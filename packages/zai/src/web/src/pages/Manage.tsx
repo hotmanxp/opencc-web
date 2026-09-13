@@ -35,13 +35,7 @@ export default function Manage() {
 
   return (
     <div
-      style={{
-        padding: '0 24px 24px',
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: 0,
-      }}
+      className="h-full flex flex-col min-h-0 px-6 pb-6"
       data-testid="manage-page"
     >
       <Tabs

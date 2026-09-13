@@ -104,15 +104,7 @@ function CodeBlock({
   if (!match) {
     return (
       <code
-        style={{
-          background: "transparent",
-          color: "#a78bfa",
-          padding: "1px 6px",
-          borderRadius: 3,
-          fontSize: "0.9em",
-          fontFamily: CODE_FONT_FAMILY,
-          fontWeight: 500,
-        }}
+        className="bg-transparent text-[#a78bfa] py-[1px] px-[6px] rounded-[3px] text-[0.9em] font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] font-medium"
       >
         {children}
       </code>
@@ -124,16 +116,11 @@ function CodeBlock({
     // layout doesn't jump when SyntaxHighlighter arrives a tick later.
     return (
       <pre
+        className="my-[6px_0_10px_0] py-3 px-[14px] rounded-md text-xs leading-[1.55] overflow-auto"
         style={{
-          margin: "6px 0 10px 0",
-          padding: "12px 14px",
-          borderRadius: 6,
-          fontSize: 12,
-          lineHeight: 1.55,
           background: CODE_BG,
           color: "var(--text-dim-85)",
           fontFamily: CODE_FONT_FAMILY,
-          overflow: "auto",
         }}
       >
         <code>{text}</code>
@@ -165,87 +152,61 @@ function CodeBlock({
 }
 
 const markdownComponents = {
-  p: ({ children }: any) => <p style={{ margin: "0 0 8px 0" }}>{children}</p>,
+  p: ({ children }: any) => <p className="mb-2">{children}</p>,
   h1: ({ children }: any) => (
-    <h1 style={{ fontSize: 20, fontWeight: 600, margin: "12px 0 8px 0" }}>
-      {children}
-    </h1>
+    <h1 className="text-[20px] font-semibold my-3 mb-2">{children}</h1>
   ),
   h2: ({ children }: any) => (
-    <h2 style={{ fontSize: 18, fontWeight: 600, margin: "12px 0 8px 0" }}>
-      {children}
-    </h2>
+    <h2 className="text-[18px] font-semibold my-3 mb-2">{children}</h2>
   ),
   h3: ({ children }: any) => (
-    <h3 style={{ fontSize: 16, fontWeight: 600, margin: "10px 0 6px 0" }}>
-      {children}
-    </h3>
+    <h3 className="text-base font-semibold my-[10px] mb-[6px]">{children}</h3>
   ),
   h4: ({ children }: any) => (
-    <h4 style={{ fontSize: 14, fontWeight: 600, margin: "8px 0 4px 0" }}>
-      {children}
-    </h4>
+    <h4 className="text-[14px] font-semibold my-2 mb-1">{children}</h4>
   ),
   ul: ({ children }: any) => (
-    <ul style={{ margin: "0 0 8px 0", paddingLeft: 20 }}>{children}</ul>
+    <ul className="mb-2 pl-5">{children}</ul>
   ),
   ol: ({ children }: any) => (
-    <ol style={{ margin: "0 0 8px 0", paddingLeft: 20 }}>{children}</ol>
+    <ol className="mb-2 pl-5">{children}</ol>
   ),
-  li: ({ children }: any) => <li style={{ marginBottom: 4 }}>{children}</li>,
+  li: ({ children }: any) => <li className="mb-1">{children}</li>,
   code: CodeBlock,
   pre: ({ children }: any) => <>{children}</>,
   table: ({ children }: any) => (
     <table
-      style={{
-        borderCollapse: "collapse",
-        margin: "4px 0 8px 0",
-        fontSize: 13,
-        width: "100%",
-      }}
+      className="border-collapse my-1 mb-2 text-[13px] w-full"
     >
       {children}
     </table>
   ),
   thead: ({ children }: any) => (
-    <thead style={{ background: "var(--bg-faint-05)" }}>{children}</thead>
+    <thead className="bg-[var(--bg-faint-05)]">{children}</thead>
   ),
   tbody: ({ children }: any) => <tbody>{children}</tbody>,
   tr: ({ children }: any) => (
-    <tr style={{ borderBottom: "1px solid var(--border-light)" }}>
+    <tr className="border-b border-[var(--border-light)]">
       {children}
     </tr>
   ),
   th: ({ children }: any) => (
     <th
-      style={{
-        padding: "6px 10px",
-        textAlign: "left",
-        fontWeight: 600,
-        border: "1px solid var(--border-light)",
-      }}
+      className="py-[6px] px-[10px] text-left font-semibold border border-[var(--border-light)]"
     >
       {children}
     </th>
   ),
   td: ({ children }: any) => (
     <td
-      style={{
-        padding: "6px 10px",
-        border: "1px solid var(--border-light)",
-      }}
+      className="py-[6px] px-[10px] border border-[var(--border-light)]"
     >
       {children}
     </td>
   ),
   blockquote: ({ children }: any) => (
     <blockquote
-      style={{
-        borderLeft: "3px solid var(--border-mid)",
-        paddingLeft: 12,
-        margin: "4px 0 8px 0",
-        color: "var(--text-dim-70)",
-      }}
+      className="border-l-[3px] border-l-[var(--border-mid)] pl-3 my-1 mb-2 text-[var(--text-dim-70)]"
     >
       {children}
     </blockquote>
@@ -256,18 +217,14 @@ const markdownComponents = {
       aria-label={`外部链接 ${typeof children === 'string' ? children : ''}`}
       target="_blank"
       rel="noopener noreferrer"
-      style={{ color: "#1677ff", textDecoration: "underline" }}
+      className="text-[#1677ff] underline"
     >
       {children}
     </a>
   ),
   hr: () => (
     <hr
-      style={{
-        border: "none",
-        borderTop: "1px solid var(--border-light)",
-        margin: "12px 0",
-      }}
+      className="border-none border-t border-t-[var(--border-light)] my-3"
     />
   ),
 };
@@ -289,12 +246,8 @@ export const MarkdownText = React.memo(function MarkdownText({ text }: { text: s
 
   return (
     <div
-      style={{
-        fontSize: 14,
-        lineHeight: 1.6,
-        color: "inherit",
-        wordBreak: "break-word",
-      }}
+      className="text-[14px] leading-[1.6] break-words"
+      style={{ color: "inherit" }}
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}

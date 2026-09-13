@@ -100,14 +100,10 @@ export default function MobileLayout() {
 
   return (
     <div
+      className="flex flex-col bg-[var(--bg-body)] text-[var(--text-primary)] overflow-hidden"
       style={{
         height: vvHeight || '100vh',
         paddingBottom: 'env(safe-area-inset-bottom)',
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--bg-body)',
-        color: 'var(--text-primary)',
-        overflow: 'hidden',
       }}
     >
       {/* 全局设置面板 — 与桌面端 Layout.tsx 对称,让 /m 路由也能唤起。

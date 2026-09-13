@@ -194,12 +194,12 @@ function ProviderForm({
         </Button>
       }
     >
-      <Text type="secondary" style={{ marginBottom: 8, display: 'block' }}>
+      <Text type="secondary" className="mb-2 block">
         已配置 {profiles.length} 个 Provider
       </Text>
 
       {profiles.length === 0 ? (
-        <Text type="secondary" style={{ fontSize: 12 }}>
+        <Text type="secondary" className="text-xs">
           暂无配置的 Provider，点击右上角“添加”创建
         </Text>
       ) : (
@@ -211,7 +211,7 @@ function ProviderForm({
                 hoverable
                 styles={{ body: { padding: 12 } }}
                 title={
-                    <Text ellipsis style={{ width: '100%' }} title={item.name || item.provider}>
+                    <Text ellipsis className="w-full" title={item.name || item.provider}>
                       {item.name || item.provider}
                     </Text>
                   }
@@ -231,17 +231,17 @@ function ProviderForm({
                   </Space>
                 }
               >
-                <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Provider: {item.provider}</Text>
+                <Space direction="vertical" size={6} className="w-full">
+                  <Text type="secondary" className="text-xs">Provider: {item.provider}</Text>
                   {item.baseUrl && (
                     <Tooltip title={item.baseUrl}>
-                      <Text type="secondary" style={{ fontSize: 12 }} ellipsis>
+                      <Text type="secondary" className="text-xs" ellipsis>
                         BaseURL: {item.baseUrl}
                       </Text>
                     </Tooltip>
                   )}
                   {item.apiKeyEnv && (
-                    <Text type="secondary" style={{ fontSize: 12 }}>API Key: {item.apiKeyEnv}</Text>
+                    <Text type="secondary" className="text-xs">API Key: {item.apiKeyEnv}</Text>
                   )}
                   {item.capabilities && Object.keys(item.capabilities).length > 0 && (
                     <ProviderCapabilitySummary capabilities={item.capabilities} />
@@ -268,7 +268,7 @@ function ProviderForm({
         destroyOnClose
         width={600}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+        <Form form={form} layout="vertical" className="mt-4">
           <Form.Item name="provider" label="Provider" rules={[{ required: true, message: '请选择 Provider' }]}>
             <Select placeholder="选择 Provider" options={KNOWN_PROVIDERS} onChange={fillFromBuiltin} />
           </Form.Item>
@@ -330,7 +330,7 @@ function ProviderCapabilitySummary({
   const maxOut = entries.reduce<number>((m, [, c]) => Math.max(m, c.maxOutputTokens ?? 0), 0);
 
   return (
-    <div style={{ marginTop: 4 }}>
+    <div className="mt-1">
       <Space size={4} wrap>
         <Tag color="blue">{entries.length} 模型</Tag>
         {maxCtx > 0 && <Tag>{formatTokens(maxCtx)} 输入</Tag>}
@@ -430,7 +430,7 @@ function PluginForm() {
         </Button>
       }
     >
-      <Text type="secondary" style={{ marginBottom: 8, display: 'block' }}>
+      <Text type="secondary" className="mb-2 block">
         已配置 {plugin.length} 个插件
       </Text>
       <List
@@ -444,7 +444,7 @@ function PluginForm() {
               </Popconfirm>,
             ]}
           >
-            <code style={{ fontSize: 13, color: 'var(--accent-start)' }}>{item}</code>
+            <code className="text-[13px] text-[var(--accent-start)]">{item}</code>
           </List.Item>
         )}
       />
@@ -460,7 +460,7 @@ function PluginForm() {
         width={500}
         destroyOnClose
       >
-        <Form layout="vertical" style={{ marginTop: 16 }}>
+        <Form layout="vertical" className="mt-4">
           <Form.Item label="选择内置插件">
             <Select
               value={draft}
@@ -594,22 +594,15 @@ function JsonFileEditor({
       styles={{ body: { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 12 } }}
     >
       <Tooltip title={filePath}>
-        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+        <Text type="secondary" className="text-xs block mb-2">
           路径: {filePath}{missing && ' (文件不存在，保存后将创建)'}
         </Text>
       </Tooltip>
       <pre
+        className="m-0 text-xs leading-[1.6] overflow-auto flex-1 min-h-0 rounded-lg p-3"
         style={{
           background: 'var(--bg-body)',
           color: 'var(--text-primary)',
-          padding: 12,
-          borderRadius: 8,
-          fontSize: 12,
-          lineHeight: 1.6,
-          overflow: 'auto',
-          flex: 1,
-          minHeight: 0,
-          margin: 0,
           fontFamily: 'JetBrains Mono, Fira Code, monospace',
         }}
       >
@@ -632,9 +625,10 @@ function JsonFileEditor({
           onChange={(e) => setDraft(e.target.value)}
           autoSize={{ minRows: 16, maxRows: 30 }}
           spellCheck={false}
-          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace', fontSize: 12 }}
+          className="text-xs"
+          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
         />
-        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+        <Text type="secondary" className="text-xs block mt-2">
           必须是合法 JSON 对象。保存时自动校验。
         </Text>
       </Modal>
@@ -730,25 +724,16 @@ function AgentsMdEditor({
       styles={{ body: { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 12 } }}
     >
       <Tooltip title={filePath}>
-        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+        <Text type="secondary" className="text-xs block mb-2">
           路径: {filePath}{missing && ' (文件不存在，保存后将创建)'}
         </Text>
       </Tooltip>
       <pre
+        className="m-0 text-xs leading-[1.6] overflow-auto flex-1 min-h-0 rounded-lg p-3 whitespace-pre-wrap break-words"
         style={{
           background: 'var(--bg-body)',
           color: 'var(--text-primary)',
-          padding: 12,
-          borderRadius: 8,
-          fontSize: 12,
-          lineHeight: 1.6,
-          overflow: 'auto',
-          flex: 1,
-          minHeight: 0,
-          margin: 0,
           fontFamily: 'JetBrains Mono, Fira Code, monospace',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
         }}
       >
         {content || (missing ? '(空文件)' : '')}
@@ -771,9 +756,10 @@ function AgentsMdEditor({
           autoSize={{ minRows: 16, maxRows: 30 }}
           spellCheck={false}
           placeholder={missing ? '# AGENTS.md\n\n在此编写工具说明...' : undefined}
-          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace', fontSize: 12 }}
+          className="text-xs"
+          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
         />
-        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+        <Text type="secondary" className="text-xs block mt-2">
           纯文本 (Markdown)。保存时使用原子写 (tmp + rename)。
         </Text>
       </Modal>
@@ -807,7 +793,7 @@ export default function Config() {
   };
 
   return (
-    <div style={{ padding: 24 }}>
+    <div className="p-6">
       <Row gutter={24}>
         <Col xs={24} md={6}>
           <Card size="small">
@@ -825,7 +811,8 @@ export default function Config() {
         <Col
           xs={24}
           md={18}
-          style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', overflow: 'auto' }}
+          className="flex flex-col overflow-auto"
+          style={{ height: 'calc(100vh - 112px)' }}
         >
           {activeTool === 'opencc' ? (
             <>
@@ -837,14 +824,14 @@ export default function Config() {
                 style={{ marginTop: 16 }}
                 styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
               >
-                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div className="flex-1 h-[280px] min-w-0 flex flex-col min-h-0">
                   <JsonFileEditor
                     endpoint="/config/claude-json"
                     title="Configs"
                     modalTitle="编辑 OpenCC 配置"
                   />
                 </div>
-                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div className="flex-1 h-[280px] min-w-0 flex flex-col min-h-0">
                   <JsonFileEditor
                     endpoint="/config/claude-settings"
                     title="Settings"
@@ -873,10 +860,10 @@ export default function Config() {
                 style={{ marginTop: 16 }}
                 styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
               >
-                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div className="flex-1 h-[280px] min-w-0 flex flex-col min-h-0">
                   <SettingsEditor tool="zai" title="Settings" modalTitle="编辑 Settings" />
                 </div>
-                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div className="flex-1 h-[280px] min-w-0 flex flex-col min-h-0">
                   <JsonFileEditor
                     endpoint="/config/zai-json"
                     title="Config"

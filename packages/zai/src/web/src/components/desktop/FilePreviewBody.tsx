@@ -120,7 +120,7 @@ function CodeBlock({
   }, [])
   if (!hl) {
     return loading ? <>{loading}</> : (
-      <pre data-testid="code-fallback" data-language={lang} style={{ whiteSpace: 'pre', fontSize: 12, padding: 12, background: '#282c34', color: '#abb2bf' }}>
+      <pre data-testid="code-fallback" data-language={lang} className="whitespace-pre text-xs p-3 bg-[#282c34] text-[#abb2bf]">
         {content}
       </pre>
     )
@@ -148,7 +148,7 @@ function TextPreview({ path, content }: { path: string; content: string }) {
   }
   return (
     <div data-testid="preview-code">
-      <CodeBlock lang={detectLanguage(path)} content={display} loading={<pre data-testid="code-loading" style={{ whiteSpace: 'pre', fontSize: 12, padding: 12, background: '#282c34', color: '#abb2bf' }}>{display}</pre>} />
+      <CodeBlock lang={detectLanguage(path)} content={display} loading={<pre data-testid="code-loading" className="whitespace-pre text-xs p-3 bg-[#282c34] text-[#abb2bf]">{display}</pre>} />
       {truncated && !expanded && <Button type="link" onClick={() => setExpanded(true)}>展开全部</Button>}
     </div>
   )
@@ -157,11 +157,11 @@ function TextPreview({ path, content }: { path: string; content: string }) {
 function ImagePreview({ dataUrl, path }: { dataUrl: string; path: string }) {
   const name = path.split(/[\\/]/).pop() ?? path
   return (
-    <div data-testid="preview-image" style={{ display: 'flex', justifyContent: 'center' }}>
+    <div data-testid="preview-image" className="flex justify-center">
       <img
         src={dataUrl}
         alt={name}
-        style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }}
+        className="max-w-full max-h-[70vh] object-contain"
       />
     </div>
   )
@@ -181,7 +181,7 @@ function HtmlPreview({ dataUrl, content }: { dataUrl?: string; content?: string 
       // origin,不给 allow-same-origin,无法访问宿主页面)。与 FsTab 预览一致。
       sandbox="allow-scripts"
       title="html-preview"
-      style={{ width: '100%', height: '100%', minHeight: 320, border: 0 }}
+      className="w-full h-full min-h-[320px] border-0"
     />
   )
 }
@@ -234,10 +234,10 @@ export function FilePreviewBody({ payload }: { payload: FilePreviewPayload }) {
 export function PreviewLoading({ loading, payload }: { loading: boolean; payload?: { size?: number } }) {
   if (!loading) return null
   return (
-    <div data-testid="preview-loading" style={{ textAlign: 'center', padding: 40 }}>
+    <div data-testid="preview-loading" className="text-center p-10">
       <Spin />
       {payload?.size != null && payload.size > 0 && (
-        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary, #aaa)' }}>{humanSize(payload.size)}</div>
+        <div className="mt-2 text-xs text-[var(--text-secondary,#aaa)]">{humanSize(payload.size)}</div>
       )}
     </div>
   )

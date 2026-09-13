@@ -212,13 +212,9 @@ export default function SuperTaskDetailDrawer({
         // mobile 端把内容包成 flex 列向容器,让 Tabs 自适应吃满剩余高度;
         // desktop 端不强制布局(保留原有 maxHeight 计算路径)。
         <div
-          style={
-            isMobile
-              ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }
-              : undefined
-          }
+          className={isMobile ? 'flex flex-col flex-1 min-h-0' : undefined}
         >
-          <Typography.Title level={5} style={{ marginTop: 0, flexShrink: isMobile ? 0 : undefined }}>
+          <Typography.Title level={5} className={isMobile ? 'mt-0 flex-shrink-0' : 'mt-0'}>
             {detail.summary.title}
           </Typography.Title>
           {/* Header meta (tf-3u5g7p4z): colored status badge + light info tags,
@@ -227,7 +223,7 @@ export default function SuperTaskDetailDrawer({
             size={[6, 6]}
             wrap
             data-testid="task-status-badges"
-            style={{ marginBottom: 8, flexShrink: isMobile ? 0 : undefined }}
+            className={isMobile ? 'mb-2 flex-shrink-0' : 'mb-2'}
           >
             <Tag color={statusBadge?.color} style={{ marginInlineEnd: 0 }}>
               状态:{statusBadge?.label}
@@ -256,18 +252,17 @@ export default function SuperTaskDetailDrawer({
               type="info"
               showIcon
               message={
-                <span style={{ color: '#0958d9', fontWeight: 600 }}>
+                <span className="text-[#0958d9] font-semibold">
                   本任务为快速创建,无 plan.md / brainstorm.md
                 </span>
               }
               description={
-                <span style={{ color: 'rgba(0,0,0,0.72)' }}>
+                <span className="text-black/70">
                   任务目录只包含 task.yaml + process.md + 最小 docs/spec.md(title/description/priority/cwd 快照);验证走轻量路径(build + lint + 关键文件 diff 的 code review)。
                 </span>
               }
+              className={isMobile ? 'mb-3 flex-shrink-0' : 'mb-3'}
               style={{
-                marginBottom: 12,
-                flexShrink: isMobile ? 0 : undefined,
                 // tf-3u5g7p4z: deepen the light-blue background and emphasize
                 // the left border so the banner is not missed at a glance.
                 background: '#e6f4ff',
@@ -278,7 +273,7 @@ export default function SuperTaskDetailDrawer({
             />
           )}
           <Tabs
-            style={isMobile ? { flex: 1, minHeight: 0 } : undefined}
+            className={isMobile ? 'flex-1 min-h-0' : undefined}
             items={(() => {
               const isQuick = detail.summary.mode === 'quick'
               const items: Array<{
@@ -295,16 +290,7 @@ export default function SuperTaskDetailDrawer({
                       事件流
                       {rendered.length > 0 && (
                         <span
-                          style={{
-                            marginLeft: 6,
-                            padding: '0 6px',
-                            background: '#f97316',
-                            color: '#fff',
-                            borderRadius: 8,
-                            fontSize: 11,
-                            lineHeight: '16px',
-                            display: 'inline-block',
-                          }}
+                          className="ml-1.5 px-1.5 bg-[#f97316] text-white rounded-lg text-[11px] leading-4 inline-block"
                           data-testid="process-event-count"
                         >
                           {rendered.length}
@@ -313,21 +299,10 @@ export default function SuperTaskDetailDrawer({
                     </span>
                   ),
                   children: activeStreamId ? (
-                    <div
-                      style={
-                        isMobile
-                          ? {
-                              display: 'flex',
-                              flexDirection: 'column',
-                              height: '100%',
-                              minHeight: 0,
-                            }
-                          : undefined
-                      }
-                    >
+                    <div className={isMobile ? 'flex flex-col h-full min-h-0' : undefined}>
                       <Typography.Text
                         type="secondary"
-                        style={{ fontSize: 12, flexShrink: isMobile ? 0 : undefined }}
+                        className={isMobile ? 'text-xs flex-shrink-0' : 'text-xs'}
                       >
                         当前事件流来源:{active.role === 'verifier' ? '验证 Agent(verifier)' : '执行 Agent(executor)'}
                         {` · task ${activeStreamId}`}
@@ -337,13 +312,13 @@ export default function SuperTaskDetailDrawer({
                           收起态 Timeline 只跑最近 20 条 (visible 切片),新事件到来
                           时旧头部自动挤出(流动窗口)。≤20 条不显示按钮。 */}
                       {canToggle && (
-                        <div style={{ marginTop: 4 }}>
+                        <div className="mt-1">
                           <Button
                             type="link"
                             size="small"
                             onClick={() => setShowAll((s) => !s)}
                             data-testid="event-stream-toggle"
-                            style={{ padding: 0, fontSize: 12 }}
+                            className="!p-0 text-xs"
                           >
                             {showAll ? '收起' : `显示全部 (${rendered.length})`}
                           </Button>
@@ -354,20 +329,11 @@ export default function SuperTaskDetailDrawer({
                         // 这里完成(避免 drawer body 双重 scroll);desktop:
                         // 保留 maxHeight=calc(100vh-310px) 路径不变。
                         <div
+                          className={isMobile ? 'flex-1 min-h-0 overflow-y-auto mt-2' : 'overflow-auto mt-2'}
                           style={
                             isMobile
-                              ? {
-                                  flex: 1,
-                                  minHeight: 0,
-                                  overflowY: 'auto',
-                                  marginTop: 8,
-                                  WebkitOverflowScrolling: 'touch',
-                                }
-                              : {
-                                  maxHeight: 'calc(100vh - 310px)',
-                                  overflow: 'auto',
-                                  marginTop: 8,
-                                }
+                              ? { WebkitOverflowScrolling: 'touch' }
+                              : { maxHeight: 'calc(100vh - 310px)' }
                           }
                           data-testid="process-timeline-scroll"
                         >
@@ -391,18 +357,7 @@ export default function SuperTaskDetailDrawer({
                         // 移动端窄屏被压扁不可见;Empty 图标占用一整行,
                         // 「事件流是开的」信号不会被 maxHeight 吃掉。
                         <div
-                          style={
-                            isMobile
-                              ? {
-                                  flex: 1,
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  marginTop: 8,
-                                  minHeight: 0,
-                                }
-                              : { marginTop: 8 }
-                          }
+                          className={isMobile ? 'flex-1 flex items-center justify-center mt-2 min-h-0' : 'mt-2'}
                           data-testid="process-empty-state"
                         >
                           <Empty
@@ -500,7 +455,15 @@ function JsonPanel({
   open: boolean
   error?: boolean
 }): JSX.Element {
-  if (!open) return <span style={{ fontSize: 11, color: error ? '#c41d7f' : '#999' }}>▸</span>
+  if (!open) {
+    return (
+      <span
+        className={error ? 'text-[11px] text-[#c41d7f]' : 'text-[11px] text-[#999]'}
+      >
+        ▸
+      </span>
+    )
+  }
   const style: CSSProperties = {
     marginTop: 4,
     padding: 8,
@@ -530,8 +493,8 @@ function ThinkingBlock({ text }: { text: string }): JSX.Element {
       items={[
         {
           key: 't',
-          label: <span style={{ color: '#888' }}>[思考]</span>,
-          children: <div style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{text}</div>,
+          label: <span className="text-[#888]">[思考]</span>,
+          children: <div className="whitespace-pre-wrap text-[#555]">{text}</div>,
         },
       ]}
     />
@@ -551,25 +514,18 @@ function RenderedEventRow({
   switch (ev.kind) {
     case 'system':
       return (
-        <span style={{ color: '#888' }}>
+        <span className="text-[#888]">
           <code>[{ev.sub}]</code>
         </span>
       )
     case 'user':
       return (
         <div>
-          <blockquote
-            style={{
-              margin: '4px 0',
-              padding: '4px 10px',
-              borderLeft: '3px solid #52c41a',
-              background: '#f6ffed',
-            }}
-          >
+          <blockquote className="my-1 py-1 pl-2.5 pr-2.5 border-l-[3px] border-l-[#52c41a] bg-[#f6ffed]">
             {ev.text}
           </blockquote>
           {(ev.cwd || ev.agent) && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            <Typography.Text type="secondary" className="text-xs">
               {ev.cwd ? `cwd: ${ev.cwd}` : ''}
               {ev.cwd && ev.agent ? ' · ' : ''}
               {ev.agent ? `agent: ${ev.agent}` : ''}
@@ -579,7 +535,7 @@ function RenderedEventRow({
       )
     case 'assistant-text':
       return (
-        <div style={{ marginTop: 2 }}>
+        <div className="mt-0.5">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{ev.text}</ReactMarkdown>
         </div>
       )
@@ -594,7 +550,7 @@ function RenderedEventRow({
               e.preventDefault()
               toggle(ev.toolUseId, 'input')
             }}
-            style={{ color: '#722ed1', cursor: 'pointer' }}
+            className="text-[#722ed1] cursor-pointer"
           >
             [Tool: {ev.name}] {ev.summary} {open ? '▾' : '▸'}
           </a>
@@ -606,13 +562,14 @@ function RenderedEventRow({
       const open = expanded.get(ev.toolUseId)?.result ?? false
       const color = ev.isError ? '#c41d7f' : '#666'
       return (
-        <div style={{ marginTop: 2, paddingLeft: 12, borderLeft: '2px solid #eee' }}>
+        <div className="mt-0.5 pl-3 border-l-2 border-l-[#eee]">
           <a
             onClick={(e) => {
               e.preventDefault()
               toggle(ev.toolUseId, 'result')
             }}
-            style={{ color, cursor: 'pointer', fontSize: 13 }}
+            className="cursor-pointer text-[13px]"
+            style={{ color }}
           >
             ↳ result · {ev.summary} {open ? '▾' : '▸'}
           </a>
@@ -622,13 +579,13 @@ function RenderedEventRow({
     }
     case 'task-ended':
       if (ev.status === 'completed')
-        return <span style={{ color: '#52c41a' }}>✓ 任务完成</span>
+        return <span className="text-[#52c41a]">✓ 任务完成</span>
       if (ev.status === 'failed')
         return (
-          <span style={{ color: '#ff4d4f' }}>
+          <span className="text-[#ff4d4f]">
             ✗ 失败:{ev.error ?? '未知错误'}
           </span>
         )
-      return <span style={{ color: '#999' }}>− 已取消</span>
+      return <span className="text-[#999]">− 已取消</span>
   }
 }

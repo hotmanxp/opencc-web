@@ -71,15 +71,7 @@ export const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }:
     <>
       {complete && <MarkdownText text={complete} />}
       {tail && (
-        <div
-          style={{
-            fontSize: 14,
-            lineHeight: 1.6,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            color: "inherit",
-          }}
-        >
+        <div className="text-[14px] leading-[1.6] whitespace-pre-wrap break-words text-inherit">
           {linkifyText(tail)}
           <span
             style={{
@@ -212,7 +204,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
     // 思考块属于 LLM 正常回复节奏的一部分:
     // - 不缩进 (贴齐主对话流, 与正式文字回答同级宽度)
     // - 箭头紧贴 pill 后 (手动渲染, 不靠 expandIconPosition)
-    <div style={{ marginBottom: 8, maxWidth: "100%" }}>
+    <div className="mb-2 max-w-full">
         <Collapse
         size="small"
         ghost
@@ -228,34 +220,15 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
             // 固定 key, 避免 Math.random 导致每次渲染重新挂载丢失展开态
             key: "thinking",
             label: (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  minWidth: 0,
-                  flex: 1,
-                  overflow: "hidden",
-                }}
-              >
+              <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
                 {/* 紫色 pill: 仿 opencc userFacingNameBackgroundColor,
                     把 "思考" 标签用主色背景包裹, 视觉权重高于纯文字标签. */}
                 <span
-                  className={streaming ? "zai-thinking-pill-active" : undefined}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 2,
-                    padding: "1px 6px",
-                    borderRadius: 10,
-                    background: THINKING_ACCENT,
-                    // pill 是颜色填充背景, 文字固定白色保证对比度, 不随主题切换.
-                    color: "#fff",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    lineHeight: 1.6,
-                    flexShrink: 0,
-                  }}
+                  className={
+                    (streaming ? "zai-thinking-pill-active " : "") +
+                    "inline-flex items-center gap-0.5 px-1.5 py-px rounded-[10px] text-white text-[11px] font-semibold leading-[1.6] flex-shrink-0"
+                  }
+                  style={{ background: THINKING_ACCENT }}
                 >
                   <BulbOutlined
                     className={streaming ? "zai-thinking-bulb zai-thinking-bulb-active" : "zai-thinking-bulb"}
@@ -268,11 +241,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                   {streaming && (
                     <span
                       aria-hidden="true"
-                      style={{
-                        display: "inline-flex",
-                        gap: 1,
-                        marginLeft: 1,
-                      }}
+                      className="inline-flex gap-px ml-px"
                     >
                       <span className="zai-think-dot-1">.</span>
                       <span className="zai-think-dot-2">.</span>
@@ -285,28 +254,12 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                     注意: 颜色必须用浅色 — ThinkingBlock 直接挂在 #000000
                     消息容器下, 用 var(--text-dim-45) 会与背景同色不可见 */}
                 <span
-                  style={{
-                    fontSize: 13,
-                    color: "var(--text-secondary)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    flexShrink: 0,
-                    lineHeight: 1.6,
-                  }}
+                  className="text-[13px] text-[var(--text-secondary)] inline-flex items-center flex-shrink-0 leading-[1.6]"
                 >
                   {active ? <CaretDownOutlined /> : <CaretRightOutlined />}
                 </span>
                 <span
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-secondary)",
-                    fontStyle: "italic",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    flex: 1,
-                    minWidth: 0,
-                  }}
+                  className="text-xs text-[var(--text-secondary)] italic overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0"
                   title={firstLine}
                 >
                   {preview}
@@ -315,19 +268,12 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
             ),
             children: (
               <div
+                className="text-xs px-3 py-2.5 rounded italic whitespace-pre-wrap leading-[1.6] text-[var(--text-secondary)]"
                 style={{
-                  fontSize: 12,
-                  padding: "10px 12px",
                   background: THINKING_BG,
                   borderLeft: `3px solid ${THINKING_ACCENT}`,
-                  borderRadius: 4,
-                  // THINKING_BG 是主题紫半透明叠加深色页面, 浅色文字才有足够对比度
-                  color: "var(--text-secondary)",
-                  fontStyle: "italic",
                   fontFamily:
                     "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                  whiteSpace: "pre-wrap",
-                  lineHeight: 1.6,
                 }}
               >
                 {linkifyText(text)}
@@ -394,21 +340,10 @@ export function MessageCopyButton({
     timerRef.current = setTimeout(() => setCopied(false), 1500);
   };
 
-  const style: React.CSSProperties =
+  const className =
     placement === "absolute"
-      ? {
-          position: "absolute",
-          top: 4,
-          right: 2,
-          zIndex: 1,
-          background: "transparent",
-          borderRadius: 4,
-        }
-      : {
-          background: "transparent",
-          borderRadius: 4,
-          flexShrink: 0,
-        };
+      ? "absolute top-1 right-0.5 z-[1] bg-transparent rounded"
+      : "bg-transparent rounded flex-shrink-0";
 
   return (
     <Button
@@ -418,7 +353,7 @@ export function MessageCopyButton({
       onClick={handleClick}
       title="复制"
       aria-label={variant === "ai" ? "复制助手回答" : "复制用户消息"}
-      style={style}
+      className={className}
     />
   );
 }
@@ -433,14 +368,7 @@ function ReadPreviewIcon({ path }: { path: string }) {
         role="button"
         aria-label="预览文件"
         data-testid="read-preview-icon"
-        style={{
-          flexShrink: 0,
-          cursor: "pointer",
-          color: "var(--text-secondary)",
-          display: "inline-flex",
-          alignItems: "center",
-          fontSize: 12,
-        }}
+        className="flex-shrink-0 cursor-pointer text-[var(--text-secondary)] inline-flex items-center text-xs"
         onClick={(e) => {
           // Collapse header 会吞点击展开面板,这里阻止冒泡只开抽屉
           e.stopPropagation();
@@ -457,17 +385,11 @@ function ToolUsePill({ name, status }: { name: string; status: ToolStatus }) {
   const c = TOOL_PILL_COLORS[status];
   return (
     <span
+      className="inline-block px-2 py-px rounded-[10px] text-[11px] font-semibold leading-[1.6] tracking-[0.2px]"
       style={{
-        display: "inline-block",
-        padding: "1px 8px",
-        borderRadius: 10,
         background: c.bg,
         color: c.fg,
-        fontSize: 11,
-        fontWeight: 600,
-        lineHeight: 1.6,
         fontFamily: CODE_FONT_FAMILY,
-        letterSpacing: 0.2,
       }}
     >
       {name}
@@ -552,12 +474,8 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   // 跳跃最小.
   const renderGenericInput = () => (
     <pre
-      style={{
-        fontSize: 12, margin: "4px 0 0 0", padding: "8px 10px",
-        background: "var(--bg-card)", borderRadius: 4,
-        whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const,
-        fontFamily: CODE_FONT_FAMILY,
-      }}
+      className="text-xs mt-1 p-2 rounded bg-[var(--bg-card)] whitespace-pre-wrap break-words"
+      style={{ fontFamily: CODE_FONT_FAMILY }}
     >
       {linkifyText(JSON.stringify(input, null, 2))}
     </pre>
@@ -566,11 +484,11 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   const renderGenericOutput = () =>
     output === undefined || output === null ? null : (
       <pre
+        className="text-xs mt-1 p-2 rounded-l-none rounded whitespace-pre-wrap break-words max-h-[360px] overflow-auto"
         style={{
-          fontSize: 12, margin: "4px 0 0 0", padding: "8px 10px",
-          background: "var(--success-bg, rgba(82,196,26,0.06))", borderLeft: "2px solid", borderLeftColor: "var(--accent-start)",
-          borderRadius: 4, whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const,
-          fontFamily: CODE_FONT_FAMILY, maxHeight: 360, overflow: "auto" as const,
+          background: "var(--success-bg, rgba(82,196,26,0.06))",
+          borderLeft: "2px solid var(--accent-start)",
+          fontFamily: CODE_FONT_FAMILY,
         }}
       >
         {typeof output === "string"
@@ -581,7 +499,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
 
   return (
     // 不缩进 (贴齐主对话流); 视觉上与 assistant.text 气泡同列.
-    <div style={{ marginBottom: 8, maxWidth: "100%" }}>
+    <div className="mb-2 max-w-full">
       <Collapse
         size="small"
         ghost
@@ -597,16 +515,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
           {
             key: `tool-${toolUseId}`,
             label: (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  minWidth: 0,
-                  flex: 1,
-                  overflow: "hidden",
-                }}
-              >
+              <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
                 <ToolUsePill name={displayName} status={status} />
                 <Tag color={TOOL_PILL_COLORS[status].tag} style={{ margin: 0 }}>
                   {TOOL_PILL_COLORS[status].label}
@@ -614,28 +523,14 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                 {/* 箭头: 紧贴标签(pill + status tag), 之后接预览文字.
                     颜色用浅色以适配深色背景, 字号 13 与 ThinkingBlock 一致 */}
                 <span
-                  style={{
-                    fontSize: 13,
-                    color: "var(--text-secondary)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    flexShrink: 0,
-                    lineHeight: 1.6,
-                  }}
+                  className="text-[13px] text-[var(--text-secondary)] inline-flex items-center flex-shrink-0 leading-[1.6]"
                 >
                   {active ? <CaretDownOutlined /> : <CaretRightOutlined />}
                 </span>
                 {preview && (
                   <Text
                     type="secondary"
-                    style={{
-                      fontSize: 12,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      flex: 1,
-                      minWidth: 0,
-                    }}
+                    className="text-xs overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0"
                     title={preview}
                   >
                     {preview}
@@ -647,21 +542,17 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
               </div>
             ),
             children: (
-              <div style={{ paddingLeft: 4 }}>
+              <div className="pl-1">
                 {inputKeys.length > 0 && (
                   // 自定义 renderer 自带 FieldLabel (e.g. "命令"/"文件"), 不重复套 "参数" 标题;
                   // 仅 generic fallback 显示 "参数" 给 JSON 兜底一份上下文.
                   renderer.renderInput
                     ? renderer.renderInput(input)
                     : (
-                      <div style={{ marginBottom: 8 }}>
+                      <div className="mb-2">
                         <Text
                           type="secondary"
-                          style={{
-                            fontSize: 11,
-                            textTransform: "uppercase",
-                            letterSpacing: 0.5,
-                          }}
+                          className="text-[11px] uppercase tracking-[0.5px]"
                         >
                           参数
                         </Text>
@@ -670,14 +561,10 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                     )
                 )}
                 {output !== undefined && output !== null && (
-                  <div style={{ marginBottom: 8 }}>
+                  <div className="mb-2">
                     <Text
                       type="secondary"
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: 0.5,
-                      }}
+                      className="text-[11px] uppercase tracking-[0.5px]"
                     >
                       结果
                     </Text>
@@ -690,25 +577,16 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                   <div>
                     <Text
                       type="secondary"
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: 0.5,
-                      }}
+                      className="text-[11px] uppercase tracking-[0.5px]"
                     >
                       错误
                     </Text>
                     <pre
+                      className="text-xs mt-1 p-2 rounded whitespace-pre-wrap break-words"
                       style={{
-                        fontSize: 12,
-                        margin: "4px 0 0 0",
-                        padding: "8px 10px",
                         background: "var(--error-bg, rgba(255,77,79,0.06))",
-                        borderLeft: "2px solid", borderLeftColor: "var(--accent-end)",
-                        borderRadius: 4,
+                        borderLeft: "2px solid var(--accent-end)",
                         color: "var(--accent-end)",
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
                         fontFamily: CODE_FONT_FAMILY,
                       }}
                     >
@@ -773,49 +651,28 @@ export const MessageBubble = React.memo(function MessageBubble({
     return (
       <div
         data-testid="user-bubble-container"
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          marginBottom: 16,
-        }}
+        className="flex justify-end mb-4"
       >
         <Card
           size="small"
+          className="bg-[var(--bg-card)] rounded-xl relative"
           style={{
             // 移动端或分屏开启时, 对话区被压窄, 70% 显得局促; 撑满与 AI 气泡
             // 行为一致 (见上方 expandUserBubble 计算). 桌面端无分屏仍维持
             // 70% 以保留短消息右对齐的视觉呼吸.
             maxWidth: expandUserBubble ? "100%" : "70%",
-            background: "var(--bg-card)",
-            borderRadius: 12,
-            position: "relative",
           }}
         >
           {/* 横向 flex: [copy] [text flex:1] [user icon]
               copy 用 inline 模式嵌在最左, user icon 嵌在最右, 文字占中间 flex:1.
               任何长度的消息都不会与 copy 按钮重叠 (旧 absolute top:8 right:8 会盖住短消息文字). */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 8,
-              minWidth: 0,
-            }}
-          >
+          <div className="flex items-start gap-2 min-w-0">
             <MessageCopyButton
               text={visibleText}
               variant="user"
               placement="inline"
             />
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
-              }}
-            >
+            <div className="flex-1 min-w-0 flex flex-col gap-1">
               {msgAttachments.length > 0 && (
                 <AttachmentStrip
                   attachments={msgAttachments}
@@ -828,34 +685,26 @@ export const MessageBubble = React.memo(function MessageBubble({
                   }
                 />
               )}
-              <Text style={{ wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
+              <Text className="break-words whitespace-pre-wrap">
                 {linkifyText(visibleText)}
               </Text>
               {isRendered && (
                 <Text
                   data-testid="user-text-rendered-prompt"
-                  style={{
-                    fontSize: 12,
-                    fontStyle: "italic",
-                    color: "var(--text-tertiary)",
-                    borderLeft: "2px solid var(--text-tertiary)",
-                    paddingLeft: 8,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
+                  className="text-xs italic text-[var(--text-tertiary)] border-l-2 border-l-[var(--text-tertiary)] pl-2 whitespace-pre-wrap break-words"
                 >
-                  <span style={{ color: "var(--text-tertiary)", marginRight: 4 }}>
+                  <span className="text-[var(--text-tertiary)] mr-1">
                     ⤷
                   </span>
-                  <span style={{ fontWeight: 500 }}>渲染后</span>
-                  <span style={{ margin: "0 6px", color: "var(--text-tertiary)" }}>
+                  <span className="font-medium">渲染后</span>
+                  <span className="mx-1.5 text-[var(--text-tertiary)]">
                     ·
                   </span>
                   {linkifyText(visibleText)}
                 </Text>
               )}
             </div>
-            <UserOutlined style={{ flexShrink: 0, marginTop: 2 }} />
+            <UserOutlined className="flex-shrink-0 mt-0.5" />
           </div>
         </Card>
         {/* 附件大图预览: 跟气泡同级, 不影响 maxWidth:70% 气泡本身宽度.
@@ -880,15 +729,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             <img
               src={previewingAttachment.url}
               alt={previewingAttachment.filename}
-              style={{
-                display: "block",
-                maxWidth: "90vw",
-                maxHeight: "85vh",
-                width: "auto",
-                height: "auto",
-                cursor: "zoom-out",
-                borderRadius: 4,
-              }}
+              className="block max-w-[90vw] max-h-[85vh] w-auto h-auto cursor-zoom-out rounded"
               onClick={() => setPreviewingAttachment(null)}
             />
           )}
@@ -906,28 +747,15 @@ export const MessageBubble = React.memo(function MessageBubble({
     // 流式期间跳过 ReactMarkdown 重解析 (每次 delta 都跑一次 unified pipeline 太重),
     // 用 pre-wrap 渲染纯文本; 状态切回 idle 后才解析 markdown, 利用 React 自动重渲.
     return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-start",
-          marginBottom: 16,
-        }}
-      >
+      <div className="flex justify-start mb-4">
         <Card
           size="small"
-          style={{
-            width: "100%",
-            maxWidth: "100%",
-            marginRight: 20,
-            background: "var(--bg-card)",
-            borderRadius: 12,
-            position: "relative",
-          }}
+          className="w-full max-w-full mr-5 bg-[var(--bg-card)] rounded-xl relative"
         >
           <MessageCopyButton text={text} variant="ai" />
-          <Space align="start" size={8} style={{ width: "100%" }}>
+          <Space align="start" size={8} className="w-full">
             <RobotFilled style={{ color: "var(--accent-start)", fontSize: 18 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="flex-1 min-w-0">
               {streaming ? (
                 <StreamingMarkdown text={text} />
               ) : (
@@ -967,7 +795,7 @@ export const MessageBubble = React.memo(function MessageBubble({
       (msg.arguments as Record<string, unknown>) ||
       {};
     return (
-      <div style={{ marginBottom: 8 }}>
+      <div className="mb-2">
         <Collapse
           size="small"
           items={[
@@ -982,7 +810,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               ),
               children: (
                 <pre
-                  style={{ fontSize: 12, margin: 0, whiteSpace: "pre-wrap" }}
+                  className="text-xs m-0 whitespace-pre-wrap"
                 >
                   {linkifyText(JSON.stringify(args, null, 2))}
                 </pre>
@@ -999,7 +827,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     const result = msg.result || msg.output || msg.error || "";
     const isError = Boolean(msg.isError || msg.error);
     return (
-      <div style={{ marginBottom: 8 }}>
+      <div className="mb-2">
         <Collapse
           size="small"
           items={[
@@ -1016,10 +844,8 @@ export const MessageBubble = React.memo(function MessageBubble({
               ),
               children: (
                 <pre
+                  className="text-xs m-0 whitespace-pre-wrap"
                   style={{
-                    fontSize: 12,
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
                     color: isError ? "var(--accent-end)" : undefined,
                   }}
                 >
@@ -1042,7 +868,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     // 容器背景透明,只保留 border + text 表达「错误」语义;避免 Card 的白底
     // 在浅色对话区(--bg-body=#eef2f7)上突兀跳出(tf-k93br2hc,2026-09-05)。
     return (
-      <div style={{ marginBottom: 8 }}>
+      <div className="mb-2">
         <Card
           size="small"
           className="runtime-error-card"
@@ -1075,22 +901,10 @@ export const MessageBubble = React.memo(function MessageBubble({
     const text = delta?.text || "";
     if (!text) return null;
     return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-start",
-          marginBottom: 16,
-        }}
-      >
+      <div className="flex justify-start mb-4">
         <Card
           size="small"
-          style={{
-            width: "100%",
-            maxWidth: "100%",
-            marginRight: 20,
-            background: "var(--bg-card)",
-            borderRadius: 12,
-          }}
+          className="w-full max-w-full mr-5 bg-[var(--bg-card)] rounded-xl"
         >
           <Space align="start" size={8}>
             <RobotFilled style={{ color: "var(--accent-start)", fontSize: 18 }} />

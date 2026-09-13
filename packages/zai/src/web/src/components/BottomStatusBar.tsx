@@ -36,38 +36,25 @@ export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
   const trigger = (
     <div
       data-testid="bottom-status-trigger"
+      className="flex items-center justify-center gap-2 px-3 py-2 cursor-pointer bg-[var(--bg-faint-04)] border-y border-[var(--border-subtle)] text-xs font-[ui-monospace,SFMono-Regular,Menlo,monospace] select-none"
       style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        padding: "8px 12px",
-        cursor: "pointer",
-        background: "var(--bg-faint-04)",
-        borderTop: "1px solid var(--border-subtle)",
-        borderBottom: "1px solid var(--border-subtle)",
         color: total > 0 ? "var(--text-dim-85)" : "var(--text-dim-45)",
-        fontSize: 12,
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        userSelect: "none",
       }}
     >
       <span data-testid="bottom-status-summary">
-        <span style={{ color: done === total ? "#52c41a" : "var(--text-dim-85)" }}>
+        <span
+          style={{ color: done === total ? "#52c41a" : "var(--text-dim-85)" }}
+        >
           {done}/{total} {label}
         </span>
         {inProgress > 0 && (
-          <span style={{ color: "#a78bfa", marginLeft: 8 }}>
-            · {inProgress} 进行中
-          </span>
+          <span className="text-[#a78bfa] ml-2">· {inProgress} 进行中</span>
         )}
         {open > 0 && (
-          <span style={{ color: "var(--text-dim-55)", marginLeft: 8 }}>
-            · {open} 待开始
-          </span>
+          <span className="text-[var(--text-dim-55)] ml-2">· {open} 待开始</span>
         )}
       </span>
-      <CaretUpOutlined style={{ fontSize: 10, opacity: 0.7 }} />
+      <CaretUpOutlined className="text-[10px] opacity-70" />
     </div>
   );
 

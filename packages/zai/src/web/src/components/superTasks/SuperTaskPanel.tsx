@@ -87,50 +87,18 @@ export default function SuperTaskPanel(): JSX.Element {
     return (
       <div
         data-testid={`lane-${key}`}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          background: '#f8fafc',
-          border: '1px solid #e5e9f0',
-          borderRadius: 12,
-          overflow: 'hidden',
-        }}
+        className="flex-1 min-w-0 flex flex-col bg-[#f8fafc] border border-[#e5e9f0] rounded-xl overflow-hidden"
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '8px 12px',
-            borderBottom: '1px solid #e5e9f0',
-            flexWrap: 'wrap',
-          }}
-        >
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#e5e9f0] flex-wrap">
           <span
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: laneColor,
-              flexShrink: 0,
-            }}
+            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+            style={{ background: laneColor }}
           />
-          <span style={{ fontWeight: 600, color: laneColor }}>{LANE_TITLE[key]}</span>
-          <span
-            style={{
-              fontSize: 12,
-              color: '#64748b',
-              background: '#eef2f7',
-              borderRadius: 999,
-              padding: '0 8px',
-              lineHeight: '18px',
-            }}
-          >
+          <span className="font-semibold" style={{ color: laneColor }}>{LANE_TITLE[key]}</span>
+          <span className="text-xs text-[#64748b] bg-[#eef2f7] rounded-full px-2 leading-[18px]">
             {rows.length}
           </span>
-          <div style={{ flex: 1 }} />
+          <div className="flex-1" />
           <Checkbox
             checked={allSelected}
             indeterminate={someSelected}
@@ -162,19 +130,9 @@ export default function SuperTaskPanel(): JSX.Element {
             </Tooltip>
           )}
         </div>
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: 'auto',
-            padding: 10,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
+        <div className="flex-1 min-h-0 overflow-y-auto p-2.5 flex flex-col gap-2.5">
           {rows.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--text-tertiary, #999)', padding: '24px 0', fontSize: 13 }}>
+            <div className="text-center text-[var(--text-tertiary,#999)] py-6 text-[13px]">
               暂无任务
             </div>
           ) : (
@@ -203,7 +161,7 @@ export default function SuperTaskPanel(): JSX.Element {
   // 卸载重挂会让 [open] effect 重跑,把对话窗口重置回草稿提示甚至瞬时消失。
   const showLanes = !(loading && isEmpty && !loadedOnce)
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0 }}>
+    <div className="flex flex-col gap-3 h-full min-h-0">
       <TaskOverviewBar
         filter={filter}
         onFilterChange={setFilter}
@@ -212,14 +170,14 @@ export default function SuperTaskPanel(): JSX.Element {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       {showLanes ? (
-        <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0, alignItems: 'stretch' }}>
+        <div className="flex gap-3 flex-1 min-h-0 items-stretch">
           {renderLane('queue', buckets.queue, true)}
           {renderLane('processing', buckets.processing, false)}
           {renderLane('verifying', buckets.verifying, false)}
           {renderLane('finished', buckets.finished, true)}
         </div>
       ) : (
-        <div style={{ padding: 24, textAlign: 'center' }} />
+        <div className="p-6 text-center" />
       )}
       <NewSuperTaskModal open={newModalOpen} onClose={() => setNewModalOpen(false)} />
       <QuickCreateModal open={quickModalOpen} onClose={() => setQuickModalOpen(false)} />

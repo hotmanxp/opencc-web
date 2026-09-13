@@ -43,39 +43,17 @@ export default function MobileSupervisorDrawer({
         aria-label="打开任务调度器对话"
         data-testid="mobile-supervisor-fab"
         onClick={onOpen}
+        className="fixed right-4 w-[52px] h-[52px] rounded-full border-none bg-[#f97316] text-white shadow-lg flex items-center justify-center z-[900] cursor-pointer outline-none"
         style={{
-          position: 'fixed',
-          right: 16,
           bottom: 'calc(16px + env(safe-area-inset-bottom))',
-          width: 52,
-          height: 52,
-          borderRadius: '50%',
-          border: 'none',
-          background: '#f97316',
-          color: '#ffffff',
           boxShadow: '0 4px 12px rgba(0,0,0,.18)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 900,
-          cursor: 'pointer',
-          outline: 'none',
         }}
       >
-        <CommentOutlined style={{ fontSize: 22, color: '#ffffff' }} />
+        <CommentOutlined className="text-[22px] text-white" />
         {streaming && (
           <span
             data-testid="mobile-supervisor-fab-dot"
-            style={{
-              position: 'absolute',
-              top: 4,
-              right: 4,
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: '#ffffff',
-              border: '2px solid #f97316',
-            }}
+            className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-[#f97316]"
           />
         )}
       </button>
@@ -132,22 +110,20 @@ export default function MobileSupervisorDrawer({
                 disabled={resetting}
                 aria-label="重置任务调度器会话"
                 data-testid="mobile-supervisor-reset-button"
-                style={{ minWidth: 44, minHeight: 44 }}
+                className="min-w-[44px] min-h-[44px]"
               />
             </Tooltip>
           </Popconfirm>
         }
       >
         <div
+          className="h-full flex flex-col"
           style={{
             ...LIGHT_PAGE_VARS,
             background: '#eef2f7',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
           }}
         >
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="flex-1 min-h-0 flex flex-col">
             {/* bottomStackStyle: 与 NewSuperTaskModal / QuickCreateModal 同款,
                 输入区铺白底 + 顶部分隔线, 避免与 #eef2f7 消息区连成一片。
                 showModelPicker: 移动调度器抽屉没有 ConfigStatusBar, 在状态行

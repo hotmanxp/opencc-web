@@ -54,20 +54,18 @@ export function PluginRow({ plugin, writing, onToggle, onUpdate, onUninstall }: 
   return (
     <div
       data-testid="plugin-row"
-      style={{
-        display: 'flex',
-        gap: 12,
-        padding: '10px 12px',
-        borderBottom: '1px solid var(--border-subtle)',
-        alignItems: 'flex-start',
-      }}
+      className="flex gap-3 py-2.5 px-3 items-start"
+      style={{ borderBottom: '1px solid var(--border-subtle)' }}
     >
-      <span style={{ width: 8, height: 8, borderRadius: 4, background: dot, marginTop: 6, flexShrink: 0 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <span
+        className="rounded-full shrink-0 mt-1.5"
+        style={{ width: 8, height: 8, background: dot }}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
           <Typography.Text strong>{plugin.name}</Typography.Text>
           {plugin.version && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            <Typography.Text type="secondary" className="text-xs">
               v{plugin.version}
             </Typography.Text>
           )}
@@ -82,17 +80,17 @@ export function PluginRow({ plugin, writing, onToggle, onUpdate, onUninstall }: 
           )}
         </div>
         {plugin.description && (
-          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
+          <Typography.Text type="secondary" className="text-xs block mt-0.5">
             {plugin.description}
           </Typography.Text>
         )}
         {plugin.errors.length > 0 && (
-          <Typography.Text type="danger" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
+          <Typography.Text type="danger" className="text-xs block mt-0.5">
             {plugin.errors.join('；')}
           </Typography.Text>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+      <div className="flex items-center gap-2 shrink-0">
         {plugin.writable ? (
           switchEl
         ) : (

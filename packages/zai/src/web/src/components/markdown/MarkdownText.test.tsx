@@ -12,12 +12,13 @@ describe("MarkdownText", () => {
   it("renders inline code with the violet (#a78bfa) custom style", () => {
     const { container } = render(<MarkdownText text="use `foo` here" />);
     // The markdownComponents.code branch (no language class) returns
-    // <code style={{ color: "#a78bfa" ... }}>. happy-dom preserves the
-    // hex literal as-is (does not normalize to rgb()), so we assert
-    // against the original value.
+    // <code className="text-[#a78bfa] ...">. happy-dom does not parse
+    // Tailwind utility classes, so we assert the className contains
+    // the violet color literal that survives Tailwind's arbitrary-value
+    // JIT compilation.
     const code = container.querySelector("code");
     expect(code).toBeTruthy();
-    expect(code?.style.color).toBe("#a78bfa");
+    expect(code?.className).toContain("text-[#a78bfa]");
   });
 
   it("renders a fenced code block (text content survives inside <code>)", () => {

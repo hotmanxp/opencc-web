@@ -17,8 +17,8 @@ export default function ZnLogo({ size = 32, style, className }: ZnLogoProps) {
       width={size}
       height={size}
       shapeRendering="crispEdges"
-      className={className}
-      style={{ imageRendering: 'pixelated', display: 'block', ...style }}
+      className={`block ${className ?? ''}`}
+      style={{ imageRendering: 'pixelated', ...style }}
       aria-label="知鸟"
     >
       <g fill="#F26B2A">

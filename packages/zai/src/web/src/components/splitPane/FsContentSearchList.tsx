@@ -17,7 +17,6 @@ export interface FsContentSearchListProps {
 }
 
 const TRUNCATED_TAIL = '(结果已截断,继续输入以收窄范围)';
-const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
 /**
  * Split `text` into [before, highlighted, after] JSX nodes around the
@@ -41,7 +40,8 @@ export function highlightLine(
     <span
       key="hit"
       data-testid="fs-content-hit"
-      style={{ background: 'rgba(255, 200, 0, 0.4)', borderRadius: 2 }}
+      className="rounded-sm"
+      style={{ background: 'rgba(255, 200, 0, 0.4)' }}
     >
       {hit}
     </span>,
@@ -49,31 +49,7 @@ export function highlightLine(
   ];
 }
 
-const rowStyle: React.CSSProperties = {
-  padding: '6px 10px',
-  borderRadius: 4,
-  cursor: 'pointer',
-  fontFamily: MONO,
-  fontSize: 12,
-  display: 'flex',
-  alignItems: 'baseline',
-  gap: 8,
-  color: 'var(--text-dim-85)',
-};
-
-const pathStyle: React.CSSProperties = {
-  color: 'var(--text-dim-55)',
-  fontSize: 11,
-  whiteSpace: 'nowrap',
-};
-
-const previewStyle: React.CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'pre',
-};
+const ROW_CLASS = 'px-2.5 py-1.5 rounded cursor-pointer font-mono text-xs flex items-baseline gap-2 text-[color:var(--text-dim-85)]';
 
 export function FsContentSearchList(props: FsContentSearchListProps): JSX.Element {
   const { entries, loading, error, truncated, query, onSelect, onItemContextMenu } = props;
@@ -84,7 +60,7 @@ export function FsContentSearchList(props: FsContentSearchListProps): JSX.Elemen
 
   if (loading && entries.length === 0) {
     return (
-      <div data-testid="fs-content-loading" style={{ padding: 16, textAlign: 'center' }}>
+      <div data-testid="fs-content-loading" className="p-4 text-center">
         <Spin />
       </div>
     );
@@ -92,7 +68,7 @@ export function FsContentSearchList(props: FsContentSearchListProps): JSX.Elemen
 
   if (error) {
     return (
-      <div data-testid="fs-content-error" style={{ padding: 16 }}>
+      <div data-testid="fs-content-error" className="p-4">
         <Empty description={error} />
       </div>
     );
@@ -100,7 +76,7 @@ export function FsContentSearchList(props: FsContentSearchListProps): JSX.Elemen
 
   if (entries.length === 0) {
     return (
-      <div data-testid="fs-content-empty" style={{ padding: 16 }}>
+      <div data-testid="fs-content-empty" className="p-4">
         <Empty description={`无内容匹配: "${query.trim()}"`} />
       </div>
     );
@@ -109,12 +85,7 @@ export function FsContentSearchList(props: FsContentSearchListProps): JSX.Elemen
   return (
     <div
       data-testid="fs-content-list"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        padding: '4px 0',
-      }}
+      className="flex flex-col gap-0.5 py-1"
     >
       {entries.map((e) => {
         // Display only the first match per file (per spec). The remaining
@@ -142,7 +113,7 @@ export function FsContentSearchList(props: FsContentSearchListProps): JSX.Elemen
                 onSelect(e.path, first.line);
               }
             }}
-            style={rowStyle}
+            className={ROW_CLASS}
             onMouseEnter={(ev) => {
               (ev.currentTarget as HTMLDivElement).style.background = 'var(--bg-faint-06)';
             }}
@@ -150,23 +121,20 @@ export function FsContentSearchList(props: FsContentSearchListProps): JSX.Elemen
               (ev.currentTarget as HTMLDivElement).style.background = 'transparent';
             }}
           >
-            <span style={pathStyle}>
+            <span className="text-[color:var(--text-dim-55)] text-[11px] whitespace-nowrap">
               {e.path}:{first.line}
               {extra}
             </span>
-            <span style={previewStyle}>{highlightLine(first.text, first.submatch)}</span>
+            <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-pre">
+              {highlightLine(first.text, first.submatch)}
+            </span>
           </div>
         );
       })}
       {truncated && (
         <div
           data-testid="fs-content-truncated"
-          style={{
-            padding: '6px 10px',
-            color: 'var(--text-dim-45)',
-            fontSize: 11,
-            fontStyle: 'italic',
-          }}
+          className="px-2.5 py-1.5 text-[color:var(--text-dim-45)] text-[11px] italic"
         >
           {TRUNCATED_TAIL}
         </div>

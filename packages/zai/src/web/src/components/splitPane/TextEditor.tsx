@@ -216,7 +216,7 @@ export function TextEditor(props: TextEditorProps): JSX.Element {
     <div
       data-testid="fs-editor"
       ref={containerRef}
-      style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
+      className="flex-1 min-h-0 overflow-auto"
     />
   );
 }

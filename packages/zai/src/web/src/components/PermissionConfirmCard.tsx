@@ -29,16 +29,9 @@ export default function PermissionConfirmCard(): JSX.Element | null {
 
   return (
     <div
-      className="question-card-scope permission-confirm-card"
-      style={{
-        margin: '12px 24px',
-        padding: '12px 14px',
-        background: 'var(--bg-card-ansi)',
-        borderTop: '3px solid #f59e0b',
-        borderRadius: 6,
-      }}
+      className="question-card-scope permission-confirm-card m-3 mx-6 py-3 px-[14px] bg-[var(--bg-card-ansi)] border-t-[3px] border-t-[#f59e0b] rounded-md"
     >
-      <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="mb-[10px] flex items-center gap-2">
         <Tag style={{ marginRight: 0, background: '#f59e0b', borderColor: '#f59e0b', color: '#fff' }}>
           {toolName || 'Permission'}
         </Tag>
@@ -47,68 +40,42 @@ export default function PermissionConfirmCard(): JSX.Element | null {
 
       {status === 'error' && errorMessage && (
         <div
-          style={{
-            marginBottom: 10,
-            padding: '6px 10px',
-            background: 'var(--bg-body)',
-            border: '1px solid var(--error)',
-            borderRadius: 4,
-          }}
+          className="mb-[10px] py-[6px] px-[10px] bg-[var(--bg-body)] border border-[var(--error)] rounded"
         >
-          <Text type="danger" style={{ fontSize: 12 }}>{errorMessage}</Text>
+          <Text type="danger" className="text-xs">{errorMessage}</Text>
         </div>
       )}
 
       {message && (
-        <Paragraph style={{ color: 'var(--text-secondary)', marginBottom: 8, fontSize: 13 }}>
+        <Paragraph className="text-[var(--text-secondary)] mb-2 text-[13px]">
           {message}
         </Paragraph>
       )}
       {description && description !== message && (
-        <Paragraph style={{ color: 'var(--text-secondary)', marginBottom: 8, fontSize: 13 }}>
+        <Paragraph className="text-[var(--text-secondary)] mb-2 text-[13px]">
           {description}
         </Paragraph>
       )}
       {commandLine && (
         <div
-          style={{
-            margin: '8px 0',
-            padding: '8px 10px',
-            background: 'var(--bg-faint-04)',
-            border: '1px solid var(--border-mid)',
-            borderRadius: 4,
-            color: '#1f1f1f',
-            fontSize: 12,
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
+          className="my-2 py-2 px-[10px] bg-[var(--bg-faint-04)] border border-[var(--border-mid)] rounded text-[#1f1f1f] text-xs font-[ui-monospace,SFMono-Regular,Menlo,monospace] whitespace-pre-wrap break-all"
         >
           {commandLine}
         </div>
       )}
 
-      <div style={{ marginTop: 4 }}>
+      <div className="mt-1">
         <textarea
           aria-label="拒绝理由"
           value={localReason}
           onChange={(e) => setLocalReason(e.target.value.slice(0, 2000))}
           placeholder="拒绝理由（可选）"
           rows={2}
-          style={{
-            width: '100%',
-            resize: 'vertical',
-            background: 'var(--bg-faint-04)',
-            border: '1px solid var(--border-mid)',
-            borderRadius: 4,
-            color: '#1f1f1f',
-            padding: '6px 8px',
-            fontSize: 12,
-          }}
+          className="w-full resize-y bg-[var(--bg-faint-04)] border border-[var(--border-mid)] rounded text-[#1f1f1f] py-[6px] px-2 text-xs"
         />
       </div>
 
-      <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+      <div className="mt-3 flex gap-2 justify-end">
         <Popconfirm
           title="确认拒绝?"
           okText="拒绝"

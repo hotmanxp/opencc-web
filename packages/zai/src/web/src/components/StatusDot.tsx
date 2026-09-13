@@ -8,14 +8,8 @@ export default function StatusDot({ installed }: StatusDotProps) {
 
   return (
     <span
-      style={{
-        display: 'inline-block',
-        width: 12,
-        height: 12,
-        borderRadius: '50%',
-        backgroundColor: color,
-        boxShadow: shadow,
-      }}
+      className="inline-block w-3 h-3 rounded-full"
+      style={{ backgroundColor: color, boxShadow: shadow }}
     />
   );
 }

@@ -51,12 +51,10 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
         size="small"
         aria-label={`切换模型,当前 ${badgeText ?? '未知'}`}
         title={`当前模型: ${tooltipText ?? '未知'}\n点击切换`}
+        className="opacity-90 text-xs font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace]"
         style={{
           color: 'inherit',
           opacity: currentModel ? 0.9 : 0.6,
-          fontSize: 12,
-          fontFamily:
-            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
           // 移动端走 ConfigStatusBar: antd small Button 默认 padding 0 7px
           // 会在 caret 右侧留出一大块空白. 收紧到 0 2px, 把间距交给外层
           // ConfigStatusBar 的 gap 统一管控, 否则底栏 '· main · MiniMax-M3 ·'

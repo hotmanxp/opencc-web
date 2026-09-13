@@ -124,51 +124,27 @@ export default function AgentConversation({
 
   return (
     <div
+      className="flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden"
       style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        minWidth: 0,
-        maxWidth: '100%',
-        overflowX: 'hidden',
         paddingTop: isMobile ? 0 : 20,
       }}
     >
       <div
         ref={scrollContainerRef}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          padding: '0 8px',
-          marginBottom: 4,
-          background: 'var(--bg-body)',
-          maxWidth: '100%',
-          overflowX: 'hidden',
-        }}
+        className="flex-1 min-h-0 overflow-y-auto max-w-full overflow-x-hidden mb-1 bg-[var(--bg-body)] px-2"
       >
         {messages.length === 0 && (
-          <div style={{ textAlign: 'center', marginTop: 80, color: 'var(--text-tertiary)' }}>
-            <RobotFilled style={{ fontSize: 48, marginBottom: 16, color: 'var(--accent-start)' }} />
+          <div className="text-center mt-20 text-[var(--text-tertiary)]">
+            <RobotFilled className="text-5xl mb-4 text-[var(--accent-start)]" />
             <Paragraph type="secondary">发送消息开始与 AI Agent 对话</Paragraph>
-            <Paragraph type="secondary" style={{ fontSize: 12 }}>
+            <Paragraph type="secondary" className="text-xs">
               支持文件搜索、读写文件和 Bash 执行
             </Paragraph>
           </div>
         )}
         <TodoZone tasks={v2TasksForCurrentSession} />
         {showPill && (
-          <div
-            style={{
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
-              display: 'flex',
-              justifyContent: 'center',
-              paddingTop: 8,
-              paddingBottom: 4,
-            }}
-          >
+          <div className="sticky top-0 z-10 flex justify-center pt-2 pb-1">
             <Button
               shape="round"
               size="small"

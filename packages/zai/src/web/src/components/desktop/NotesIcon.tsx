@@ -12,7 +12,7 @@ export default function NotesIcon({ size = 18 }: NotesIconProps) {
       height={size}
       viewBox="0 0 24 24"
       aria-hidden
-      style={{ display: 'block' }}
+      className="block"
     >
       {/* 后层绿色便签(轻微左偏 + 上偏) */}
       <rect x="7" y="2.5" width="12" height="15" rx="1.6" fill="#a8e6a1" />

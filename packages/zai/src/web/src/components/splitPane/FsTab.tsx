@@ -76,13 +76,7 @@ function LazyTextEditor(props: {
     return (
       <div
         data-testid="fs-editor-loading"
-        style={{
-          flex: 1,
-          minHeight: 0,
-          padding: 12,
-          color: 'var(--text-dim-45)',
-          fontSize: 12,
-        }}
+        className="flex-1 min-h-0 p-3 text-[color:var(--text-dim-45)] text-xs"
       >
         正在加载编辑器…
       </div>
@@ -157,19 +151,10 @@ function HtmlPreview({
     return (
       <pre
         data-testid="fs-preview-html-source"
+        className="flex-1 min-h-0 m-0 p-3 overflow-auto rounded-md font-mono text-xs whitespace-pre-wrap break-words"
         style={{
-          flex: 1,
-          minHeight: 0,
-          margin: 0,
-          padding: 12,
-          overflow: 'auto',
           background: 'var(--bg-faint-04)',
           color: 'var(--text-dim-85)',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          borderRadius: 6,
-          fontFamily: MONO,
-          fontSize: 12,
           lineHeight: 1.55,
         }}
       >
@@ -191,14 +176,8 @@ function HtmlPreview({
       // local HTML preview.
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
-      style={{
-        flex: 1,
-        minHeight: 0,
-        width: '100%',
-        border: 'none',
-        borderRadius: 6,
-        background: 'var(--bg-card)',
-      }}
+      className="flex-1 min-h-0 w-full border-0 rounded-md"
+      style={{ background: 'var(--bg-card)' }}
     />
   );
 }
@@ -342,30 +321,21 @@ function FilePreview({
   // — auto-fit, transparent background, checker pattern helps spot
   // transparency vs. solid images.
   if (file.kind === 'image' && file.dataUrl) {
-    const containerStyle: React.CSSProperties = {
-      flex: 1,
-      minHeight: 0,
-      overflow: 'auto',
-      borderRadius: 6,
-      display: 'flex',
-      alignItems: 'flex-start',
-      justifyContent: 'center',
-      padding: 12,
-      backgroundImage:
-        'linear-gradient(45deg, var(--bg-faint-05) 25%, transparent 25%), linear-gradient(-45deg, var(--bg-faint-05) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--bg-faint-05) 75%), linear-gradient(-45deg, transparent 75%, var(--bg-faint-05) 75%)',
-      backgroundSize: '16px 16px',
-      backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
-    };
     return (
-      <div data-testid="fs-preview-image" style={containerStyle}>
+      <div
+        data-testid="fs-preview-image"
+        className="flex-1 min-h-0 overflow-auto rounded-md flex items-start justify-center p-3"
+        style={{
+          backgroundImage:
+            'linear-gradient(45deg, var(--bg-faint-05) 25%, transparent 25%), linear-gradient(-45deg, var(--bg-faint-05) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--bg-faint-05) 75%), linear-gradient(-45deg, transparent 75%, var(--bg-faint-05) 75%)',
+          backgroundSize: '16px 16px',
+          backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
+        }}
+      >
         <img
           src={file.dataUrl}
           alt={name ?? ''}
-          style={{
-            maxWidth: '100%',
-            height: 'auto',
-            display: 'block',
-          }}
+          className="max-w-full h-auto block"
         />
       </div>
     );
@@ -378,19 +348,14 @@ function FilePreview({
     return <HtmlPreview dataUrl={file.dataUrl} name={name} mode={htmlMode} />;
   }
 
-  const containerStyle: React.CSSProperties = {
-    flex: 1,
-    minHeight: 0,
-    overflow: 'auto',
-    borderRadius: 6,
-  };
+  const CONTAINER_CLASS = 'flex-1 min-h-0 overflow-auto rounded-md';
 
   // MD 分支: 在 lang 检查之前,先识别 .md / .markdown,走 MarkdownText。
   // 用 regex 而非 extToLanguage, 因为 extToLanguage 不把 MD 视为 code,
   // 返回 null, 会让 MD 落到 plain text 分支(就是现状的 bug)。
   if (name && /\.(md|markdown)$/i.test(name)) {
     return (
-      <div ref={pendingRef} data-testid="fs-preview-md" style={containerStyle}>
+      <div ref={pendingRef} data-testid="fs-preview-md" className={CONTAINER_CLASS}>
         <MarkdownText text={content} />
       </div>
     );
@@ -407,19 +372,14 @@ function FilePreview({
     // chunk is already cached from a previous click in the session.
     if (!hl) {
       return (
-        <div data-testid="fs-preview-code" style={containerStyle}>
+        <div data-testid="fs-preview-code" className={CONTAINER_CLASS}>
           <pre
             data-testid="fs-preview-code-fallback"
+            className="m-0 p-3 font-mono text-xs whitespace-pre-wrap break-words"
             style={{
-              margin: 0,
-              padding: 12,
               background: 'var(--bg-faint-04)',
               color: 'var(--text-dim-85)',
-              fontFamily: MONO,
-              fontSize: 12,
               lineHeight: 1.55,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
             }}
           >
             {content}
@@ -429,7 +389,7 @@ function FilePreview({
     }
     const { SyntaxHighlighter, oneDark } = hl;
     return (
-      <div ref={pendingRef} data-testid="fs-preview-code" style={containerStyle}>
+      <div ref={pendingRef} data-testid="fs-preview-code" className={CONTAINER_CLASS}>
         <SyntaxHighlighter
           language={lang}
           style={oneDark}
@@ -476,19 +436,16 @@ function FilePreview({
     );
   }
   return (
-    <div ref={pendingRef} data-testid="fs-preview-text" style={containerStyle}>
+    <div ref={pendingRef} data-testid="fs-preview-text" className={CONTAINER_CLASS}>
       <pre
+        className="m-0 p-3 whitespace-pre-wrap break-words"
         style={{
-          margin: 0,
-          padding: 12,
           background: 'var(--bg-faint-04)',
           color: 'var(--text-dim-85)',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
         }}
       >
         {content.split('\n').map((line, idx) => (
-          <span key={idx} data-line={idx + 1} style={{ display: 'block' }}>
+          <span key={idx} data-line={idx + 1} className="block">
             {line}
           </span>
         ))}
@@ -706,7 +663,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
 
   if (!cwd) {
     return (
-      <div style={{ padding: 16 }}>
+      <div className="p-4">
         <Empty description="未选择会话 cwd" />
       </div>
     );
@@ -772,28 +729,13 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           // dirty dot 维持 inline-block 圆点,不影响后续文本省略计算.
           <span
             title={e.name}
-            style={{
-              fontFamily: MONO,
-              fontSize: 12,
-              display: 'block',
-              width: '100%',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
+            className="font-mono text-xs block w-full overflow-hidden text-ellipsis whitespace-nowrap"
           >
             {isDirty && (
               <span
                 data-testid={`fs-tree-dirty-${e.name}`}
-                style={{
-                  display: 'inline-block',
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: 'rgba(255,102,0,0.7)',
-                  marginRight: 6,
-                  verticalAlign: 'middle',
-                }}
+                className="inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle"
+                style={{ background: 'rgba(255,102,0,0.7)' }}
               />
             )}
             {e.name}
@@ -832,10 +774,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   return (
     <div
       data-testid="fs-tab-root"
+      className="flex flex-col h-full"
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
         outline: dropHover ? '2px dashed rgba(255,102,0,.55)' : 'none',
         outlineOffset: -2,
       }}
@@ -851,15 +791,10 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     >
       <div
         data-testid="fs-tab-header"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 12px',
-          borderBottom: '1px solid var(--border-light)',
-        }}
+        className="flex items-center gap-2 py-1.5 px-3"
+        style={{ borderBottom: '1px solid var(--border-light)' }}
       >
-        <span style={{ fontSize: 12, color: 'var(--text-dim-55)', whiteSpace: 'nowrap' }}>
+        <span className="text-xs whitespace-nowrap" style={{ color: 'var(--text-dim-55)' }}>
           Files
         </span>
         <Input
@@ -878,7 +813,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             if (v === '') setSubmittedQuery('');
           }}
           onPressEnter={() => setSubmittedQuery(draft.trim())}
-          style={{ flex: 1 }}
+          className="flex-1"
         />
         <Switch
           size="small"
@@ -938,18 +873,17 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         )}
         {refreshBtn}
       </div>
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+      <div className="flex flex-1 min-h-0">
         <div
           ref={fsTreeContainerRef}
           data-testid="fs-tree"
+          className="relative min-w-0 px-2 py-1"
           style={{
             // 宽度用百分比 (相对 FsTab 容器), 持久化到 localStorage, 用户
             // 拖动调整; position:relative 让内部的 drag handle / lock 按钮
             // 用 absolute 锚定到 fs-tree 右边缘 (borderRight 视觉分割线).
             flex: '0 0 auto',
             width: `${fsTreeWidth}%`,
-            minWidth: 0,
-            position: 'relative',
             // 显式高度 (calc(100vh - 140px)) 让 fs-tree 在 flex 行里
             // 有确定的高度, antd Tree 自然渲染的内容超出时被父容器
             // overflow:auto 截断并显示原生滚动条; minHeight:0 防止
@@ -958,7 +892,6 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             minHeight: 0,
             overflow: 'auto',
             borderRight: '1px solid var(--border-light)',
-            padding: '4px 8px',
           }}
         >
           {submittedQuery.length > 0 ? (
@@ -986,11 +919,11 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           ) : root.error && !root.data?.ok ? (
             <Empty description={root.error} />
           ) : root.loading && treeData.length === 0 ? (
-            <div style={{ padding: 16, textAlign: 'center' }}>
+            <div className="p-4 text-center">
               <Spin />
             </div>
           ) : treeData.length === 0 ? (
-            <div style={{ padding: 16, color: 'var(--text-dim-45)', fontSize: 12 }}>
+            <div className="p-4 text-xs" style={{ color: 'var(--text-dim-45)' }}>
               目录为空
             </div>
           ) : (
@@ -1027,18 +960,13 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           <div
             data-testid="fs-tree-drag-handle"
             onMouseDown={onFsHandleMouseDown}
+            className="absolute top-0 -right-1.5 w-3 h-full z-[5]"
             style={{
-              position: 'absolute',
-              top: 0,
-              right: -6,
-              width: 12,
-              height: '100%',
               cursor: lockedStored ? 'default' : 'ew-resize',
               background: lockedStored
                 ? 'transparent'
                 : 'rgba(255,102,0,0.06)',
               pointerEvents: lockedStored ? 'none' : 'auto',
-              zIndex: 5,
             }}
             onMouseEnter={(e) => {
               if (lockedStored) return;
@@ -1065,25 +993,12 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             data-testid="fs-tree-lock-toggle"
             aria-label={lockedStored ? '解锁文件树宽度拖动' : '锁定文件树宽度拖动'}
             onClick={() => setLockedStored(!lockedStored)}
+            className="absolute top-1/2 -right-3.5 w-7 h-7 p-0 rounded-full border border-[color:var(--border-light)] flex items-center justify-center z-[6] text-sm -translate-y-1/2"
             style={{
-              position: 'absolute',
-              top: '50%',
-              right: -14,
-              transform: 'translateY(-50%)',
-              width: 28,
-              height: 28,
-              padding: 0,
-              borderRadius: 14,
-              border: '1px solid var(--border-light)',
               background: lockedStored ? 'var(--bg-card)' : 'var(--accent-start)',
               color: lockedStored ? 'var(--text-secondary)' : '#fff',
               cursor: lockedStored ? 'pointer' : 'ew-resize',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 6,
               boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
-              fontSize: 14,
             }}
             title={
               lockedStored
@@ -1096,6 +1011,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         </div>
         <div
           data-testid="fs-preview"
+          className="flex flex-col p-3 overflow-hidden font-mono text-xs"
           style={{
             // fs-tree 用固定百分比 width 占左侧, fs-preview 用 flex:1 填
             // 剩余空间; minWidth:0 让预览区可以被 fs-tree 挤压 (而不是
@@ -1104,18 +1020,12 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             minWidth: 0,
             height: 'calc(100vh - 140px)',
             minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            padding: 12,
-            overflow: 'hidden',
-            fontFamily: MONO,
-            fontSize: 12,
           }}
         >
           {!selected ? (
             <Empty description="选择左侧文件查看内容" />
           ) : file.loading ? (
-            <div style={{ textAlign: 'center', padding: 24 }}>
+            <div className="text-center p-6">
               <Spin />
             </div>
           ) : file.error ? (

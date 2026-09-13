@@ -37,23 +37,16 @@ function DiffRowLine({ row }: { row: DiffRow }) {
   const markerColor = row.kind === 'add' ? ADD_FG : row.kind === 'del' ? DEL_FG : GUTTER_FG
   const textColor = row.kind === 'context' ? CTX_FG : row.kind === 'add' ? ADD_FG : DEL_FG
   return (
-    <div style={{ display: 'flex', background: bg, minWidth: 'max-content' }}>
+    <div className="flex min-w-max" style={{ background: bg }}>
       <span
-        style={{
-          flexShrink: 0,
-          width: 44,
-          textAlign: 'right',
-          paddingRight: 10,
-          color: GUTTER_FG,
-          userSelect: 'none',
-        }}
+        className="flex-shrink-0 w-[44px] text-right pr-[10px] text-[var(--text-dim-30)] select-none"
       >
         {row.no}
       </span>
-      <span style={{ flexShrink: 0, width: 16, color: markerColor, userSelect: 'none' }}>
+      <span className="flex-shrink-0 w-4 select-none" style={{ color: markerColor }}>
         {marker}
       </span>
-      <span style={{ color: textColor, whiteSpace: 'pre', paddingRight: 12 }}>
+      <span className="whitespace-pre pr-3" style={{ color: textColor }}>
         {row.text || ' '}
       </span>
     </div>
@@ -101,36 +94,23 @@ export default function DiffBlock({ msg }: { msg: AgentMessage }) {
   }
 
   return (
-    <div style={{ marginBottom: 8, maxWidth: '100%' }}>
+    <div className="mb-2 max-w-full">
       {/* 头部: 状态点 + Update/Write(path) + 摘要 */}
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontFamily: MONO,
-          fontSize: 13,
-          marginBottom: 4,
-          minWidth: 0,
-        }}
+        className="flex items-center gap-2 font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] text-[13px] mb-1 min-w-0"
       >
         <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: DOT_COLOR[status],
-            flexShrink: 0,
-          }}
+          className="w-2 h-2 rounded-full flex-shrink-0"
+          style={{ background: DOT_COLOR[status] }}
         />
-        <span style={{ color: 'var(--text-dim-90)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {headerLabel}(<span style={{ color: 'var(--text-dim-65)', fontWeight: 400 }}>{filePath}</span>)
+        <span className="text-[var(--text-dim-90)] font-semibold min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+          {headerLabel}(<span className="text-[var(--text-dim-65)] font-normal">{filePath}</span>)
         </span>
         {summary && (
-          <span style={{ color: GUTTER_FG, flexShrink: 0 }}>{summary}</span>
+          <span className="text-[var(--text-dim-30)] flex-shrink-0">{summary}</span>
         )}
         {status === 'done' && filePath && (
-          <Space size={4} style={{ flexShrink: 0, marginLeft: 'auto' }}>
+          <Space size={4} className="flex-shrink-0 ml-auto">
             <Tooltip title="预览文件内容">
               <Button
                 size="small"
@@ -149,19 +129,7 @@ export default function DiffBlock({ msg }: { msg: AgentMessage }) {
 
       {/* diff 主体: 横向可滚动 (长行), 纵向 maxHeight 限高滚动 */}
       {rows.length > 0 && (
-        <div
-          style={{
-            fontFamily: MONO,
-            fontSize: 12,
-            lineHeight: 1.55,
-            border: '1px solid var(--border-light)',
-            borderRadius: 6,
-            padding: '6px 0',
-            maxHeight: 360,
-            overflow: 'auto',
-            background: 'var(--bg-faint-02)',
-          }}
-        >
+        <div className="font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] text-xs leading-[1.55] border border-[var(--border-light)] rounded-md py-[6px] max-h-[360px] overflow-auto bg-[var(--bg-faint-02)]">
           {rows.map((row, idx) => (
             <DiffRowLine key={idx} row={row} />
           ))}
@@ -170,17 +138,10 @@ export default function DiffBlock({ msg }: { msg: AgentMessage }) {
 
       {errorText && (
         <pre
+          className="text-xs m-[6px_0_0_0] py-2 px-[10px] rounded border-l-2 border-[#ff4d4f] whitespace-pre-wrap break-words font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace]"
           style={{
-            fontSize: 12,
-            margin: '6px 0 0 0',
-            padding: '8px 10px',
             background: 'rgba(255,77,79,0.06)',
-            borderLeft: '2px solid #ff4d4f',
-            borderRadius: 4,
             color: '#f85149',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            fontFamily: MONO,
           }}
         >
           {errorText}

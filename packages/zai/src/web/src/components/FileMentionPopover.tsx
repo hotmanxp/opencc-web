@@ -120,30 +120,13 @@ export default function FileMentionPopover({
       role="listbox"
       aria-label="文件候选列表"
       onKeyDown={onKeyDown}
-      style={{
-        position: "absolute",
-        bottom: "calc(100% + 4px)",
-        left: 0,
-        right: 0,
-        background: "var(--bg-card)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 8,
-        boxShadow: "0 4px 24px var(--text-dim-50)",
-        zIndex: 1100,
-        overflow: "hidden",
-        maxHeight: 320,
-      }}
+      className="absolute bottom-[calc(100%+4px)] left-0 right-0 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg shadow-[0_4px_24px_var(--text-dim-50)] z-[1100] overflow-hidden max-h-[320px]"
     >
       {/* 顶部条:状态行(loading / 截断 / 错误) */}
       <div
+        className="py-1 px-[10px] text-[11px] flex items-center gap-[6px] border-b border-[var(--border-faint)]"
         style={{
-          padding: "4px 10px",
-          fontSize: 11,
           color: error ? "var(--danger, #ff4d4f)" : "var(--text-dim-45)",
-          borderBottom: "1px solid var(--border-faint)",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
         }}
       >
         {error && <span data-testid="file-mention-error">{error}</span>}
@@ -161,21 +144,12 @@ export default function FileMentionPopover({
       {/* 列表区:对齐 dsh MenuView .viewport,4px inset + rounded items */}
       <div
         data-testid="file-mention-list"
-        style={{
-          overflowY: "auto",
-          maxHeight: 280,
-          padding: "4px",
-        }}
+        className="overflow-y-auto max-h-[280px] p-1"
       >
         {visible.length === 0 && !loading && (
           <div
             data-testid="file-mention-empty"
-            style={{
-              padding: "16px 12px",
-              fontSize: 12,
-              color: "var(--text-dim-45)",
-              textAlign: "center",
-            }}
+            className="py-4 px-3 text-xs text-[var(--text-dim-45)] text-center"
           >
             {error ? "" : emptyText}
           </div>
@@ -199,66 +173,28 @@ export default function FileMentionPopover({
                 e.preventDefault();
                 handleSelect(entry);
               }}
+              className="py-2 px-[10px] cursor-pointer flex items-center gap-2 w-full min-h-[40px] border-none rounded-[10px] transition-colors duration-100"
               style={{
-                padding: "8px 10px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                width: "100%",
-                minHeight: 40,
-                border: "none",
-                borderRadius: 10,
                 background: isActive
                   ? "rgba(255,102,0,0.15)"
                   : "transparent",
-                transition: "background 0.1s",
               }}
             >
               <span
                 aria-hidden
-                style={{
-                  color: isDir ? "#facc15" : "var(--text-dim-45)",
-                  fontSize: 14,
-                  flexShrink: 0,
-                  width: 16,
-                  height: 16,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
+                className="text-[14px] flex-shrink-0 w-4 h-4 inline-flex items-center justify-center"
+                style={{ color: isDir ? "#facc15" : "var(--text-dim-45)" }}
               >
                 {isDir ? <FolderOutlined /> : <FileOutlined />}
               </span>
               <span
-                style={{
-                  fontSize: 14,
-                  fontWeight: 500,
-                  lineHeight: "22px",
-                  fontFamily:
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  flex: "none",
-                  maxWidth: "40%",
-                  minWidth: 0,
-                }}
+                className="text-[14px] font-medium leading-[22px] font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] whitespace-nowrap overflow-hidden text-ellipsis max-w-[40%] min-w-0"
+                style={{ flex: "none" }}
               >
                 {entry.name}
               </span>
               <span
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-dim-45)",
-                  fontFamily:
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  flex: 1,
-                  minWidth: 0,
-                }}
+                className="text-xs text-[var(--text-dim-45)] font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0"
               >
                 {entry.path}
               </span>

@@ -19,14 +19,14 @@ const loginTypes: LoginTypeConfig[] = [
     key: 'pa',
     title: 'PA 神兵登录',
     description: '通过 PA 神兵系统进行身份验证',
-    icon: <LoginOutlined style={{ fontSize: 32, color: '#ff6600' }} />,
+    icon: <LoginOutlined className="text-3xl text-[#ff6600]" />,
     longAction: { key: 'pa-long', label: '登录(6日有效)' },
   },
   {
     key: 'op',
     title: '开放平台登录',
     description: '登录知鸟开放平台',
-    icon: <ApiOutlined style={{ fontSize: 32, color: '#ff8533' }} />,
+    icon: <ApiOutlined className="text-3xl text-[#ff8533]" />,
   },
 ];
 
@@ -56,7 +56,7 @@ export default function Login() {
   const anyDone = Object.values(logs).some((l) => l.done);
 
   return (
-    <div style={{ padding: 24 }} className="space-y-4">
+    <div className="p-6 space-y-4">
       <Card
         title={<Typography.Title level={4} style={{ margin: 0 }}>账号登录</Typography.Title>}
       >
@@ -65,20 +65,20 @@ export default function Login() {
         showIcon
         message="登录说明"
         description="点击登录按钮后,系统将在后台执行登录流程,请在页面查看实时输出日志。"
-        style={{ marginBottom: 16 }}
+        className="mb-4"
       />
 
       <Row gutter={[16, 16]}>
         {loginTypes.map((item) => (
           <Col key={item.key} xs={24} sm={12} md={12}>
-            <Card hoverable className="h-full" style={{ textAlign: 'center' }}>
-              <div style={{ padding: '24px 0' }}>
-                <div style={{ marginBottom: 16 }}>{item.icon}</div>
-                <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>{item.title}</h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 24 }}>
+            <Card hoverable className="h-full text-center">
+              <div className="py-6">
+                <div className="mb-4">{item.icon}</div>
+                <h3 className="text-lg font-semibold mb-2">{item.title}</h3>
+                <p className="text-[var(--text-secondary)] text-sm mb-6">
                   {item.description}
                 </p>
-                <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <div className="flex gap-3 justify-center flex-wrap">
                   <Button
                     type="primary"
                     size="large"

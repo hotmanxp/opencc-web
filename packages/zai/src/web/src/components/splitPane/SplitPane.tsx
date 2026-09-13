@@ -143,19 +143,15 @@ export function SplitPane({ cwd }: SplitPaneProps) {
   return (
     <div
       data-testid="split-pane"
+      className="flex flex-col h-full relative overflow-visible"
       style={{
         flex: '0 0 auto',
         width: panelWidth,
         minWidth: panelWidth,
-        height: '100%',
-        display: 'flex',
-        position: 'relative',
-        flexDirection: 'column',
         borderLeft: open ? '1px solid var(--border-light)' : 'none',
         // overflow 改为 visible — 让悬浮按钮和 drag handle 跨在 panel 左
         // 边缘 (borderLeft 视觉分割线) 上. 各 Tab 内部仍有自己的
         // overflow:auto / overflow:hidden, 不会让内容溢出到 Agent 区.
-        overflow: 'visible',
         transition: 'width 0.2s ease, min-width 0.2s ease',
       }}
     >
@@ -180,18 +176,13 @@ export function SplitPane({ cwd }: SplitPaneProps) {
           <div
             data-testid="split-pane-handle"
             onMouseDown={onHandleMouseDown}
+            className="absolute top-0 -left-1.5 w-3 h-full z-[5]"
             style={{
-              position: 'absolute',
-              top: 0,
-              left: -6,
-              width: 12,
-              height: '100%',
               cursor: lockedStored ? 'default' : 'ew-resize',
               background: lockedStored
                 ? 'transparent'
                 : 'rgba(255,102,0,0.06)',
               pointerEvents: lockedStored ? 'none' : 'auto',
-              zIndex: 5,
             }}
             onMouseEnter={(e) => {
               if (lockedStored) return;
@@ -224,25 +215,12 @@ export function SplitPane({ cwd }: SplitPaneProps) {
             data-testid="split-pane-lock-toggle"
             aria-label={lockedStored ? '解锁分屏宽度拖动' : '锁定分屏宽度拖动'}
             onClick={() => setLockedStored(!lockedStored)}
+            className="absolute top-1/2 -left-3.5 w-7 h-7 p-0 rounded-full border border-[color:var(--border-light)] flex items-center justify-center z-[6] text-sm -translate-y-1/2"
             style={{
-              position: 'absolute',
-              top: '50%',
-              left: -14,
-              transform: 'translateY(-50%)',
-              width: 28,
-              height: 28,
-              padding: 0,
-              borderRadius: 14,
-              border: '1px solid var(--border-light)',
               background: lockedStored ? 'var(--bg-card)' : 'var(--accent-start)',
               color: lockedStored ? 'var(--text-secondary)' : '#fff',
               cursor: lockedStored ? 'pointer' : 'ew-resize',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 6,
               boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
-              fontSize: 14,
             }}
             title={
               lockedStored

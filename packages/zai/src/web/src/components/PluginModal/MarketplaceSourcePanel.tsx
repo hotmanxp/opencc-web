@@ -27,10 +27,10 @@ export function MarketplaceSourcePanel({ marketplaces, status, adding, onAdd }: 
   const [source, setSource] = useState('')
 
   if (status === 'loading' || status === 'idle') {
-    return <Skeleton active style={{ padding: 16 }} />
+    return <Skeleton active className="p-4" />
   }
   if (status === 'error') {
-    return <Alert type="error" message="加载失败" showIcon style={{ margin: 16 }} />
+    return <Alert type="error" message="加载失败" showIcon className="m-4" />
   }
 
   const submit = () => {
@@ -42,8 +42,8 @@ export function MarketplaceSourcePanel({ marketplaces, status, adding, onAdd }: 
 
   return (
     <div>
-      <div style={{ padding: '4px 12px 12px' }}>
-        <Space.Compact style={{ width: '100%' }}>
+      <div className="pt-1 px-3 pb-3">
+        <Space.Compact className="w-full">
           <Input
             data-testid="marketplace-source-input"
             placeholder="owner/repo、https://... 或本地路径 ./path"
@@ -62,13 +62,13 @@ export function MarketplaceSourcePanel({ marketplaces, status, adding, onAdd }: 
             添加市场
           </Button>
         </Space.Compact>
-        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+        <Typography.Text type="secondary" className="text-xs block mt-1.5">
           支持 GitHub 简写(owner/repo)、git/https 地址、本地目录或 marketplace.json 路径。
         </Typography.Text>
       </div>
 
       {marketplaces.length === 0 ? (
-        <Empty description="尚未配置任何插件市场" style={{ marginTop: 24, marginBottom: 24 }} />
+        <Empty description="尚未配置任何插件市场" className="my-6" />
       ) : (
         marketplaces.map((m) => {
           const updated = formatDate(m.lastUpdated)
@@ -76,22 +76,20 @@ export function MarketplaceSourcePanel({ marketplaces, status, adding, onAdd }: 
             <div
               key={m.name}
               data-testid="marketplace-source-row"
-              style={{
-                padding: '10px 12px',
-                borderBottom: '1px solid var(--border-subtle)',
-              }}
+              className="py-2.5 px-3"
+              style={{ borderBottom: '1px solid var(--border-subtle)' }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div className="flex items-center gap-2 flex-wrap">
                 <Typography.Text strong>{m.name}</Typography.Text>
                 <Tag style={{ margin: 0 }}>{m.sourceType}</Tag>
               </div>
               <Typography.Text
                 type="secondary"
-                style={{ fontSize: 12, display: 'block', marginTop: 2, wordBreak: 'break-all' }}
+                className="text-xs block mt-0.5 break-all"
               >
                 {m.source}
               </Typography.Text>
-              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
+              <Typography.Text type="secondary" className="text-xs block mt-0.5">
                 {/* pluginCount 为 undefined 表示该市场缓存读不出来,不能当成 0 个插件 */}
                 {m.pluginCount === undefined ? '插件清单读取失败' : `${m.pluginCount} 个插件`}
                 {` · 已安装 ${m.installedCount}`}

@@ -228,7 +228,7 @@ export default function Directory() {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
+    <div className="p-6">
       <Row gutter={[16, 16]}>
         {treeData.map((item) => (
           <Col key={item.key} xs={24} md={12}>
@@ -257,10 +257,9 @@ export default function Directory() {
                   defaultExpandedKeys={item.defaultExpandedKeys}
                   treeData={[item.tree]}
                   onSelect={handleSelect}
+                  className="rounded-lg p-2"
                   style={{
                     background: 'var(--bg-body)',
-                    borderRadius: 8,
-                    padding: 8,
                   }}
                 />
               ) : (
@@ -278,9 +277,9 @@ export default function Directory() {
         width={760}
         title={
           viewerFile ? (
-            <Space direction="vertical" size={0} style={{ width: '100%' }}>
-              <span style={{ fontWeight: 600 }}>{viewerFile.name}</span>
-              <Text type="secondary" style={{ fontSize: 12 }}>
+            <Space direction="vertical" size={0} className="w-full">
+              <span className="font-semibold">{viewerFile.name}</span>
+              <Text type="secondary" className="text-xs">
                 {viewerFile.path} · {formatSize(viewerFile.size)} ·{' '}
                 {new Date(viewerFile.mtime).toLocaleString()}
               </Text>
@@ -290,7 +289,7 @@ export default function Directory() {
           )
         }
       >
-        <Space style={{ marginBottom: 12 }} wrap>
+        <Space className="mb-3" wrap>
           <Button
             icon={<CopyOutlined />}
             onClick={handleCopy}
@@ -315,23 +314,18 @@ export default function Directory() {
           <Empty description={viewerError} />
         ) : viewerFile ? (
           <div
+            className="rounded-lg p-4"
             style={{
               maxHeight: '70vh',
               overflow: 'auto',
               background: 'var(--bg-body, #f5f5f5)',
-              borderRadius: 8,
-              padding: 16,
             }}
           >
             <pre
+              className="m-0 text-[12px] leading-[1.6] whitespace-pre-wrap break-words"
               style={{
-                margin: 0,
-                fontSize: 12,
-                lineHeight: 1.6,
                 fontFamily:
                   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
               }}
             >
               {viewerFile.content}

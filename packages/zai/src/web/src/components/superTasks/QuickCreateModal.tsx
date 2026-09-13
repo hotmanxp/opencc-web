@@ -338,10 +338,10 @@ export default function QuickCreateModal({
   // chat mode 走独立内层样式(填满高度 + flex column),允许 AgentConversation
   // 占满剩余空间。
   const innerStyle = mobileAsDrawer
-    ? { height: '100%', overflow: 'hidden' as const, display: 'flex', flexDirection: 'column' as const }
+    ? { height: '100%' }
     : fullscreen
-      ? { height: '100dvh', overflow: 'hidden' as const, display: 'flex', flexDirection: 'column' as const }
-      : { height: '70vh', overflow: 'hidden' as const, display: 'flex', flexDirection: 'column' as const }
+      ? { height: '100dvh' }
+      : { height: '70vh' }
 
   /**
    * chat mode 渲染块(tfa-vy72blq6;2026-09-06 改造为唯一渲染态):
@@ -356,6 +356,7 @@ export default function QuickCreateModal({
   const chatBodyContent = (
     <div
       data-testid="quick-chat-mode"
+      className="flex-1 min-h-0 flex flex-col"
       style={{
         ...LIGHT_PAGE_VARS,
         // chat mode 用亮色背景(同 NewSuperTaskModal):AgentConversation 内部
@@ -363,27 +364,15 @@ export default function QuickCreateModal({
         // 浅色 var 兜底,避免暗色主题下黑底 + 暗色文字低对比。
         background: '#eef2f7',
         color: 'var(--text-primary, #1f2937)',
-        flex: 1,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
       }}
     >
       <div
         data-testid="quick-chat-toolbar"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          padding: '8px 12px',
-          borderBottom: '1px solid var(--border-color, #e5e7eb)',
-          flexShrink: 0,
-        }}
+        className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[var(--border-color,#e5e7eb)] flex-shrink-0"
       >
         <Space size={8} wrap>
           <ThunderboltOutlined style={{ color: '#fa8c16' }} />
-          <span style={{ fontWeight: 500 }}>intake researcher (lite)</span>
+          <span className="font-medium">intake researcher (lite)</span>
           {designReady ? (
             <Tag icon={<CheckCircleOutlined />} color="success" data-testid="quick-chat-design-ready">
               方案已就绪
@@ -412,13 +401,13 @@ export default function QuickCreateModal({
           type="error"
           showIcon
           message={error}
-          style={{ borderRadius: 0, flexShrink: 0 }}
+          className="!rounded-none flex-shrink-0"
           closable
           onClose={() => setError(null)}
         />
       )}
       <AgentStoreContext.Provider value={intakeStore}>
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="flex-1 min-h-0 flex flex-col">
           {/* bottomStackStyle: 弹窗 body 与消息区同为 #eef2f7, 输入区不单独
               设底会跟消息区连成一片; 铺白底 + 顶部分隔线与消息区分层
               (同 NewSuperTaskModal)。 */}
@@ -435,7 +424,7 @@ export default function QuickCreateModal({
   )
 
   const bodyContent = (
-    <div style={innerStyle}>
+    <div className="overflow-hidden flex flex-col" style={innerStyle}>
       {createdTaskId ? (
         <Alert
           type="success"
@@ -454,7 +443,7 @@ export default function QuickCreateModal({
         // 2026-09-06 改造:不再有前置表单态;这条分支理论上只在极短窗口
         // (打开 useEffect 已 setChatMode(true),但 React 还未渲染时)被命中。
         // 留作防御性兜底,避免 chatMode=false 时空白。
-        <div data-testid="quick-loading" style={{ padding: 24, color: 'var(--text-tertiary, #999)' }}>
+        <div data-testid="quick-loading" className="p-6 text-[var(--text-tertiary,#999)]">
           正在准备对话窗口…
         </div>
       )}
@@ -480,7 +469,7 @@ export default function QuickCreateModal({
         title={(
           <div>
             <DrawerPullHandle testId="quick-drawer-handle" onClose={handleContainerClose} />
-            <Space style={{ display: 'flex', paddingBottom: 8 }}>
+            <Space className="flex pb-2">
               <ThunderboltOutlined style={{ color: '#fa8c16' }} />
               <span>快速创建任务</span>
             </Space>

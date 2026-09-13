@@ -85,9 +85,9 @@ export default function Dashboard() {
               value={systemInfo?.nodeVersion || '未知'}
               prefix={
                 systemInfo?.nodeMajor && systemInfo.nodeMajor >= 20 ? (
-                  <CheckCircleOutlined style={{ color: 'var(--success)' }} />
+                  <CheckCircleOutlined className="text-[var(--success)]" />
                 ) : (
-                  <CloseCircleOutlined style={{ color: 'var(--error)' }} />
+                  <CloseCircleOutlined className="text-[var(--error)]" />
                 )
               }
             />
@@ -104,25 +104,16 @@ export default function Dashboard() {
         </Col>
         <Col xs={24} md={12} lg={8}>
           <Card style={{ borderTop: '2px solid', borderImage: 'linear-gradient(90deg, #ff6600, #ff8533) 1' }}>
-            <div className="ant-statistic-title" style={{ marginBottom: 16 }}>CLI 工具</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <div className="ant-statistic-title mb-4">CLI 工具</div>
+            <div className="flex items-center gap-4 flex-wrap">
               {aiTools.map((cli) => (
                 <div
                   key={cli.name}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontSize: 14,
-                    color: cli.installed ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                    fontWeight: 500,
-                  }}
+                  className={`flex items-center gap-1.5 text-[14px] font-medium ${cli.installed ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'}`}
                 >
                   <span
+                    className="w-2 h-2 rounded-full"
                     style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
                       background: cli.installed ? 'var(--success)' : 'var(--text-tertiary)',
                     }}
                   />
@@ -138,7 +129,7 @@ export default function Dashboard() {
         title="npm Registry"
         extra={
           <Select
-            style={{ width: 240 }}
+            className="w-60"
             placeholder="选择 Registry"
             aria-label="选择 npm Registry"
             value={
@@ -150,8 +141,8 @@ export default function Dashboard() {
           />
         }
       >
-        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-          当前 Registry：<code style={{ color: 'var(--accent-start)' }}>{systemInfo?.npmRegistry || '未知'}</code>
+        <div className="text-[13px] text-[var(--text-secondary)]">
+          当前 Registry：<code className="text-[var(--accent-start)]">{systemInfo?.npmRegistry || '未知'}</code>
         </div>
       </Card>
 

@@ -14,7 +14,6 @@ export interface FsSearchListProps {
 }
 
 const TRUNCATED_TAIL = '(结果已截断,继续输入以收窄范围)';
-const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
 /**
  * Compute positions of `query` subsequence character matches in `text`.
@@ -48,7 +47,7 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
 
   if (loading && entries.length === 0) {
     return (
-      <div data-testid="fs-search-loading" style={{ padding: 16, textAlign: 'center' }}>
+      <div data-testid="fs-search-loading" className="p-4 text-center">
         <Spin />
       </div>
     );
@@ -56,7 +55,7 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
 
   if (error) {
     return (
-      <div data-testid="fs-search-error" style={{ padding: 16 }}>
+      <div data-testid="fs-search-error" className="p-4">
         <Empty description={error} />
       </div>
     );
@@ -64,7 +63,7 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
 
   if (entries.length === 0) {
     return (
-      <div data-testid="fs-search-empty" style={{ padding: 16 }}>
+      <div data-testid="fs-search-empty" className="p-4">
         <Empty description={`无匹配文件: "${query.trim()}"`} />
       </div>
     );
@@ -73,12 +72,7 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
   return (
     <div
       data-testid="fs-search-list"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        padding: '4px 0',
-      }}
+      className="flex flex-col gap-0.5 py-1"
     >
       {entries.map((e) => {
         const idx = findMatchIndices(e.path, query.trim());
@@ -100,17 +94,7 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
                 onSelect(e.path);
               }
             }}
-            style={{
-              padding: '6px 10px',
-              borderRadius: 4,
-              cursor: 'pointer',
-              fontFamily: MONO,
-              fontSize: 12,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              color: 'var(--text-dim-85)',
-            }}
+            className="px-2.5 py-1.5 rounded cursor-pointer font-mono text-xs flex items-center gap-1.5 text-[color:var(--text-dim-85)]"
             onMouseEnter={(ev) => {
               (ev.currentTarget as HTMLDivElement).style.background = 'var(--bg-faint-06)';
             }}
@@ -125,18 +109,13 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
       {truncated && (
         <div
           data-testid="fs-search-truncated"
-          style={{
-            padding: '6px 10px',
-            color: 'var(--text-dim-45)',
-            fontSize: 11,
-            fontStyle: 'italic',
-          }}
+          className="px-2.5 py-1.5 text-[color:var(--text-dim-45)] text-[11px] italic"
         >
           {TRUNCATED_TAIL}
         </div>
       )}
       {loading && (
-        <div data-testid="fs-search-loading-more" style={{ padding: '4px 10px' }}>
+        <div data-testid="fs-search-loading-more" className="px-2.5 py-1">
           <Spin size="small" />
         </div>
       )}

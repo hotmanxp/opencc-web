@@ -276,8 +276,9 @@ describe('SuperTaskDetailDrawer', () => {
       render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
       const wrap = await screen.findByTestId('process-timeline-scroll')
       // mobile 分支显式声明 overflowY=auto + flex:1(不是桌面端 maxHeight=calc(...))
-      const cs = window.getComputedStyle(wrap)
-      expect(cs.overflowY).toBe('auto')
+      // happy-dom 不解析 Tailwind class,断言 className 字符串代替 getComputedStyle
+      expect(wrap.className).toContain('overflow-y-auto')
+      expect(wrap.className).toContain('flex-1')
     } finally {
       useAppStore.setState({ isMobile: false })
       vi.unstubAllGlobals()
@@ -294,11 +295,11 @@ describe('SuperTaskDetailDrawer', () => {
     try {
       render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
       const wrap = await screen.findByTestId('process-timeline-scroll')
-      const cs = window.getComputedStyle(wrap)
-      // desktop 端仍是 inline style maxHeight:calc(100vh - 310px) + overflow:auto,
-      // jsdom getComputedStyle 返回 inline style 直接值。
+      // desktop 端 maxHeight=calc(100vh-310px) 保留为 inline style,
+      // overflow:auto 走 Tailwind className(happy-dom 不解析 className,
+      // 改为断言 className 字符串;jsdom getComputedStyle 仅返回 inline style)
       expect(wrap.getAttribute('style') ?? '').toMatch(/max-height:\s*calc\(100vh\s*-\s*310px\)/)
-      expect(cs.overflow).toMatch(/auto/)
+      expect(wrap.className).toContain('overflow-auto')
       // tab badge 仍渲染事件计数
       expect((await screen.findByTestId('process-event-count')).textContent).toBe('2')
     } finally {

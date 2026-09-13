@@ -4,49 +4,6 @@ type Props = { v2Tasks: V2TaskItem[] }
 
 // 样式与 zai-web 现有暗色主题靠齐. 颜色 / 字号复用 TodoZone 的视觉密度,
 // 仅追加 Popover 包裹所需的宽度 / maxHeight / 滚动 / 分割线.
-const styles: Record<string, React.CSSProperties> = {
-  wrap: {
-    // 桌面端固定 360; 手机视口较窄时按 100vw - 84px 自适应 (iPhone 14 ~390 → 306),
-    // 避免占满全屏. 64px 留白在 390 视口减幅 ~9% 仍偏紧, 84px 拉到 306 更明显.
-    width: 'min(360px, calc(100vw - 84px))',
-    background: 'var(--bg-popup)',
-    borderRadius: 6,
-    padding: 10,
-    maxHeight: 360,
-    overflowY: 'auto',
-    color: '#fff',
-    fontSize: 12,
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-  },
-  header: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: 'var(--text-dim-55)',
-    marginBottom: 8,
-    display: 'flex',
-    justifyContent: 'space-between',
-  },
-  list: { listStyle: 'none', padding: 0, margin: 0 },
-  item: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '5px 6px',
-    borderRadius: 4,
-  },
-  icon: { width: 16, textAlign: 'center', fontSize: 12 },
-  empty: {
-    fontSize: 12,
-    color: 'var(--text-dim-40)',
-    padding: '16px 8px',
-    textAlign: 'center',
-  },
-  divider: {
-    height: 1,
-    background: 'var(--bg-faint-08)',
-    margin: '10px -10px',
-  },
-}
 
 function v2Icon(status: V2TaskItem['status']): string {
   if (status === 'completed') return '✓'
@@ -62,6 +19,11 @@ function v2Color(status: V2TaskItem['status']): string {
   return 'var(--text-dim-40)'
 }
 
+const wrapClass =
+  'w-[min(360px,calc(100vw-84px))] bg-[var(--bg-popup)] rounded-md p-[10px] ' +
+  'max-h-[360px] overflow-y-auto text-white text-xs ' +
+  'font-[ui-monospace,SFMono-Regular,Menlo,monospace]'
+
 export default function TodoDropdown({ v2Tasks }: Props) {
   const v2Done = v2Tasks.filter((t) => t.status === 'completed').length
   const v2InProgress = v2Tasks.filter((t) => t.status === 'in_progress').length
@@ -69,33 +31,35 @@ export default function TodoDropdown({ v2Tasks }: Props) {
 
   if (isEmpty) {
     return (
-      <div style={styles.wrap} data-testid="todo-dropdown-empty">
-        <div style={styles.empty}>暂无任务</div>
+      <div className={wrapClass} data-testid="todo-dropdown-empty">
+        <div className="text-xs text-[var(--text-dim-40)] py-4 px-2 text-center">
+          暂无任务
+        </div>
       </div>
     )
   }
 
   return (
-    <div style={styles.wrap} data-testid="todo-dropdown">
-      <div style={styles.header}>
+    <div className={wrapClass} data-testid="todo-dropdown">
+      <div className="text-[11px] font-semibold text-[var(--text-dim-55)] mb-2 flex justify-between">
         <span>任务清单</span>
         <span>
           {v2Done}/{v2Tasks.length} 完成 · {v2InProgress} 进行中
         </span>
       </div>
-      <ul style={styles.list}>
+      <ul className="list-none p-0 m-0">
         {v2Tasks.map((t) => (
           <li
             key={t.id}
-            style={styles.item}
+            className="flex items-center gap-2 py-[5px] px-[6px] rounded"
             data-testid={`v2-task-dropdown-item-${t.status}`}
           >
-            <span style={{ ...styles.icon, color: v2Color(t.status) }}>
+            <span className="w-4 text-center text-xs" style={{ color: v2Color(t.status) }}>
               {v2Icon(t.status)}
             </span>
             <span
+              className="flex-1"
               style={{
-                flex: 1,
                 color:
                   t.status === 'completed' || t.status === 'deleted'
                     ? 'var(--text-dim-45)'
@@ -110,7 +74,7 @@ export default function TodoDropdown({ v2Tasks }: Props) {
               {t.subject}
             </span>
             {t.blockedBy.length > 0 && (
-              <span style={{ fontSize: 10, color: 'var(--text-dim-45)' }}>
+              <span className="text-[10px] text-[var(--text-dim-45)]">
                 依赖 {t.blockedBy.length}
               </span>
             )}

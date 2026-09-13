@@ -15,7 +15,7 @@ export default function SharePopover() {
 
   if (!sessionId) {
     return (
-      <div style={{ padding: "12px 4px", fontSize: 13 }}>
+      <div className="py-3 px-1 text-[13px]">
         先开一个会话再分享。
       </div>
     );
@@ -23,7 +23,7 @@ export default function SharePopover() {
 
   if (!ctx || ctx.ips.length === 0) {
     return (
-      <div style={{ padding: "12px 4px", fontSize: 13, maxWidth: 280 }}>
+      <div className="py-3 px-1 text-[13px] max-w-[280px]">
         未启用 <code>--lan</code>,无法分享到局域网。
         <br />
         用 <code>zai --lan</code> 重新启动 server。
@@ -52,21 +52,15 @@ export default function SharePopover() {
   };
 
   return (
-    <div style={{ maxWidth: 360, padding: "4px 0" }}>
-      <div style={{ fontSize: 12, color: 'var(--text-dim-45)', marginBottom: 8 }}>
+    <div className="max-w-[360px] py-1 px-0">
+      <div className="text-xs text-[var(--text-dim-45)] mb-2">
         分享到 LAN — 点 Copy 把链接发给小伙伴
       </div>
 
       {/* 主二维码区: 锁白底黑前景, 暗色背景下扫码更稳 */}
       <div
         data-testid="share-primary-section"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 6,
-          padding: "10px 0 12px",
-        }}
+        className="flex flex-col items-center gap-[6px] py-[10px] pb-3"
       >
         <QRCode
           value={primaryQrUrl}
@@ -76,11 +70,11 @@ export default function SharePopover() {
           bgColor="#fff"
           data-testid="share-primary-qrcode"
         />
-        <div style={{ fontSize: 12, color: 'var(--text-dim-45)' }}>
+        <div className="text-xs text-[var(--text-dim-45)]">
           扫码在手机上打开 <code>/m?sid={sessionId}</code>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-dim-65)' }}>
+        <div className="flex items-center gap-2">
+          <div className="text-xs text-[var(--text-dim-65)]">
             首选: <code>{primaryIp}:{ctx.port}</code>
           </div>
           <Button
@@ -98,37 +92,21 @@ export default function SharePopover() {
       {/* 其它可用 IP 分组: 仅在 ≥2 个 IP 时显示 */}
       {otherIps.length > 0 && (
         <>
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--text-dim-45)',
-              borderTop: "1px solid var(--border-light)",
-              paddingTop: 8,
-              marginTop: 4,
-              marginBottom: 6,
-            }}
-          >
+          <div className="text-xs text-[var(--text-dim-45)] border-t border-[var(--border-light)] pt-2 mt-1 mb-[6px]">
             其它可用 IP
           </div>
-          <Space direction="vertical" size={6} style={{ width: "100%" }}>
+          <Space direction="vertical" size={6} className="w-full">
             {otherIps.map((ip) => {
               const url = `http://${ip}:${ctx.port}/agent?sid=${sessionId}`;
               const errored = Boolean(copyError[ip]);
               return (
                 <div
                   key={ip}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "6px 8px",
-                    background: "var(--bg-faint-04)",
-                    borderRadius: 4,
-                  }}
+                  className="flex items-center gap-2 py-[6px] px-2 bg-[var(--bg-faint-04)] rounded"
                 >
                   <Text
                     code
-                    style={{ flex: 1, fontSize: 12, wordBreak: "break-all" }}
+                    className="flex-1 text-xs break-all"
                   >
                     {ip}:{ctx.port}/agent?sid={sessionId.slice(0, 12)}…
                   </Text>
@@ -156,39 +134,22 @@ export default function SharePopover() {
       {ctx.host === '0.0.0.0' && (
         <div
           data-testid="share-proxy-section"
-          style={{
-            borderTop: "1px solid var(--border-light)",
-            paddingTop: 10,
-            marginTop: 10,
-          }}
+          className="border-t border-[var(--border-light)] pt-[10px] mt-[10px]"
         >
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--text-dim-45)',
-              marginBottom: 6,
-            }}
-          >
+          <div className="text-xs text-[var(--text-dim-45)] mb-[6px]">
             代理本机端口 — 把 <code>&lt;端口&gt;</code> 换成你本地服务的端口号
           </div>
-          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+          <Space direction="vertical" size={4} className="w-full">
             {ctx.ips.map((ip) => {
               const template = `http://${ip}:${ctx.port}/proxy/<端口>/<路径>`;
               return (
                 <div
                   key={ip}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "6px 8px",
-                    background: "var(--bg-faint-04)",
-                    borderRadius: 4,
-                  }}
+                  className="flex items-center gap-2 py-[6px] px-2 bg-[var(--bg-faint-04)] rounded"
                 >
                   <Text
                     code
-                    style={{ flex: 1, fontSize: 12, wordBreak: "break-all" }}
+                    className="flex-1 text-xs break-all"
                   >
                     {template}
                   </Text>
@@ -208,14 +169,7 @@ export default function SharePopover() {
               );
             })}
           </Space>
-          <div
-            style={{
-              fontSize: 11,
-              color: 'var(--text-dim-65)',
-              marginTop: 6,
-              lineHeight: 1.5,
-            }}
-          >
+          <div className="text-[11px] text-[var(--text-dim-65)] mt-[6px] leading-[1.5]">
             例:本机 <code>python3 -m http.server 8100</code> →
             {' '}<code>http://{ctx.ips[0]}:{ctx.port}/proxy/8100/</code>
           </div>

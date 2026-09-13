@@ -225,13 +225,8 @@ export default function Layout() {
         trigger={null}
       >
         <div
+          className="h-16 flex items-center justify-center text-lg font-bold"
           style={{
-            height: 64,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 18,
-            fontWeight: 700,
             background: 'linear-gradient(135deg, #ff6600, #ff8533)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent'
@@ -249,7 +244,7 @@ export default function Layout() {
         />
         <Button
           type="text"
-          icon={<SettingOutlined style={{ fontSize: 16 }} />}
+          icon={<SettingOutlined className="text-base" />}
           onClick={openSettingsDrawer}
           aria-label="打开设置"
           data-testid="global-settings-button"
@@ -290,29 +285,21 @@ export default function Layout() {
             调整 Header 高度或 padding 都不会再把对话输入框挤出底部.
             注意 Content 自身必须有 flex: 1 才能在 AntLayout (flex column) 里
             占满 Header 之外的剩余高度, 否则子页面会以 content 高度为准溢出. */}
-        <Content style={{ flex: 1, padding: '0', width: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        <Content className="flex-1 p-0 w-full flex flex-col relative">
           {/* 桌面端右上角悬浮主题切换 Switch — 复用现有 setSettingsTheme +
               PUT /api/agent/settings/theme 写盘路径,与 SettingsDrawer 里"主题"
               行同源;移动端不渲染. */}
           {!isMobile && (
             <div
               data-testid="theme-floating-switch"
+              className="absolute top-0 right-[5px] z-[100] inline-flex items-center gap-2 px-2 py-1 rounded-full"
               style={{
-                position: 'absolute',
-                top: 0,
-                right: 5,
-                zIndex: 100,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '4px 8px',
-                borderRadius: 999,
                 background: 'var(--bg-card)',
                 border: '1px solid var(--border-subtle)',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
               }}
             >
-              <MoonOutlined style={{ fontSize: 12, color: effectiveTheme === 'dark' ? 'var(--accent-start)' : 'var(--text-tertiary)' }} />
+              <MoonOutlined className={`text-xs ${effectiveTheme === 'dark' ? 'text-[var(--accent-start)]' : 'text-[var(--text-tertiary)]'}`} />
               <Switch
                 size="small"
                 checked={effectiveTheme === 'light'}
@@ -321,7 +308,7 @@ export default function Layout() {
                 unCheckedChildren={<MoonOutlined />}
                 aria-label="切换主题"
               />
-              <SunOutlined style={{ fontSize: 12, color: effectiveTheme === 'light' ? 'var(--accent-start)' : 'var(--text-tertiary)' }} />
+              <SunOutlined className={`text-xs ${effectiveTheme === 'light' ? 'text-[var(--accent-start)]' : 'text-[var(--text-tertiary)]'}`} />
             </div>
           )}
           <Outlet />

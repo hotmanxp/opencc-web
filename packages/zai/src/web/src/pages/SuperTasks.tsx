@@ -111,12 +111,10 @@ export default function SuperTasks(): JSX.Element {
 
   return (
     <div
+      className="flex h-screen w-full"
       style={{
         ...LIGHT_PAGE_VARS,
         background: '#eef2f7',
-        display: 'flex',
-        height: '100vh',
-        width: '100%',
       }}
     >
       <ConfigProvider
@@ -136,27 +134,20 @@ export default function SuperTasks(): JSX.Element {
       >
       {collapsed ? (
         <div
+          className="flex flex-col items-center pt-2.5 bg-white"
           style={{
             width: 40,
             flexShrink: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            paddingTop: 10,
             borderRight: '1px solid #e5e9f0',
-            background: '#ffffff',
           }}
         >
           <Tooltip title="展开调度器对话" placement="right">
             <Button type="text" icon={<CommentOutlined />} onClick={() => setCollapsed(false)} />
           </Tooltip>
           <span
+            className="text-xs mt-3.5 tracking-[4px] text-[var(--text-secondary,#666)]"
             style={{
               writingMode: 'vertical-lr',
-              fontSize: 12,
-              color: 'var(--text-secondary, #666)',
-              marginTop: 14,
-              letterSpacing: 4,
             }}
           >
             调度器
@@ -164,24 +155,18 @@ export default function SuperTasks(): JSX.Element {
         </div>
       ) : (
         <div
+          className="flex flex-col bg-white"
           style={{
             width: 280,
             minWidth: 280,
             flexShrink: 0,
-            display: 'flex',
-            flexDirection: 'column',
             borderRight: '1px solid #e5e9f0',
-            background: '#ffffff',
           }}
         >
           <div
+            className="flex items-center justify-between gap-2 py-2.5 pr-3 pl-4"
             style={{
-              padding: '10px 12px 10px 16px',
               borderBottom: '1px solid var(--border-subtle)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
             }}
           >
             <Typography.Title level={5} style={{ margin: 0 }}>
@@ -193,14 +178,7 @@ export default function SuperTasks(): JSX.Element {
           </div>
           {/* flex:1 + display:flex + flexDirection:'column' 三件套,AgentConversation
               内 flex:1 子元素才能正确撑开高度 (与 pages/Agent.tsx:488-497 同款布局)。 */}
-          <div
-            style={{
-              flex: 1,
-              minHeight: 0,
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
+          <div className="flex-1 min-h-0 flex flex-col">
             {/* 任务工厂调度器会话不展示「分享到 LAN」与「插件管理」——
                 调度器对话是单设备内对齐意图的过程,挂上反而干扰。
                 showModelPicker: 调度器栏没有 ConfigStatusBar, 在状态行右端补
@@ -210,11 +188,8 @@ export default function SuperTasks(): JSX.Element {
         </div>
       )}
       <div
+        className="flex-1 min-w-0 overflow-auto p-4"
         style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: 'auto',
-          padding: 16,
           background: 'var(--bg-page, #f5f5f5)',
         }}
       >

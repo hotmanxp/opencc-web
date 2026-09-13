@@ -250,31 +250,19 @@ export default function ModelPickerPanel() {
       data-testid="model-picker-content"
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      style={{
-        width: 360,
-        background: 'var(--bg-popup)',
-        borderRadius: 6,
-        padding: 8,
-        maxHeight: 480,
-        overflowY: 'auto',
-      }}
+      className="w-[360px] bg-[var(--bg-popup)] rounded-md p-2 max-h-[480px] overflow-y-auto"
     >
       <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 6,
-        }}
+        className="flex justify-between items-center mb-1.5"
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim-55)' }}>
+        <span className="text-xs font-semibold text-[var(--text-dim-55)]">
           Select model
         </span>
-        <span style={{ fontSize: 11, color: 'var(--text-dim-65)' }}>esc</span>
+        <span className="text-[11px] text-[var(--text-dim-65)]">esc</span>
       </div>
 
       {availableModels.length === 0 ? (
-        <div style={{ fontSize: 12, color: 'var(--text-dim-45)', padding: '12px 4px' }}>
+        <div className="text-xs text-[var(--text-dim-45)] py-3 px-1">
           ~/.zai/settings.json 未配置 models[]
         </div>
       ) : (
@@ -288,23 +276,18 @@ export default function ModelPickerPanel() {
             allowClear
             size="small"
             variant="borderless"
-            style={{
-              marginBottom: 8,
-              border: '1px solid var(--border-mid)',
-              borderRadius: 0,
-              background: 'transparent',
-            }}
+            className="!mb-2 !border !border-solid !border-[var(--border-mid)] !rounded-none !bg-transparent"
           />
 
           {filteredModels.length === 0 && (
-            <div style={{ fontSize: 12, color: 'var(--text-dim-45)', textAlign: 'center', padding: '12px 0' }}>
+            <div className="text-xs text-[var(--text-dim-45)] text-center py-3">
               无匹配模型
             </div>
           )}
 
           {showRecent && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px' }}>
+            <div className="mb-2">
+              <div className="text-[10px] font-semibold text-[#a78bfa] uppercase tracking-wider p-1">
                 Recent
               </div>
               {recentModels.map((m) => {
@@ -324,8 +307,8 @@ export default function ModelPickerPanel() {
           )}
 
           {groups.map(([title, items]) => (
-            <div key={title} style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px' }}>
+            <div key={title} className="mb-1.5">
+              <div className="text-[10px] font-semibold text-[#a78bfa] uppercase tracking-wider p-1">
                 {title}
               </div>
               {items.map((m) => {
@@ -347,19 +330,11 @@ export default function ModelPickerPanel() {
           ))}
 
           <div
-            style={{
-              fontSize: 11,
-              color: 'var(--text-dim-30)',
-              borderTop: '1px solid var(--border-light)',
-              paddingTop: 6,
-              marginTop: 4,
-              display: 'flex',
-              gap: 12,
-            }}
+            className="text-[11px] text-[var(--text-dim-30)] border-t border-[var(--border-light)] pt-1.5 mt-1 flex gap-3"
           >
             <span>↑↓ Navigate</span>
             <span>⏎ Select</span>
-            <span style={{ color: 'var(--text-dim-65)' }}>esc Close</span>
+            <span className="text-[var(--text-dim-65)]">esc Close</span>
           </div>
         </>
       )}
@@ -384,38 +359,32 @@ function Row({ entry, isCurrent, isSelected, onClick, rowRef }: RowProps) {
       data-selected={isSelected ? 'true' : 'false'}
       data-current={isCurrent ? 'true' : 'false'}
       style={{
-        padding: '5px 8px',
-        borderRadius: 4,
         cursor: isCurrent ? 'default' : 'pointer',
         background: isSelected ? 'rgba(168, 139, 250, 0.15)' : 'transparent',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 1,
       }}
+      className="px-2 py-1.5 rounded flex flex-col gap-px"
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+      <div className="flex justify-between items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
           {isCurrent ? (
-            <span style={{ color: '#a78bfa', fontSize: 12, lineHeight: 1 }}>●</span>
+            <span className="text-[#a78bfa] text-xs leading-none">●</span>
           ) : (
-            <span style={{ width: 7 }} />
+            <span className="w-[7px]" />
           )}
           <span
-            style={{
-              fontSize: 13,
-              fontWeight: isCurrent ? 600 : 400,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
+            className={
+              isCurrent
+                ? 'text-[13px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis'
+                : 'text-[13px] font-normal whitespace-nowrap overflow-hidden text-ellipsis'
+            }
           >
             {entry.label ?? entry.alias}
           </span>
         </div>
-        {isCurrent && <CheckOutlined style={{ color: '#a78bfa', fontSize: 11 }} />}
+        {isCurrent && <CheckOutlined className="!text-[#a78bfa] !text-[11px]" />}
       </div>
       {entry.description && (
-        <span style={{ fontSize: 11, color: 'var(--text-dim-40)', paddingLeft: 13 }}>
+        <span className="text-[11px] text-[var(--text-dim-40)] pl-3.5">
           {entry.description}
         </span>
       )}
@@ -443,36 +412,29 @@ function CapabilityBadges({ capabilities }: { capabilities?: ModelCapabilities }
   if (!hasAny) return null
   return (
     <div
-      style={{
-        display: 'flex',
-        gap: 4,
-        paddingLeft: 13,
-        fontSize: 10,
-        color: 'var(--text-dim-45)',
-        flexWrap: 'wrap',
-      }}
+      className="flex gap-1 pl-3.5 text-[10px] text-[var(--text-dim-45)] flex-wrap"
     >
       {capabilities.supportsVision && (
         <Tooltip title="支持图片多模态">
-          <Tag color="purple" style={{ margin: 0, fontSize: 10, lineHeight: '14px', padding: '0 4px' }}>
+          <Tag color="purple" className="!m-0 !text-[10px] !leading-[14px] !py-0 !px-1">
             <EyeOutlined /> Vision
           </Tag>
         </Tooltip>
       )}
       {capabilities.supportsFunctionCalling && (
         <Tooltip title="支持工具调用">
-          <Tag color="cyan" style={{ margin: 0, fontSize: 10, lineHeight: '14px', padding: '0 4px' }}>
+          <Tag color="cyan" className="!m-0 !text-[10px] !leading-[14px] !py-0 !px-1">
             <ThunderboltOutlined /> Tools
           </Tag>
         </Tooltip>
       )}
       {ctx ? (
-        <span style={{ paddingLeft: 2 }}>
+        <span className="pl-0.5">
           上下文 {ctx >= 1_000_000 ? `${(ctx / 1_000_000).toFixed(ctx % 1_000_000 === 0 ? 0 : 1)}M` : `${Math.round(ctx / 1000)}K`}
         </span>
       ) : null}
       {out ? (
-        <span style={{ paddingLeft: 2 }}>
+        <span className="pl-0.5">
           · 输出 {out >= 1_000_000 ? `${(out / 1_000_000).toFixed(out % 1_000_000 === 0 ? 0 : 1)}M` : `${Math.round(out / 1000)}K`}
         </span>
       ) : null}

@@ -89,7 +89,7 @@ export function UpdateNotifier() {
               <p>
                 已成功从 <strong>{from}</strong> 升级到 <strong>{to}</strong>。
               </p>
-              <p style={{ marginBottom: 0 }}>
+              <p className="mb-0">
                 当前运行中的进程仍加载旧代码,请手动重启 zai 以应用新版本(关闭终端后再执行 <code>zai start</code> 或 <code>zai dev</code>)。
               </p>
             </div>
@@ -111,10 +111,10 @@ export function UpdateNotifier() {
                   <>升级过程中发生异常。</>
                 )}
               </p>
-              <p style={{ marginBottom: 0, color: 'var(--text-tertiary)', fontSize: 12 }}>
+              <p className="mb-0 text-xs text-[var(--text-tertiary)]">
                 {error ?? '未知错误'}
               </p>
-              <p style={{ marginTop: 8, marginBottom: 0, color: 'var(--text-tertiary)', fontSize: 12 }}>
+              <p className="mt-2 mb-0 text-xs text-[var(--text-tertiary)]">
                 可手动执行 <code>npm install -g @zn-ai/zai@latest</code> 重试,或在设置中关闭自动升级。
               </p>
             </div>

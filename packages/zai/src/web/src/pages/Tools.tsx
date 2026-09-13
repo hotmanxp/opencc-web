@@ -149,7 +149,7 @@ export default function Tools() {
   if (loading) return <Spin size="large" className="block mx-auto my-20" />;
 
   return (
-    <div style={{ padding: 24 }}>
+    <div className="p-6">
       <Card
         title={<Typography.Title level={4} style={{ margin: 0 }}>工具管理</Typography.Title>}
         extra={
@@ -178,24 +178,24 @@ export default function Tools() {
                 }}
                 styles={{ body: { padding: 24 } }}
               >
-                <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                  <div style={{ fontSize: 48, lineHeight: 1 }}>{card.icon}</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>
+                <div className="text-center mb-5">
+                  <div className="text-5xl leading-none">{card.icon}</div>
+                  <div className="text-xl font-bold mt-3 text-[var(--text-primary)]">
                     {card.label}
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                <div className="flex justify-center items-center gap-2 mb-4 flex-wrap">
                   {status.installed ? (
                     <Tag color="success">已安装</Tag>
                   ) : (
                     <Tag color="error">未安装</Tag>
                   )}
                   {status.installed && status.currentVersion && (
-                    <span style={{ fontFamily: 'monospace', fontSize: 13 }}>
-                      <span style={{ color: 'var(--success)' }}>{status.currentVersion}</span>
-                      <span style={{ color: 'var(--text-tertiary)', margin: '0 4px' }}>/</span>
-                      <span style={{ color: status.latestVersion ? 'var(--text-secondary)' : 'var(--text-tertiary)' }}>
+                    <span className="font-mono text-[13px]">
+                      <span className="text-[var(--success)]">{status.currentVersion}</span>
+                      <span className="text-[var(--text-tertiary)] mx-1">/</span>
+                      <span className={status.latestVersion ? 'text-[var(--text-secondary)]' : 'text-[var(--text-tertiary)]'}>
                         {status.latestVersion ?? '?'}
                       </span>
                     </span>
@@ -205,15 +205,7 @@ export default function Tools() {
                   )}
                 </div>
 
-                <div
-                  style={{
-                    width: '80%',
-                    margin: '0 auto',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    gap: 8,
-                  }}
-                >
+                <div className="w-4/5 mx-auto flex justify-center gap-2">
                   <Button
                     type="primary"
                     style={{ flex: 1, minWidth: 0 }}

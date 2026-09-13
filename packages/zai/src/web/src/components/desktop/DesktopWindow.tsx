@@ -16,6 +16,24 @@ interface DesktopWindowProps {
   children: React.ReactNode;
 }
 
+const SECTION_BASE = 'flex flex-col pointer-events-auto overflow-hidden rounded-[10px] shadow-[0_10px_40px_rgba(0,0,0,0.35)] bg-[var(--bg-elevated,#1c1c26)]';
+const SECTION_BORDER_ACTIVE = 'border-[1px_solid_var(--accent-start,#ff6600)]';
+const SECTION_BORDER_INACTIVE = 'border-[1px_solid_var(--border-subtle,rgba(128,128,128,0.3))]';
+const TITLE_BAR_CLS = 'h-[34px] flex-shrink-0 flex items-center gap-2 px-[10px] cursor-grab select-none bg-[rgba(128,128,128,0.12)]';
+const DOTS_CONTAINER_CLS = 'inline-flex gap-[6px]';
+const DOT_BTN_CLS = 'inline-flex items-center justify-center w-3 h-3 rounded-full border-0 p-0 text-[rgba(0,0,0,0.55)] text-[9px] leading-none cursor-pointer';
+const DOT_SYMBOL_CLS = 'pointer-events-none transition-opacity duration-75';
+const TITLE_TEXT_CLS = 'flex-1 text-center pointer-events-none text-xs text-[var(--text-secondary,#aaa)]';
+const TITLE_EXTRA_CLS = 'inline-flex items-center';
+const CONTENT_CLS = 'flex-1 min-h-0 overflow-auto';
+const RESIZE_HANDLE_CLS = 'absolute right-0 bottom-0 w-5 h-5 cursor-nwse-resize z-[1] p-[3px]';
+const RESIZE_GLYPH_CLS = 'block w-full h-full opacity-35';
+// 命中区略大于视觉斜线,易于命中;视觉仍是单条 1px 斜线、opacity 0.35 不抢戏。
+const RESIZE_GLYPH_STYLE: React.CSSProperties = {
+  background:
+    'linear-gradient(135deg, transparent 49%, var(--text-secondary, #aaa) 49%, var(--text-secondary, #aaa) 51%, transparent 51%)',
+};
+
 export default function DesktopWindow({ win, active, onFocus, onMinimize, onToggleMax, onClose, onChange, viewport, titleExtra, children }: DesktopWindowProps) {
   const dragRef = useRef<{ kind: 'move' | 'resize'; startX: number; startY: number; base: { x: number; y: number; w: number; h: number } } | null>(null);
   // macOS 风格:三圆点 hover 时才显示内部符号(× / − / +)。容器级 hover 状态。
@@ -49,6 +67,8 @@ export default function DesktopWindow({ win, active, onFocus, onMinimize, onTogg
     ? maximizedBounds(viewport) // y 从顶栏之下开始, 标题栏不被顶栏遮挡, 保留还原入口
     : clampBounds(win, viewport, win.id);
 
+  const sectionCls = `${SECTION_BASE} ${active ? SECTION_BORDER_ACTIVE : SECTION_BORDER_INACTIVE}`;
+
   return (
     <section
       role="region"
@@ -59,26 +79,22 @@ export default function DesktopWindow({ win, active, onFocus, onMinimize, onTogg
       onPointerUp={endDrag}
       style={{
         position: 'absolute', left: b.x, top: b.y, width: b.w, height: b.h,
-        zIndex: win.z, display: 'flex', flexDirection: 'column',
-        pointerEvents: 'auto', // 窗口区容器为 pointer-events:none(不拦截便签/图标),
-                                // section 显式 auto 恢复窗口本体可命中可聚焦
-        background: 'var(--bg-elevated, #1c1c26)', border: active ? '1px solid var(--accent-start, #ff6600)' : '1px solid var(--border-subtle, rgba(128,128,128,.3))',
-        borderRadius: 10, boxShadow: '0 10px 40px rgba(0,0,0,.35)', overflow: 'hidden',
+        zIndex: win.z,
       }}
+      className={sectionCls}
     >
       <div
         onPointerDown={startDrag('move')}
         onDoubleClick={onToggleMax}
-        style={{ height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', cursor: 'grab', userSelect: 'none', background: 'rgba(128,128,128,.12)' }}
+        className={TITLE_BAR_CLS}
       >
         {/* macOS 风格三圆点:红=关闭 / 黄=最小化 / 绿=最大化或还原。
             三个圆点一律可点 — 即便核心窗口被红点关闭,Desktop.tsx 的 restoreWindow
             + Dock 点击提供恢复入口,不需要 disabled 防御逻辑。 */}
         <span
-          className="title-bar-dots"
+          className={`title-bar-dots ${DOTS_CONTAINER_CLS}`}
           onMouseEnter={() => setDotsHover(true)}
           onMouseLeave={() => setDotsHover(false)}
-          style={{ display: 'inline-flex', gap: 6 }}
         >
           <button
             type="button"
@@ -86,9 +102,10 @@ export default function DesktopWindow({ win, active, onFocus, onMinimize, onTogg
             onClick={(e) => { e.stopPropagation(); onClose?.(); }}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            style={{ ...dotBtn, background: '#ff5f57' }}
+            className={DOT_BTN_CLS}
+            style={{ background: '#ff5f57' }}
           >
-            <span aria-hidden style={{ ...dotSymbol, opacity: dotsHover ? 1 : 0 }}>×</span>
+            <span aria-hidden className={`${DOT_SYMBOL_CLS} ${dotsHover ? 'opacity-100' : 'opacity-0'}`}>×</span>
           </button>
           <button
             type="button"
@@ -96,9 +113,10 @@ export default function DesktopWindow({ win, active, onFocus, onMinimize, onTogg
             onClick={(e) => { e.stopPropagation(); onMinimize(); }}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            style={{ ...dotBtn, background: '#febc2e' }}
+            className={DOT_BTN_CLS}
+            style={{ background: '#febc2e' }}
           >
-            <span aria-hidden style={{ ...dotSymbol, opacity: dotsHover ? 1 : 0 }}>−</span>
+            <span aria-hidden className={`${DOT_SYMBOL_CLS} ${dotsHover ? 'opacity-100' : 'opacity-0'}`}>−</span>
           </button>
           <button
             type="button"
@@ -106,16 +124,17 @@ export default function DesktopWindow({ win, active, onFocus, onMinimize, onTogg
             onClick={(e) => { e.stopPropagation(); onToggleMax(); }}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            style={{ ...dotBtn, background: '#28c840' }}
+            className={DOT_BTN_CLS}
+            style={{ background: '#28c840' }}
           >
-            <span aria-hidden style={{ ...dotSymbol, opacity: dotsHover ? 1 : 0 }}>+</span>
+            <span aria-hidden className={`${DOT_SYMBOL_CLS} ${dotsHover ? 'opacity-100' : 'opacity-0'}`}>+</span>
           </button>
         </span>
-        <span style={{ fontSize: 12, color: 'var(--text-secondary, #aaa)', flex: 1, textAlign: 'center', pointerEvents: 'none' }}>{win.title}</span>
+        <span className={TITLE_TEXT_CLS}>{win.title}</span>
         {titleExtra && (
           // stopPropagation 防触发标题栏拖拽/双击最大化;与三圆点按钮同等处理。
           <span
-            style={{ display: 'inline-flex', alignItems: 'center' }}
+            className={TITLE_EXTRA_CLS}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
           >
@@ -123,52 +142,17 @@ export default function DesktopWindow({ win, active, onFocus, onMinimize, onTogg
           </span>
         )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{children}</div>
+      <div className={CONTENT_CLS}>{children}</div>
       {/* 右下角 resize handle:14x14 极小尺寸,单条 1px 斜线指示,hover 时才完全显示
           (默认 0.35 不透明度避免视觉抢戏)。所有桌面窗口(Agent/Explorer/Preview)统一用它。
           实际可命中区域扩展到 20x20(右下角 padding 6px)便于点击。 */}
       <div
         aria-label="调整窗口大小"
         onPointerDown={startDrag('resize')}
-        style={{
-          position: 'absolute', right: 0, bottom: 0, width: 20, height: 20, cursor: 'nwse-resize',
-          zIndex: 1,
-          padding: 3,
-        }}
+        className={RESIZE_HANDLE_CLS}
       >
-        <span
-          aria-hidden
-          style={{
-            display: 'block', width: '100%', height: '100%',
-            background:
-              'linear-gradient(135deg, transparent 49%, var(--text-secondary, #aaa) 49%, var(--text-secondary, #aaa) 51%, transparent 51%)',
-            opacity: 0.35,
-          }}
-        />
+        <span aria-hidden className={RESIZE_GLYPH_CLS} style={RESIZE_GLYPH_STYLE} />
       </div>
     </section>
   );
 }
-
-/** macOS 风格圆点按钮:12x12 圆形,默认隐藏 ×/−/+ 符号,hover 才显示(系统规范)。
- *  width 略大于 macOS 11px 是为了桌面落点更易命中(配合桌面非高 DPI 触摸场景)。 */
-const dotBtn: React.CSSProperties = {
-  width: 12,
-  height: 12,
-  borderRadius: '50%',
-  border: 0,
-  padding: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: 'rgba(0,0,0,.55)',
-  fontSize: 9,
-  lineHeight: 1,
-  cursor: 'pointer',
-};
-/** 符号层样式:opacity 由调用方通过容器 hover state 注入(React inline style 不支持 :hover)。 */
-const dotSymbol: React.CSSProperties = {
-  opacity: 0,
-  transition: 'opacity 80ms',
-  pointerEvents: 'none',
-};

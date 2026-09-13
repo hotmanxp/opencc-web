@@ -209,7 +209,7 @@ export default function Resources() {
   }, [resources, installing]);
 
   return (
-    <div style={{ padding: 24 }} className="space-y-4">
+    <div className="p-6 space-y-4">
       <Card
         title={<Typography.Title level={4} style={{ margin: 0 }}>资源管理</Typography.Title>}
         extra={
