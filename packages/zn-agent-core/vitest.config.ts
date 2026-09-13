@@ -144,6 +144,13 @@ export default defineConfig({
     include: ['test/**/*.test.ts', 'test/**/*.test.mjs', 'src/compat/repl/__tests__/**/*.test.ts'],
     setupFiles: ['./src/compat/runtime/bun-protocol.mjs'],
     exclude: ['**/node_modules/**', '**/dist/**', 'src/opencc-src/**'],
+    // 默认 vitest 5s testTimeout 在 zn-agent-core 太紧:
+    // 1) bundle self-check after build:core 要 import dist/opencc-core.mjs
+    //    (un-stripped 全量 vendor,Node 冷启动慢,属预期)
+    // 2) agentRegistry.load.test.ts 跑 mkdtemp + 扫描 + import .js 文件
+    //    磁盘 I/O,macOS 首次 / docker mount / 慢盘场景下偶尔超过 5s
+    // 全局提到 30s,留足余量,不影响确定性失败暴露。
+    testTimeout: 30_000,
   },
   optimizeDeps: {
     // Pre-bundle CJS dependencies through esbuild so they're correctly
@@ -158,5 +165,11 @@ export default defineConfig({
     // to the ESM entry, fixing the `__vite_ssr_import_0__.createStore
     // is not a function` error.
     include: ['lru-cache', '@anthropic-ai/sdk', '@orama/orama', '@orama/plugin-data-persistence'],
+  },
+  test: {
+    // 全量并发跑测试时,部分用例(loadUserAgents 走 await import() 解析 CJS
+    // fixture + bundle self-check 冷加载)在 macOS 上偶发超过默认 5s。
+    // 全局 30s 兜底,不影响其他快测试。
+    testTimeout: 30_000,
   },
 })
