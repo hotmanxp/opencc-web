@@ -249,6 +249,43 @@ describe('WeixinBotManager', () => {
     await manager.stop()
   })
 
+  it('placeholder: armed on inject only, fired after silence, cleared by delta, NOT re-armed by runtime.started', async () => {
+    const prev = process.env.WEIXIN_FIRST_TOKEN_NOTICE_MS
+    process.env.WEIXIN_FIRST_TOKEN_NOTICE_MS = '120'
+    try {
+      const { manager, adapterRef } = makeManager({
+        getSettings: () => ({ enabled: true, accountId: 'acct', token: `tk-ft-${Date.now()}-${Math.random()}` }),
+      })
+      await manager.start()
+      const sendSpy = vi.spyOn(adapterRef.current!, 'sendText')
+      const sessionId = await bindSession('user_a')
+      const arm = (manager as unknown as { armFirstTokenNotice: (sid: string, chatId: string) => void }).armFirstTokenNotice.bind(manager)
+
+      // 1) runtime.started 单独出现(内部轮次)不再触发占位
+      eventBus.emit({ type: 'runtime.started', sessionId, turnIndex: 0 } as unknown as Parameters<typeof eventBus.emit>[0])
+      await new Promise((r) => setTimeout(r, 200))
+      expect(sendSpy).not.toHaveBeenCalledWith('user_a', '正在处理…')
+
+      // 2) 注入武装 → 静默超时 → 占位发出
+      arm(sessionId, 'user_a')
+      await new Promise((r) => setTimeout(r, 250))
+      expect(sendSpy).toHaveBeenCalledWith('user_a', '正在处理…')
+
+      // 3) 再次注入武装 → delta 首字清除 → 不发占位,文本正常 flush
+      arm(sessionId, 'user_a')
+      eventBus.emit({ type: 'runtime.delta', sessionId, turnIndex: 0, delta: 'answer' } as unknown as Parameters<typeof eventBus.emit>[0])
+      await new Promise((r) => setTimeout(r, 250))
+      expect(sendSpy).not.toHaveBeenCalledTimes(2)
+      eventBus.emit({ type: 'runtime.done', sessionId, turnIndex: 0 } as unknown as Parameters<typeof eventBus.emit>[0])
+      await new Promise((r) => setTimeout(r, 100))
+      expect(sendSpy).toHaveBeenCalledWith('user_a', 'answer')
+      await manager.stop()
+    } finally {
+      if (prev === undefined) delete process.env.WEIXIN_FIRST_TOKEN_NOTICE_MS
+      else process.env.WEIXIN_FIRST_TOKEN_NOTICE_MS = prev
+    }
+  })
+
   it('runtime events for other sessions are ignored', async () => {
     const { manager, adapterRef } = makeManager({
       getSettings: () => ({ enabled: true, accountId: 'acct', token: `tk-oi-${Date.now()}-${Math.random()}` }),

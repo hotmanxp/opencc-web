@@ -60,8 +60,8 @@ export type WeixinManagerState =
 
 export type { WeixinStatus }
 
-/** 首字延迟超过该毫秒数 → 先回一条「正在处理…」占位(0 = 关闭)。 */
-const FIRST_TOKEN_NOTICE_MS = Number(process.env.WEIXIN_FIRST_TOKEN_NOTICE_MS ?? 8000)
+/** 首字延迟超过该毫秒数 → 先回一条「正在处理…」占位(0 = 关闭)。动态读,测试可调。 */
+const firstTokenNoticeMs = (): number => Number(process.env.WEIXIN_FIRST_TOKEN_NOTICE_MS ?? 8000)
 /** 长任务期间刷新 typing 的最小间隔。 */
 const TYPING_REFRESH_MS = 5000
 
@@ -408,6 +408,7 @@ export class WeixinBotManager {
           this.bridge.noteOutbound()
           return a.sendText(chatId, text)
         },
+        onInjected: (sessionId, chatId) => this.armFirstTokenNotice(sessionId, chatId),
       })
 
       this._subscribeOutbound()
@@ -631,6 +632,31 @@ export class WeixinBotManager {
     this.lastTypingAt.clear()
   }
 
+  /**
+   * 占位回执定时器:bridge 把微信消息注入 agent 的时刻调用。
+   * 每条入站消息至多一个 pending 定时器;触发条件:超时仍未发出任何文本。
+   * 清除方:runtime.delta(首字已流式) / runtime.done / runtime.error / abort。
+   * 与旧实现的区别:不在 runtime.started(每 LLM 轮次)重复武装,避免
+   * 「中间轮结果 → 下一轮占位」的乱序体验。
+   */
+  armFirstTokenNotice(sessionId: string, chatId: string): void {
+    const noticeMs = firstTokenNoticeMs()
+    if (!(noticeMs > 0)) return
+    if (this.firstTokenTimers.has(sessionId)) return
+    const timer = setTimeout(() => {
+      this.firstTokenTimers.delete(sessionId)
+      const a = this.adapter
+      if (!a) return
+      if (this.outboundBuffers.get(sessionId)?.text) return
+      if (this.outboundSent.has(sessionId)) return
+      this.outboundSent.add(sessionId)
+      this.bridge.noteOutbound()
+      void a.sendText(chatId, '正在处理…').catch(() => { /* ignore */ })
+    }, noticeMs)
+    timer.unref?.()
+    this.firstTokenTimers.set(sessionId, timer)
+  }
+
   private _subscribeOutbound(): void {
     if (!this.adapter) return
     this.busUnsub = eventBus.subscribe((event: ServerEvent) => {
@@ -655,22 +681,12 @@ export class WeixinBotManager {
 
     switch (event.type) {
       case 'runtime.started': {
-        this.outboundSent.delete(sid)
-        this.firstTokenTimers.delete(sid)
-        if (FIRST_TOKEN_NOTICE_MS > 0) {
-          const timer = setTimeout(() => {
-            this.firstTokenTimers.delete(sid)
-            const a = this.adapter
-            if (!a) return
-            if (this.outboundBuffers.get(sid)?.text) return
-            if (this.outboundSent.has(sid)) return
-            this.outboundSent.add(sid)
-            this.bridge.noteOutbound()
-            void a.sendText(chatId, '正在处理…').catch(() => { /* ignore */ })
-          }, FIRST_TOKEN_NOTICE_MS)
-          timer.unref?.()
-          this.firstTokenTimers.set(sid, timer)
-        }
+        // 占位定时器改由 bridge 在「微信消息注入时刻」武装(armFirstTokenNotice),
+        // 每条入站消息只武装一次、见首字/发过即永久清除。
+        // 旧实现在这里每轮 re-arm + 重置 outboundSent:runtime.started 是
+        // **每个 LLM 轮次**都发的事件,多轮工具循环里中间轮 runtime.done 先
+        // flush 文本(用户看到"结果"),下一轮 started 再超时就发出
+        // 「正在处理…」—— 表现为结果之后又收到占位,顺序错乱。
         this._sendTypingThrottled(chatId, 'start')
         break
       }

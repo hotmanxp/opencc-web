@@ -46,6 +46,11 @@ export interface WeixinBridgeConfig {
    * 由 manager 注入(adapter.sendText),避免 bridge 反向依赖 manager。
    */
   sendToChat: (chatId: string, text: string) => Promise<unknown> | void
+  /**
+   * 消息注入 agent 成功后回调(sessionId, chatId)。manager 用它在注入
+   * 时刻武装「正在处理…」占位定时器 —— 见 WeixinBotManager.armFirstTokenNotice。
+   */
+  onInjected?: (sessionId: string, chatId: string) => void
 }
 
 export interface WeixinBridgeMetrics {
@@ -270,6 +275,7 @@ export class WeixinInboundBridge {
     await this.deps.pending.save(pending)
 
     this.deps.inboxFor(binding.sessionId).followup(binding.sessionId, inboxMessage)
+    this.config?.onInjected?.(binding.sessionId, msg.chatId)
     this.metricsState.inbound += 1
     this.deps.sessionMap.touch(binding.sessionId)
 
@@ -386,6 +392,7 @@ export class WeixinInboundBridge {
         }
         CwdStoreSet(binding.sessionId, binding.cwd || this.deps.getCwd())
         this.deps.inboxFor(binding.sessionId).followup(binding.sessionId, inboxMessage)
+        this.config?.onInjected?.(binding.sessionId, item.chatId)
         this.metricsState.inbound += 1
         await this.deps.pending.markProcessed(item.messageId)
         await this.deps.pending.remove(item.messageId)
