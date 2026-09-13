@@ -22,7 +22,6 @@ function fakeTools(): { name: string }[] {
     { name: 'Grep' },
     { name: 'WebSearch' },
     { name: 'Skill' },
-    { name: 'AskUserQuestion' },
     { name: 'TaskCreate' },
     { name: 'TaskGet' },
     { name: 'TaskUpdate' },
@@ -65,6 +64,8 @@ describe('weixin main agent (zai patch 2026-09-13)', () => {
     expect(names).not.toContain('SendUserFile')
     expect(names).not.toContain('EnterWorktree')
     expect(names).not.toContain('LSP')
+    // 微信通道没有交互式选项卡片,AskUserQuestion 必须剔除
+    expect(names).not.toContain('AskUserQuestion')
     // 保留
     expect(names).toContain('Agent')
     expect(names).toContain('TaskOutput')
@@ -74,11 +75,10 @@ describe('weixin main agent (zai patch 2026-09-13)', () => {
     expect(names).toContain('CronList')
     expect(names).toContain('Bash')
     expect(names).toContain('Read')
-    expect(names).toContain('AskUserQuestion')
     expect(names).toContain('TaskCreate')
   })
 
-  it('systemPrompt:身份前置 + 关键纪律段 + 剥离编码段', () => {
+  it('systemPrompt:英文书写 + 身份前置 + 关键纪律段 + 剥离编码段', () => {
     const wx = getBuiltinMainAgents().find((a) => a.name === 'weixin-bot')!
     const origin = [
       'You are an interactive agent that helps users with software engineering tasks. Use the instructions below.',
@@ -91,11 +91,18 @@ describe('weixin main agent (zai patch 2026-09-13)', () => {
     ]
     const slotted = wx.systemPrompt!(origin)
     const joined = slotted.join('\n')
-    // 身份/纪律前置
-    expect(slotted[0]).toContain('微信通道')
-    expect(joined).toContain('Agent 工具派发给子 agent')
+    // 身份/纪律前置;英文书写(项目规定),回复语言固定中文
+    expect(slotted[0]).toContain('OpenCC WeChat Bot')
+    expect(slotted[0]).toMatch(/^You are /)
+    expect(joined).toContain('respond in Simplified Chinese')
+    expect(joined).toContain('via the Agent tool')
     expect(joined).toContain('CronCreate')
-    expect(joined).toContain('纯文本')
+    // 不再限制 markdown 与行数(微信可渲染 markdown)
+    expect(joined).toContain('renders markdown')
+    expect(joined).not.toContain('≤ 5 行')
+    expect(joined).not.toContain('纯文本通道')
+    // 环境事实不得提及 AskUserQuestion(工具已剔除,提了反而误导)
+    expect(joined).not.toContain('AskUserQuestion')
     // 编码段剥离
     expect(joined).not.toContain('software engineering tasks')
     expect(joined).not.toContain('# Doing tasks')
