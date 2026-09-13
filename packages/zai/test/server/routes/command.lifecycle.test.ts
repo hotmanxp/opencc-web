@@ -57,11 +57,20 @@ async function mountApp() {
   return buildApp(router)
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   emitSpy.mockReset()
   resolveSkillPromptMock.mockReset()
   resolveSkillPromptMock.mockResolvedValue(null)
   vi.resetModules()
+  // vitest 4.x + happy-dom 20 全量并发跑(threads pool)时,多个测试文件之间
+  // 会通过 module cache 共享 zn-agent-core 的 module-level command registry
+  // 单例。vi.resetModules() 只清当前线程的 module cache;并发线程拿到的可能
+  // 是已被其他文件 / case 注册过的 registry → 后续 emitSpy 看到的命令条数
+  // 比期望多(典型表现: events.toHaveLength(2) 拿到 4)。
+  // 显式 setCommandRegistry(null) 强制下次 getCommandRegistry() 重建空
+  // registry,避免跨 case / 跨文件污染。
+  const { setCommandRegistry } = await import('@zn-ai/zn-agent-core')
+  setCommandRegistry(null)
 })
 
 async function getRegistry() {
