@@ -309,7 +309,7 @@ export class WeixinAdapter {
   // ─── poll loop ───────────────────────────────────────────────
 
   private async _pollLoop(): Promise<void> {
-    console.warn(`[weixin.adapter] _pollLoop enter accountId=${this.opts.accountId} token=${this.opts.token.slice(0, 8)}... ilinkUserId=${this.opts.ilinkUserId ?? '<none>'}`)
+    weixinDiag(`[weixin.adapter] _pollLoop enter accountId=${this.opts.accountId} token=${this.opts.token.slice(0, 8)}... ilinkUserId=${this.opts.ilinkUserId ?? '<none>'}`)
     let syncBuf = await this.syncStore.load(this.opts.accountId)
     let timeoutMs = LONG_POLL_TIMEOUT_MS
     let cycle = 0
@@ -377,10 +377,10 @@ export class WeixinAdapter {
       }
 
       const msgs = response.msgs ?? []
-      // 2026-08-19 diag:前 3 个 cycle msgs=0 时 dump 完整 raw 响应,看 iLink
-      // 实际返什么字段 —— 也许 msgs 在 messages/data/events 等其它名字下。
+      // diag:启动后前 3 个 cycle msgs=0 时 dump 完整 raw 响应(排查
+      // msgs 字段名/结构问题用)。空轮询是长轮询常态,静默。
       if (msgs.length === 0 && cycle <= 3) {
-        console.warn(`[weixin.adapter] getUpdates empty cycle=${cycle} raw=${JSON.stringify(response).slice(0, 600)}`)
+        weixinDiag(`[weixin.adapter] getUpdates empty cycle=${cycle} raw=${JSON.stringify(response).slice(0, 600)}`)
       }
       // 并发派发,互不阻塞
       for (const m of msgs) {

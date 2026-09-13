@@ -38,6 +38,7 @@ import {
   type WeixinOwnerInfo,
   type WeixinOwnerSnapshot,
 } from './WeixinOwnerLock.js'
+import { weixinDiag } from './debug.js'
 import { getWeixinSessionMap } from './WeixinSessionMap.js'
 import { getWeixinPairingStore } from './WeixinPairingStore.js'
 import { getWeixinPendingStore } from './WeixinPendingStore.js'
@@ -299,7 +300,7 @@ export class WeixinBotManager {
         const parsedDefault = WeixinBotSettingsSchema.safeParse(partial)
         if (parsedDefault.success) {
           settings = parsedDefault.data
-          console.warn(`[weixin.manager] restored creds from accounts/: accountId=${persisted.accountId} ilinkUserId=${persisted.ilinkUserId ?? '<none>'}`)
+          weixinDiag(`[weixin.manager] restored creds from accounts/: accountId=${persisted.accountId} ilinkUserId=${persisted.ilinkUserId ?? '<none>'}`)
         }
       }
     }
@@ -388,7 +389,9 @@ export class WeixinBotManager {
       this.ownerLease = null
       this.ownerSnapshot = await WeixinOwnerLock.read()
       this.setState('standby', `another instance owns the weixin channel: ${acquireResult.reason}`)
-      console.warn(`[weixin.manager] standby — ${acquireResult.reason}`)
+      // standby 是双实例共存时的正常稳态(全局单实例锁按设计工作),
+      // 不刷屏;状态可从 /api/weixin/diagnostics 查。debug 才打印。
+      weixinDiag(`[weixin.manager] standby — ${acquireResult.reason}`)
       return
     }
     this.ownerLease = acquireResult.handle
