@@ -31,6 +31,7 @@ import { ILinkClient } from './iLinkClient.js'
 import {
   type ILinkInboundMessageT,
   type ILinkItemT,
+  type ILinkOutboundItemT,
   ILINK_ERROR,
   ITEM_TEXT,
   ITEM_IMAGE,
@@ -40,6 +41,7 @@ import {
   TYPING_START,
   TYPING_STOP,
   MSG_TYPE_BOT,
+  MSG_STATE_FINISH,
 } from './iLinkTypes.js'
 import { ContextTokenStore } from './stores/ContextTokenStore.js'
 import { SyncBufStore } from './stores/SyncBufStore.js'
@@ -49,7 +51,7 @@ import { TextDebouncer } from './debounce.js'
 import { AsyncMutex } from './asyncMutex.js'
 import { AccountLock } from './AccountLock.js'
 import { evaluateAccessPolicy, guessChatType, type DmPolicy, type GroupPolicy } from './accessPolicy.js'
-import { decryptAes128Ecb, assertSafeCdnUrl, encryptAes128Ecb, generateKey, mimeForMediaType } from './mediaCrypto.js'
+import { decryptAes128Ecb, assertSafeCdnUrl, encryptAes128Ecb, mimeForMediaType } from './mediaCrypto.js'
 import { weixinDiag } from './debug.js'
 import { WEIXIN_MEDIA_DIR } from './paths-internal.js'
 import { splitText } from './outbound.js'
@@ -441,7 +443,17 @@ export class WeixinAdapter {
       dynamicDmAllowlist: this.opts.dmAllowlistProvider?.() ?? [],
       globalAllowAll: this.opts.globalAllowAll,
     })
-    if (!access.allowed) return
+    if (!access.allowed) {
+      // 静默丢弃是排查噩梦:消息确实到了 getUpdates,但被策略拒掉,外部
+      // 只能看到「connected 但 msgs 永远 0 / inbound 计数不涨」。
+      // 尤其 dmPolicy=open 需要 globalAllowAll 才放行,极易误配成「全拒」。
+      weixinDiag(
+        `[weixin.adapter] inbound REJECTED: chatType=${chatType} sender=${senderId} chat=${chatId} ` +
+        `dmPolicy=${this.opts.dmPolicy} groupPolicy=${this.opts.groupPolicy} ` +
+        `globalAllowAll=${String(this.opts.globalAllowAll ?? false)} reason=${access.reason}`,
+      )
+      return
+    }
 
     // context token 持久化
     const contextToken = (msg.context_token ?? '').trim() || null
@@ -654,12 +666,13 @@ export class WeixinAdapter {
       }
       try {
         const resp = await this.client.sendMessage({
-          from_user_id: '',
-          to_user_id: args.chatId,
-          client_id: args.clientId,
-          message_type: MSG_TYPE_BOT,
-          content: {
-            text: args.chunk,
+          msg: {
+            from_user_id: '',
+            to_user_id: args.chatId,
+            client_id: args.clientId,
+            message_type: MSG_TYPE_BOT,
+            message_state: MSG_STATE_FINISH,
+            item_list: [{ type: ITEM_TEXT, text_item: { text: args.chunk } }],
             context_token: effectiveToken ?? undefined,
           },
         }) as Record<string, unknown> | null
@@ -672,18 +685,32 @@ export class WeixinAdapter {
               effectiveToken = null
               continue
             }
+            const rawErrmsg = String(resp.errmsg ?? resp.msg ?? '')
+            // hermes _is_stale_session_ret(weixin.py:96-104):-2 + "unknown error"
+            // 实际是会话失效信号,等同 -14,不是频率限制
+            if (
+              (ret === ILINK_ERROR.RATE_LIMIT || errcode === ILINK_ERROR.RATE_LIMIT) &&
+              rawErrmsg.toLowerCase() === 'unknown error' &&
+              !tokenLessTried &&
+              effectiveToken
+            ) {
+              tokenLessTried = true
+              effectiveToken = null
+              continue
+            }
             if (ret === ILINK_ERROR.RATE_LIMIT || errcode === ILINK_ERROR.RATE_LIMIT) {
-              const errmsg = String(resp.errmsg ?? resp.msg ?? 'rate limited')
-              lastError = new Error(`iLink sendmessage rate limited: ret=${ret} errcode=${errcode} errmsg=${errmsg}`)
-              if (this._recordRateLimitEvent()) {
+              lastError = new Error(`iLink sendmessage rate limited: ret=${ret} errcode=${errcode} errmsg=${rawErrmsg || '(empty)'}`)
+              // 只有 errmsg 不是 invalid/unknown 时才可信为频率限制并开熔断;
+              // -2 "invalid arguments" 是参数错误,熔断只会掩盖真因
+              const looksLikeRateLimit = rawErrmsg !== '' && !/invalid|unknown/i.test(rawErrmsg)
+              if (looksLikeRateLimit && this._recordRateLimitEvent()) {
                 throw new Error(`weixin rate-limited: cooldown ${this.opts.rateLimitCircuitOpenSeconds}s`)
               }
               if (attempt >= this.opts.sendChunkRetries) break
               await this._sleep(this.opts.sendChunkRetryDelaySeconds * 3) // 3x backoff for rate limit
               continue
             }
-            const errmsg = String(resp.errmsg ?? resp.msg ?? 'unknown error')
-            throw new Error(`iLink sendmessage error: ret=${ret} errcode=${errcode} errmsg=${errmsg}`)
+            throw new Error(`iLink sendmessage error: ret=${ret} errcode=${errcode} errmsg=${rawErrmsg || 'unknown error'}`)
           }
         }
         this._resetRateLimitCircuit()
@@ -724,57 +751,89 @@ export class WeixinAdapter {
 
   /** 通用出站:本地文件 → 加密 → CDN 上传 → sendmessage 转发 */
   async sendImageFile(chatId: string, imagePath: string): Promise<{ success: boolean; error?: string }> {
-    return this._sendFile(chatId, imagePath, ITEM_IMAGE, 'image')
+    return this._sendFile(chatId, imagePath, 'image')
   }
   async sendDocument(chatId: string, filePath: string): Promise<{ success: boolean; error?: string }> {
-    return this._sendFile(chatId, filePath, ITEM_FILE, 'file')
+    return this._sendFile(chatId, filePath, 'file')
   }
   async sendVideo(chatId: string, videoPath: string): Promise<{ success: boolean; error?: string }> {
-    return this._sendFile(chatId, videoPath, ITEM_VIDEO, 'video')
+    return this._sendFile(chatId, videoPath, 'video')
   }
   async sendVoice(chatId: string, voicePath: string): Promise<{ success: boolean; error?: string }> {
-    return this._sendFile(chatId, voicePath, ITEM_VOICE, 'voice')
+    return this._sendFile(chatId, voicePath, 'voice')
   }
 
   private async _sendFile(
     chatId: string,
     filePath: string,
-    itemType: number,
     kind: 'image' | 'file' | 'video' | 'voice',
   ): Promise<{ success: boolean; error?: string }> {
     if (this._state !== 'connected') return { success: false, error: 'adapter not connected' }
     try {
       const { readFile } = await import('node:fs/promises')
+      const { randomBytes, createHash: md5Hash } = await import('node:crypto')
       const buffer = await readFile(filePath)
-      const key = generateKey()
-      const ciphertext = encryptAes128Ecb(buffer, key)
-      const uploadInfo = await this.client.getUploadUrl()
-      const uploadUrl = uploadInfo.upload_url
-      const encryptedParam = uploadInfo.encrypted_query_param
-      if (!uploadUrl || !encryptedParam) {
-        return { success: false, error: 'iLink getUploadUrl returned empty' }
+      // hermes weixin.py:2104-2122:filekey 是 32 位 hex;aes_key 16 字节原始
+      const keyBuf = randomBytes(16)
+      const keyHex = keyBuf.toString('hex')
+      const ciphertext = encryptAes128Ecb(buffer, keyBuf.toString('base64'))
+      const rawsize = buffer.length
+      const rawfilemd5 = md5Hash('md5').update(buffer).digest('hex') // 明文 md5
+      const filesize = Math.floor((rawsize + 1 + 15) / 16) * 16 // AES PKCS#7 填充后
+      // hermes MEDIA_*:IMAGE=1 / VIDEO=2 / FILE=3 / VOICE=4(与 ITEM_* 不同)
+      const mediaTypeByKind: Record<typeof kind, number> = { image: 1, video: 2, file: 3, voice: 4 }
+      const filekey = randomBytes(16).toString('hex')
+      const uploadInfo = await this.client.getUploadUrl({
+        filekey,
+        media_type: mediaTypeByKind[kind],
+        to_user_id: chatId,
+        rawsize,
+        rawfilemd5,
+        filesize,
+        no_need_thumb: true,
+        aeskey: keyHex,
+      })
+      // hermes weixin.py:2131-2141:优先直连 upload_full_url,否则拼 CDN URL
+      const uploadUrl =
+        uploadInfo.upload_full_url ??
+        (uploadInfo.upload_param
+          ? `${this.opts.cdnBaseUrl.replace(/\/$/, '')}/upload?encrypted_query_param=${encodeURIComponent(uploadInfo.upload_param)}&filekey=${encodeURIComponent(filekey)}`
+          : undefined)
+      if (!uploadUrl) {
+        return { success: false, error: 'iLink getUploadUrl returned neither upload_full_url nor upload_param' }
       }
-      const filekey = uploadInfo.filekey ?? 'hermes'
-      const fullUploadUrl = `${this.opts.cdnBaseUrl.replace(/\/$/, '')}/upload?encrypted_query_param=${encodeURIComponent(encryptedParam)}&filekey=${encodeURIComponent(filekey)}`
-      const { xEncryptedParam } = await this.client.uploadCiphertext(fullUploadUrl, new Uint8Array(ciphertext))
+      assertSafeCdnUrl(uploadUrl)
+      const { xEncryptedParam } = await this.client.uploadCiphertext(uploadUrl, new Uint8Array(ciphertext))
       if (!xEncryptedParam) {
         return { success: false, error: 'cdn upload missing x-encrypted-param header' }
       }
       const filename = filePath.split('/').pop() ?? 'file'
       const contextToken = await this.contextStore.get(this.opts.accountId, chatId)
       const clientId = `hermes-weixin-media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      // aes_key 字段必须是 base64(hex_string),不是 base64(raw_bytes) —
+      // 后者收端解密失败图片显示灰块(hermes weixin.py:2150-2152 实测结论)
+      const aesKeyForApi = Buffer.from(keyHex, 'ascii').toString('base64')
+      const mediaRef = {
+        encrypt_query_param: xEncryptedParam,
+        aes_key: aesKeyForApi,
+        encrypt_type: 1 as const,
+      }
+      const item: ILinkOutboundItemT =
+        kind === 'image'
+          ? { type: ITEM_IMAGE, image_item: { media: mediaRef, mid_size: ciphertext.length } }
+          : kind === 'video'
+            ? { type: ITEM_VIDEO, video_item: { media: mediaRef, video_size: ciphertext.length, play_length: 0, video_md5: rawfilemd5 } }
+            : kind === 'voice'
+              ? { type: ITEM_VOICE, voice_item: { media: mediaRef, encode_type: 6, sample_rate: 24000, bits_per_sample: 16 } }
+              : { type: ITEM_FILE, file_item: { media: mediaRef, file_name: filename, len: String(rawsize) } }
       const resp = await this.client.sendMediaMessage({
-        from_user_id: '',
-        to_user_id: chatId,
-        client_id: clientId,
-        message_type: MSG_TYPE_BOT,
-        content: {
-          media: {
-            type: itemType,
-            encrypt_query_param: xEncryptedParam,
-            aes_key: key,
-            file_name: kind === 'file' ? filename : undefined,
-          },
+        msg: {
+          from_user_id: '',
+          to_user_id: chatId,
+          client_id: clientId,
+          message_type: MSG_TYPE_BOT,
+          message_state: MSG_STATE_FINISH,
+          item_list: [item],
           context_token: contextToken ?? undefined,
         },
       }) as Record<string, unknown> | null

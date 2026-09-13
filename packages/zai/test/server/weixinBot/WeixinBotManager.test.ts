@@ -146,12 +146,20 @@ describe('WeixinBotManager', () => {
   })
 
   it('start() with missing accountId/token → failed', async () => {
-    const { manager } = makeManager({
-      getSettings: () => ({ enabled: true }),
-    })
-    await manager.start()
-    expect(manager.state()).toBe('failed')
-    expect(manager.status().lastError).toMatch(/missing/i)
+    // auto-restores 用例会往共享的 worker 级 ZAI_DATA_DIR 写 accounts/*.json;
+    // 这里换一个全新 data 目录,避免它把「无凭据」用例顶成 connected。
+    const prevDataDir = process.env.ZAI_DATA_DIR
+    process.env.ZAI_DATA_DIR = mkdtempSync(join(tmpdir(), 'zai-mgr-nocreds-'))
+    try {
+      const { manager } = makeManager({
+        getSettings: () => ({ enabled: true }),
+      })
+      await manager.start()
+      expect(manager.state()).toBe('failed')
+      expect(manager.status().lastError).toMatch(/missing/i)
+    } finally {
+      process.env.ZAI_DATA_DIR = prevDataDir
+    }
   })
 
   it('inbound message → eventBus emits weixin.inbound', async () => {

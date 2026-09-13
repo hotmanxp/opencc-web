@@ -233,8 +233,7 @@ describe('WeixinAdapter — outbound sendImageFile', () => {
       if (url.includes('/getuploadurl')) {
         return new Response(JSON.stringify({
           ret: 0, errcode: 0,
-          upload_url: 'https://novac2c.cdn.weixin.qq.com/c2c/upload',
-          encrypted_query_param: 'eq-param',
+          upload_full_url: 'https://novac2c.cdn.weixin.qq.com/c2c/upload',
           filekey: 'fk',
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
@@ -271,8 +270,7 @@ describe('WeixinAdapter — outbound sendImageFile', () => {
         if (url.includes('/getuploadurl')) {
           return Promise.resolve(new Response(JSON.stringify({
             ret: 0, errcode: 0,
-            upload_url: 'https://novac2c.cdn.weixin.qq.com/c2c/upload',
-            encrypted_query_param: 'eq',
+            upload_full_url: 'https://novac2c.cdn.weixin.qq.com/c2c/upload',
             filekey: 'fk',
           }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
         }

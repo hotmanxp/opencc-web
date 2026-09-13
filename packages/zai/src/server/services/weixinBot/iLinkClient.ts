@@ -30,6 +30,7 @@ import type {
   ILinkGetQrcodeStatusResponseT,
   ILinkGetConfigResponseT,
   ILinkGetUploadUrlResponseT,
+  ILinkGetUploadUrlPayloadT,
 } from './iLinkTypes.js'
 import { ILinkGetUpdatesResponse, ILinkGetBotQrcodeResponse, ILinkGetQrcodeStatusResponse, ILinkGetConfigResponse, ILinkGetUploadUrlResponse } from './iLinkTypes.js'
 
@@ -253,8 +254,8 @@ export class ILinkClient {
     return ILinkGetConfigResponse.parse(raw)
   }
 
-  async getUploadUrl(): Promise<ILinkGetUploadUrlResponseT> {
-    const raw = await this.post<unknown>('ilink/bot/getuploadurl', {})
+  async getUploadUrl(payload: ILinkGetUploadUrlPayloadT): Promise<ILinkGetUploadUrlResponseT> {
+    const raw = await this.post<unknown>('ilink/bot/getuploadurl', payload as unknown as Record<string, unknown>)
     return ILinkGetUploadUrlResponse.parse(raw)
   }
 

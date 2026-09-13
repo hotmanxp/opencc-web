@@ -63,6 +63,7 @@ describe('install + isInstalled parity on a Nova-only box', () => {
   let work: string;
   let fakeCache: string;
   const origHome = process.env.HOME;
+  let savedDataDir: string | undefined;
 
   beforeEach(() => {
     work = mkdtempSync(join(tmpdir(), 'zai-novaonly-'));
@@ -87,6 +88,11 @@ describe('install + isInstalled parity on a Nova-only box', () => {
     // install.ts's NOVA_DIR is computed at module load from homedir(),
     // so HOME must be set BEFORE dynamic import.
     process.env.HOME = work;
+    // 全局 setup.isolation.ts 会设 ZAI_DATA_DIR,而 install.ts 的 ZAI_DIR
+    // 是模块加载时从它算的 —— HOME-stub 语义要求 zai 目录跟着 HOME 走,
+    // 这里临时清掉,afterEach 恢复。
+    savedDataDir = process.env.ZAI_DATA_DIR;
+    delete process.env.ZAI_DATA_DIR;
   });
 
   afterEach(() => {
@@ -94,6 +100,7 @@ describe('install + isInstalled parity on a Nova-only box', () => {
     vi.doUnmock('../../src/server/services/extractor.js');
     vi.resetModules();
     process.env.HOME = origHome;
+    process.env.ZAI_DATA_DIR = savedDataDir;
   });
 
   it('install + targetDirsForType agree on ~/.nova/skills', async () => {
@@ -125,6 +132,7 @@ describe('install + targetDirsForType parity on a zai-only box', () => {
   let work: string;
   let fakeCache: string;
   const origHome = process.env.HOME;
+  let savedDataDir: string | undefined;
 
   beforeEach(() => {
     work = mkdtempSync(join(tmpdir(), 'zai-zaionly-'));
@@ -159,6 +167,11 @@ describe('install + targetDirsForType parity on a zai-only box', () => {
     // HOME must be set before the dynamic import — install.ts computes
     // its path constants from homedir() at module load.
     process.env.HOME = work;
+    // 全局 setup.isolation.ts 会设 ZAI_DATA_DIR,而 install.ts 的 ZAI_DIR
+    // 是模块加载时从它算的 —— HOME-stub 语义要求 zai 目录跟着 HOME 走,
+    // 这里临时清掉,afterEach 恢复。
+    savedDataDir = process.env.ZAI_DATA_DIR;
+    delete process.env.ZAI_DATA_DIR;
   });
 
   afterEach(() => {
@@ -166,6 +179,7 @@ describe('install + targetDirsForType parity on a zai-only box', () => {
     vi.doUnmock('../../src/server/services/extractor.js');
     vi.resetModules();
     process.env.HOME = origHome;
+    process.env.ZAI_DATA_DIR = savedDataDir;
   });
 
   it('zai/<name> agent lands at ~/.zai/agents/foo.md and nowhere else', async () => {
@@ -233,6 +247,7 @@ describe('install + targetDirsForType parity on an opencc-only box', () => {
   let work: string;
   let fakeCache: string;
   const origHome = process.env.HOME;
+  let savedDataDir: string | undefined;
 
   beforeEach(() => {
     work = mkdtempSync(join(tmpdir(), 'zai-openconly-'));
@@ -256,6 +271,11 @@ describe('install + targetDirsForType parity on an opencc-only box', () => {
     }));
 
     process.env.HOME = work;
+    // 全局 setup.isolation.ts 会设 ZAI_DATA_DIR,而 install.ts 的 ZAI_DIR
+    // 是模块加载时从它算的 —— HOME-stub 语义要求 zai 目录跟着 HOME 走,
+    // 这里临时清掉,afterEach 恢复。
+    savedDataDir = process.env.ZAI_DATA_DIR;
+    delete process.env.ZAI_DATA_DIR;
   });
 
   afterEach(() => {
@@ -263,6 +283,7 @@ describe('install + targetDirsForType parity on an opencc-only box', () => {
     vi.doUnmock('../../src/server/services/extractor.js');
     vi.resetModules();
     process.env.HOME = origHome;
+    process.env.ZAI_DATA_DIR = savedDataDir;
   });
 
   it('opencc/<name> agent lands at ~/.claude/agents/bar.md', async () => {

@@ -56,6 +56,8 @@ export const ITEM_VIDEO = 5
 
 export const MSG_TYPE_USER = 1
 export const MSG_TYPE_BOT = 2
+/** 已完成的消息状态。出站必带,缺了 iLink 判 -2 invalid arguments。 */
+export const MSG_STATE_FINISH = 2
 
 const MediaReference = z.object({
   encrypt_query_param: z.string().optional(),
@@ -137,37 +139,99 @@ export type ILinkGetUpdatesResponseT = z.infer<typeof ILinkGetUpdatesResponse>
 
 // ── 出站 payload ──────────────────────────────────────────────
 
-/** 出站文本消息。base_info 由 iLinkClient.post() 强制注入,不在 payload 里声明 */
-export const ILinkSendTextPayload = z.object({
+/**
+ * 出站媒体引用。`aes_key` 必须是 `base64(hex_string)`(即对 16 字节密钥的
+ * **hex 文本**再做 base64),不是 `base64(raw_bytes)` —— 后者收端能解密失败,
+ * 图片显示为灰块(hermes-agent weixin.py:2150 实测结论)。
+ */
+const ILinkOutboundMediaRef = z.object({
+  encrypt_query_param: z.string(),
+  aes_key: z.string(),
+  encrypt_type: z.number().int().optional(),
+})
+
+const ILinkOutboundTextItem = z.object({
+  type: z.literal(ITEM_TEXT),
+  text_item: z.object({ text: z.string() }),
+})
+
+const ILinkOutboundImageItem = z.object({
+  type: z.literal(ITEM_IMAGE),
+  image_item: z.object({
+    media: ILinkOutboundMediaRef,
+    mid_size: z.number().int().optional(),
+  }),
+})
+
+const ILinkOutboundFileItem = z.object({
+  type: z.literal(ITEM_FILE),
+  file_item: z.object({
+    media: ILinkOutboundMediaRef,
+    file_name: z.string(),
+    len: z.string().optional(),
+  }),
+})
+
+const ILinkOutboundVideoItem = z.object({
+  type: z.literal(ITEM_VIDEO),
+  video_item: z.object({
+    media: ILinkOutboundMediaRef,
+    video_size: z.number().int().optional(),
+    play_length: z.number().int().optional(),
+    video_md5: z.string().optional(),
+  }),
+})
+
+const ILinkOutboundVoiceItem = z.object({
+  type: z.literal(ITEM_VOICE),
+  voice_item: z.object({
+    media: ILinkOutboundMediaRef,
+    encode_type: z.number().int().optional(),
+    sample_rate: z.number().int().optional(),
+    bits_per_sample: z.number().int().optional(),
+    playtime: z.number().int().optional(),
+  }),
+})
+
+export const ILinkOutboundItem = z.union([
+  ILinkOutboundTextItem,
+  ILinkOutboundImageItem,
+  ILinkOutboundFileItem,
+  ILinkOutboundVideoItem,
+  ILinkOutboundVoiceItem,
+])
+export type ILinkOutboundItemT = z.infer<typeof ILinkOutboundItem>
+
+/**
+ * 出站消息信封。**必须**整体包在 `msg` 里,且正文只能走 `item_list`。
+ *
+ * 血泪教训(2026-09-13 实测):原先发的是「裸 payload + content.text」,
+ * iLink 一律返 `{"ret":-2,"errmsg":"invalid arguments"}`,出站 100% 失败。
+ * 而 `{msg:{..., message_state, item_list:[{type:1,text_item:{text}}]}}`
+ * 立即返 `{"message_id":...}` 成功。hermes-agent weixin.py:455-469 同形。
+ *
+ * base_info 由 iLinkClient.post() 强制注入,不在 payload 里声明。
+ */
+export const ILinkOutboundMsg = z.object({
   from_user_id: z.literal(''),
   to_user_id: z.string(),
   client_id: z.string(),
   message_type: z.literal(MSG_TYPE_BOT),
-  content: z.object({
-    text: z.string(),
-    context_token: z.string().optional(),
-  }),
+  message_state: z.literal(MSG_STATE_FINISH),
+  item_list: z.array(ILinkOutboundItem).min(1),
+  context_token: z.string().optional(),
+})
+export type ILinkOutboundMsgT = z.infer<typeof ILinkOutboundMsg>
+
+/** 出站文本消息。 */
+export const ILinkSendTextPayload = z.object({
+  msg: ILinkOutboundMsg.extend({ item_list: z.array(ILinkOutboundTextItem).min(1) }),
 })
 export type ILinkSendTextPayloadT = z.infer<typeof ILinkSendTextPayload>
 
-/** 出站媒体消息(image/video/file/voice) */
+/** 出站媒体消息(image/video/file/voice)。 */
 export const ILinkSendMediaPayload = z.object({
-  from_user_id: z.literal(''),
-  to_user_id: z.string(),
-  client_id: z.string(),
-  message_type: z.literal(MSG_TYPE_BOT),
-  content: z.object({
-    media: z.object({
-      // type 2=image, 3=voice, 4=file, 5=video
-      type: z.number().int(),
-      encrypt_query_param: z.string(),
-      aes_key: z.string(),
-      file_name: z.string().optional(),
-      // 向后兼容,某些 iLink 版本用全裸 URL
-      full_url: z.string().optional(),
-    }),
-    context_token: z.string().optional(),
-  }),
+  msg: ILinkOutboundMsg,
 })
 export type ILinkSendMediaPayloadT = z.infer<typeof ILinkSendMediaPayload>
 
@@ -213,9 +277,33 @@ export type ILinkGetQrcodeStatusResponseT = z.infer<typeof ILinkGetQrcodeStatusR
 
 // ── 媒体上传 ──────────────────────────────────────────────────
 
+/**
+ * getuploadurl 请求体。实测(hermes-agent weixin.py:519-534 同形)必须带
+ * filekey/media_type/to_user_id/rawsize/rawfilemd5/filesize/no_need_thumb/aeskey,
+ * 空对象 `{}` 服务端不报错但返回缺 upload_param 的残缺响应。
+ * media_type 与 item_list 里的 ITEM_* 不同:IMAGE=1 / VIDEO=2 / FILE=3 / VOICE=4。
+ */
+export const ILinkGetUploadUrlPayload = z.object({
+  filekey: z.string(),
+  /** IMAGE=1 / VIDEO=2 / FILE=3 / VOICE=4(hermes MEDIA_* 常量) */
+  media_type: z.number().int(),
+  to_user_id: z.string(),
+  /** 明文字节数 */
+  rawsize: z.number().int(),
+  /** 明文 md5 hex */
+  rawfilemd5: z.string(),
+  /** AES PKCS#7 填充后字节数:((rawsize+1+15)//16)*16 */
+  filesize: z.number().int(),
+  no_need_thumb: z.literal(true),
+  /** 16 字节密钥的 hex 文本 */
+  aeskey: z.string(),
+})
+export type ILinkGetUploadUrlPayloadT = z.infer<typeof ILinkGetUploadUrlPayload>
+
+/** getuploadurl 响应。真实字段是 upload_param / upload_full_url(hermes weixin.py:2130 同) */
 export const ILinkGetUploadUrlResponse = ILinkResponse.extend({
-  upload_url: z.string().optional(),
-  encrypted_query_param: z.string().optional(),
+  upload_param: z.string().optional(),
+  upload_full_url: z.string().optional(),
   filekey: z.string().optional(),
 })
 export type ILinkGetUploadUrlResponseT = z.infer<typeof ILinkGetUploadUrlResponse>

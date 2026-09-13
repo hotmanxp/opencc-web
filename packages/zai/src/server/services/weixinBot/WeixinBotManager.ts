@@ -106,6 +106,12 @@ const DEFAULT_DEPS: WeixinBotManagerDeps = {
     ilinkUserId: settings.ilinkUserId,
     // P1:Web 面板批准后即时生效的动态白名单。
     dmAllowlistProvider: () => getWeixinPairingStore().allowedSenderIds(),
+    // accessPolicy 里 `dmPolicy: 'open'` **不是**「放行全部」,而是
+    // 「仅当 globalAllowAll 时放行」——这个开关此前从未在任何地方被赋值,
+    // 于是 `open` 等价于「静默拒收全部 DM」(而拒收不带任何日志)。
+    // 按 accessPolicy 文件里声明的 env 名把它接上,让文档语义成立。
+    globalAllowAll:
+      process.env.WEIXIN_ALLOW_ALL_USERS === '1' || process.env.GATEWAY_ALLOW_ALL_USERS === '1',
   }),
   isManagedChild,
   acquireOwner: (info) => WeixinOwnerLock.acquire(info),
@@ -269,22 +275,30 @@ export class WeixinBotManager {
   /** 启动 weixin bot(best-effort) */
   async start(): Promise<void> {
     let settings = this.deps.getSettings()
-    // 兜底:zai 重启后 `deps.getSettings()` 返回 null 时,从 `accounts/` 挑
-    // mtime 最新的那个 bot 凭据补上 token / ilinkUserId,免得每次重启都重新扫码。
-    if (!settings) {
+    // 兜底:zai 重启后从 `accounts/` 挑 mtime 最新的 bot 凭据补回
+    // accountId / token / ilinkUserId,免得每次重启都重新扫码。
+    //
+    // 注意触发条件**不能**只判 `!settings`:settings.json 里的 `weixinBot`
+    // 段通常存在(至少 enabled / dmPolicy),只是没有 accountId+token ——
+    // 扫码凭据只落在 `accounts/<id>.json`。只判 null 会让「段存在但无凭据」
+    // 这条主路径直接掉到下面的 `failed: accountId/token missing`,
+    // 表现为「扫码成功、重启即失联,必须重扫」。
+    const missingCreds = !settings || !settings.accountId || !settings.token
+    if (missingCreds) {
       const persisted = await this.loadLatestAccount()
       if (persisted && persisted.token) {
         const partial: Partial<WeixinBotSettings> = {
-          enabled: true,
+          ...(settings ?? {}),
+          enabled: settings?.enabled ?? true,
           accountId: persisted.accountId,
           token: persisted.token,
-          baseUrl: persisted.baseUrl ?? 'https://ilinkai.weixin.qq.com',
-          ilinkUserId: persisted.ilinkUserId,
+          baseUrl: persisted.baseUrl ?? settings?.baseUrl ?? 'https://ilinkai.weixin.qq.com',
+          ilinkUserId: persisted.ilinkUserId ?? settings?.ilinkUserId,
         }
         const parsedDefault = WeixinBotSettingsSchema.safeParse(partial)
         if (parsedDefault.success) {
           settings = parsedDefault.data
-          console.warn(`[weixin.manager] auto-restored from accounts/: accountId=${persisted.accountId} ilinkUserId=${persisted.ilinkUserId ?? '<none>'}`)
+          console.warn(`[weixin.manager] restored creds from accounts/: accountId=${persisted.accountId} ilinkUserId=${persisted.ilinkUserId ?? '<none>'}`)
         }
       }
     }
