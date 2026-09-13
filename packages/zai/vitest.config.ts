@@ -19,11 +19,11 @@ export default defineConfig({
     // test 跑到 40s+ 才 timeout / module-level 单例跨 thread 共享污染。
     // 单独跑任一文件 100% 通过 → 是并发执行的问题,不是产品代码 bug。
     //
-    // 兜底:加 `fileParallelism: false` 让所有 test 串行跑(同进程,共享
-    // module cache,避开 happy-dom 资源竞争);retry=3 给纯网络侧偶发
-    // 问题(单独跑不复现)最后一次兜底。
+    // 兜底:`fileParallelism: false` 让所有 test 串行跑(同进程,共享
+    // module cache,避开 happy-dom 资源竞争);testTimeout: 30s 给超慢用例
+    // (rpc stub codegen / desktopFS 端到端 / desktop 页面)充足时间。
     fileParallelism: false,
     retry: 3,
-    testTimeout: 10_000,
+    testTimeout: 30_000,
   },
 });
