@@ -27,7 +27,7 @@
  * onChange 由父组件 SettingsDrawer 接到 store / 写盘动作(后续阶段)。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Drawer, Modal, Select, message } from 'antd'
+import { Button, Drawer, Modal, Select, Tag, message } from 'antd'
 import { WeixinBotPanel } from './WeixinBotPanel.js'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
@@ -785,10 +785,38 @@ function buildStaticSchema(
   ]
 }
 
+/** 微信通道状态 → Tag 颜色(与 WeixinBotPanel.stateColor 同语义,精简版)。 */
+function weixinTagColor(state: string): string {
+  if (state === 'connected') return 'green'
+  if (state === 'connecting' || state === 'reconnecting' || state === 'standby') return 'orange'
+  if (state === 'failed') return 'red'
+  if (state === 'supervisor_required') return 'gold'
+  return 'default'
+}
+
 export default function SettingsDrawer() {
   const open = useAppStore((s) => s.settingsDrawerOpen)
   const close = useAppStore((s) => s.closeSettingsDrawer)
   const [weixinOpen, setWeixinOpen] = useState(false)
+  // 微信通道状态(drawer 打开时拉一次,展示在 section 标题旁;面板内部有轮询)
+  const [weixinState, setWeixinState] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    fetch('/api/weixin/status')
+      .then((r) => (r.ok ? (r.json() as Promise<{ state?: string }>) : null))
+      .then((s) => {
+        if (!cancelled && s?.state) setWeixinState(s.state)
+      })
+      .catch(() => {
+        // 状态拉不到就静默,不打扰设置面板
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
   const theme = useAppStore((s) => s.settingsTheme)
   const setTheme = useAppStore((s) => s.setSettingsTheme)
   const outputStyle = useAppStore((s) => s.outputStyle)
@@ -1205,18 +1233,6 @@ export default function SettingsDrawer() {
       onClose={close}
       destroyOnClose
       data-testid="settings-drawer"
-      extra={
-        // P0 打通后恢复入口:通道已能收发,面板是 QR 登录 / 配对批准 / 诊断的
-        // 唯一入口。早期这里是 `false ? (...) : null` 的 TODO 包裹,导致面板
-        // 在 UI 上根本点不出来。
-        <Button
-          size="small"
-          onClick={() => setWeixinOpen(true)}
-          data-testid="open-weixin-bot"
-        >
-          微信机器人
-        </Button>
-      }
       styles={{ body: { padding: '12px 16px' } }}
       footer={
         <div className="text-[11px] text-[var(--text-dim-45)]">
@@ -1224,6 +1240,27 @@ export default function SettingsDrawer() {
         </div>
       }
     >
+      {/* 微信机器人 section:面板入口从 Drawer 顶部 extra 挪进设置列表,
+          与「服务」section 同构。状态标签在 drawer 打开时拉一次。 */}
+      <div
+        data-testid="settings-weixin-section"
+        className="mb-4 p-3 border border-[var(--border-subtle)] rounded-md"
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="font-semibold">微信机器人</div>
+          {weixinState && <Tag color={weixinTagColor(weixinState)}>{weixinState}</Tag>}
+        </div>
+        <div className="text-[11px] text-[var(--text-dim-45)] mb-2">
+          扫码登录 / 配对批准 / 会话与诊断
+        </div>
+        <Button
+          size="small"
+          onClick={() => setWeixinOpen(true)}
+          data-testid="open-weixin-bot"
+        >
+          打开设置
+        </Button>
+      </div>
       {open && showServiceSection && (
         <div
           data-testid="settings-service-section"

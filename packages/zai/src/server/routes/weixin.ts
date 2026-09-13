@@ -6,6 +6,8 @@
  *   POST /api/weixin/connect                启用并连接(仅受管进程生效)
  *   POST /api/weixin/disconnect             断开(释放全局 owner 锁)
  *   POST /api/weixin/reload                 重启 adapter(改了 settings 后)
+ *   GET  /api/weixin/settings               UI 可见设置(enabled/dmPolicy/…,不含凭据)
+ *   PUT  /api/weixin/settings               改设置并热生效(enabled=服务启动自动连接)
  *   POST /api/weixin/setup/start            开始 QR 登录 (返回 qrcodeId + qrcodeUrl)
  *   GET  /api/weixin/setup/poll?qrcodeId=   轮询 QR 状态
  *   POST /api/weixin/setup/cancel           取消 QR 登录
@@ -31,6 +33,7 @@ import { getWeixinBotManager } from '../services/weixinBot/WeixinBotManager.js'
 import { getWeixinPairingStore } from '../services/weixinBot/WeixinPairingStore.js'
 import { WeixinBotSettingsSchema } from '../../shared/weixin.js'
 import { isManagedChild } from '../../cli/managedChild.js'
+import { readZaiSettings, updateZaiSettings } from '../services/zaiSettingsStore.js'
 
 const router: IRouter = Router()
 
@@ -86,10 +89,51 @@ router.post('/reload', async (_req: Request, res: Response) => {
   }
 })
 
+/**
+ * GET /settings —— 面板「设置」表单的数据源。
+ * 只回 UI 需要的字段,token 等凭据永不出网。enabled 语义 =
+ * 「服务启动时自动连接微信机器人」(WeixinBotManager.start() 的 disabled 门控)。
+ */
 router.get('/settings', async (_req: Request, res: Response) => {
   try {
-    const settings = WeixinBotSettingsSchema.parse({})
-    res.json(settings)
+    const raw = (await readZaiSettings()).weixinBot ?? {}
+    const parsed = WeixinBotSettingsSchema.safeParse(raw)
+    const s = parsed.success ? parsed.data : null
+    res.json({
+      enabled: s?.enabled ?? false,
+      dmPolicy: s?.dmPolicy ?? 'pairing',
+      groupPolicy: s?.groupPolicy ?? 'disabled',
+      allowFrom: s?.allowFrom ?? [],
+      sessionTtlHours: s?.sessionTtlHours ?? 6,
+    })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+const WeixinSettingsPatch = z.object({
+  enabled: z.boolean().optional(),
+})
+
+/**
+ * PUT /settings —— 改设置并热生效。
+ * 读-合并-写 weixinBot 段(保留凭据与其它未涉及字段),然后 manager.reload()
+ * (stop + start):enabled=false → 断开并置 disabled;true → 重新拉起。
+ */
+router.put('/settings', async (req: Request, res: Response) => {
+  try {
+    if (supervisorBlocked(res)) return
+    const parsed = WeixinSettingsPatch.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
+      return
+    }
+    const cur = await readZaiSettings()
+    await updateZaiSettings({
+      weixinBot: { ...(cur.weixinBot ?? {}), ...(parsed.data.enabled !== undefined ? { enabled: parsed.data.enabled } : {}) },
+    })
+    await getManager().reload()
+    res.json(await getManager().statusAsync())
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }

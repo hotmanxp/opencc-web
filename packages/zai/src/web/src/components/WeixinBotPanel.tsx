@@ -1,7 +1,8 @@
 /**
  * WeixinBotPanel — 微信机器人配置 UI (Vite + React + AntD)。
  *
- * 入口:SettingsDrawer 顶部"微信机器人"按钮触发 Modal 渲染此组件。
+ * 入口:SettingsDrawer 设置列表中的「微信机器人」section(原顶部 extra 按钮
+ * 已挪进设置列表)触发 Modal 渲染此组件。
  * 包含 4 个 section:
  *   1. StatusBanner: 当前状态 / accountId / lastError / 启停按钮
  *   2. SetupSection: 未配置时显示 "扫描二维码" 按钮 + 渲染 QR
@@ -13,7 +14,7 @@
  * SSE 订阅:沿用现有 useEventStream hook,filter event.sessionId.startsWith('weixin:')。
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Modal, Button, Input, Select, message, Spin, Alert, Tag } from 'antd'
+import { Modal, Button, Input, Select, message, Spin, Alert, Tag, Switch } from 'antd'
 import { apiRpc } from '../lib/api.js'
 
 interface WeixinStatus {
@@ -128,6 +129,8 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
   const [allowFrom, setAllowFrom] = useState<string>('')
   const [pairings, setPairings] = useState<Pairings>({ allowed: [], pending: [] })
   const [bindings, setBindings] = useState<SessionBinding[]>([])
+  // 服务启动自动连接(settings.json weixinBot.enabled)。null = 还没拉到。
+  const [autoConnect, setAutoConnect] = useState<boolean | null>(null)
   // polling handle 走 ref 而不是 state,避免 stale 闭包 + 每次 setInterval 重启
   // 时拿到旧的 interval id。
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -172,6 +175,17 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
     }
   }, [])
 
+  const loadBotSettings = useCallback(async () => {
+    try {
+      const r = await fetch('/api/weixin/settings')
+      if (!r.ok) return
+      const s = (await r.json()) as { enabled?: boolean }
+      if (typeof s.enabled === 'boolean') setAutoConnect(s.enabled)
+    } catch {
+      // 观测面失败不打扰用户
+    }
+  }, [])
+
   // 面板打开期间轮询 diagnostics(3s),让「最近入站消息 / 会话绑定 / 计数」
   // 实时起来。关闭即停,不给后端白刷请求。
   useEffect(() => {
@@ -187,7 +201,29 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
     void refresh()
     void loadPairings()
     void loadDiagnostics()
-  }, [open, refresh, loadPairings, loadDiagnostics])
+    void loadBotSettings()
+  }, [open, refresh, loadPairings, loadDiagnostics, loadBotSettings])
+
+  const handleAutoConnectChange = useCallback(
+    async (next: boolean) => {
+      const prev = autoConnect
+      setAutoConnect(next) // optimistic
+      try {
+        const r = await fetch('/api/weixin/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: next }),
+        })
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        message.success(next ? '已开启:服务启动时自动连接微信机器人' : '已关闭:服务启动不再自动连接(当前连接也会断开)')
+        await refresh()
+      } catch (err) {
+        setAutoConnect(prev) // rollback
+        message.error(`保存失败: ${(err as Error).message}`)
+      }
+    },
+    [autoConnect, refresh],
+  )
 
   const pairingAction = useCallback(
     async (action: 'approve' | 'reject' | 'revoke', senderId: string) => {
@@ -508,6 +544,15 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
         {status?.configured && (
           <div className="mb-4">
             <h4>设置</h4>
+            <div className="mb-2 flex items-center">
+              <Switch
+                aria-label="服务启动自动连接"
+                checked={autoConnect === true}
+                loading={autoConnect === null}
+                onChange={(v) => void handleAutoConnectChange(v)}
+              />
+              <label className="ml-2">服务启动时自动连接</label>
+            </div>
             <div className="mb-2">
               <label>DM policy:&nbsp;</label>
               <Select
