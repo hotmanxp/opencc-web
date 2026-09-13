@@ -116,6 +116,16 @@ export default defineConfig({
         find: /^(?:\.\.\/)+modelCost\.js$/,
         replacement: resolve(__dirname, 'src/compat/dangling-shims/modelCost-stub.ts'),
       },
+      // Same as above but for single-`./` relative paths
+      // (cost-tracker.ts:57 uses `./utils/modelCost.js`, not `../modelCost.js`).
+      {
+        find: /^(?:\.\/)+utils\/modelCost\.ts$/,
+        replacement: resolve(__dirname, 'src/compat/dangling-shims/modelCost-stub.ts'),
+      },
+      {
+        find: /^(?:\.\/)+utils\/modelCost\.js$/,
+        replacement: resolve(__dirname, 'src/compat/dangling-shims/modelCost-stub.ts'),
+      },
       // @orama/orama has dual ESM+CJS entries; Vite SSR-import picks
       // the CJS path which doesn't unwrap named exports correctly
       // (`__vite_ssr_import_0__.createStore is not a function`).

@@ -24,7 +24,7 @@ describe('assemblePluginList', () => {
       disabled: [],
       errors: [],
     }
-    const v2: InstalledPluginsFileV2 = { version: 2, plugins: { a: { installs: { user: { path: '/p' } } } } }
+    const v2: InstalledPluginsFileV2 = { version: 2, plugins: { a: [{ scope: 'user', installPath: '/p' }] } }
     const enabled = { 'a@market': true }
     const counts = new Map<string, OpenccPluginComponentCounts>([['a', { ...EMPTY_COUNTS, commands: 3 }]])
     const r = assemblePluginList(load, v2, enabled, counts)
@@ -39,7 +39,7 @@ describe('assemblePluginList', () => {
 
   it('project 作用域 → writable=false', () => {
     const load: PluginLoadResult = { enabled: [makePlugin({ name: 'p' })], disabled: [], errors: [] }
-    const v2: InstalledPluginsFileV2 = { version: 2, plugins: { p: { installs: { project: { path: '/p' } } } } }
+    const v2: InstalledPluginsFileV2 = { version: 2, plugins: { p: [{ scope: 'project', installPath: '/p' }] } }
     const r = assemblePluginList(load, v2, {}, new Map())
     expect(r.plugins[0].scope).toBe('project')
     expect(r.plugins[0].writable).toBe(false)
@@ -47,7 +47,7 @@ describe('assemblePluginList', () => {
 
   it('local 作用域 → writable=false', () => {
     const load: PluginLoadResult = { enabled: [makePlugin({ name: 'l' })], disabled: [], errors: [] }
-    const v2: InstalledPluginsFileV2 = { version: 2, plugins: { l: { installs: { local: { path: '/p' } } } } }
+    const v2: InstalledPluginsFileV2 = { version: 2, plugins: { l: [{ scope: 'local', installPath: '/p' }] } }
     const r = assemblePluginList(load, v2, {}, new Map())
     expect(r.plugins[0].scope).toBe('local')
     expect(r.plugins[0].writable).toBe(false)
@@ -57,7 +57,7 @@ describe('assemblePluginList', () => {
     const load: PluginLoadResult = { enabled: [makePlugin({ name: 'b' })], disabled: [], errors: [] }
     const v2: InstalledPluginsFileV2 = {
       version: 2,
-      plugins: { b: { installs: { user: { path: '/u' }, project: { path: '/p' } } } },
+      plugins: { b: [{ scope: 'user', installPath: '/u' }, { scope: 'project', installPath: '/p' }] },
     }
     const r = assemblePluginList(load, v2, {}, new Map())
     expect(r.plugins[0].scope).toBe('user')
@@ -136,7 +136,7 @@ describe('assemblePluginList', () => {
     }
     const v2: InstalledPluginsFileV2 = {
       version: 2,
-      plugins: { 'chrome-devtools-mcp': { installs: { user: { path: '/p' } } } },
+      plugins: { 'chrome-devtools-mcp': [{ scope: 'user', installPath: '/p' }] },
     }
     const enabled = { 'chrome-devtools-mcp@claude-plugins-official': true }
     const r = assemblePluginList(load, v2, enabled, new Map())
@@ -153,7 +153,7 @@ describe('assemblePluginList', () => {
     }
     const v2: InstalledPluginsFileV2 = {
       version: 2,
-      plugins: { a: { installs: { user: { path: '/p' } } } },
+      plugins: { a: [{ scope: 'user', installPath: '/p' }] },
     }
     const enabled = { 'a@market': true }
     const r = assemblePluginList(load, v2, enabled, new Map())

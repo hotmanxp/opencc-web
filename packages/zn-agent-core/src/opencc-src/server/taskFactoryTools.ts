@@ -511,7 +511,8 @@ export const createWorktreeTool = buildTool({
       } catch (err) {
         const msg = gitErr(err)
         // 分支已存在(上轮建过 / integration-main 已在仓库):退化为 checkout 既有分支。
-        if (!/already exists|already checked out/i.test(msg)) {
+        // 兼容英文 ("already exists") 与本地化 (zh_CN: "已经存在", "已存在") 错误信息。
+        if (!/already exists|already checked out|已经存在|已存在/i.test(msg)) {
           throw new Error(`git worktree add failed for ${repoPath} (branch ${branch}): ${msg}`)
         }
         await execFileAsync('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branch])
