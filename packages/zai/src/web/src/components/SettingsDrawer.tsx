@@ -1240,27 +1240,6 @@ export default function SettingsDrawer() {
         </div>
       }
     >
-      {/* 微信机器人 section:面板入口从 Drawer 顶部 extra 挪进设置列表,
-          与「服务」section 同构。状态标签在 drawer 打开时拉一次。 */}
-      <div
-        data-testid="settings-weixin-section"
-        className="mb-4 p-3 border border-[var(--border-subtle)] rounded-md"
-      >
-        <div className="flex items-center justify-between mb-2">
-          <div className="font-semibold">微信机器人</div>
-          {weixinState && <Tag color={weixinTagColor(weixinState)}>{weixinState}</Tag>}
-        </div>
-        <div className="text-[11px] text-[var(--text-dim-45)] mb-2">
-          扫码登录 / 配对批准 / 会话与诊断
-        </div>
-        <Button
-          size="small"
-          onClick={() => setWeixinOpen(true)}
-          data-testid="open-weixin-bot"
-        >
-          打开设置
-        </Button>
-      </div>
       {open && showServiceSection && (
         <div
           data-testid="settings-service-section"
@@ -1359,6 +1338,26 @@ export default function SettingsDrawer() {
         </div>
       )}
       <SettingsList schema={schema} onClose={close} onChange={handleChange} />
+      {/* 微信机器人入口:刻意放在设置列表最底部且弱化为单一小链接行,
+          不与常规设置项争视觉权重。状态标签仅在 drawer 打开时拉一次。 */}
+      <div
+        data-testid="settings-weixin-section"
+        className="mt-4 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between"
+      >
+        <button
+          type="button"
+          onClick={() => setWeixinOpen(true)}
+          data-testid="open-weixin-bot"
+          className="text-[11px] text-[var(--text-dim-45)] hover:text-[var(--text)] cursor-pointer bg-transparent border-none p-0"
+        >
+          微信机器人
+        </button>
+        {weixinState && (
+          <Tag color={weixinTagColor(weixinState)} className="!m-0 !text-[10px] !leading-[16px] !px-[6px]">
+            {weixinState}
+          </Tag>
+        )}
+      </div>
     </Drawer>
     <WeixinBotPanel open={weixinOpen} onClose={() => setWeixinOpen(false)} />
     </>
