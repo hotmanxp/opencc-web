@@ -1018,6 +1018,14 @@ function inboxToPendingPrompt(sid: string, msg: InboxMessage): PendingPrompt {
     // inbox 来源的 prompt (subagent <task-notification> / 系统注入) 走 isMeta
     // 落盘路径,跟 vendor isMeta 语义对齐 — LLM 仍可见并据此响应,UI 隐藏。
     fromInbox: true,
+    // D3:外部平台(微信)用户消息带 displayText → runQueryLoop 先落一条
+    // **可见** user 消息(用户原话),再把完整渲染 prompt 以 isMeta 落盘。
+    // 其它 inbox 调用方不传 displayText,行为不变。
+    ...(msg.displayText ? { displayText: msg.displayText } : {}),
+    // P3-2:多模态 content-block 透传(微信图片等)。
+    ...(msg.contentBlocks && msg.contentBlocks.length > 0
+      ? { contentBlocks: msg.contentBlocks as PendingPrompt['contentBlocks'] }
+      : {}),
   }
 }
 

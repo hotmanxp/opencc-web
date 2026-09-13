@@ -183,6 +183,13 @@ export interface ZaiSettings {
     sendChunkRetries?: number
     rateLimitCircuitThreshold?: number
     rateLimitCircuitOpenSeconds?: number
+    /**
+     * iLink `ilink_user_id`(QR confirmed 响应返回)。getUpdates 用它跟
+     * bot_token 一起做 session 鉴权 —— 缺失时 iLink 返 ret=0 msgs=0
+     * 的"假象成功",表现为 connected 但永远收不到消息。
+     * 与 shared/weixin.ts:WeixinBotSettingsSchema 对齐。
+     */
+    ilinkUserId?: string
   }
   /**
    * zai patch (2026-08-29, plan §A): 显式 opt-in 把

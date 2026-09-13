@@ -3,8 +3,11 @@
  *
  * 4 种 DM policy:
  *   - open       任何人都可 DM(默认;若 GATEWAY_ALLOW_ALL_USERS / WEIXIN_ALLOW_ALL_USERS 显式开启)
- *   - allowlist  仅 senderId 在 allowFrom 列表内的可 DM
- *   - pairing    配对模式(首次扫码后接受所有 DM,后续 require 加入 allowlist)
+ *   - allowlist  仅 senderId 在 allowFrom ∪ dynamicDmAllowlist 内的可 DM
+ *   - pairing    配对模式。**adapter 层放行全部 DM**,准入由
+ *                `WeixinInboundBridge.evaluateGate` 判定:未配对 → 回配对码
+ *                并阻断注入;已配对(WeixinPairingStore.allowed)→ 放行。
+ *                两段式是为了让未配对用户能收到配对提示。
  *   - disabled   拒收所有 DM
  *
  * 3 种 group policy:
@@ -26,6 +29,11 @@ export interface AccessPolicyInput {
   groupPolicy: GroupPolicy
   allowFrom: string[]
   groupAllowFrom: string[]
+  /**
+   * P1:动态白名单(WeixinPairingStore 已批准用户),与静态 `allowFrom`
+   * 取并集。Web 面板批准后无需重建 adapter 即可生效。
+   */
+  dynamicDmAllowlist?: string[]
   /** optional global kill switch: 若 GATEWAY_ALLOW_ALL_USERS / WEIXIN_ALLOW_ALL_USERS 启用,open 才放行 */
   globalAllowAll?: boolean
 }
@@ -43,16 +51,24 @@ export function evaluateAccessPolicy(input: AccessPolicyInput): AccessPolicyResu
 }
 
 function evaluateDm(input: AccessPolicyInput): AccessPolicyResult {
+  const dynamic = input.dynamicDmAllowlist ?? []
   switch (input.dmPolicy) {
     case 'disabled':
       return { allowed: false, reason: 'dm_policy=disabled' }
     case 'allowlist':
+      // 静态配置 + 动态批准的并集(D5)。
       return input.allowFrom.includes(input.senderId)
         ? { allowed: true, reason: 'dm_policy=allowlist hit' }
-        : { allowed: false, reason: 'dm_policy=allowlist miss' }
+        : dynamic.includes(input.senderId)
+          ? { allowed: true, reason: 'dm_policy=allowlist hit (paired)' }
+          : { allowed: false, reason: 'dm_policy=allowlist miss' }
     case 'pairing':
-      // pairing 模式:首次扫码后接受所有 DM,无需 allowFrom 校验
-      return { allowed: true, reason: 'dm_policy=pairing' }
+      // 两段式设计:adapter 层放行所有 DM,真正的准入由
+      // `WeixinInboundBridge.evaluateGate` 判定 —— 未配对用户必须能到达
+      // bridge,才能收到配对码提示。若在这里直接拒收,用户永远不会知道
+      // 如何配对(而且访问策略里也没有「回复他」的能力)。
+      // 已配对用户走 dynamic 白名单,语义与 allowlist 一致。
+      return { allowed: true, reason: dynamic.includes(input.senderId) ? 'dm_policy=pairing (paired)' : 'dm_policy=pairing (bridge enforces)' }
     case 'open':
       return input.globalAllowAll
         ? { allowed: true, reason: 'dm_policy=open + global_allow_all' }

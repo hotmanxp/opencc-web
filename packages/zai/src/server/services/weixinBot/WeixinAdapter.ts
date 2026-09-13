@@ -50,6 +50,7 @@ import { AsyncMutex } from './asyncMutex.js'
 import { AccountLock } from './AccountLock.js'
 import { evaluateAccessPolicy, guessChatType, type DmPolicy, type GroupPolicy } from './accessPolicy.js'
 import { decryptAes128Ecb, assertSafeCdnUrl, encryptAes128Ecb, generateKey, mimeForMediaType } from './mediaCrypto.js'
+import { weixinDiag } from './debug.js'
 import { WEIXIN_MEDIA_DIR } from './paths-internal.js'
 import { splitText } from './outbound.js'
 import {
@@ -81,6 +82,11 @@ export interface WeixinAdapterOptions {
   groupPolicy?: GroupPolicy
   allowFrom?: string[]
   groupAllowFrom?: string[]
+  /**
+   * P1 动态 DM 白名单 provider(WeixinPairingStore 的已批准列表)。
+   * 每次评估准入时同步调用,Web 面板批准后即时生效,无需重建 adapter。
+   */
+  dmAllowlistProvider?: () => string[]
   /** iLink global allow-all 兜底开关(从 env 读) */
   globalAllowAll?: boolean
   /** 持久化媒体目录 */
@@ -128,7 +134,7 @@ export interface AdapterStatus {
 }
 
 export class WeixinAdapter {
-  private readonly opts: Required<Omit<WeixinAdapterOptions, 'fetchImpl' | 'mediaDir' | 'ilinkUserId'>> & {
+  private readonly opts: Required<Omit<WeixinAdapterOptions, 'fetchImpl' | 'mediaDir' | 'ilinkUserId' | 'dmAllowlistProvider'>> & {
     fetchImpl: typeof fetch | undefined
     mediaDir: string
     sendChunkDelaySeconds: number
@@ -138,6 +144,7 @@ export class WeixinAdapter {
     rateLimitCircuitWindowSeconds: number
     rateLimitCircuitOpenSeconds: number
     ilinkUserId: string | undefined
+    dmAllowlistProvider: (() => string[]) | undefined
   }
   private readonly client: ILinkClient
   private readonly contextStore = new ContextTokenStore()
@@ -180,6 +187,7 @@ export class WeixinAdapter {
       rateLimitCircuitWindowSeconds: options.rateLimitCircuitWindowSeconds ?? 30.0,
       rateLimitCircuitOpenSeconds: options.rateLimitCircuitOpenSeconds ?? 30.0,
       ilinkUserId: options.ilinkUserId,
+      dmAllowlistProvider: options.dmAllowlistProvider,
       fetchImpl: options.fetchImpl,
     }
     const clientOpts: ILinkClientOptions = {
@@ -311,12 +319,12 @@ export class WeixinAdapter {
         // 一直在但 msgs=0(可能 user_id 没带 / base_info 不对 / X-WECHAT-UIN
         // random 每次变,导致 session 永远绑不上 user)。
         if (cycle === 1) {
-          console.warn(`[weixin.adapter] getUpdates payload=`,
+          weixinDiag(`[weixin.adapter] getUpdates payload=`,
             JSON.stringify({ get_updates_buf: syncBuf, user_id: this.opts.ilinkUserId ?? '<none>' }))
         }
-        console.warn(`[weixin.adapter] getUpdates cycle=${cycle} syncBuf="${syncBuf}" (len=${syncBuf.length})`)
+        weixinDiag(`[weixin.adapter] getUpdates cycle=${cycle} syncBuf="${syncBuf}" (len=${syncBuf.length})`)
         response = await this.client.getUpdates(syncBuf, timeoutMs, this.pollAbort?.signal)
-        console.warn(`[weixin.adapter] getUpdates response: ret=${response.ret} errcode=${response.errcode} msgs=${(response.msgs ?? []).length} errmsg="${response.errmsg ?? ''}" newSyncBuf="${response.get_updates_buf ?? ''}" (len=${(response.get_updates_buf ?? '').length})`)
+        weixinDiag(`[weixin.adapter] getUpdates response: ret=${response.ret} errcode=${response.errcode} msgs=${(response.msgs ?? []).length} errmsg="${response.errmsg ?? ''}" newSyncBuf="${response.get_updates_buf ?? ''}" (len=${(response.get_updates_buf ?? '').length})`)
       } catch (err) {
         // AbortError 是 graceful shutdown
         if (err instanceof Error && (err.name === 'AbortError' || /aborted/i.test(err.message))) {
@@ -430,6 +438,7 @@ export class WeixinAdapter {
       groupPolicy: this.opts.groupPolicy,
       allowFrom: this.opts.allowFrom,
       groupAllowFrom: this.opts.groupAllowFrom,
+      dynamicDmAllowlist: this.opts.dmAllowlistProvider?.() ?? [],
       globalAllowAll: this.opts.globalAllowAll,
     })
     if (!access.allowed) return

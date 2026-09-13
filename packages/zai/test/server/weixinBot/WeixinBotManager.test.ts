@@ -8,13 +8,22 @@ import { join } from 'node:path'
 import { WeixinBotManager } from '../../../src/server/services/weixinBot/WeixinBotManager.js'
 import { WeixinAdapter } from '../../../src/server/services/weixinBot/WeixinAdapter.js'
 import type { InternalWeixinMessage } from '../../../src/server/services/weixinBot/WeixinAdapter.js'
+import {
+  getWeixinSessionMap,
+  resetWeixinSessionMapForTests,
+} from '../../../src/server/services/weixinBot/WeixinSessionMap.js'
+import { WeixinOwnerLock } from '../../../src/server/services/weixinBot/WeixinOwnerLock.js'
 import { eventBus } from '../../../src/server/services/eventBus.js'
 import type { WeixinBotSettings } from '../../../src/shared/weixin.js'
 
 // 用临时 ZAI_DATA_DIR 避免污染 ~/.zai,且让所有 weixinBot 测试共享 lock dir
-// 隔离(proper-lockfile 在 WEIXIN_LOCKS_DIR 里建文件)
+// 隔离(proper-lockfile 在 lock dir 里建文件)
 const _tmpDir = mkdtempSync(join(tmpdir(), 'zai-weixin-mgr-'))
 process.env.ZAI_DATA_DIR = _tmpDir
+// P5:全局 owner 锁固定在 ~/.zai/weixin/locks(机器级,不随 ZAI_DATA_DIR 漂移),
+// 测试必须用覆盖变量把它指到临时目录,否则会污染真机锁。
+const _ownerLockDir = mkdtempSync(join(tmpdir(), 'zai-weixin-owner-'))
+process.env.ZAI_WEIXIN_OWNER_LOCK_DIR = _ownerLockDir
 
 function mockFetchOk(json: unknown, holdMs = 100): typeof fetch {
   return vi.fn(async (input: unknown, init?: RequestInit) => {
@@ -50,6 +59,8 @@ function makeManager(deps?: Partial<{ getSettings: () => WeixinBotSettings | nul
   let adapterRef: { current: WeixinAdapter | null } = { current: null }
   const manager = new WeixinBotManager({
     getSettings: deps?.getSettings ?? (() => null),
+    // P6:测试进程没有 ZAI_SUPERVISOR_PID,显式放行 supervisor 门控。
+    isManagedChild: () => true,
     createAdapter: deps?.createAdapter ?? ((s) => {
       const a = new WeixinAdapter({
         accountId: s.accountId ?? 'acct',
@@ -70,10 +81,21 @@ function makeManager(deps?: Partial<{ getSettings: () => WeixinBotSettings | nul
   return { manager, adapterRef, fetchImpl }
 }
 
+/** 建立微信会话绑定(出站反查依赖它)。 */
+async function bindSession(chatId: string, accountId = 'acct'): Promise<string> {
+  const b = await getWeixinSessionMap().resolveOrCreate(
+    { accountId, chatType: 'dm', chatId, senderId: chatId },
+    _tmpDir,
+  )
+  return b.sessionId
+}
+
 describe('WeixinBotManager', () => {
-  beforeEach(() => {
-    // eventBus 清掉 history 避免与本测试隔离
-    // (eventBus 没有 reset API,这里仅清隐式状态)
+  beforeEach(async () => {
+    // P5:每个用例从干净的 owner 锁开始,避免上一个用例残留的持有者
+    // 把本用例挤到 standby。
+    await WeixinOwnerLock.forceTakeover()
+    resetWeixinSessionMapForTests()
   })
 
   it('start() with no settings → state=unconfigured', async () => {
@@ -188,7 +210,8 @@ describe('WeixinBotManager', () => {
     })
     await manager.start()
     const sendSpy = vi.spyOn(adapterRef.current!, 'sendText')
-    const sessionId = 'weixin:acct:dm:user_a'
+    // P0/D1:出站按 sessionId → 映射表反查 chatId,先建立绑定。
+    const sessionId = await bindSession('user_a')
 
     eventBus.emit({
       type: 'runtime.started',
@@ -251,5 +274,135 @@ describe('WeixinBotManager', () => {
     await manager.stop()
     expect(disconnectSpy).toHaveBeenCalled()
     expect(manager.state()).toBe('disconnected')
+  })
+
+  // ─── P0/D4:出站回执 ────────────────────────────────────────────
+
+  it('runtime.error(turn 级)→ 回错误文案,且绝对路径被脱敏', async () => {
+    const { manager, adapterRef } = makeManager({
+      getSettings: () => ({ enabled: true, accountId: 'acct', token: `tk-err-${Date.now()}-${Math.random()}` }),
+    })
+    await manager.start()
+    const sendSpy = vi.spyOn(adapterRef.current!, 'sendText')
+    const sessionId = await bindSession('user_e')
+
+    eventBus.emit({
+      type: 'runtime.error',
+      sessionId,
+      turnIndex: 0,
+      error: {
+        category: 'internal',
+        message: 'ENOENT: open /Users/secret/keys/prod.pem failed',
+        recoverable: false,
+      },
+    } as unknown as Parameters<typeof eventBus.emit>[0])
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+    const [chatId, text] = sendSpy.mock.calls[0] as [string, string]
+    expect(chatId).toBe('user_e')
+    expect(text).toContain('internal')
+    expect(text).not.toContain('/Users/secret')
+    expect(text).toContain('<path>')
+    await manager.stop()
+  })
+
+  it('runtime.error(工具级,toolUseId 存在)→ 不回执(避免刷屏)', async () => {
+    const { manager, adapterRef } = makeManager({
+      getSettings: () => ({ enabled: true, accountId: 'acct', token: `tk-tool-${Date.now()}-${Math.random()}` }),
+    })
+    await manager.start()
+    const sendSpy = vi.spyOn(adapterRef.current!, 'sendText')
+    const sessionId = await bindSession('user_t')
+
+    eventBus.emit({
+      type: 'runtime.error',
+      sessionId,
+      turnIndex: 0,
+      error: { category: 'internal', message: 'tool blew up', recoverable: true },
+      toolUseId: 'tool-1',
+    } as unknown as Parameters<typeof eventBus.emit>[0])
+    await new Promise((r) => setTimeout(r, 50))
+    expect(sendSpy).not.toHaveBeenCalled()
+    await manager.stop()
+  })
+
+  it('runtime.aborted → 回已中断', async () => {
+    const { manager, adapterRef } = makeManager({
+      getSettings: () => ({ enabled: true, accountId: 'acct', token: `tk-abor-${Date.now()}-${Math.random()}` }),
+    })
+    await manager.start()
+    const sendSpy = vi.spyOn(adapterRef.current!, 'sendText')
+    const sessionId = await bindSession('user_ab')
+
+    eventBus.emit({
+      type: 'runtime.aborted',
+      sessionId,
+      turnIndex: 0,
+      reason: 'user',
+    } as unknown as Parameters<typeof eventBus.emit>[0])
+    await new Promise((r) => setTimeout(r, 50))
+    expect(sendSpy).toHaveBeenCalledWith('user_ab', expect.stringContaining('中断'))
+    await manager.stop()
+  })
+
+  it('runtime.done 且无任何输出 → 兜底提示(不静默)', async () => {
+    const { manager, adapterRef } = makeManager({
+      getSettings: () => ({ enabled: true, accountId: 'acct', token: `tk-empty-${Date.now()}-${Math.random()}` }),
+    })
+    await manager.start()
+    const sendSpy = vi.spyOn(adapterRef.current!, 'sendText')
+    const sessionId = await bindSession('user_z')
+
+    eventBus.emit({
+      type: 'runtime.done',
+      sessionId,
+      turnIndex: 0,
+    } as unknown as Parameters<typeof eventBus.emit>[0])
+    await new Promise((r) => setTimeout(r, 50))
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+    await manager.stop()
+  })
+
+  // ─── P5/P6 门控 ────────────────────────────────────────────────
+
+  it('P6:非 supervisor 进程 → supervisor_required,不建 adapter', async () => {
+    const fetchImpl = mockFetchOk({ ret: 0, errcode: 0 })
+    const manager = new WeixinBotManager({
+      getSettings: () => ({ enabled: true, accountId: 'acct', token: 'tk-nosup' }),
+      isManagedChild: () => false,
+      createAdapter: (s) => new WeixinAdapter({
+        accountId: s.accountId ?? 'acct',
+        token: s.token ?? 'tk',
+        fetchImpl,
+        mediaDir: mkdtempSync(join(tmpdir(), 'zai-mgr-')),
+      }),
+    })
+    await manager.start()
+    expect(manager.state()).toBe('supervisor_required')
+    expect(manager.getAdapter()).toBeNull()
+    expect(manager.status().owner).toBe(false)
+  })
+
+  it('P5:owner 锁被他人持有时 → standby,不建 adapter', async () => {
+    const { WeixinOwnerLock } = await import('../../../src/server/services/weixinBot/WeixinOwnerLock.js')
+    const held = await WeixinOwnerLock.acquire({
+      instanceId: 'other', pid: 4242, supervisorPid: 1, port: 9201,
+      cwd: '/other', accountId: 'other_acct', hostname: 'h', startedAt: Date.now(),
+    })
+    expect(held.ok).toBe(true)
+    try {
+      const { manager } = makeManager({
+        getSettings: () => ({ enabled: true, accountId: 'acct', token: `tk-standby-${Date.now()}` }),
+      })
+      await manager.start()
+      expect(manager.state()).toBe('standby')
+      expect(manager.getAdapter()).toBeNull()
+      const st = manager.status()
+      expect(st.owner).toBe(false)
+      expect(st.ownerInfo?.instanceId).toBe('other')
+    } finally {
+      if (held.ok) await held.handle.release()
+    }
   })
 })

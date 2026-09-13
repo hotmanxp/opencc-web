@@ -52,6 +52,24 @@ export interface InboxMessage {
     [k: string]: unknown
   }
   content: string
+  /**
+   * 可选:落盘时作为**用户可见行**的原始文本。
+   *
+   * 背景:inbox 来源的 prompt 默认以 `isMeta: true` 落盘,前端
+   * `loadTranscriptMessages` 按 isMeta 跳过 —— LLM 可见 / UI 隐藏。
+   * 这对 subagent 通知是对的,但微信用户的话必须让用户看见。
+   *
+   * 复用 `runQueryLoop` 对 slash 指令的双消息形态(可见行 +
+   * isMeta 完整行):有 displayText 时先 `appendVisibleUserMessage` 落
+   * 可见行,再把 `content` 以 isMeta 落盘。零核心改动。
+   */
+  displayText?: string
+  /**
+   * 可选:多模态 content-block 数组(如微信图片)。透传到
+   * `PendingPrompt.contentBlocks`,走 vendor 的
+   * `submitMessage(prompt: string | ContentBlockParam[])` 多模态路径。
+   */
+  contentBlocks?: unknown[]
   createdAt: number
 }
 

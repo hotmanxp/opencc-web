@@ -2,21 +2,35 @@
  * Weixin (微信) 机器人 REST API。
  *
  * 端点:
- *   GET  /api/weixin/status                 当前状态 + 配置
- *   POST /api/weixin/connect                启用并连接(用 settings 里的 accountId/token)
- *   POST /api/weixin/disconnect             断开
+ *   GET  /api/weixin/status                 当前状态 + owner + 指标
+ *   POST /api/weixin/connect                启用并连接(仅受管进程生效)
+ *   POST /api/weixin/disconnect             断开(释放全局 owner 锁)
  *   POST /api/weixin/reload                 重启 adapter(改了 settings 后)
- *   POST /api/weixin/setup/start            开始 QR 登录 (B5:返回 qrcodeId + qrcodeUrl)
+ *   POST /api/weixin/setup/start            开始 QR 登录 (返回 qrcodeId + qrcodeUrl)
  *   GET  /api/weixin/setup/poll?qrcodeId=   轮询 QR 状态
  *   POST /api/weixin/setup/cancel           取消 QR 登录
  *   POST /api/weixin/setup/confirm          拿到 QR 凭据后保存 + 启动 adapter
  *
- * 详见 docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md B4。
+ * P1 配对鉴权:
+ *   GET  /api/weixin/pairings               白名单 + 待批准队列
+ *   POST /api/weixin/pairings/approve       { senderId } 批准
+ *   POST /api/weixin/pairings/reject        { senderId } 拒绝
+ *   POST /api/weixin/pairings/verify        { senderId, code } 按配对码批准
+ *   POST /api/weixin/pairings/revoke        { senderId } 吊销已批准用户
+ *
+ * P5/P7 全局单实例锁:
+ *   GET  /api/weixin/owner                  当前机器级通道持有者
+ *   POST /api/weixin/owner/takeover         清除失联持有者的锁
+ *
+ * P4 观测:
+ *   GET  /api/weixin/diagnostics            会话绑定 / 指标 / owner
  */
 import { Router, type IRouter, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { getWeixinBotManager } from '../services/weixinBot/WeixinBotManager.js'
+import { getWeixinPairingStore } from '../services/weixinBot/WeixinPairingStore.js'
 import { WeixinBotSettingsSchema } from '../../shared/weixin.js'
+import { isManagedChild } from '../../cli/managedChild.js'
 
 const router: IRouter = Router()
 
@@ -24,25 +38,30 @@ function getManager() {
   return getWeixinBotManager()
 }
 
+/** P6:通道只由 supervisor 拉起的进程运行。非受管进程给出明确原因。 */
+function supervisorBlocked(res: Response): boolean {
+  if (isManagedChild()) return false
+  res.status(409).json({
+    error: 'supervisor_required',
+    detail:
+      'Weixin channel only runs in a supervisor-managed process. Start zai via its supervisor (default `zai start`), not a bare dev/direct process.',
+  })
+  return true
+}
+
 router.get('/status', async (_req: Request, res: Response) => {
   try {
-    const s = getManager().status()
-    // B7.5 diag:前端轮询 status 时打到这里,确认 lastConfirmedCreds 是否起作用。
-    if (process.env.WEIXIN_DIAG === '1') {
-      console.warn(`[weixin.status] configured=${s.configured} state=${s.state} accountId=${s.accountId ?? '<none>'} lastError=${s.lastError ?? '<none>'}`)
-    }
-    res.json(s)
+    res.json(await getManager().statusAsync())
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }
 })
 
-router.post('/connect', async (req: Request, res: Response) => {
+router.post('/connect', async (_req: Request, res: Response) => {
   try {
-    const body = z.object({}).parse(req.body)
-    void body
+    if (supervisorBlocked(res)) return
     await getManager().start()
-    res.json(getManager().status())
+    res.json(await getManager().statusAsync())
   } catch (err) {
     res.status(400).json({ error: (err as Error).message })
   }
@@ -51,7 +70,7 @@ router.post('/connect', async (req: Request, res: Response) => {
 router.post('/disconnect', async (_req: Request, res: Response) => {
   try {
     await getManager().stop()
-    res.json(getManager().status())
+    res.json(await getManager().statusAsync())
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }
@@ -59,8 +78,9 @@ router.post('/disconnect', async (_req: Request, res: Response) => {
 
 router.post('/reload', async (_req: Request, res: Response) => {
   try {
+    if (supervisorBlocked(res)) return
     await getManager().reload()
-    res.json(getManager().status())
+    res.json(await getManager().statusAsync())
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }
@@ -77,17 +97,14 @@ router.get('/settings', async (_req: Request, res: Response) => {
 
 router.post('/setup/start', async (_req: Request, res: Response) => {
   try {
-    console.warn('[weixin-setup.start] ENTER')
+    if (supervisorBlocked(res)) return
     const result = await getManager().startSetup()
     if (!result) {
-      console.warn('[weixin-setup.start] startSetup returned null')
       res.status(502).json({ error: 'iLink getBotQrcode returned empty or adapter init failed' })
       return
     }
-    console.warn(`[weixin-setup.start] OK qrcodeId=${result.qrcodeId}`)
     res.json(result)
   } catch (err) {
-    console.warn(`[weixin-setup.start] err: ${(err as Error).message}`)
     res.status(500).json({ error: (err as Error).message })
   }
 })
@@ -100,15 +117,8 @@ router.get('/setup/poll', async (req: Request, res: Response) => {
       return
     }
     const result = await getManager().pollSetup(qrcodeId)
-    // B7.5 diag:把每次 poll 结果打到 stdout,扫码链路卡哪一步直接看这里。
-    // 微信那边扫码通过 → iLink.get_qrcode_status 返回 status='confirmed' →
-    // pollSetup 命中 confirmed 走 saveAccount + reload + lastConfirmedCreds
-    // fallback → state 翻 connected。状态停在 waiting/scanned 通常是 iLink
-    // 还没收到扫码;stopped 在 expired 通常是 QR 过期或被人 cancel。
-    console.warn(`[weixin-setup.poll] qrcodeId=${qrcodeId} → ${JSON.stringify(result)} manager.state=${getManager().state()} configured=${getManager().status().configured}`)
     res.json(result)
   } catch (err) {
-    console.warn(`[weixin-setup.poll] err qrcodeId=${req.query.qrcodeId}: ${(err as Error).message}`)
     res.status(500).json({ error: (err as Error).message })
   }
 })
@@ -128,7 +138,7 @@ router.post('/setup/confirm', async (req: Request, res: Response) => {
     }
     await getManager().saveAccount(parsed.data.accountId, parsed.data.token, parsed.data.baseUrl)
     await getManager().reload()
-    res.json(getManager().status())
+    res.json(await getManager().statusAsync())
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }
@@ -143,10 +153,107 @@ router.post('/setup/cancel', async (_req: Request, res: Response) => {
   }
 })
 
-// diag:手动触发 sendText,绕开 inbound → agent → outbound 整条链,直接
-// 测"bot 已建 session 后 sendmessage 端点是否接受" —— curl 测过新 session
-// 会被 -1 invalid request 拒,但 bot ILinkClient 实例持续 polling 持有
-// 长寿命 session,可能 iLink 对这个 session 接受 sendmessage。
+// ─── P1 配对鉴权 ────────────────────────────────────────────────────
+
+router.get('/pairings', async (_req: Request, res: Response) => {
+  try {
+    res.json(await getWeixinPairingStore().list())
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+const SenderBody = z.object({ senderId: z.string().min(1) })
+
+router.post('/pairings/approve', async (req: Request, res: Response) => {
+  try {
+    const parsed = SenderBody.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ error: 'senderId required' }); return }
+    await getWeixinPairingStore().approve(parsed.data.senderId, 'web')
+    res.json(await getWeixinPairingStore().list())
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+router.post('/pairings/reject', async (req: Request, res: Response) => {
+  try {
+    const parsed = SenderBody.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ error: 'senderId required' }); return }
+    await getWeixinPairingStore().reject(parsed.data.senderId)
+    res.json(await getWeixinPairingStore().list())
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+router.post('/pairings/revoke', async (req: Request, res: Response) => {
+  try {
+    const parsed = SenderBody.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ error: 'senderId required' }); return }
+    await getWeixinPairingStore().revoke(parsed.data.senderId)
+    res.json(await getWeixinPairingStore().list())
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+const VerifyBody = z.object({ senderId: z.string().min(1), code: z.string().min(1) })
+
+router.post('/pairings/verify', async (req: Request, res: Response) => {
+  try {
+    const parsed = VerifyBody.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ error: 'senderId + code required' }); return }
+    const result = await getWeixinPairingStore().verifyCode(parsed.data.senderId, parsed.data.code)
+    res.json({ ...result, pairings: await getWeixinPairingStore().list() })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// ─── P5/P7 全局单实例锁 ─────────────────────────────────────────────
+
+router.get('/owner', async (_req: Request, res: Response) => {
+  try {
+    const snapshot = await getManager().readOwner()
+    res.json(snapshot ?? null)
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+router.post('/owner/takeover', async (_req: Request, res: Response) => {
+  try {
+    if (supervisorBlocked(res)) return
+    const result = await getManager().forceTakeoverOwner()
+    res.status(result.ok ? 200 : 409).json(result)
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// ─── P4 观测 ───────────────────────────────────────────────────────
+
+router.get('/diagnostics', async (_req: Request, res: Response) => {
+  try {
+    const manager = getManager()
+    const [status, bindings, pairings] = await Promise.all([
+      manager.statusAsync(),
+      manager.listSessionBindings(),
+      getWeixinPairingStore().list(),
+    ])
+    res.json({
+      supervisorManaged: isManagedChild(),
+      status,
+      bindings,
+      pairingPending: pairings.pending,
+    })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// diag:手动触发 sendText,绕开 inbound → agent → outbound 整条链。
 // 仅在 WEIXIN_DIAG=1 时挂载,避免生产暴露。
 if (process.env.WEIXIN_DIAG === '1') {
   const SendBody = z.object({

@@ -44,10 +44,89 @@ export const WeixinStatusSchema = z.object({
     'connecting',
     'connected',
     'disconnected',
+    // 全局单实例锁:本进程不是机器上的 weixin 通道持有者,处于待命态。
+    // 不 poll、不出站、不处理入站 —— 由持有者实例独占。
+    'standby',
+    // 本进程不是由 supervisor 拉起。weixin 通道只允许 supervisor 托管进程启动。
+    'supervisor_required',
   ]),
   accountId: z.string().optional(),
   lastError: z.string().optional(),
   lastConnAt: z.number().optional(),
+  /** 本进程是否为通道持有者(全局单实例锁)。 */
+  owner: z.boolean().default(false),
+  /** 当前通道持有者信息(可能不是本进程)。 */
+  ownerInfo: z
+    .object({
+      instanceId: z.string(),
+      pid: z.number(),
+      supervisorPid: z.number().nullable(),
+      port: z.number().nullable(),
+      cwd: z.string(),
+      accountId: z.string(),
+      hostname: z.string(),
+      startedAt: z.number(),
+      self: z.boolean(),
+      live: z.boolean(),
+    })
+    .nullable()
+    .default(null),
+  /** 观测计数(入站/出站/待注入/待配对)。 */
+  metrics: z
+    .object({
+      inbound: z.number(),
+      outbound: z.number(),
+      pendingReplay: z.number(),
+      pairingPending: z.number(),
+      boundSessions: z.number(),
+    })
+    .default({ inbound: 0, outbound: 0, pendingReplay: 0, pairingPending: 0, boundSessions: 0 }),
 })
 
 export type WeixinStatus = z.infer<typeof WeixinStatusSchema>
+
+// ─── 配对鉴权 (P1) ────────────────────────────────────────────────────
+
+export const WeixinPairingAllowedSchema = z.object({
+  senderId: z.string(),
+  displayName: z.string().optional(),
+  pairedAt: z.number(),
+  /** 批准来源:'web' 面板批准 / 'code' 用户回码 */
+  approvedVia: z.enum(['web', 'code']).default('web'),
+})
+
+export const WeixinPairingPendingSchema = z.object({
+  senderId: z.string(),
+  displayName: z.string().optional(),
+  code: z.string(),
+  requestedAt: z.number(),
+  expiresAt: z.number(),
+  /** 已尝试回码次数(上限后作废,防暴力枚举) */
+  attempts: z.number().default(0),
+})
+
+export const WeixinPairingsSchema = z.object({
+  allowed: z.array(WeixinPairingAllowedSchema),
+  pending: z.array(WeixinPairingPendingSchema),
+})
+
+export type WeixinPairingAllowed = z.infer<typeof WeixinPairingAllowedSchema>
+export type WeixinPairingPending = z.infer<typeof WeixinPairingPendingSchema>
+export type WeixinPairings = z.infer<typeof WeixinPairingsSchema>
+
+// ─── 会话绑定 (D1) ────────────────────────────────────────────────────
+
+export const WeixinSessionBindingSchema = z.object({
+  conversationKey: z.string(),
+  sessionId: z.string(),
+  cwd: z.string(),
+  accountId: z.string(),
+  chatType: z.enum(['dm', 'group']),
+  chatId: z.string(),
+  senderId: z.string(),
+  displayName: z.string().optional(),
+  createdAt: z.number(),
+  lastActiveAt: z.number(),
+})
+
+export type WeixinSessionBinding = z.infer<typeof WeixinSessionBindingSchema>

@@ -798,16 +798,23 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     }
   })
 
-  // Weixin 微信机器人后台 task 已停用(2026-09-06):删除 initAgentRuntime 里的
-  // 自动启动。runtimeLifecycle.ts 的 stop() 仍是幂等的空操作;routes/weixin.ts
-  // 仍可访问 manager(状态查询 / QR wizard),只是 adapter 不会自动 connect。
-  // 重新启用:把下面那段加回来。
-  // try {
-  //   const { getWeixinBotManager } = await import('./weixinBot/WeixinBotManager.js')
-  //   await getWeixinBotManager().start()
-  // } catch (err) {
-  //   console.warn('[initAgentRuntime] weixinBot start failed:', err)
-  // }
+  // Weixin 通道(P6):**只由 supervisor 拉起的进程**自动启动 ——
+  // `maybeAutoStartWeixinBot()` 内部先判 `isManagedChild()`,非受管进程直接
+  // 拒绝(supervisor_required),不建 adapter、不 poll、不出站。受管进程再
+  // 由 `WeixinBotManager` 竞争机器级 owner 锁(P5),拿不到就 standby。
+  //
+  // 同时注册 serverCwd provider:入站桥据此把微信会话绑定到本实例的
+  // project cwd,Web UI 里才能在该 project 的会话列表看到它。
+  try {
+    const [{ setWeixinServerCwdProvider }, { maybeAutoStartWeixinBot }] = await Promise.all([
+      import('./weixinBot/weixinInboundBridge.js'),
+      import('./weixinBot/weixinRuntimeBoot.js'),
+    ])
+    setWeixinServerCwdProvider(() => getServerCwd())
+    await maybeAutoStartWeixinBot()
+  } catch (err) {
+    console.warn('[initAgentRuntime] weixin boot failed:', err)
+  }
 }
 
 export async function getOrCreateAgentSession(): Promise<string | null> {

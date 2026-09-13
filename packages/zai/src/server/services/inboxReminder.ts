@@ -76,11 +76,17 @@ export function renderInboxReminder(messages: InboxMessage[]): string | null {
   if (messages.length === 0) return null
 
   const steers = messages.filter(isUserSteer)
-  const others = messages.filter(m => !isUserSteer(m))
+  const userMessages = messages.filter(isUserMessage)
+  const others = messages.filter(m => !isUserSteer(m) && !isUserMessage(m))
 
   const blocks: string[] = []
   for (const s of steers) {
     blocks.push(renderSteerBlock(s))
+  }
+  // 外部平台(微信)的用户消息:用户发完就在等回复,必须让模型当轮看到
+  // 并回应,不能退化成泛化的 "system events occurred" 项目符号。
+  for (const m of userMessages) {
+    blocks.push(renderUserMessageBlock(m))
   }
   if (others.length > 0) {
     blocks.push(renderGenericReminder(others))
@@ -90,6 +96,40 @@ export function renderInboxReminder(messages: InboxMessage[]): string | null {
 
 function isUserSteer(msg: InboxMessage): boolean {
   return msg.source.kind === 'user' && msg.source.form === 'steer'
+}
+
+/**
+ * 外部平台(微信)的用户消息 —— `kind: 'user'` + `form: 'message'`。
+ *
+ * 与 steer 的差别:steer 是「用户在线插话,等下次 prompt 一起看」;这类是
+ * 用户**在另一个端发来、等待回复**的消息(busy 时被 `followup` 降级进
+ * nextStep),必须当轮处理,否则用户端表现为「消息石沉大海」。
+ */
+function isUserMessage(msg: InboxMessage): boolean {
+  return msg.source.kind === 'user' && msg.source.form === 'message'
+}
+
+/** 外部平台用户消息,渲染成独立高显著度块(<user-steer> 同级措辞强度)。 */
+function renderUserMessageBlock(msg: InboxMessage): string {
+  const platform = typeof msg.source.platform === 'string' ? msg.source.platform : undefined
+  const chatType = typeof msg.source.chatType === 'string' ? msg.source.chatType : undefined
+  const attrs = [
+    platform ? `platform="${escapeAttr(platform)}"` : '',
+    chatType ? `chat-type="${escapeAttr(chatType)}"` : '',
+  ].filter(Boolean).join(' ')
+  return (
+    `<user-message${attrs ? ' ' + attrs : ''}>\n` +
+    'The user sent you this message and is waiting for a reply.\n' +
+    'Address it in this turn:\n' +
+    '\n' +
+    truncateForReminder(msg.content) +
+    '\n' +
+    '</user-message>'
+  )
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 /**
@@ -145,8 +185,9 @@ function renderBullet(msg: InboxMessage): string {
     // verbatim in a single truncated line (also bounded).
     return `- task-factory notice: ${truncateForReminder(msg.content)}`
   }
-  // user/steer messages never reach renderBullet — they are split out in
-  // renderInboxReminder and rendered as a dedicated <user-steer> block.
+  // user/steer 与外部平台 user/message 都不会到达 renderBullet —— 它们在
+  // renderInboxReminder 里被拆出来,分别渲染成 <user-steer> / <user-message>
+  // 高显著度块。
   return `- ${kind} / ${form}: ${truncateForReminder(msg.content)}`
 }
 

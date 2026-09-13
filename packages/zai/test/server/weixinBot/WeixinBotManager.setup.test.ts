@@ -8,9 +8,12 @@ import { join } from 'node:path'
 
 const _tmpDir = mkdtempSync(join(tmpdir(), 'zai-weixin-setup-'))
 process.env.ZAI_DATA_DIR = _tmpDir
+// P5:owner 锁是机器级的,测试用覆盖变量隔离到临时目录。
+process.env.ZAI_WEIXIN_OWNER_LOCK_DIR = mkdtempSync(join(tmpdir(), 'zai-weixin-setup-owner-'))
 
 import { WeixinBotManager } from '../../../src/server/services/weixinBot/WeixinBotManager.js'
 import { WeixinAdapter } from '../../../src/server/services/weixinBot/WeixinAdapter.js'
+import { WeixinOwnerLock } from '../../../src/server/services/weixinBot/WeixinOwnerLock.js'
 import type { WeixinBotSettings } from '../../../src/shared/weixin.js'
 
 interface QrResp { ret: number; errcode: number; [k: string]: unknown }
@@ -77,6 +80,8 @@ function makeManager(opts: {
   // QR wizard → reload → start 用 confirmed token connect 的真实路径。
   const manager = new WeixinBotManager({
     getSettings: () => opts.settings ?? null,
+    // P6:测试进程无 ZAI_SUPERVISOR_PID,显式放行,验证 QR → reload → connect。
+    isManagedChild: () => true,
     createAdapter: opts.createAdapter ?? ((s) => new WeixinAdapter({
       accountId: s.accountId ?? 'pending',
       token: s.token ?? 'pending',
@@ -90,8 +95,11 @@ function makeManager(opts: {
 }
 
 describe('WeixinBotManager — QR setup', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    // P5:每个用例从干净的 owner 锁开始 —— 上一个用例的 manager 若未 stop
+    // 会一直持有锁,导致本用例落到 standby。
+    await WeixinOwnerLock.forceTakeover()
   })
 
   it('startSetup returns qrcodeId + qrcodeUrl (data URL) + pollUrl', async () => {

@@ -21,6 +21,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto'
 import { ILINK_BASE_URL } from './constants.js'
+import { weixinDiag } from './debug.js'
 import type {
   ILinkGetUpdatesResponseT,
   ILinkSendTextPayloadT,
@@ -129,8 +130,15 @@ export class ILinkClient {
       // 排查"session 活着但 msgs=0"是哪个字段不对。
       if (endpoint === 'ilink/bot/getupdates' && !this.dumpedGetUpdatesHeaders) {
         this.dumpedGetUpdatesHeaders = true
-        console.warn(`[weixin.ilinkClient] first getUpdates body=${body}`)
-        console.warn(`[weixin.ilinkClient] first getUpdates headers=${JSON.stringify(headers)}`)
+        // P4:高频诊断默认静默(WEIXIN_DEBUG=1 打开);Authorization 里的
+        // bot_token 必须脱敏,不能整串落日志。
+        weixinDiag(`[weixin.ilinkClient] first getUpdates body=${body}`)
+        weixinDiag(
+          `[weixin.ilinkClient] first getUpdates headers=${JSON.stringify({
+            ...headers,
+            Authorization: headers.Authorization ? `Bearer ${String(headers.Authorization).slice(7, 15)}…(redacted)` : undefined,
+          })}`,
+        )
       }
       const res = await this.fetchImpl(url, {
         method: 'POST',
