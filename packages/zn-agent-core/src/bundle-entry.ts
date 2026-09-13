@@ -22,7 +22,7 @@ export { createOpenccRuntime } from './opencc-src/server/createOpenccRuntime.js'
 // assertDtsTargetsResolve 在 tsconfig.server.json 的 server d.ts 复制
 // 之前运行,直接指向 mainAgents.js 会撞"目标无 d.ts"校验;index.js 的
 // re-export 链由 server 项目 transitive emit 补齐。
-export { getBuiltinMainAgents } from './opencc-src/server/index.js'
+export { getBuiltinMainAgents, WEIXIN_MAIN_AGENT_NAME } from './opencc-src/server/index.js'
 // zai patch (2026-08-29): Agent 插件系统 registry —— 单例由 core 持有,
 // zai-server 启动时 loadBuiltinAgents + loadUserAgents;session 生命周期
 // 经 registryAgent / unregistryAgent;socket 派发走 slot()。bundle-entry

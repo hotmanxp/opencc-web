@@ -32,6 +32,7 @@ import { agentCreatorMainAgent } from './mainAgents-agentCreator.js'
 import { taskFactoryMainAgent } from './mainAgents-taskFactory.js'
 import { taskIntakeMainAgent } from './mainAgents-taskIntake.js'
 import { taskIntakeQuickMainAgent } from './mainAgents-taskIntakeQuick.js'
+import { weixinMainAgent, WEIXIN_MAIN_AGENT_NAME } from './mainAgents-weixin.js'
 import { displayFilesOpenccTool } from './displayFilesOpencc.js'
 import { filterBannedTools } from './mainAgents-toolFilters.js'
 
@@ -106,8 +107,14 @@ export function getBuiltinMainAgents(): MainAgentConfig[] {
     // zai patch (2026-09-04, quick-intake):与 taskIntakeMainAgent 并列,
     // 供「快速创建」弹窗(mainAgent: 'task-intake-quick')使用,跳过 brainstorming。
     taskIntakeQuickMainAgent,
+    // zai patch (2026-09-13, weixin-bot):微信通道专用 —— 指派型调度助手。
+    // 微信会话是长期固定 session,主上下文靠「子 agent 派发」保命;
+    // 无 Web UI(DisplayFiles 不挂);cron 三件套全量开放。
+    weixinMainAgent,
   ]
 }
+
+export { WEIXIN_MAIN_AGENT_NAME }
 
 /**
  * 按名字查找主 Agent;未知名回退到 default(永不返回 undefined)。

@@ -73,7 +73,7 @@ export type {
 export { createOpenccRuntime } from './createOpenccRuntime.js'
 
 // zai patch (2026-08-20): 主 Agent 插槽配置。
-export { getBuiltinMainAgents } from './mainAgents.js'
+export { getBuiltinMainAgents, WEIXIN_MAIN_AGENT_NAME } from './mainAgents.js'
 export type {
   MainAgentConfig,
   MainAgentLoadContext,

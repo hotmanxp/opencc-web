@@ -55,6 +55,10 @@ import {
   type InboxMessage,
 } from "../services/sessionInbox.js";
 import { drainInboxReminder } from "../services/inboxReminder.js"; // (no longer used here — see agentRuntime.ts registerExtraReminderProvider for the per-API-call hook)
+// zai patch (2026-09-13, weixin-bot): 微信会话默认派专用主 agent 'weixin-bot'
+// (指派型调度助手,见 zn-agent-core mainAgents-weixin.ts)。
+import { getWeixinSessionMap } from "../services/weixinBot/WeixinSessionMap.js";
+import { WEIXIN_MAIN_AGENT_NAME } from "@zn-ai/zn-agent-core";
 // zai patch (2026-09-07, fix busy-flush, worktree-dsh): 主 turn 结束时
 // flush 积压的 bash 后台通知。详见 bashNotifier.flushPendingBashNotifications。
 // 之前 finally 块没有 flush, 后台 bash 在主线活跃时完成只能入 pendingNotifications
@@ -169,6 +173,26 @@ const HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000;
  */
 function instanceForcedMainAgent(): string | null {
   return process.env.ZAI_APP === 'task-factory' ? 'task-factory' : null
+}
+
+/**
+ * 微信会话默认 mainAgent(zai patch 2026-09-13, weixin-bot)。
+ *
+ * 微信通道的绑定会话(bound session)默认使用 'weixin-bot'(指派型调度
+ * 助手:子 agent 派发为主、cron 定时能力、纯文本回复)。**不读全局
+ * settings.mainAgent** —— 微信通道的 agent 是产品行为,不随 Web UI 里
+ * 的工作模式切换漂移。per-session 冻结语义不变:transcript.meta.mainAgent
+ * 已有值的会话(含旧行为下创建的微信会话)保持原 agent。
+ * 查询走 WeixinSessionMap.lookupBySessionId(ensureLoaded lazy IO);
+ * 非微信会话返回 null,链条继续落到全局设置。永不被此处抛错阻断。
+ */
+async function weixinSessionMainAgent(sessionId: string): Promise<string | null> {
+  try {
+    const binding = await getWeixinSessionMap().lookupBySessionId(sessionId)
+    return binding ? WEIXIN_MAIN_AGENT_NAME : null
+  } catch {
+    return null
+  }
 }
 
 // ExitPlanMode 退出 plan 后的 mode 回写表。用户把会话切到 plan（PATCH
@@ -1276,7 +1300,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         // 任务工厂 profile:实例级强制 'task-factory',不走全局设置
         // (用户改 settings.mainAgent 也不会改变任务工厂实例的 fallback)。
         // 见 instanceForcedMainAgent() 注释。
-        sessionMainAgent = instanceForcedMainAgent()
+        // 微信绑定会话:默认 'weixin-bot'(不读全局设置),见
+        // weixinSessionMainAgent() 注释。
+        sessionMainAgent = (await weixinSessionMainAgent(sessionId))
+          ?? instanceForcedMainAgent()
           ?? getCachedZaiSettingsSync().mainAgent ?? 'default';
         // 仅当 transcript 已存在(消息已落盘)才写 —— 新会话首条消息由
         // 后续 append 流程创建文件,此时写会因文件不存在而失败(无害)。
