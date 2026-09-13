@@ -139,3 +139,54 @@ describe('SettingsDrawer — schema wires Display section', () => {
     expect(screen.getByText('30')).toBeInTheDocument()
   })
 })
+
+describe('SettingsDrawer — 微信配置入口只在主实例显示', () => {
+  afterEach(() => {
+    cleanup()
+    useAppStore.setState({
+      settingsDrawerOpen: false,
+      instanceContext: null,
+    })
+  })
+
+  it('主实例(非受管子进程)显示「微信机器人」入口', () => {
+    useAppStore.setState({
+      settingsDrawerOpen: true,
+      instanceContext: {
+        cwd: '/tmp',
+        cwdName: 'tmp',
+        branch: 'main',
+        isManagedChild: false,
+        app: null,
+      },
+    })
+    render(<SettingsDrawer />)
+    expect(screen.getByTestId('settings-weixin-section')).toBeInTheDocument()
+    expect(screen.getByTestId('open-weixin-bot')).toBeInTheDocument()
+  })
+
+  it('受管子进程(app=weixin 专用实例)不显示「微信机器人」入口', () => {
+    useAppStore.setState({
+      settingsDrawerOpen: true,
+      instanceContext: {
+        cwd: '/Users/foo',
+        cwdName: '~',
+        branch: null,
+        isManagedChild: true,
+        instanceId: 'weixin-bot',
+        app: 'weixin',
+      },
+    })
+    render(<SettingsDrawer />)
+    expect(screen.queryByTestId('settings-weixin-section')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('open-weixin-bot')).not.toBeInTheDocument()
+    // 常规设置列表照常渲染 —— 只摘掉微信入口,不是整个设置页空白
+    expect(screen.getByText('显示')).toBeInTheDocument()
+  })
+
+  it('instanceContext 未 hydrate 时按主实例处理(向后兼容裸 dev / 旧后端)', () => {
+    useAppStore.setState({ settingsDrawerOpen: true, instanceContext: null })
+    render(<SettingsDrawer />)
+    expect(screen.getByTestId('settings-weixin-section')).toBeInTheDocument()
+  })
+})

@@ -801,8 +801,23 @@ export default function SettingsDrawer() {
   // 微信通道状态(drawer 打开时拉一次,展示在 section 标题旁;面板内部有轮询)
   const [weixinState, setWeixinState] = useState<string | null>(null)
 
+  // 微信配置只在**主实例**(用户日常访问的那个 Web 服务进程)里显示,子进程一律不显示。
+  //
+  // 判据沿用 GET /api/system 回显的 `isManagedChild`(与下方「服务」区块同源,见
+  // useAppStore.instanceContext):微信通道的编排者是主实例 —— 它负责拉起/配置/重启
+  // `app=weixin` 的专用实例(见 services/weixinBot/weixinDedicatedInstance.ts),
+  // 专用实例自己在 9199 上再摆一份配置入口只会导致"在子实例里改配置"这类误操作;
+  // task-factory / 用户自定义的子实例同理,它们的设置页不该出现与自身无关的微信配置。
+  //
+  // 注意与下方 showServiceSection 的默认方向**相反**:那里是"instanceContext 未
+  // hydrate(undefined)就不显示",因为误显示会给出不能用的重启/关闭按钮;这里未
+  // hydrate 时按主实例处理(显示),否则主实例用户会遇到"设置页里微信入口凭空消失",
+  // 而子实例顶多多显示一瞬、下一次 /api/system 回来即消失。裸 `zai dev`
+  // (isManagedChild 未设)与旧版后端(字段未回传)也走显示分支,保持向后兼容。
+  const weixinConfigVisible = useAppStore((s) => s.instanceContext?.isManagedChild !== true)
+
   useEffect(() => {
-    if (!open) return
+    if (!open || !weixinConfigVisible) return
     let cancelled = false
     fetch('/api/weixin/status')
       .then((r) => (r.ok ? (r.json() as Promise<{ state?: string }>) : null))
@@ -815,7 +830,7 @@ export default function SettingsDrawer() {
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, weixinConfigVisible])
 
   const theme = useAppStore((s) => s.settingsTheme)
   const setTheme = useAppStore((s) => s.setSettingsTheme)
@@ -1339,27 +1354,32 @@ export default function SettingsDrawer() {
       )}
       <SettingsList schema={schema} onClose={close} onChange={handleChange} />
       {/* 微信机器人入口:刻意放在设置列表最底部且弱化为单一小链接行,
-          不与常规设置项争视觉权重。状态标签仅在 drawer 打开时拉一次。 */}
-      <div
-        data-testid="settings-weixin-section"
-        className="mt-4 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between"
-      >
-        <button
-          type="button"
-          onClick={() => setWeixinOpen(true)}
-          data-testid="open-weixin-bot"
-          className="text-[11px] text-[var(--text-dim-45)] hover:text-[var(--text)] cursor-pointer bg-transparent border-none p-0"
+          不与常规设置项争视觉权重。状态标签仅在 drawer 打开时拉一次。
+          仅在主实例渲染(子进程不显示),见 weixinConfigVisible 的说明。 */}
+      {weixinConfigVisible && (
+        <div
+          data-testid="settings-weixin-section"
+          className="mt-4 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between"
         >
-          微信机器人
-        </button>
-        {weixinState && (
-          <Tag color={weixinTagColor(weixinState)} className="!m-0 !text-[10px] !leading-[16px] !px-[6px]">
-            {weixinState}
-          </Tag>
-        )}
-      </div>
+          <button
+            type="button"
+            onClick={() => setWeixinOpen(true)}
+            data-testid="open-weixin-bot"
+            className="text-[11px] text-[var(--text-dim-45)] hover:text-[var(--text)] cursor-pointer bg-transparent border-none p-0"
+          >
+            微信机器人
+          </button>
+          {weixinState && (
+            <Tag color={weixinTagColor(weixinState)} className="!m-0 !text-[10px] !leading-[16px] !px-[6px]">
+              {weixinState}
+            </Tag>
+          )}
+        </div>
+      )}
     </Drawer>
-    <WeixinBotPanel open={weixinOpen} onClose={() => setWeixinOpen(false)} />
+    {weixinConfigVisible && (
+      <WeixinBotPanel open={weixinOpen} onClose={() => setWeixinOpen(false)} />
+    )}
     </>
   )
 }

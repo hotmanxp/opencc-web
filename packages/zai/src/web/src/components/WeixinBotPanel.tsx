@@ -3,6 +3,10 @@
  *
  * 入口:SettingsDrawer 设置列表中的「微信机器人」section(原顶部 extra 按钮
  * 已挪进设置列表)触发 Modal 渲染此组件。
+ *
+ * **可见性**:该入口只在**主实例**(用户日常访问的 Web 服务进程)渲染,受管子
+ * 子进程(app=weixin 的专用实例 / task-factory / 用户自定义实例)一律不显示 ——
+ * 通道由主实例编排,见 SettingsDrawer 的 weixinConfigVisible。
  * 包含 4 个 section:
  *   1. StatusBanner: 当前状态 / accountId / lastError / 启停按钮
  *   2. SetupSection: 未配置时显示 "扫描二维码" 按钮 + 渲染 QR
