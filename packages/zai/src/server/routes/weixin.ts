@@ -247,6 +247,10 @@ router.get('/diagnostics', async (_req: Request, res: Response) => {
       status,
       bindings,
       pairingPending: pairings.pending,
+      // 面板「最近入站消息」数据源。SSE 那条 weixin.inbound 用的是关联键
+      // sessionId(weixin:<acct>:...),按 zai sessionId 过滤的 SSE 收不到,
+      // 所以从服务端环形缓冲取。
+      recentInbound: manager.listRecentInbound(),
     })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })

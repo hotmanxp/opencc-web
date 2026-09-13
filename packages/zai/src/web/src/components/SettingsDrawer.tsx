@@ -1206,16 +1206,16 @@ export default function SettingsDrawer() {
       destroyOnClose
       data-testid="settings-drawer"
       extra={
-        // TODO: 微信机器人暂时不开放,需要恢复时取消下面的 false 包裹
-        false ? (
-          <Button
-            size="small"
-            onClick={() => setWeixinOpen(true)}
-            data-testid="open-weixin-bot"
-          >
-            微信机器人
-          </Button>
-        ) : null
+        // P0 打通后恢复入口:通道已能收发,面板是 QR 登录 / 配对批准 / 诊断的
+        // 唯一入口。早期这里是 `false ? (...) : null` 的 TODO 包裹,导致面板
+        // 在 UI 上根本点不出来。
+        <Button
+          size="small"
+          onClick={() => setWeixinOpen(true)}
+          data-testid="open-weixin-bot"
+        >
+          微信机器人
+        </Button>
       }
       styles={{ body: { padding: '12px 16px' } }}
       footer={

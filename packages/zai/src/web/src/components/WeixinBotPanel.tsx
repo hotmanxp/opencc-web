@@ -98,13 +98,17 @@ interface SetupState {
 interface InboxItem {
   id: string
   ts: number
-  sessionId: string
-  accountId: string
+  /** 关联键 `weixin:<acct>:<chatType>:<chatId>`(仅 SSE 路径带;diagnostics 不带) */
+  sessionId?: string
+  accountId?: string
   chatId: string
   chatType: 'dm' | 'group'
   senderId: string
   text: string
-  mediaPaths: string[]
+  /** SSE 路径带实际路径 */
+  mediaPaths?: string[]
+  /** diagnostics 路径只带条数 */
+  mediaCount?: number
 }
 
 export interface WeixinBotPanelProps {
@@ -151,13 +155,32 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
     try {
       const r = await fetch('/api/weixin/diagnostics')
       if (!r.ok) return
-      const d = (await r.json()) as { bindings?: SessionBinding[]; status?: WeixinStatus }
+      const d = (await r.json()) as {
+        bindings?: SessionBinding[]
+        status?: WeixinStatus
+        recentInbound?: InboxItem[]
+      }
       setBindings(d.bindings ?? [])
+      // 入站消息走服务端环形缓冲。原因:`weixin.inbound` 的 SSE 事件用的是
+      // 关联键 sessionId(`weixin:<acct>:...`),而服务端 SSE 按当前 tab 的
+      // zai sessionId 过滤,面板永远收不到 —— 所以别指望 inboxStream,
+      // 打开面板时轮询 diagnostics。
+      if (d.recentInbound) setInbox(d.recentInbound)
       if (d.status) setStatus((prev) => ({ ...(prev ?? ({} as WeixinStatus)), ...d.status } as WeixinStatus))
     } catch {
       // ignore
     }
   }, [])
+
+  // 面板打开期间轮询 diagnostics(3s),让「最近入站消息 / 会话绑定 / 计数」
+  // 实时起来。关闭即停,不给后端白刷请求。
+  useEffect(() => {
+    if (!open) return
+    const t = setInterval(() => {
+      void loadDiagnostics()
+    }, 3_000)
+    return () => clearInterval(t)
+  }, [open, loadDiagnostics])
 
   useEffect(() => {
     if (!open) return
@@ -538,19 +561,23 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
             <p className="text-[#999]">暂无消息</p>
           ) : (
             <div className="max-h-[240px] overflow-auto border border-[#eee] p-2">
-              {inbox.map((item) => (
-                <div key={item.id} className="border-b border-[#f0f0f0] p-1">
-                  <div className="text-xs text-[#666]">
-                    [{item.chatType}] {item.senderId} → {item.chatId} · {new Date(item.ts).toLocaleTimeString()}
-                  </div>
-                  <div className="mt-[2px]">{item.text || <i>(空)</i>}</div>
-                  {item.mediaPaths.length > 0 && (
-                    <div className="text-[11px] text-[#999]">
-                      媒体: {item.mediaPaths.length} 个
+              {inbox.map((item) => {
+                const mediaN = item.mediaPaths?.length ?? item.mediaCount ?? 0
+                return (
+                  <div key={item.id} className="border-b border-[#f0f0f0] p-1">
+                    <div className="text-xs text-[#666]">
+                      [{item.chatType}] {item.senderId} → {item.chatId} ·{' '}
+                      {new Date(item.ts).toLocaleTimeString()}
                     </div>
-                  )}
-                </div>
-              ))}
+                    <div className="mt-[2px]">{item.text || <i>(空)</i>}</div>
+                    {mediaN > 0 && (
+                      <div className="text-[11px] text-[#999]">
+                        媒体: {mediaN} 个
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

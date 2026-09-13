@@ -138,6 +138,24 @@ export class WeixinBotManager {
     pairingPending: 0,
     boundSessions: 0,
   }
+  /**
+   * 最近入站消息环形缓冲(最多 50 条),供面板「最近入站消息」展示。
+   *
+   * 为什么不走 SSE:`_onInbound` 发的 `weixin.inbound` 事件其 `sessionId` 是
+   * `weixin:<acct>:<chatType>:<chatId>` 这个**关联键**,而服务端 SSE 是按当前
+   * tab 的 zai sessionId(`sess-<uuid>`)过滤的 —— 两者永远匹配不上,面板订阅
+   * 收不到任何一条。与其改全局 SSE 过滤语义(会牵动其它事件),不如在服务端留
+   * 一份环形缓冲,面板打开时轮询 `/diagnostics` 取。
+   */
+  private recentInbound: Array<{
+    id: string
+    ts: number
+    senderId: string
+    chatType: string
+    chatId: string
+    text: string
+    mediaCount: number
+  }> = []
   /** QR 登录当前活动状态 */
   private activeSetup: {
     qrcodeId: string
@@ -154,6 +172,20 @@ export class WeixinBotManager {
    */
   private lastConfirmedCreds: WeixinBotSettings | null = null
 
+  /**
+   * 「本机是否已有可用凭据(accountId + token)」。
+   *
+   * 为什么不能直接用 `!!this.adapter` 当 `configured`:`startSetup()`(QR 登录
+   * wizard)也会创建一个 adapter(用 `pending`/dummy settings 只为了调
+   * `getBotQrcode`)。一旦用它判断,用户点过一次「连接微信」但没扫完码,
+   * `configured` 就变成 true —— 前端 setup 区块的条件是
+   * `!configured || state === 'unconfigured'`,于是**二维码入口被藏掉**,
+   * 只剩一个必然失败的「连接」按钮,用户卡死到重启进程。
+   *
+   * 语义修正:configured = 「有凭据」,与 adapter 对象是否已实例化解耦。
+   */
+  private hasCreds = false
+
   constructor(deps?: Partial<WeixinBotManagerDeps>) {
     this.deps = { ...DEFAULT_DEPS, ...(deps ?? {}) }
     this.bridge = deps?.bridge ?? getWeixinInboundBridge()
@@ -162,7 +194,7 @@ export class WeixinBotManager {
   state(): WeixinManagerState { return this._state }
   status(): WeixinStatus {
     return {
-      configured: !!this.adapter,
+      configured: this.hasCreds,
       enabled: this._state !== 'disabled' && this._state !== 'unconfigured',
       state: this._state,
       accountId: this.adapter?.getAccountId(),
@@ -293,6 +325,9 @@ export class WeixinBotManager {
       this.setState('failed', 'accountId/token missing')
       return
     }
+    // 走到这里说明凭据齐全 —— configured 转为 true,前端才会从「扫码登录」
+    // 切到「设置 / 连接」形态。见 hasCreds 字段的注释。
+    this.hasCreds = true
     // 兜底:缺 ilinkUserId 时从 accounts/<id>.json 补上 —— iLink getUpdates
     // 没有它不知道往哪个 WeChat user 路由,即使 session 活着 msgs 永远 0。
     if (!s.ilinkUserId) {
@@ -415,6 +450,23 @@ export class WeixinBotManager {
     return this.ownerSnapshot
   }
 
+  /**
+   * 最近入站消息(新→旧,最多 50 条)。面板打开时轮询 `/diagnostics` 取。
+   * 进程内内存态 —— 重启即清空,不需要持久化(持久化那部分是 P2 的
+   * WeixinPendingStore,负责不丢消息,不是拿来做展示的)。
+   */
+  listRecentInbound(): Array<{
+    id: string
+    ts: number
+    senderId: string
+    chatType: string
+    chatId: string
+    text: string
+    mediaCount: number
+  }> {
+    return [...this.recentInbound]
+  }
+
   /** 清掉非存活持有者的锁,便于本进程接管(P7)。 */
   async forceTakeoverOwner(): Promise<{ ok: boolean; reason: string }> {
     const result = await WeixinOwnerLock.forceTakeover()
@@ -513,6 +565,22 @@ export class WeixinBotManager {
 
   private _onInbound(msg: InternalWeixinMessage): void {
     if (!this.adapter) return
+    // 面板「最近入站消息」数据源(环形缓冲,最多 50 条)。放在最前面:
+    // 即使后面 deliver 抛错,用户也能在面板看到「消息到了」。
+    try {
+      this.recentInbound.unshift({
+        id: msg.messageId,
+        ts: Date.now(),
+        senderId: msg.senderId,
+        chatType: msg.chatType,
+        chatId: msg.chatId,
+        text: msg.text ?? '',
+        mediaCount: msg.mediaPaths?.length ?? 0,
+      })
+      if (this.recentInbound.length > 50) this.recentInbound.length = 50
+    } catch {
+      /* 观测面失败不影响主链路 */
+    }
     // 观测事件的 sid 仍用 `weixin:<acct>:<chatType>:<chatId>` 关联键 ——
     // 它只给 SSE / Web 面板消费,不是 zai sessionId(后者走映射表)。
     const sessionId = `weixin:${msg.accountId}:${msg.chatType}:${msg.chatId}`
@@ -794,6 +862,7 @@ export class WeixinBotManager {
         ilinkUserId,
       }
       this.lastConfirmedCreds = creds
+      this.hasCreds = true
       this.activeSetup = null
       await this.reload()
       return { status: 'confirmed', accountId, baseUrl }

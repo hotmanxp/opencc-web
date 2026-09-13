@@ -59,6 +59,7 @@ function makeMockManager() {
     readOwner: vi.fn(async () => null),
     forceTakeoverOwner: vi.fn(async () => ({ ok: true, reason: 'cleared' })),
     listSessionBindings: vi.fn(async () => []),
+    listRecentInbound: vi.fn(() => []),
     startSetup: vi.fn(async () => ({
       qrcodeId: 'qr-1',
       qrcodeUrl: 'https://wx.qq.com/qr/1.png',
@@ -272,5 +273,16 @@ describe('weixin routes', () => {
     expect(res.body.supervisorManaged).toBe(true)
     expect(res.body.bindings).toHaveLength(1)
     expect(res.body.bindings[0].sessionId).toBe('sess-1')
+  })
+
+  it('GET /api/weixin/diagnostics 透传 recentInbound(面板入站列表数据源)', async () => {
+    mockManager.listRecentInbound.mockReturnValue([
+      { id: 'm-1', ts: 1, senderId: 'u1', chatType: 'dm', chatId: 'u1', text: '你好', mediaCount: 0 },
+    ])
+    const app = makeApp()
+    const res = await request(app).get('/api/weixin/diagnostics')
+    expect(res.status).toBe(200)
+    expect(res.body.recentInbound).toHaveLength(1)
+    expect(res.body.recentInbound[0].text).toBe('你好')
   })
 })

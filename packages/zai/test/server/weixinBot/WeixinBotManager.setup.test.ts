@@ -117,6 +117,26 @@ describe('WeixinBotManager — QR setup', () => {
     manager.cancelSetup()
   })
 
+  it('configured stays false after startSetup without credentials (保留二维码入口)', async () => {
+    // 回归:`configured` 曾用 `!!this.adapter` 计算,而 startSetup() 为了调
+    // iLink getBotQrcode 也会创建一个 adapter(dummy settings)。于是用户点过
+    // 一次「连接微信」但没扫完码之后,configured 变成 true —— 前端 setup 区块
+    // 的条件是 `!configured || state === 'unconfigured'`,入口被藏掉,只剩一个
+    // 必然失败的「连接」按钮,用户只能重启进程才能重扫。
+    // 语义修正:configured = 「本机有可用凭据」,与 adapter 对象是否实例化解耦。
+    const { manager } = makeManager({
+      qrcode: { qrcode_id: 'qr-1', qrcode_url: 'https://wx.qq.com/qr/1.png' },
+      settings: null,
+    })
+    const r = await manager.startSetup()
+    expect(r).not.toBeNull()
+    // adapter 确实被创建了(startSetup 调 QR 接口需要它)……
+    expect(manager.getAdapter()).not.toBeNull()
+    // ……但没有凭据,configured 必须仍为 false,二维码入口不能被藏。
+    expect(manager.status().configured).toBe(false)
+    manager.cancelSetup()
+  })
+
   it('startSetup returns null when no settings', async () => {
     const { manager } = makeManager({ settings: null })
     const r = await manager.startSetup()
