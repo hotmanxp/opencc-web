@@ -124,11 +124,15 @@ describe('getAgentTranscriptPath — zai patch (2026-09-01, task-factory)', () =
 // 异常 (e.g. esbuild 编译错误) 即视为 build:core 出问题,patch 没落地。
 describe('bundle self-check after build:core', () => {
   it('@zn-ai/zn-agent-core bundle is importable (load-time sanity)', async () => {
+    // zn-agent-core 的 dist/opencc-core.mjs 是 un-stripped 全量 vendor,
+    // Node 冷启动加载本身慢(AGENTS.md "Node-direct runtime" 节明确说
+    // "属预期")。默认 vitest testTimeout 5s 不足以首次加载。给这个
+    // bundle 自检用例单独 60s 兜底,不影响其它测试。
     const mod = (await import('@zn-ai/zn-agent-core')) as unknown
     expect(mod).toBeDefined()
     // sanity: bundle's default export is a factory `(ctx) => config`,
     // and some named exports we know about exist.
     const named = mod as Record<string, unknown>
     expect(typeof named.getBuiltinMainAgents).toBe('function')
-  })
+  }, 60_000)
 })
