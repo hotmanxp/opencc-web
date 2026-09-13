@@ -31,8 +31,8 @@ export const TEXT_BATCH_SPLIT_THRESHOLD = 1800
 
 /** typing ticket TTL 600s */
 export const TYPING_TICKET_TTL_SECONDS = 600
-/** iLink 出站单文本最大长度(hermes 沿用 4000) */
-export const MAX_MESSAGE_LENGTH = 4000
+/** iLink 出站单文本最大长度(对齐 hermes a54106bbc8:2000 字贴合 iLink 实际边界) */
+export const MAX_MESSAGE_LENGTH = 2000
 /** 媒体加密 AES-128 密钥长度 */
 export const AES_KEY_LENGTH = 16
 

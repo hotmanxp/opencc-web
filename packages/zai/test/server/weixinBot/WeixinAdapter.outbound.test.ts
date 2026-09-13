@@ -101,10 +101,10 @@ describe('WeixinAdapter — outbound sendText', () => {
       sendChunkDelaySeconds: 0,
     })
     await a.connect()
-    const longText = 'A'.repeat(8500) // 一个 4000 上限 → 至少 3 chunks
+    const longText = 'A'.repeat(8500) // 一个 2000 上限 → 至少 5 chunks
     const r = await a.sendText('user_a', longText)
     expect(r.success).toBe(true)
-    expect(countSendMessageCalls(fetchImpl)).toBe(3)
+    expect(countSendMessageCalls(fetchImpl)).toBe(5)
     await a.disconnect()
   })
 
