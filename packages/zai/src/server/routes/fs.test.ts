@@ -505,6 +505,18 @@ describe('POST /api/fs/upload — 拖入文件作为副本落盘 ~/.zai/uploads'
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'zai-fs-upload-'));
     created.length = 0;
+    // 清掉前序 test 可能残留的 dup-*.txt(afterEach 只清自己 created
+    // 列表里的,前序失败留下的 dup-2.txt / dup-3.txt 等不会清 → 重命名
+    // 逻辑跳过这些名,期望 dup-2.txt 实际得到 dup-6.txt 之类)。
+    // 限定为 `dup(-<digits>)?\\.txt$` 不影响用户真实上传文件。
+    const { rmSync, readdirSync } = require('node:fs') as typeof import('node:fs')
+    try {
+      for (const f of readdirSync(join(homedir(), '.zai', 'uploads'))) {
+        if (/^dup(-\d+)?\.txt$/.test(f)) {
+          try { rmSync(join(homedir(), '.zai', 'uploads', f)) } catch { /* ignore */ }
+        }
+      }
+    } catch { /* dir 还没建;无所谓 */ }
   });
 
   afterEach(() => {

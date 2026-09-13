@@ -25,5 +25,10 @@ export default defineConfig({
     fileParallelism: false,
     retry: 3,
     testTimeout: 30_000,
+    // happy-dom 在测试 teardown 时会 abort 未完成的 fetch,触发
+    // `DOMException [AbortError]`。vitest 4.x 把这些 AbortError 记为
+    // unhandled error 让 exit code 变 1(test 本身全过)。抑制这条噪音,
+    // 只保留真正的 test assertion 失败作为失败信号。
+    dangerouslyIgnoreUnhandledErrors: true,
   },
 });
