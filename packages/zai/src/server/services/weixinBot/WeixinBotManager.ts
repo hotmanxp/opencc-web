@@ -24,6 +24,7 @@ import {
   type WeixinSessionBinding,
 } from '../../../shared/weixin.js'
 import { ensureWeixinDirs } from '../paths.js'
+import { registerBuiltinWeixinCommands } from './weixinCommands.js'
 import { writeFile, mkdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -342,6 +343,14 @@ export class WeixinBotManager {
     // 走到这里说明凭据齐全 —— configured 转为 true,前端才会从「扫码登录」
     // 切到「设置 / 连接」形态。见 hasCreds 字段的注释。
     this.hasCreds = true
+
+    // 会话轮转策略:settings.weixinBot.sessionTtlHours(默认 6h,0 = 永不)。
+    // 同一微信对话的绑定 session 超过 TTL 后,下一条消息自动迁入新 sess-uuid。
+    getWeixinSessionMap().setRotationPolicy({
+      ttlMs: s.sessionTtlHours > 0 ? s.sessionTtlHours * 3_600_000 : null,
+    })
+    // 内置微信指令(/new 等)—— 重名覆盖,重复注册幂等。
+    registerBuiltinWeixinCommands()
     // 兜底:缺 ilinkUserId 时从 accounts/<id>.json 补上 —— iLink getUpdates
     // 没有它不知道往哪个 WeChat user 路由,即使 session 活着 msgs 永远 0。
     if (!s.ilinkUserId) {
@@ -793,6 +802,7 @@ export class WeixinBotManager {
       sendChunkRetries: 4,
       rateLimitCircuitThreshold: 1,
       rateLimitCircuitOpenSeconds: 30.0,
+      sessionTtlHours: 6,
     }
     // 归一化成完整 settings(补 schema 默认值),createAdapter 契约要求完整形状。
     const parsedBase = WeixinBotSettingsSchema.safeParse(this.deps.getSettings() ?? dummySettings)
@@ -889,6 +899,7 @@ export class WeixinBotManager {
         sendChunkRetries: base.sendChunkRetries ?? 4,
         rateLimitCircuitThreshold: base.rateLimitCircuitThreshold ?? 1,
         rateLimitCircuitOpenSeconds: base.rateLimitCircuitOpenSeconds ?? 30.0,
+        sessionTtlHours: base.sessionTtlHours ?? 6,
         ilinkUserId,
       }
       this.lastConfirmedCreds = creds

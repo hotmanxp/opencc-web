@@ -43,9 +43,28 @@ type CompressToolHistoryFn = (
 let compressToolHistory: CompressToolHistoryFn | undefined
 try {
   const req = createRequire(import.meta.url)
-  const mod = req('../../opencc-src/services/api/compressToolHistory.js') as
-    | { compressToolHistory?: CompressToolHistoryFn }
-    | undefined
+  // 候选相对路径随打包形态不同:
+  //   - src 直跑(tsx):src/compat/transcript/ → '../../opencc-src/...' 命中
+  //   - dist 平铺(tsc 逐文件):dist/compat/transcript/ → '../../opencc-src/...' 命中
+  //   - dist bundle(opencc-core.mjs 位于 dist/ 根):import.meta.url 的 dirname
+  //     就是 dist/,正确前缀是 './opencc-src/...' → dist/opencc-src/。
+  //     '../../' 会解析到包根(不存在)—— 这正是线上 load failed 的根因。
+  // 逐个尝试,全部失败才降级 passthrough(与"shim 未接线"同语义)。
+  const candidates = [
+    '../../opencc-src/services/api/compressToolHistory.js',
+    './opencc-src/services/api/compressToolHistory.js',
+  ] as const
+  let mod: { compressToolHistory?: CompressToolHistoryFn } | undefined
+  let lastErr: unknown
+  for (const rel of candidates) {
+    try {
+      mod = req(rel) as { compressToolHistory?: CompressToolHistoryFn } | undefined
+      break
+    } catch (err) {
+      lastErr = err
+    }
+  }
+  if (!mod) throw lastErr ?? new Error('compressToolHistory not found in any candidate path')
   compressToolHistory = mod?.compressToolHistory
 } catch (err) {
   if (process.env.ZAI_DEBUG === '1')

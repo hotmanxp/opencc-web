@@ -92,4 +92,46 @@ describe('WeixinSessionMap', () => {
     const list = await map.list()
     expect(list[0].chatId).toBe('u2')
   })
+
+  // ─── 会话轮转(TTL / 手动) ──────────────────────────────────────
+
+  it('TTL 轮转:超过 ttlMs 后 resolveOrCreate 迁入新 session 并留轮转事件', async () => {
+    map.setRotationPolicy({ ttlMs: 1000 })
+    const old = await map.resolveOrCreate(input, '/proj')
+    // 把 createdAt 拨回 2 小时前,模拟"存活超 TTL"
+    ;(old as unknown as { createdAt: number }).createdAt = Date.now() - 2 * 3600_000
+    const fresh = await map.resolveOrCreate(input, '/proj')
+    expect(fresh.sessionId).not.toBe(old.sessionId)
+    expect(fresh.conversationKey).toBe(old.conversationKey)
+    expect(fresh.cwd).toBe('/proj')
+    // 轮转事件只消费一次
+    const evt = map.takeRotation(old.conversationKey)
+    expect(evt?.fromSessionId).toBe(old.sessionId)
+    expect(evt?.toSessionId).toBe(fresh.sessionId)
+    expect(evt?.reason).toBe('ttl')
+    expect(map.takeRotation(old.conversationKey)).toBeNull()
+    // 旧 sessionId 仍可出站反查(在途事件镜像不断链)
+    expect(map.lookupBySessionIdSync(old.sessionId)?.sessionId).toBe(old.sessionId)
+    // 新消息继续走新 session,不再轮转
+    const again = await map.resolveOrCreate(input, '/proj')
+    expect(again.sessionId).toBe(fresh.sessionId)
+  })
+
+  it('未设策略 / ttl=0 时永不轮转', async () => {
+    const a = await map.resolveOrCreate(input, '/proj')
+    ;(a as unknown as { createdAt: number }).createdAt = Date.now() - 100 * 3600_000
+    map.setRotationPolicy({ ttlMs: 0 })
+    const b = await map.resolveOrCreate(input, '/proj')
+    expect(b.sessionId).toBe(a.sessionId)
+    expect(map.takeRotation(a.conversationKey)).toBeNull()
+  })
+
+  it('rotate():手动轮转,未绑定时返回 null', async () => {
+    expect(await map.rotate('nope:dm:x', 'test')).toBeNull()
+    const old = await map.resolveOrCreate(input, '/proj')
+    const rotated = await map.rotate(old.conversationKey, 'command:/new')
+    expect(rotated?.fresh.sessionId).not.toBe(old.sessionId)
+    const evt = map.takeRotation(old.conversationKey)
+    expect(evt?.reason).toBe('command:/new')
+  })
 })

@@ -11,6 +11,8 @@ import { WeixinSessionMap } from '../../../src/server/services/weixinBot/WeixinS
 import { WeixinPairingStore } from '../../../src/server/services/weixinBot/WeixinPairingStore.js'
 import { WeixinPendingStore } from '../../../src/server/services/weixinBot/WeixinPendingStore.js'
 import { WeixinInboundBridge } from '../../../src/server/services/weixinBot/weixinInboundBridge.js'
+import { registerBuiltinWeixinCommands } from '../../../src/server/services/weixinBot/weixinCommands.js'
+import { resetWeixinMemoryForTests } from '../../../src/server/services/weixinBot/weixinMemory.js'
 import type { InternalWeixinMessage } from '../../../src/server/services/weixinBot/WeixinAdapter.js'
 import type { DmPolicy } from '../../../src/server/services/weixinBot/accessPolicy.js'
 
@@ -241,5 +243,56 @@ describe('weixinInboundBridge', () => {
     await h.bridge.deliver(m)
     await h.bridge.deliver({ ...m })
     expect(h.followup).toHaveBeenCalledTimes(1)
+  })
+
+  // ─── 指令解析(/new)与轮转 ─────────────────────────────────────
+
+  it('/new:轮转 session + 回执,不注入 agent;后续消息走新 session', async () => {
+    registerBuiltinWeixinCommands()
+    const h = makeHarness('open')
+    await h.bridge.deliver(dm('第一条'))
+    const [sidOld] = h.followup.mock.calls[0] as [string, unknown]
+
+    await h.bridge.deliver(dm('/new'))
+    // 不注入 agent,发回执
+    expect(h.followup).toHaveBeenCalledTimes(1)
+    expect(h.sent.some((s) => s.text.includes('已开启新会话'))).toBe(true)
+
+    // 轮转后的消息走新 session
+    await h.bridge.deliver(dm('新会话第一条'))
+    expect(h.followup).toHaveBeenCalledTimes(2)
+    const [sidNew] = h.followup.mock.calls[1] as [string, unknown]
+    expect(sidNew).not.toBe(sidOld)
+    expect(sidNew).toMatch(/^sess-/)
+  })
+
+  it('未注册的 / 开头消息原样穿透给 agent', async () => {
+    registerBuiltinWeixinCommands()
+    const h = makeHarness('open')
+    await h.bridge.deliver(dm('/etc/hosts 里配了什么'))
+    expect(h.followup).toHaveBeenCalledTimes(1)
+    const [, inboxMsg] = h.followup.mock.calls[0] as [string, { content: string }]
+    expect(inboxMsg.content).toContain('/etc/hosts 里配了什么')
+    expect(h.sent).toHaveLength(0)
+  })
+
+  it('TTL 轮转:resolveOrCreate 阶段自动迁入新 session 并触发记忆沉淀', async () => {
+    registerBuiltinWeixinCommands()
+    const h = makeHarness('open')
+    h.sessionMap.setRotationPolicy({ ttlMs: 1000 })
+    await h.bridge.deliver(dm('老会话消息'))
+    const [sidOld] = h.followup.mock.calls[0] as [string, unknown]
+    // 把绑定 createdAt 拨回超 TTL
+    const binding = await h.sessionMap.lookupByConversationKey(
+      (await h.sessionMap.list())[0].conversationKey,
+    )
+    ;(binding as unknown as { createdAt: number }).createdAt = Date.now() - 2 * 3600_000
+
+    await h.bridge.deliver(dm('触发轮转的消息'))
+    expect(h.followup).toHaveBeenCalledTimes(2)
+    const [sidNew, inboxMsg] = h.followup.mock.calls[1] as [string, { content: string }]
+    expect(sidNew).not.toBe(sidOld)
+    // 无 transcript → 无记忆块,但消息正常注入
+    expect(inboxMsg.content).toContain('触发轮转的消息')
   })
 })

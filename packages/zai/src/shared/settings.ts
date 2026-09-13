@@ -190,6 +190,8 @@ export interface ZaiSettings {
      * 与 shared/weixin.ts:WeixinBotSettingsSchema 对齐。
      */
     ilinkUserId?: string
+    /** 会话轮转 TTL(小时),默认 6;0 = 永不轮转。与 shared/weixin.ts 对齐。 */
+    sessionTtlHours?: number
   }
   /**
    * zai patch (2026-08-29, plan §A): 显式 opt-in 把

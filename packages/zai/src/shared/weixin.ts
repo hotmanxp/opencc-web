@@ -30,6 +30,12 @@ export const WeixinBotSettingsSchema = z.object({
   /** B7.6:QR confirmed 响应的 ilink_user_id,getUpdates 用它跟 bot_token
    * 一起做 session 鉴权。重新扫码后会被 lastConfirmedCreds 刷新覆盖。 */
   ilinkUserId: z.string().optional(),
+  /**
+   * 会话轮转:同一微信对话的绑定 session 存活超过该小时数后,下一条
+   * 入站消息自动迁入新 sess-uuid(旧绑定保留出站反查兼容)。0 = 永不轮转。
+   * 默认 6h。轮转时触发记忆沉淀(见 weixinMemory.ts)。
+   */
+  sessionTtlHours: z.number().nonnegative().default(6),
 })
 
 export type WeixinBotSettings = z.infer<typeof WeixinBotSettingsSchema>

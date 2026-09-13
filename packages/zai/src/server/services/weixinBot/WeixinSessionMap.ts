@@ -49,6 +49,14 @@ export class WeixinSessionMap {
   private loaded = false
   private writeChain: Promise<void> = Promise.resolve()
 
+  /** 轮转 TTL(ms);null/0 = 永不轮转。由 manager 从 settings 注入。 */
+  private rotationTtlMs: number | null = null
+  /** 轮转事件待消费队列:conversationKey → 轮转信息(bridge 取走后清除)。 */
+  private pendingRotations = new Map<
+    string,
+    { fromSessionId: string; toSessionId: string; reason: string; at: number }
+  >()
+
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return
     this.loaded = true
@@ -98,9 +106,67 @@ export class WeixinSessionMap {
   }
 
   /**
+   * 注入轮转策略。ttlMs <= 0 或 null 表示永不轮转。
+   * manager 在 start() 时从 settings.weixinBot.sessionTtlHours 换算传入。
+   */
+  setRotationPolicy(opts: { ttlMs: number | null }): void {
+    this.rotationTtlMs = opts.ttlMs != null && opts.ttlMs > 0 ? opts.ttlMs : null
+  }
+
+  /**
+   * 取走并清除该会话的待处理轮转事件(若有)。
+   * bridge 在 resolveOrCreate 后调用:有返回值说明刚发生了轮转,
+   * 应触发旧会话的记忆沉淀。
+   */
+  takeRotation(
+    conversationKey: string,
+  ): { fromSessionId: string; toSessionId: string; reason: string; at: number } | null {
+    const evt = this.pendingRotations.get(conversationKey) ?? null
+    this.pendingRotations.delete(conversationKey)
+    return evt
+  }
+
+  /**
+   * 把 conversationKey 的绑定迁到新 sess-uuid。
+   * 旧绑定保留在 bySessionId 里(在途 runtime 事件的出站镜像不断链),
+   * 但从 byConversation 摘除 —— 新消息走新 session。
+   * 不存在绑定时返回 null(无事可轮转)。
+   */
+  async rotate(
+    conversationKey: string,
+    reason: string,
+  ): Promise<{ old: WeixinSessionBinding; fresh: WeixinSessionBinding } | null> {
+    await this.ensureLoaded()
+    const oldBinding = this.byConversation.get(conversationKey)
+    if (!oldBinding) return null
+    const now = Date.now()
+    const fresh: WeixinSessionBinding = {
+      ...oldBinding,
+      sessionId: `sess-${randomUUID()}`,
+      createdAt: now,
+      lastActiveAt: now,
+    }
+    // 旧绑定从 conversation 索引摘除但保留 sessionId 索引;
+    // 持久化文件只写 byConversation(values),旧绑定重启后自然淡出。
+    this.byConversation.set(conversationKey, fresh)
+    this.bySessionId.set(fresh.sessionId, fresh)
+    this.pendingRotations.set(conversationKey, {
+      fromSessionId: oldBinding.sessionId,
+      toSessionId: fresh.sessionId,
+      reason,
+      at: now,
+    })
+    await this.enqueuePersist()
+    return { old: oldBinding, fresh }
+  }
+
+  /**
    * 取该微信会话的绑定;不存在则新建一个合规 sessionId 并落盘。
    * `cwd` 只在首次创建时写入 —— 后续不覆盖,避免服务重启换了 cwd 之后
    * 老对话被"搬走"到另一个 project。
+   *
+   * 轮转:绑定存在且存活超过 rotationTtlMs → 自动迁入新 session,
+   * 并在 pendingRotations 留事件供 bridge 消费(记忆沉淀)。
    */
   async resolveOrCreate(
     input: ResolveWeixinSessionInput,
@@ -111,6 +177,10 @@ export class WeixinSessionMap {
     const now = Date.now()
     const existing = this.byConversation.get(key)
     if (existing) {
+      if (this.rotationTtlMs != null && now - existing.createdAt >= this.rotationTtlMs) {
+        const rotated = await this.rotate(key, 'ttl')
+        if (rotated) return rotated.fresh
+      }
       let changed = false
       if (existing.senderId !== input.senderId) {
         existing.senderId = input.senderId
@@ -171,6 +241,7 @@ export class WeixinSessionMap {
   reset(): void {
     this.byConversation.clear()
     this.bySessionId.clear()
+    this.pendingRotations.clear()
     this.loaded = false
   }
 
