@@ -192,6 +192,13 @@ export interface ZaiSettings {
     ilinkUserId?: string
     /** 会话轮转 TTL(小时),默认 6;0 = 永不轮转。与 shared/weixin.ts 对齐。 */
     sessionTtlHours?: number
+    /**
+     * 微信专用实例的端口(默认 9199)。`enabled=true` 时主实例启动会用它
+     * 拉起一个 `app=weixin` 的受管子实例独占通道。与 shared/weixin.ts 对齐。
+     */
+    instancePort?: number
+    /** 微信专用实例的工作目录;空串 = 用户主目录。与 shared/weixin.ts 对齐。 */
+    instanceCwd?: string
   }
   /**
    * zai patch (2026-08-29, plan §A): 显式 opt-in 把

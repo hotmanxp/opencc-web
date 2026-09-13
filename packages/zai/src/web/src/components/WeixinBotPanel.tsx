@@ -14,8 +14,10 @@
  * SSE 订阅:沿用现有 useEventStream hook,filter event.sessionId.startsWith('weixin:')。
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Modal, Button, Input, Select, message, Spin, Alert, Tag, Switch } from 'antd'
+import { Modal, Button, Input, Select, message, Spin, Alert, Tag, Switch, InputNumber } from 'antd'
 import { apiRpc } from '../lib/api.js'
+import { DEFAULT_WEIXIN_INSTANCE_PORT } from '../../../shared/weixinInstance.js'
+import DirectoryPicker from './common/DirectoryPicker.js'
 
 interface WeixinStatus {
   configured: boolean
@@ -30,11 +32,15 @@ interface WeixinStatus {
     | 'reconnecting'
     | 'standby'
     | 'supervisor_required'
+    /** 本进程不是 app=weixin 专用实例 —— 通道归专用实例,本进程只负责拉起它。 */
+    | 'dedicated_instance_required'
   accountId?: string
   lastError?: string
   lastConnAt?: number
   owner?: boolean
   ownerInfo?: OwnerInfo | null
+  /** 微信专用实例(app=weixin)的运行时快照。主实例视角下才有值。 */
+  dedicatedInstance?: DedicatedInstanceSnapshot | null
   metrics?: {
     inbound: number
     outbound: number
@@ -42,6 +48,17 @@ interface WeixinStatus {
     pairingPending: number
     boundSessions: number
   }
+}
+
+/** 微信专用实例快照(由主实例的 instanceSupervisor 提供)。 */
+interface DedicatedInstanceSnapshot {
+  id: string
+  name: string
+  state: string
+  port: number | null
+  pid: number | null
+  cwd: string
+  lastError: string | null
 }
 
 /** P5/P7:机器级通道持有者(全局单实例锁)。 */
@@ -129,8 +146,12 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
   const [allowFrom, setAllowFrom] = useState<string>('')
   const [pairings, setPairings] = useState<Pairings>({ allowed: [], pending: [] })
   const [bindings, setBindings] = useState<SessionBinding[]>([])
-  // 服务启动自动连接(settings.json weixinBot.enabled)。null = 还没拉到。
+  // 服务启动自动启动微信机器人(settings.json weixinBot.enabled)。null = 还没拉到。
   const [autoConnect, setAutoConnect] = useState<boolean | null>(null)
+  // 专用实例编排参数:端口 + 工作目录(空串 = 用户主目录)。
+  const [instancePort, setInstancePort] = useState<number>(DEFAULT_WEIXIN_INSTANCE_PORT)
+  const [instanceCwd, setInstanceCwd] = useState<string>('')
+  const [cwdPickerOpen, setCwdPickerOpen] = useState(false)
   // polling handle 走 ref 而不是 state,避免 stale 闭包 + 每次 setInterval 重启
   // 时拿到旧的 interval id。
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -179,8 +200,20 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
     try {
       const r = await fetch('/api/weixin/settings')
       if (!r.ok) return
-      const s = (await r.json()) as { enabled?: boolean }
+      const s = (await r.json()) as {
+        enabled?: boolean
+        instancePort?: number
+        instanceCwd?: string
+        dmPolicy?: string
+        groupPolicy?: string
+        allowFrom?: string[]
+      }
       if (typeof s.enabled === 'boolean') setAutoConnect(s.enabled)
+      if (typeof s.instancePort === 'number') setInstancePort(s.instancePort)
+      if (typeof s.instanceCwd === 'string') setInstanceCwd(s.instanceCwd)
+      if (typeof s.dmPolicy === 'string') setDmPolicy(s.dmPolicy)
+      if (typeof s.groupPolicy === 'string') setGroupPolicy(s.groupPolicy)
+      if (Array.isArray(s.allowFrom)) setAllowFrom(s.allowFrom.join(','))
     } catch {
       // 观测面失败不打扰用户
     }
@@ -215,14 +248,19 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
           body: JSON.stringify({ enabled: next }),
         })
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        message.success(next ? '已开启:服务启动时自动连接微信机器人' : '已关闭:服务启动不再自动连接(当前连接也会断开)')
+        message.success(
+          next
+            ? '已开启:服务启动时自动拉起微信专用实例并接管消息'
+            : '已关闭:服务启动不再自动拉起专用实例(已拉起的那一个会被停掉)',
+        )
         await refresh()
+        await loadDiagnostics()
       } catch (err) {
         setAutoConnect(prev) // rollback
         message.error(`保存失败: ${(err as Error).message}`)
       }
     },
-    [autoConnect, refresh],
+    [autoConnect, refresh, loadDiagnostics],
   )
 
   const pairingAction = useCallback(
@@ -363,19 +401,49 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
     }
   }, [])
 
-  const handleSaveSettings = useCallback(async () => {
-    // 简化:实际上 settings 持久化应该走 agentSettings 接口,这里只 reload
+  /** 保存专用实例编排参数(端口 / 工作目录)。 */
+  const handleSaveInstanceConfig = useCallback(async () => {
     setLoading(true)
     try {
-      await apiRpc.weixin.reload.post(undefined)
-      message.success('已应用,若需设置 allowFrom 等请编辑 ~/.zai/settings.json')
-      void refresh()
+      const r = await fetch('/api/weixin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instancePort, instanceCwd }),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      message.success('已保存。端口与工作目录在专用实例下次启动时生效。')
+      await refresh()
+      await loadDiagnostics()
     } catch (err) {
       message.error(`保存失败: ${(err as Error).message}`)
     } finally {
       setLoading(false)
     }
-  }, [refresh])
+  }, [instancePort, instanceCwd, refresh, loadDiagnostics])
+
+  /** 保存通道行为参数(dmPolicy / groupPolicy / allowFrom)。 */
+  const handleSaveBotBehavior = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await fetch('/api/weixin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dmPolicy,
+          groupPolicy,
+          allowFrom: allowFrom.split(',').map((s) => s.trim()).filter(Boolean),
+        }),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      message.success('已保存。通道参数在专用实例重启后生效。')
+      await refresh()
+      await loadDiagnostics()
+    } catch (err) {
+      message.error(`保存失败: ${(err as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [dmPolicy, groupPolicy, allowFrom, refresh, loadDiagnostics])
 
   return (
     <Modal
@@ -413,6 +481,18 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
                     status.ownerInfo
                       ? `持有者 pid=${status.ownerInfo.pid} instance=${status.ownerInfo.instanceId} port=${status.ownerInfo.port ?? '-'}。同一台电脑只允许一个实例收发微信消息。`
                       : '另一个实例正在持有通道。'
+                  }
+                />
+              )}
+              {status.state === 'dedicated_instance_required' && (
+                <Alert
+                  type="info"
+                  className="mt-2"
+                  message="本进程不运行微信通道"
+                  description={
+                    status.dedicatedInstance
+                      ? `通道由专用实例「${status.dedicatedInstance.name}」承载:状态 ${status.dedicatedInstance.state},端口 ${status.dedicatedInstance.port ?? '-'},工作目录 ${status.dedicatedInstance.cwd}。`
+                      : '按设计,微信消息由 app=weixin 的专用实例处理。开启下面「服务启动时自动启动」,或点「连接」,即可拉起它。'
                   }
                 />
               )}
@@ -465,6 +545,31 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
             ) : (
               <p className="text-[#999]">本实例持有通道。</p>
             )}
+          </div>
+        )}
+
+        {/* 1b-2. 微信专用实例 (app=weixin) —— 真正收发消息的那个进程 */}
+        {status?.dedicatedInstance && (
+          <div className="mb-4">
+            <h4>微信专用实例</h4>
+            <div className="text-xs">
+              <div>
+                <code>{status.dedicatedInstance.name}</code> · 状态{' '}
+                <Tag color={instanceStateColor(status.dedicatedInstance.state)}>
+                  {status.dedicatedInstance.state}
+                </Tag>{' '}
+                · 端口 <code>{status.dedicatedInstance.port ?? '-'}</code> · pid{' '}
+                <code>{status.dedicatedInstance.pid ?? '-'}</code>
+              </div>
+              <div className="text-[#999] mt-1">cwd: {status.dedicatedInstance.cwd}</div>
+              {status.dedicatedInstance.lastError && (
+                <Alert
+                  type="error"
+                  className="mt-2"
+                  message={status.dedicatedInstance.lastError}
+                />
+              )}
+            </div>
           </div>
         )}
 
@@ -546,13 +651,55 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
             <h4>设置</h4>
             <div className="mb-2 flex items-center">
               <Switch
-                aria-label="服务启动自动连接"
+                aria-label="服务启动自动启动微信机器人"
                 checked={autoConnect === true}
                 loading={autoConnect === null}
                 onChange={(v) => void handleAutoConnectChange(v)}
               />
-              <label className="ml-2">服务启动时自动连接</label>
+              <label className="ml-2">服务启动时自动启动微信机器人</label>
             </div>
+            <p className="text-xs text-[#999] mb-3">
+              开启后主服务启动时会检查机器级通道锁:无锁即拉起一个专用实例
+              (app=weixin)独占微信通道 —— 消息的接收、agent 处理与回复全在那个独立
+              进程里跑,不占用主服务的会话进程。
+            </p>
+
+            <div className="font-medium mb-1">专用实例</div>
+            <div className="mb-2 flex items-center">
+              <label className="w-[110px]">端口:&nbsp;</label>
+              <InputNumber
+                aria-label="专用实例端口"
+                min={1}
+                max={65535}
+                value={instancePort}
+                onChange={(v) => setInstancePort(typeof v === 'number' ? v : DEFAULT_WEIXIN_INSTANCE_PORT)}
+                className="w-[140px]"
+              />
+            </div>
+            <div className="mb-2 flex items-center">
+              <label className="w-[110px]">工作目录:&nbsp;</label>
+              <Input
+                aria-label="专用实例工作目录"
+                value={instanceCwd}
+                readOnly
+                placeholder="留空 = 用户主目录"
+                className="w-[240px]"
+              />
+              <Button size="small" className="ml-2" onClick={() => setCwdPickerOpen(true)}>
+                选择…
+              </Button>
+              {instanceCwd !== '' && (
+                <Button size="small" className="ml-1" onClick={() => setInstanceCwd('')}>
+                  清除
+                </Button>
+              )}
+            </div>
+            <Button onClick={() => void handleSaveInstanceConfig()}>保存实例配置</Button>
+            <p className="text-xs text-[#999] mt-2">
+              微信会话会绑定到该目录对应的 project;端口与目录改动后需重启专用实例才生效。
+            </p>
+
+            <div className="font-medium mb-1 mt-4">通道策略</div>
             <div className="mb-2">
               <label>DM policy:&nbsp;</label>
               <Select
@@ -591,10 +738,10 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
                 className="w-[280px]"
               />
             </div>
-            <Button onClick={handleSaveSettings}>应用</Button>
+            <Button onClick={() => void handleSaveBotBehavior()}>保存通道策略</Button>
             <p className="text-xs text-[#999] mt-2">
-              实际值持久化在 ~/.zai/settings.json (zaiSettings.weixinBot)。
-              应用后会请重启 zai 触发 reload。
+              全部持久化在 ~/.zai/settings.json (zaiSettings.weixinBot)。通道策略由专用
+              实例在启动时读取,保存后会自动重启它以生效。
             </p>
           </div>
         )}
@@ -650,6 +797,14 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
           )}
         </div>
       </Spin>
+      {/* 专用实例工作目录选择器。独立 Modal,挂在这里只是让它跟随父面板的
+          挂载生命周期;onSelect 后组件内部会自行调 onCancel 关闭。 */}
+      <DirectoryPicker
+        open={cwdPickerOpen}
+        initialPath={instanceCwd}
+        onCancel={() => setCwdPickerOpen(false)}
+        onSelect={(p) => setInstanceCwd(p)}
+      />
     </Modal>
   )
 }
@@ -670,10 +825,29 @@ function stateColor(state: WeixinStatus['state']): string {
     // P6:非受管进程 —— 需要用户换启动方式。
     case 'supervisor_required':
       return 'gold'
+    // 非 app=weixin 进程:通道归专用实例,本进程只负责把它拉起来。
+    case 'dedicated_instance_required':
+      return 'blue'
     case 'disconnected':
       return 'default'
     case 'disabled':
       return 'default'
+    default:
+      return 'default'
+  }
+}
+
+/** instanceSupervisor 的 InstanceState → AntD Tag 颜色。 */
+function instanceStateColor(state: string): string {
+  switch (state) {
+    case 'running':
+      return 'green'
+    case 'starting':
+      return 'blue'
+    case 'stopping':
+      return 'orange'
+    case 'down':
+      return 'red'
     default:
       return 'default'
   }

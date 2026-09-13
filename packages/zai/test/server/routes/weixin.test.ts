@@ -27,6 +27,22 @@ vi.mock('../../../src/server/services/weixinBot/WeixinBotManager.js', async () =
   }
 })
 
+// 专用实例编排模块:主实例的 connect/disconnect 走它,而不是本进程的 manager。
+// 这里 mock 掉,既避免真的去 spawn 实例,也让断言能看清"走了哪条分支"。
+const dedicated = vi.hoisted(() => ({
+  ensure: vi.fn(),
+  stop: vi.fn(),
+  restart: vi.fn(),
+  find: vi.fn(),
+}))
+vi.mock('../../../src/server/services/weixinBot/weixinDedicatedInstance.js', () => ({
+  DEFAULT_WEIXIN_INSTANCE_PORT: 9199,
+  ensureDedicatedInstance: dedicated.ensure,
+  stopDedicatedInstance: dedicated.stop,
+  restartDedicatedInstance: dedicated.restart,
+  findDedicatedInstance: dedicated.find,
+}))
+
 let mockManager: any
 
 import { weixinRouter } from '../../../src/server/routes/weixin.js'
@@ -73,6 +89,13 @@ function makeMockManager() {
 describe('weixin routes', () => {
   beforeEach(async () => {
     mockManager = makeMockManager()
+    // 默认按"主实例"跑(无 ZAI_APP):connect/disconnect 走专用实例编排。
+    // 需要走宿主分支的用例自己设 ZAI_APP='weixin'。
+    delete process.env.ZAI_APP
+    dedicated.ensure.mockReset().mockResolvedValue({ attempted: true, reason: 'provisioned', instanceId: 'inst_wx' })
+    dedicated.stop.mockReset().mockResolvedValue({ ok: true, reason: 'stopped', instanceId: 'inst_wx' })
+    dedicated.restart.mockReset().mockResolvedValue({ attempted: true, reason: 'started', instanceId: 'inst_wx' })
+    dedicated.find.mockReset().mockReturnValue(null)
     // 清掉上一个用例可能残留的配对 / owner 状态
     const { getWeixinPairingStore, resetWeixinPairingStoreForTests } = await import(
       '../../../src/server/services/weixinBot/WeixinPairingStore.js'
@@ -89,11 +112,45 @@ describe('weixin routes', () => {
     expect(mockManager.statusAsync).toHaveBeenCalled()
   })
 
-  it('POST /api/weixin/connect calls manager.start', async () => {
+  it('GET /api/weixin/status 附带专用实例快照', async () => {
+    dedicated.find.mockReturnValue({
+      id: 'inst_wx', name: 'weixin-bot', state: 'running', port: 9199, pid: 4242, cwd: '/Users/me', lastError: null,
+    })
+    const app = makeApp()
+    const res = await request(app).get('/api/weixin/status')
+    expect(res.status).toBe(200)
+    expect(res.body.dedicatedInstance).toMatchObject({ id: 'inst_wx', port: 9199, state: 'running' })
+  })
+
+  it('POST /api/weixin/connect 在宿主进程上连通道(manager.start)', async () => {
+    const prev = process.env.ZAI_APP
+    process.env.ZAI_APP = 'weixin'
+    try {
+      const app = makeApp()
+      const res = await request(app).post('/api/weixin/connect').send({})
+      expect(res.status).toBe(200)
+      expect(mockManager.start).toHaveBeenCalled()
+      expect(dedicated.ensure).not.toHaveBeenCalled()
+    } finally {
+      if (prev === undefined) delete process.env.ZAI_APP
+      else process.env.ZAI_APP = prev
+    }
+  })
+
+  it('POST /api/weixin/connect 在主实例上拉起专用实例(不碰本进程 manager)', async () => {
     const app = makeApp()
     const res = await request(app).post('/api/weixin/connect').send({})
     expect(res.status).toBe(200)
-    expect(mockManager.start).toHaveBeenCalled()
+    expect(dedicated.ensure).toHaveBeenCalled()
+    expect(mockManager.start).not.toHaveBeenCalled()
+  })
+
+  it('POST /api/weixin/connect 专用实例端口被占等失败 → 502', async () => {
+    dedicated.ensure.mockResolvedValue({ attempted: false, reason: 'failed', detail: 'EADDRINUSE' })
+    const app = makeApp()
+    const res = await request(app).post('/api/weixin/connect').send({})
+    expect(res.status).toBe(502)
+    expect(res.body.detail).toBe('EADDRINUSE')
   })
 
   it('POST /api/weixin/connect returns 409 when not supervisor-managed', async () => {
@@ -105,16 +162,33 @@ describe('weixin routes', () => {
       expect(res.status).toBe(409)
       expect(res.body.error).toBe('supervisor_required')
       expect(mockManager.start).not.toHaveBeenCalled()
+      expect(dedicated.ensure).not.toHaveBeenCalled()
     } finally {
       process.env.ZAI_SUPERVISOR_PID = prev
     }
   })
 
-  it('POST /api/weixin/disconnect calls manager.stop', async () => {
+  it('POST /api/weixin/disconnect 在宿主进程上断开通道(manager.stop)', async () => {
+    const prev = process.env.ZAI_APP
+    process.env.ZAI_APP = 'weixin'
+    try {
+      const app = makeApp()
+      const res = await request(app).post('/api/weixin/disconnect').send({})
+      expect(res.status).toBe(200)
+      expect(mockManager.stop).toHaveBeenCalled()
+      expect(dedicated.stop).not.toHaveBeenCalled()
+    } finally {
+      if (prev === undefined) delete process.env.ZAI_APP
+      else process.env.ZAI_APP = prev
+    }
+  })
+
+  it('POST /api/weixin/disconnect 在主实例上停掉专用实例', async () => {
     const app = makeApp()
     const res = await request(app).post('/api/weixin/disconnect').send({})
     expect(res.status).toBe(200)
-    expect(mockManager.stop).toHaveBeenCalled()
+    expect(dedicated.stop).toHaveBeenCalled()
+    expect(mockManager.stop).not.toHaveBeenCalled()
   })
 
   it('POST /api/weixin/reload calls manager.reload', async () => {
@@ -136,7 +210,7 @@ describe('weixin routes', () => {
     expect(res.status).toBe(400)
   })
 
-  it('POST /api/weixin/setup/confirm persists account + reload', async () => {
+  it('POST /api/weixin/setup/confirm 在主实例上重启专用实例(让它读走新凭据)', async () => {
     const app = makeApp()
     const res = await request(app).post('/api/weixin/setup/confirm').send({
       accountId: 'acct1',
@@ -144,7 +218,26 @@ describe('weixin routes', () => {
     })
     expect(res.status).toBe(200)
     expect(mockManager.saveAccount).toHaveBeenCalledWith('acct1', 'tok-xyz', undefined)
-    expect(mockManager.reload).toHaveBeenCalled()
+    expect(dedicated.restart).toHaveBeenCalled()
+    expect(mockManager.reload).not.toHaveBeenCalled()
+  })
+
+  it('POST /api/weixin/setup/confirm 在宿主进程上走 manager.reload', async () => {
+    const prev = process.env.ZAI_APP
+    process.env.ZAI_APP = 'weixin'
+    try {
+      const app = makeApp()
+      const res = await request(app).post('/api/weixin/setup/confirm').send({
+        accountId: 'acct2',
+        token: 'tok-abc',
+      })
+      expect(res.status).toBe(200)
+      expect(mockManager.reload).toHaveBeenCalled()
+      expect(dedicated.restart).not.toHaveBeenCalled()
+    } finally {
+      if (prev === undefined) delete process.env.ZAI_APP
+      else process.env.ZAI_APP = prev
+    }
   })
 
   it('POST /api/weixin/setup/start returns 502 when manager returns null', async () => {

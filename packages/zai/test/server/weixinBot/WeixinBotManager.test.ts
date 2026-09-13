@@ -61,6 +61,8 @@ function makeManager(deps?: Partial<{ getSettings: () => WeixinBotSettings | nul
     getSettings: deps?.getSettings ?? (() => null),
     // P6:测试进程没有 ZAI_SUPERVISOR_PID,显式放行 supervisor 门控。
     isManagedChild: () => true,
+    // 专用实例门禁:测试进程没有 ZAI_APP,显式声明"本进程就是通道宿主"。
+    isChannelHost: () => true,
     createAdapter: deps?.createAdapter ?? ((s) => {
       const a = new WeixinAdapter({
         accountId: s.accountId ?? 'acct',
@@ -416,6 +418,7 @@ describe('WeixinBotManager', () => {
     const manager = new WeixinBotManager({
       getSettings: () => ({ enabled: true, accountId: 'acct', token: 'tk-nosup' }),
       isManagedChild: () => false,
+      isChannelHost: () => true,
       createAdapter: (s) => new WeixinAdapter({
         accountId: s.accountId ?? 'acct',
         token: s.token ?? 'tk',
@@ -425,6 +428,27 @@ describe('WeixinBotManager', () => {
     })
     await manager.start()
     expect(manager.state()).toBe('supervisor_required')
+    expect(manager.getAdapter()).toBeNull()
+    expect(manager.status().owner).toBe(false)
+  })
+
+  it('专用实例门禁:非 app=weixin 进程 → dedicated_instance_required,不取锁、不建 adapter', async () => {
+    // 主实例(用户日常访问的 Web 服务)走的正是这条:它不再抢占 owner 锁,
+    // 通道完全交给按配置拉起出来的专用实例。
+    const fetchImpl = mockFetchOk({ ret: 0, errcode: 0 })
+    const manager = new WeixinBotManager({
+      getSettings: () => ({ enabled: true, accountId: 'acct', token: 'tk-not-host' }),
+      isManagedChild: () => true,
+      isChannelHost: () => false,
+      createAdapter: (s) => new WeixinAdapter({
+        accountId: s.accountId ?? 'acct',
+        token: s.token ?? 'tk',
+        fetchImpl,
+        mediaDir: mkdtempSync(join(tmpdir(), 'zai-mgr-')),
+      }),
+    })
+    await manager.start()
+    expect(manager.state()).toBe('dedicated_instance_required')
     expect(manager.getAdapter()).toBeNull()
     expect(manager.status().owner).toBe(false)
   })

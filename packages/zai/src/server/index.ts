@@ -140,6 +140,18 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
     await initInstanceSupervisor({ cwd: opts.cwd })
   }
 
+  // 微信专用实例编排(2026-09-13):主实例启动时按 `settings.weixinBot.enabled`
+  // 决定是否要有微信通道宿主 —— 先读机器级 owner 锁,无锁则拉起一个
+  // `app=weixin` 的受管实例独占通道(默认端口 9199,面板可配;cwd 默认用户
+  // 主目录,面板可配)。有活锁说明已有实例在收消息,不重启它。
+  //
+  // 必须排在 `initInstanceSupervisor` 之后:编排要调 `getInstanceSupervisor()`。
+  // fire-and-forget —— 实例启不起来(端口被占 / cwd 不存在)不该阻断 zai 启动,
+  // 失败信息会留在实例的 lastError 与面板上。
+  void import('./services/weixinBot/weixinDedicatedInstance.js')
+    .then((m) => m.maybeProvisionWeixinInstance())
+    .catch((err) => console.warn('[weixin.instance] boot provisioning failed:', err))
+
   // Ensure ~/.zai/ exists for persistent cache (manifest.json) and future
   // config data. This is fire-and-forget — if it fails the app still works,
   // just without disk persistence.

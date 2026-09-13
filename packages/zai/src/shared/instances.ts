@@ -39,13 +39,20 @@ export interface InstanceDefinition {
    */
   startPort?: number | null
   /**
-   * 启动 profile：'task-factory' = 任务工厂实例（打开 /super-tasks、锁定调度器 Agent）。
-   * 该值经 supervisor spawn `--app` 传给子进程，并在 `/api/system` 回显。
-   * 子进程 `cli/index.ts` 把它落到 `process.env.ZAI_APP`；`routes/agent.ts`
-   * 看到该 env 后强制把所有新建会话的 `mainAgent` 锁定为 `task-factory`，
-   * 不走全局 `settings.mainAgent`。`undefined` 是默认（无 profile），行为与既有实例一致。
+   * 启动 profile。
+   *   - `'task-factory'` = 任务工厂实例(打开 /super-tasks、锁定调度器 Agent)。
+   *   - `'weixin'` = 微信专用实例 —— 机器上唯一持有微信通道 owner 锁、
+   *     收发微信消息的进程。由主实例按 `settings.weixinBot` 自动拉起
+   *     (见 services/weixinBot/weixinDedicatedInstance.ts),也可以由用户在
+   *     实例管理页手动创建。
+   *
+   * 该值经 supervisor spawn `--app` 传给子进程,并在 `/api/system` 回显。
+   * 子进程 `cli/index.ts` 把它落到 `process.env.ZAI_APP`;`routes/agent.ts`
+   * 看到 `task-factory` 后强制把所有新建会话的 `mainAgent` 锁定,
+   * `maybeAutoStartWeixinBot()` 则只认 `weixin`(其余进程不碰通道)。
+   * `undefined` 是默认(无 profile),行为与既有实例一致。
    */
-  app?: 'task-factory'
+  app?: 'task-factory' | 'weixin'
 }
 
 export interface InstanceStatus {

@@ -30,6 +30,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import QRCode from 'qrcode'
 import { isManagedChild } from '../../../cli/managedChild.js'
+import { isWeixinChannelHost, DEFAULT_WEIXIN_INSTANCE_PORT } from './channelProfile.js'
 import { getCachedZaiSettingsSync } from '../zaiSettingsStore.js'
 import {
   WeixinOwnerLock,
@@ -61,6 +62,11 @@ export type WeixinManagerState =
   | 'standby'
   /** 本进程不是由 supervisor 拉起,禁止启动通道。 */
   | 'supervisor_required'
+  /**
+   * 本进程不是 `app=weixin` 专用实例 —— 通道归专用实例独占,本进程不跑通道,
+   * 只负责按配置把它拉起来(见 weixinDedicatedInstance.ts)。
+   */
+  | 'dedicated_instance_required'
 
 export type { WeixinStatus }
 
@@ -80,6 +86,12 @@ export interface WeixinBotManagerDeps {
   createAdapter: (settings: WeixinBotSettings) => WeixinAdapter
   /** P6 门控。默认 `isManagedChild()`;测试注入 `() => true`。 */
   isManagedChild?: () => boolean
+  /**
+   * 通道宿主门控(2026-09-13)。默认 `isWeixinChannelHost()` —— 即
+   * `ZAI_APP === 'weixin'` 的专用实例才是宿主;测试注入 `() => true`。
+   * 非宿主进程一律 `dedicated_instance_required`,不取锁、不 poll、不出站。
+   */
+  isChannelHost?: () => boolean
   /** P5 取锁。默认 `WeixinOwnerLock.acquire`。 */
   acquireOwner?: (info: WeixinOwnerInfo) => Promise<Awaited<ReturnType<typeof WeixinOwnerLock.acquire>>>
   /** 注入 bridge(测试用)。 */
@@ -118,6 +130,7 @@ const DEFAULT_DEPS: WeixinBotManagerDeps = {
       process.env.WEIXIN_ALLOW_ALL_USERS === '1' || process.env.GATEWAY_ALLOW_ALL_USERS === '1',
   }),
   isManagedChild,
+  isChannelHost: isWeixinChannelHost,
   acquireOwner: (info) => WeixinOwnerLock.acquire(info),
   resolveCwd: resolveWeixinCwd,
 }
@@ -299,8 +312,31 @@ export class WeixinBotManager {
         boundSessions: bound,
       }
       this.ownerSnapshot = snap
+      // `configured` 的兜底刷新。面板每 3s 轮询 statusAsync,而**主实例从不真正
+      // 启动通道**(它在专用实例门禁处就 return 了),不能只靠 start() 设 hasCreds
+      // —— 否则主实例面板永远停在"扫码登录"形态,连专用实例的配置项都看不见。
+      // 短路在 !hasCreds:一旦有凭据就零开销。
+      if (!this.hasCreds) this.hasCreds = await this.probeCreds()
     } catch (err) {
       this.lastError = `refreshMetrics failed: ${(err as Error).message}`
+    }
+  }
+
+  /**
+   * 磁盘探测「本机是否已有可用凭据(accountId + token)」。
+   * 判据顺序:已连上的 adapter → 本次扫码确认的凭据 → settings.json →
+   * `accounts/<id>.json`(扫码凭据的真实落点,settings 里通常没有 token)。
+   */
+  private async probeCreds(): Promise<boolean> {
+    if (this.adapter?.getAccountId()) return true
+    if (this.lastConfirmedCreds) return true
+    const s = this.deps.getSettings()
+    if (s?.accountId && s.token) return true
+    try {
+      const persisted = await this.loadLatestAccount()
+      return !!(persisted && persisted.token)
+    } catch {
+      return false
     }
   }
 
@@ -398,6 +434,19 @@ export class WeixinBotManager {
       this.setState(
         'supervisor_required',
         'weixin channel only runs in a supervisor-managed process (ZAI_SUPERVISOR_PID missing)',
+      )
+      return
+    }
+
+    // ── 专用实例门禁:只有 `app=weixin` 的实例跑通道 ───────────────────
+    // 主实例(用户日常访问的 Web 服务)/ task-factory 实例走到这里就停:
+    // 它们不取 owner 锁、不 poll、不出站,通道完全交给专用实例
+    // (由主实例按 settings.weixinBot 拉起,见 weixinDedicatedInstance.ts)。
+    const channelHost = this.deps.isChannelHost ?? isWeixinChannelHost
+    if (!channelHost()) {
+      this.setState(
+        'dedicated_instance_required',
+        'weixin channel is owned by the dedicated app=weixin instance; this process does not run it',
       )
       return
     }
@@ -836,6 +885,10 @@ export class WeixinBotManager {
       rateLimitCircuitThreshold: 1,
       rateLimitCircuitOpenSeconds: 30.0,
       sessionTtlHours: 6,
+      // QR 登录期间用不到实例编排参数,但 WeixinBotSettings 要求完整形状
+      // (schema 给了 default,所以类型是 required)。
+      instancePort: DEFAULT_WEIXIN_INSTANCE_PORT,
+      instanceCwd: '',
     }
     // 归一化成完整 settings(补 schema 默认值),createAdapter 契约要求完整形状。
     const parsedBase = WeixinBotSettingsSchema.safeParse(this.deps.getSettings() ?? dummySettings)
@@ -933,6 +986,8 @@ export class WeixinBotManager {
         rateLimitCircuitThreshold: base.rateLimitCircuitThreshold ?? 1,
         rateLimitCircuitOpenSeconds: base.rateLimitCircuitOpenSeconds ?? 30.0,
         sessionTtlHours: base.sessionTtlHours ?? 6,
+        instancePort: base.instancePort ?? DEFAULT_WEIXIN_INSTANCE_PORT,
+        instanceCwd: base.instanceCwd ?? '',
         ilinkUserId,
       }
       this.lastConfirmedCreds = creds

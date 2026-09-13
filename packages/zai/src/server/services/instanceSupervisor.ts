@@ -70,7 +70,7 @@ type Entry = { def: InstanceDefinition; status: InstanceStatus; child: ChildProc
 
 export interface InstanceSupervisor {
   getSnapshots: () => InstanceSnapshot[]
-  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null; app?: 'task-factory' }) => Promise<InstanceSnapshot>
+  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null; app?: InstanceDefinition['app'] }) => Promise<InstanceSnapshot>
   startInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
   stopInstance: (id: string) => Promise<InstanceSnapshot>
   restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
@@ -276,11 +276,14 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         const useLan = opts?.lan ?? entry.def.lan ?? false
         const args: string[] = [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open']
         if (useLan) args.push('--lan')
-        // 应用 profile 透传：task-factory 实例把 `--app task-factory` 传给 child，
-        // 让 child 的 `cli/index.ts` action 落到 `process.env.ZAI_APP`，进而
-        // `routes/agent.ts` 据此锁定 `mainAgent = 'task-factory'`。其它值不传，
-        // child 走默认 profile（无 mainAgent 强制）。
-        if (entry.def.app === 'task-factory') args.push('--app', 'task-factory')
+        // 应用 profile 透传：把 `--app <profile>` 传给 child，让 child 的
+        // `cli/index.ts` action 落到 `process.env.ZAI_APP`。两个 profile 的
+        // 下游消费者各自读它：
+        //   - `task-factory` → `routes/agent.ts` 锁定 `mainAgent`；
+        //   - `weixin` → `maybeAutoStartWeixinBot()` 才允许启动微信通道
+        //     （其余进程一律不碰通道，见 weixinDedicatedInstance.ts）。
+        // 值域已在 `routes/instances.ts` 收窄；这里原样透传。
+        if (entry.def.app) args.push('--app', entry.def.app)
         // 进程标题:让 ps / top / macOS Activity Monitor 在 spawn 后立即
         // 显示 `zai[name]:port` 而不是 `node .../bin/zai.js`。`argv0` 改
         // `argv[0]`(Linux ps/macOS ps 列都从 argv[0] 起始读);`ZAI_PROCESS_TITLE`
@@ -387,7 +390,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       // assertions can observe the latest persisted snapshot deterministically.
       // Production callers should never invoke this.
       __flushPendingWrites: async () => { await writeChain },
-      async createInstance({ name, cwd, lan, port, app }: { name: string; cwd: string; lan?: boolean; port?: number | null; app?: 'task-factory' }) {
+      async createInstance({ name, cwd, lan, port, app }: { name: string; cwd: string; lan?: boolean; port?: number | null; app?: InstanceDefinition['app'] }) {
         const trimmed = name.trim(); for (const entry of entries.values()) if (entry.def.name === trimmed) throw new InstanceSupervisorError('DUPLICATE_NAME', `duplicate name: ${trimmed}`)
         const def: InstanceDefinition = {
           id: `inst_${randomUUID().slice(0, 8)}`,

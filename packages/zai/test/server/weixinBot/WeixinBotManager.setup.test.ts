@@ -82,6 +82,8 @@ function makeManager(opts: {
     getSettings: () => opts.settings ?? null,
     // P6:测试进程无 ZAI_SUPERVISOR_PID,显式放行,验证 QR → reload → connect。
     isManagedChild: () => true,
+    // 专用实例门禁:测试进程没有 ZAI_APP,显式声明"本进程就是通道宿主"。
+    isChannelHost: () => true,
     createAdapter: opts.createAdapter ?? ((s) => new WeixinAdapter({
       accountId: s.accountId ?? 'pending',
       token: s.token ?? 'pending',
