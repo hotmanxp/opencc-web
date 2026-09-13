@@ -151,8 +151,15 @@ export default function MobileSuperTaskCard({
           onOpen(task.id)
         }
       }}
-      className="relative flex flex-col gap-1.5 px-3 py-2.5 rounded-[10px] bg-white border border-[#e5e9f0] cursor-pointer min-h-[108px] outline-none"
+      className="relative gap-1.5 px-3 py-2.5 rounded-[10px] bg-white border border-[#e5e9f0] cursor-pointer outline-none"
       style={{
+        // zai patch (2026-09-05, tf-7l9rsb47): 高度 / flex 用 inline style
+        // 暴露给 happy-dom 读 el.style.minHeight / display / flexDirection,
+        // 让 useAgentStore.mobileSuperTaskCard.height.test 的契约断言能命中。
+        // 桌面 SuperTaskCard 同款行为由 desktop 卡片测试覆盖,二者口径一致。
+        minHeight: 108,
+        display: 'flex',
+        flexDirection: 'column',
         borderLeft: `4px solid ${accent}`,
         boxShadow: '0 1px 3px rgba(15,23,42,.06)',
       }}

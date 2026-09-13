@@ -45,10 +45,12 @@ describe('GET /api/fs/content-search', () => {
     expect(res.body.ok).toBe(false);
   });
 
-  test('returns 400 when q exceeds MAX_QUERY_LEN (64)', async () => {
+  test('returns 400 when q exceeds MAX_QUERY_LEN (512)', async () => {
+    // zai patch (2026-09-12): MAX_QUERY_LEN 在 fs.ts 从历史 64 提到 512,
+    // 用 513 字符覆盖"超过 MAX_QUERY_LEN"分支,旧 "65 字符" 路径已不再生效。
     const res = await request(makeApp(root))
       .get('/api/fs/content-search')
-      .query({ q: 'a'.repeat(65) });
+      .query({ q: 'a'.repeat(513) });
     expect(res.status).toBe(400);
     expect(res.body.ok).toBe(false);
   });

@@ -46,7 +46,7 @@ describe('FilePreviewDrawer', () => {
     expect(img.getAttribute('src') ?? '').toMatch(/^data:image\/png;base64,AAAA$/)
   })
 
-  it('renders html via <iframe> with sandbox=""', async () => {
+  it('renders html via <iframe> with sandbox="allow-scripts"', async () => {
     mockFetch({ kind: 'html', mime: 'text/html', content: '<h1>x</h1>', size: 8, mtime: 0 })
     useAgentStore.setState({ filePreviewPath: '/a.html' })
     render(<FilePreviewDrawer />)
@@ -59,7 +59,11 @@ describe('FilePreviewDrawer', () => {
       check()
     })
     expect(iframe).not.toBeNull()
-    expect(iframe!.getAttribute('sandbox')).toBe('')
+    // FilePreviewBody 复用于 desktop FilePreviewBody + splitPane/FsTab,
+    // 共享的契约: allow-scripts(让 HTML 自带 JS 能跑) +
+    // 故意不带 allow-same-origin(iframe 为 opaque-origin,无法读宿主
+    // cookie / DOM)。FsTab.test.tsx 同一契约,这里保持一致。
+    expect(iframe!.getAttribute('sandbox')).toBe('allow-scripts')
   })
 
   it('renders binary metadata + open-folder button', async () => {

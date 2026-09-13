@@ -21,7 +21,7 @@ vi.mock("../components/ConversationInfoButton.js", () => ({
 }))
 vi.mock("../lib/api.js", () => ({
   api: {
-    post: vi.fn(async () => ({})),
+    post: vi.fn(async () => ({ sessionId: 'mock-sess-1' })),
   },
 }))
 

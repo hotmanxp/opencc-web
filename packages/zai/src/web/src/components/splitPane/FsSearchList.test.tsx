@@ -69,7 +69,10 @@ describe('FsSearchList', () => {
     expect(onSelect).toHaveBeenCalledWith('src/foo.ts');
   });
 
-  test('right-clicking a row fires onItemContextMenu with path and coords', () => {
+  test('right-clicking a row fires onItemContextMenu with path, coords and kind', () => {
+    // zai patch (2026-09-12): 回调新增第 4 参数 kind('file' | 'dir'),
+    // 让 Desktop 资源管理器区分右键目标,file → 复制路径 / 预览,
+    // dir → 在新窗口打开。FsContentSearchList 同步同款。
     const onItemContextMenu = vi.fn();
     render(
       <FsSearchList
@@ -84,7 +87,7 @@ describe('FsSearchList', () => {
     );
     const rows = screen.getAllByTestId('fs-search-row');
     fireEvent.contextMenu(rows[1], { clientX: 120, clientY: 240 });
-    expect(onItemContextMenu).toHaveBeenCalledWith('src/FooRunner.tsx', 120, 240);
+    expect(onItemContextMenu).toHaveBeenCalledWith('src/FooRunner.tsx', 120, 240, 'file');
   });
 
   test('renders plain path without per-character highlight', () => {

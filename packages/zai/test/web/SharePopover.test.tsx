@@ -85,10 +85,10 @@ describe("SharePopover", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     render(<SharePopover />);
-    // primary IP 已进 QR 区, "其它可用 IP" 分组只剩 10.0.0.2
-    const copyBtns = screen.getAllByRole("button", { name: /复制/ });
-    expect(copyBtns).toHaveLength(1);
-    fireEvent.click(copyBtns[0]!);
+    // 验证 "其它可用 IP" 分组里的 10.0.0.2 复制按钮: 用 data-testid 精确选择
+    // (避免和 primary IP 复制 + 代理模板复制的同名 "复制" 按钮混淆)。
+    const copyBtn = screen.getByTestId("share-copy-10.0.0.2");
+    fireEvent.click(copyBtn);
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(
         "http://10.0.0.2:9888/agent?sid=sess-test-123",
@@ -118,8 +118,9 @@ describe("SharePopover", () => {
     expect(screen.getByText(/\/m\?sid=sess-test-123/)).toBeInTheDocument();
     // "其它可用 IP" 分组标题
     expect(screen.getByText(/其它可用 IP/)).toBeInTheDocument();
-    // 2 个 IP: primary 已在 QR 区(无复制按钮), "其它可用 IP" 分组只剩 1 个 row → 1 个复制按钮
-    expect(screen.getAllByRole("button", { name: /复制/ })).toHaveLength(1);
+    // 2 个 IP: "其它可用 IP" 分组只剩 10.0.0.2 → 1 个 share-copy-* 按钮
+    // (用 data-testid 精确选择, 不与 primary / 代理模板的同名 "复制" 按钮混淆)
+    expect(screen.getByTestId("share-copy-10.0.0.2")).toBeInTheDocument();
   });
 
   test("primary QRCode value points to /m?sid=<sid> with first IP", () => {
@@ -147,8 +148,8 @@ describe("SharePopover", () => {
     expect(screen.getByTestId("share-primary-qrcode")).toBeInTheDocument();
     // "其它可用 IP" 标题不出现
     expect(screen.queryByText(/其它可用 IP/)).not.toBeInTheDocument();
-    // 仅 1 个 IP: 无 "其它可用 IP" 分组 + primary IP 不在 copy 列表 → 0 复制按钮
-    expect(screen.queryAllByRole("button", { name: /复制/ })).toHaveLength(0);
+    // 仅 1 个 IP: 没有其它可用 IP 分组 → 没有 share-copy-* 按钮
+    expect(screen.queryByTestId("share-copy-192.168.1.5")).not.toBeInTheDocument();
   });
 });
 

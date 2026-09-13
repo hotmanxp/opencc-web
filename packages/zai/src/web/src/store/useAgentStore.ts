@@ -574,10 +574,11 @@ export type AgentStoreApi = ReturnType<typeof createAgentStore>
 export const useAgentStore: AgentStoreApi = createAgentStore()
 
 export function createAgentStore() {
+  return create<AgentState>((set, get) => {
   // 自动清理 helper 闭包(2026-09-02 factory 改造):
   // 之前是模块级函数,硬编码引用 useAgentStore 单例 — 一旦 store 走 factory
   // 多实例(Modal 内的 intake store),就要让 helper 跟着 closure 走。把它挪到
-  // createAgentStore 内部,捕获本次 store 的 set (zustand 命令式更新 api),
+  // create 的回调内部,捕获本次 store 的 set/get (zustand 命令式更新 api),
   // reducer 内调用 scheduleClear(sid) 即可,定时器字典在 store state 里
   // 独立保留,Modal 卸载后随 store 一起 GC,不会跨实例污染。
   const scheduleTaskListClearIfAllDone = (sessionId: string): void => {
@@ -625,7 +626,7 @@ export function createAgentStore() {
     }))
   }
 
-  return create<AgentState>((set, get) => ({
+  return {
   sessionId: null,
   creatingSession: false,
   sessions: [],
@@ -2157,7 +2158,8 @@ export function createAgentStore() {
       }
     })
   },
-}))
+  }
+})
 }
 
 /**

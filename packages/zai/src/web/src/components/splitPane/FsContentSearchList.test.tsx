@@ -99,7 +99,8 @@ describe('FsContentSearchList', () => {
     expect(onSelect).toHaveBeenCalledWith('src/foo.ts', 42);
   });
 
-  test('right-clicking a row fires onItemContextMenu with path and coords', () => {
+  test('right-clicking a row fires onItemContextMenu with path, coords and kind', () => {
+    // zai patch (2026-09-12): 回调新增第 4 参数 kind, 与 FsSearchList 同步。
     const onItemContextMenu = vi.fn();
     render(
       <FsContentSearchList
@@ -114,7 +115,7 @@ describe('FsContentSearchList', () => {
     );
     const rows = screen.getAllByTestId('fs-content-row');
     fireEvent.contextMenu(rows[1], { clientX: 80, clientY: 160 });
-    expect(onItemContextMenu).toHaveBeenCalledWith('src/bar.ts', 80, 160);
+    expect(onItemContextMenu).toHaveBeenCalledWith('src/bar.ts', 80, 160, 'file');
   });
 
   test('shows loading spinner when loading and no entries', () => {
