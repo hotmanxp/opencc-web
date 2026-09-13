@@ -142,7 +142,13 @@ export default defineConfig({
     // Exclude the vendored opencc-src/** — those are opencc's own tests
     // (vitest globals, bun:test imports, etc.) that fail under Node.
     include: ['test/**/*.test.ts', 'test/**/*.test.mjs', 'src/compat/repl/__tests__/**/*.test.ts'],
-    setupFiles: ['./src/compat/runtime/bun-protocol.mjs'],
+    setupFiles: [
+      './src/compat/runtime/bun-protocol.mjs',
+      // 兜底:vitest 2.1.9 在 src/compat/repl/__tests__/ 下的 27 个 test
+      // 没用 globals:true 自动注入 afterAll/beforeAll,这里手动挂到 globalThis
+      // 让这批 test 不必每个都 `import { afterAll } from 'vitest'`。
+      './src/compat/runtime/vitest-globals-fix.mjs',
+    ],
     exclude: ['**/node_modules/**', '**/dist/**', 'src/opencc-src/**'],
     // 默认 vitest 5s testTimeout 在 zn-agent-core 太紧:
     // 1) bundle self-check after build:core 要 import dist/opencc-core.mjs

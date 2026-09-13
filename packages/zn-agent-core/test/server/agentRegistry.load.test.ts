@@ -100,4 +100,4 @@ describe('AgentRegistry load', () => {
     expect(a?.description).toBe('user override')
     await rm(dir, { recursive: true })
   })
-})
+}, { timeout: 30_000 })
