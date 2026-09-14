@@ -39,6 +39,21 @@ describe('getModelMaxOutputTokens', () => {
     expect(getModelMaxOutputTokens('zhiniao-MiniMax-M2.7-highspeed')).toBe(131_072)
   })
 
+  it('DeepSeek V4 family — 262k, matching the core descriptor value', () => {
+    // Unified 2026-09-14: defineModel descriptors, the deepseek vendor
+    // catalog, openaiContextWindows and builtinProviders.openplatformCaps
+    // all agree on 262_144 for this family. Before this row existed the
+    // lookup fell through to DEFAULT (64k) while the picker displayed the
+    // descriptor value — 262K shown, 64K actually sent.
+    expect(getModelMaxOutputTokens('deepseek-flash')).toBe(262_144)
+    expect(getModelMaxOutputTokens('deepseek-v4-flash')).toBe(262_144)
+    expect(getModelMaxOutputTokens('deepseek-v4-pro')).toBe(262_144)
+  })
+
+  it('deepseek-v4-pro-0813 keeps its own 384k ceiling', () => {
+    expect(getModelMaxOutputTokens('deepseek-v4-pro-0813')).toBe(384_000)
+  })
+
   it('Anthropic Claude Sonnet 4.5 — supports 64k (no more 8k truncation)', () => {
     expect(getModelMaxOutputTokens('claude-sonnet-4-5')).toBe(64_000)
   })

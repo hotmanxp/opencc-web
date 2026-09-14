@@ -251,10 +251,10 @@ const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
   'o3-mini':                  200_000,
   'o4-mini':                  200_000,
 
-  // DeepSeek V4 coding-agent models. DeepSeek's official coding-agent guide
-  // publishes V4 Pro at 1,048,576 context / 131,072 output; Flash is treated
-  // as the same family for local budgeting until a dedicated public model card
-  // lands.
+  // DeepSeek V4 coding-agent models. 1,048,576 context / 262,144 output is the
+  // single agreed value across every table (this file, defineModel descriptors,
+  // the deepseek vendor catalog, and zai's server-side cap). V4 Pro 0813 is a
+  // dated variant with its own 384,000 output ceiling.
   'deepseek-v4-flash':      1_048_576,
   'deepseek-v4-pro':        1_048_576,
   'deepseek-v4-pro-0813':   1_000_000,

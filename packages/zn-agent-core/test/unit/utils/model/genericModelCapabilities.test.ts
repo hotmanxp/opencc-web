@@ -24,8 +24,8 @@ import { lookupGenericModelCapabilities } from '@zn-ai/zn-agent-core'
 describe('lookupGenericModelCapabilities', () => {
   describe('defineModel() registry hits', () => {
     it('deepseek-v4-flash — exact descriptor match returns context + flags', () => {
-      // integrations/models/deepseek.ts:41-57 — defineModel('deepseek-v4-flash')
-      //   contextWindow: 1_048_576, maxOutputTokens: 65_536
+      // integrations/models/deepseek.ts:40-57 — defineModel('deepseek-v4-flash')
+      //   contextWindow: 1_048_576, maxOutputTokens: 262_144
       //   capabilities.supportsStreaming: true, supportsFunctionCalling: true,
       //                  supportsJsonMode: true, supportsVision: false
       const caps = lookupGenericModelCapabilities('deepseek-v4-flash')
@@ -76,15 +76,14 @@ describe('lookupGenericModelCapabilities', () => {
       expect(caps!.contextWindow).toBe(128_000)
     })
 
-    it('deepseek-v4-flash — descriptor maxOutputTokens (65_536) wins over openai table (262_144)', () => {
-      // descriptor (integrations/models/deepseek.ts:55) declares 65_536.
-      // openaiContextWindows.ts:505 lists 262_144 with a comment noting
-      // "Flash is treated as the same family for local budgeting" — a
-      // temporary placeholder until a dedicated public model card lands.
-      // We treat defineModel as canonical and pin the descriptor value.
+    it('deepseek-v4-flash — descriptor and openai table agree on 262_144', () => {
+      // descriptor (integrations/models/deepseek.ts:56) and
+      // openaiContextWindows.ts both declare 262_144 for the V4 family.
+      // The descriptor still wins the field; the two sources no longer
+      // disagree, so the picker and the request budget match.
       const caps = lookupGenericModelCapabilities('deepseek-v4-flash')
       expect(caps).toBeDefined()
-      expect(caps!.maxOutputTokens).toBe(65_536)
+      expect(caps!.maxOutputTokens).toBe(262_144)
     })
   })
 

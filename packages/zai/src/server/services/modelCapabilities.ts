@@ -66,6 +66,16 @@ const MODEL_MAX_OUTPUT_TOKENS: ReadonlyMap<string, number> = new Map([
   ['zhiniao-MiniMax-M2.7-highspeed', 131_072],
   ['zhiniao-qwen3.6-plus', 65_536],
   ['zhiniao-glm-5.1', 262_144],
+  // DeepSeek V4 family (Open Platform / Nova gateway). 262_144 matches the
+  // unified value in zn-agent-core (defineModel descriptors + deepseek vendor
+  // catalog + openaiContextWindows) and builtinProviders.openplatformCaps.
+  // Without an explicit row these fall through to DEFAULT_MAX_OUTPUT_TOKENS
+  // (64_000) while the picker displays the descriptor value — the display /
+  // request mismatch this table exists to prevent.
+  ['deepseek-flash', 262_144],
+  ['deepseek-v4-flash', 262_144],
+  ['deepseek-v4-pro', 262_144],
+  ['deepseek-v4-pro-0813', 384_000],
   // Anthropic (first-party through Anthropic SDK)
   ['claude-opus-4-5', 64_000],
   ['claude-opus-4-1', 32_000],

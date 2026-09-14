@@ -53,7 +53,7 @@ export default [
       supportsPreciseTokenCount: false,
     },
     contextWindow: 1_048_576,
-    maxOutputTokens: 65_536,
+    maxOutputTokens: 262_144,
   }),
   defineModel({
     id: 'deepseek-v4-pro',
@@ -71,10 +71,10 @@ export default [
       supportsPreciseTokenCount: false,
     },
     contextWindow: 1_048_576,
-    maxOutputTokens: 65_536,
+    maxOutputTokens: 262_144,
   }),
   // deepseek-flash: vision-capable flash variant. Parameters aligned with
-  // deepseek-v4-flash (1M context / 65_536 output, no reasoning) but
+  // deepseek-v4-flash (1M context / 262,144 output, no reasoning) but
   // supportsVision flipped to true for image recognition.
   defineModel({
     id: 'deepseek-flash',
@@ -92,6 +92,6 @@ export default [
       supportsPreciseTokenCount: false,
     },
     contextWindow: 1_048_576,
-    maxOutputTokens: 65_536,
+    maxOutputTokens: 262_144,
   }),
 ]
