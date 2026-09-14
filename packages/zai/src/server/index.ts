@@ -32,6 +32,7 @@ import replHistoryRouter from './routes/replHistory.js';
 import transcriptRouter from './routes/transcript.js';
 import instancesRouter from './routes/instances.js';
 import superTasksRouter from './routes/superTasks.js';
+import voiceRouter from './routes/voice.js';
 import { ensureManifestDir } from './services/manifest.js';
 import { initInstanceSupervisor } from './services/instanceSupervisor.js';
 import { initAgentRuntime, getAskRegistry, getApproveRegistry, getPermissionRegistry } from './services/agentRuntime.js';
@@ -245,6 +246,8 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // /api/super-tasks — 任务工厂 REST 端点(list / detail / delete / managed / inject)。
   // 路由挂在 /api 前缀下,内部路径自带 super-tasks,与 /api/agent 不冲突。
   app.use('/api', superTasksRouter);
+  // /api/voice/getASRToken — WorkBuddy 登录态下发（只读不刷新，见 routes/voice.ts 头注）。
+  app.use('/api', voiceRouter);
   // 注入 globalThis.__zaiTaskFactoryEmitter → eventBus 桥接,让 core 内
   // emitTaskFactoryEvent 转 zai 的 SSE task_factory.* 事件。幂等。
   initTaskFactoryBridge();
