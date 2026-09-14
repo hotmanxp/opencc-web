@@ -18,6 +18,7 @@ import ReactMarkdown from "react-markdown";
 import "katex/dist/katex.min.css";
 import { remarkPlugins, rehypePlugins } from "./markdownPlugins.js";
 import { MermaidBlock } from "./MermaidBlock.js";
+import { MathBlock } from "./MathBlock.js";
 import { ensureMermaidBundle, hasMermaidBundle } from "./mermaidRenderer.js";
 import { FilePathChip } from "./FilePathChip.js";
 import { isFilePath, splitFilePaths } from "../../lib/filePathDetect.js";
@@ -234,6 +235,9 @@ const markdownComponents = {
   ),
   li: ({ children }: any) => <li className="mb-1">{renderWithFilePaths(children)}</li>,
   code: CodeBlock,
+  // 块级公式容器 —— 由 markdownPlugins.ts 的 rehypeKatexContainer 注入。
+  // 行内公式不在这里处理,直接走 .katex(嵌在正文流)。
+  "math-block": ({ children }: any) => <MathBlock>{children}</MathBlock>,
   // 透明渲染,只负责给内部 <code> 打上「在围栏块里」的标记(见 InFencedCode)
   pre: ({ children }: any) => (
     <InFencedCode.Provider value={true}>{children}</InFencedCode.Provider>

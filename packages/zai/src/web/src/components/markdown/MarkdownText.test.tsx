@@ -69,6 +69,37 @@ $$`}
     expect(container.querySelector(".katex")).toBeTruthy();
   });
 
+  it("wraps a block $$...$$ formula in the MathBlock container with header + body", () => {
+    // 块级公式应被 rehypeKatexContainer 包成 <math-block> → MathBlock,
+    // 渲染出 data-testid="math-block" 的卡片与头部条。
+    // 注意:`$$` 必须独占行 remark-math 才认作 block math —— 这里用多行
+    // 模板保留真换行,不是 String.raw 的字面 \n。
+    const { container } = render(
+      <MarkdownText
+        text={`$$
+x = 1
+$$`}
+      />,
+    );
+    expect(container.querySelector('[data-testid="math-block"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="math-block-header"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="math-block-body"]')).toBeTruthy();
+    // KaTeX 节点应在 body 内
+    expect(
+      container.querySelector('[data-testid="math-block-body"] .katex'),
+    ).toBeTruthy();
+  });
+
+  it("does NOT wrap an inline $...$ formula in the MathBlock container", () => {
+    // 行内公式嵌在正文流,不应该出现 math-block 容器
+    const { container } = render(
+      <MarkdownText text={String.raw`质能方程 $E = mc^2$ 成立`} />,
+    );
+    expect(container.querySelector('[data-testid="math-block"]')).toBeNull();
+    expect(container.querySelector(".katex")).toBeTruthy();
+    expect(container.querySelector(".katex-display")).toBeNull();
+  });
+
   it("renders inline $...$ as KaTeX without a display block", () => {
     const { container } = render(
       <MarkdownText text={String.raw`质能方程 $E = mc^2$ 成立`} />,

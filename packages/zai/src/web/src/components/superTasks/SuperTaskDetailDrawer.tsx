@@ -3,6 +3,7 @@ import { Alert, Button, Drawer, Empty, Space, Tabs, Tag, Typography, Spin, Timel
 import type { CSSProperties } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { MarkdownText } from '../markdown/MarkdownText.js'
+import { MathBlock } from '../markdown/MathBlock.js'
 import { remarkPlugins, rehypePlugins } from '../markdown/markdownPlugins.js'
 import { fetchSuperTaskDetail } from '../../lib/superTaskApi'
 import { subscribeTaskEvents } from '../../lib/taskApi'
@@ -59,6 +60,13 @@ const STATUS_BADGE: Record<string, { color: string; label: string }> = {
   verifying: { color: 'orange', label: '验证中' },
   done: { color: 'green', label: '完成' },
   failed: { color: 'red', label: '失败' },
+}
+
+// 与主 MarkdownText / TaskDrawer 共用同一个 MathBlock;只注册 math-block 这一
+// 个自定义元素,其它走 react-markdown 默认组件即可(任务事件流只关心 assistant
+// 文本与 thinking,不需要代码块 / 表格 / 引用块等自定义渲染)。
+const eventMarkdownComponents = {
+  'math-block': ({ children }: any) => <MathBlock>{children}</MathBlock>,
 }
 
 /**
@@ -536,7 +544,7 @@ function RenderedEventRow({
     case 'assistant-text':
       return (
         <div className="mt-0.5">
-          <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>{ev.text}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={eventMarkdownComponents}>{ev.text}</ReactMarkdown>
         </div>
       )
     case 'thinking':

@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 // KaTeX 样式 + 与主 MarkdownText 共用的插件链(数学公式)
 import 'katex/dist/katex.min.css'
 import { remarkPlugins, rehypePlugins } from './markdown/markdownPlugins.js'
+import { MathBlock } from './markdown/MathBlock.js'
 import { Badge, Button, Drawer, Empty, Tag, Tooltip } from 'antd'
 import { useAppStore } from '../store/useAppStore'
 
@@ -83,6 +84,8 @@ const markdownComponents = {
   ul: ({ children }: any) => <ul className="mb-2 pl-5">{children}</ul>,
   ol: ({ children }: any) => <ol className="mb-2 pl-5">{children}</ol>,
   li: ({ children }: any) => <li className="mb-1">{children}</li>,
+  // 块级公式容器 —— 与主 MarkdownText 共用同一个 MathBlock。
+  'math-block': ({ children }: any) => <MathBlock>{children}</MathBlock>,
   code: ({ className, children }: any) => {
     const match = /language-(\w+)/.exec(className || '')
     if (!match) return <code className="bg-transparent text-[var(--accent-start)] px-1.5 py-px rounded font-medium font-mono text-[0.9em]">{children}</code>
