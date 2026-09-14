@@ -3,10 +3,10 @@ import { describe, it, expect, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { MermaidBlock } from "./MermaidBlock.js";
 
-// happy-dom 不支持 SVG layout,但 DOMPurify + 字符串注入能正常跑;beautiful-mermaid
-// 内部也不依赖 layout(纯字符串拼 SVG)。mermaidjs 在 happy-dom 下会抛
-// "Cannot read properties of null"——这条路径我们走 error 分支降级,assert
-// <details> 存在即可,不验证 SVG。
+// happy-dom 不支持 SVG layout,但字符串注入能正常跑;beautiful-mermaid
+// 内部也不依赖 layout(纯字符串拼 SVG),所以这边可以真实渲染出 <svg>。
+// 不支持的图类型(block-beta/gantt 等)走 error 分支降级 <details>,assert
+// <details> / 源码文本存在即可。
 
 describe("MermaidBlock", () => {
   it("renders a flowchart LR block as sanitized SVG (beautiful-mermaid path)", async () => {
@@ -77,6 +77,19 @@ describe("MermaidBlock", () => {
       '[data-testid="mermaid-block-loading"]',
     );
     expect(loading).toBeNull();
+  });
+
+  it("degrades unsupported diagram types (gantt) to the <details> source fallback", async () => {
+    const code = "gantt\n  title A\n  dateFormat YYYY-MM-DD";
+    const { container } = render(<MermaidBlock code={code} />);
+    await waitFor(
+      () => {
+        expect(container.querySelector("details")).not.toBeNull();
+      },
+      { timeout: 5000 },
+    );
+    expect(container.querySelector("svg")).toBeNull();
+    expect(container.textContent).toContain("gantt");
   });
 
   it("blocks <script> tags injected via beautified SVG output", async () => {

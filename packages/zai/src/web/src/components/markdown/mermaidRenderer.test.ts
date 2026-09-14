@@ -126,7 +126,7 @@ describe("mermaidRenderer detect-type routing", () => {
     expect(result.kind).toBe("beautiful");
   });
 
-  it("routes block-beta to mermaidjs (fallback)", async () => {
+  it("rejects block-beta as unsupported (no mermaidjs fallback anymore)", async () => {
     const { renderMermaidDiagram } = await import("./mermaidRenderer.js");
     const result = await renderMermaidDiagram(
       "block-beta\n  columns 1\n  block:A\n  end",
@@ -140,12 +140,13 @@ describe("mermaidRenderer detect-type routing", () => {
         border: "#333",
       },
     );
-    // happy-dom 跑 mermaidjs 会抛错,这是预期的(plan § 风险 3)
-    // 我们只验证路由走到了 mermaidjs 路径,SVG 是否成功不影响
-    expect(result.kind).toBe("mermaidjs");
+    // 官方 mermaid 库已移除:冷门类型直接降级,不渲染、也不抛错
+    expect(result.ok).toBe(false);
+    expect(result.kind).toBe("unsupported");
+    expect(result.message).toContain("block-beta");
   });
 
-  it("routes gantt to mermaidjs (fallback)", async () => {
+  it("rejects gantt as unsupported (no mermaidjs fallback anymore)", async () => {
     const { renderMermaidDiagram } = await import("./mermaidRenderer.js");
     const result = await renderMermaidDiagram(
       "gantt\n  title A\n  dateFormat YYYY-MM-DD\n  section S\n  Task :a1, 2026-01-01, 1d",
@@ -159,10 +160,31 @@ describe("mermaidRenderer detect-type routing", () => {
         border: "#333",
       },
     );
-    expect(result.kind).toBe("mermaidjs");
+    expect(result.ok).toBe(false);
+    expect(result.kind).toBe("unsupported");
   });
 
-  it("returns ok: false with sanitized empty SVG message", async () => {
+  it("isSupportedMermaid accepts the 6 supported types and rejects others", async () => {
+    const { isSupportedMermaid } = await import("./mermaidRenderer.js");
+    for (const ok of [
+      "flowchart LR\n A-->B",
+      "graph TD\n A-->B",
+      "sequenceDiagram\n A->>B: hi",
+      "classDiagram\n class A",
+      "stateDiagram-v2\n [*] --> A",
+      "stateDiagram\n [*] --> A",
+      "erDiagram\n USER ||--o{ POST : has",
+      'xychart-beta\n line [1,2]\n x ["a","b"]',
+      "%% comment first\nflowchart LR\n A-->B",
+    ]) {
+      expect(isSupportedMermaid(ok), ok).toBe(true);
+    }
+    for (const bad of ["pie\n title A", "gitGraph\n commit", "mindmap\n root", ""]) {
+      expect(isSupportedMermaid(bad), bad).toBe(false);
+    }
+  });
+
+  it("renders a flowchart into sanitized SVG without dangerous attrs", async () => {
     // 正常路径:有 svg
     const { renderMermaidDiagram } = await import("./mermaidRenderer.js");
     const result = await renderMermaidDiagram(

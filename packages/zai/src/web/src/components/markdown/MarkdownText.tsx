@@ -113,8 +113,8 @@ function CodeBlock({
     );
   }
   const text = String(children).replace(/\n$/, "");
-  // Mermaid 路由:```mermaid``` 块走独立渲染器(双 renderer + DOMPurify sanitize),
-  // 见 mermaidRenderer.ts。其它语言继续走 syntax highlighter。
+  // Mermaid 路由:```mermaid``` 块走独立渲染器(beautiful-mermaid + 自写正则
+  // sanitize),见 mermaidRenderer.ts。其它语言继续走 syntax highlighter。
   if (match[1] === "mermaid") {
     return <MermaidBlock code={text} />;
   }
@@ -249,8 +249,8 @@ export const MarkdownText = React.memo(function MarkdownText({ text }: { text: s
       warmedRef.current = true;
       void ensureSyntaxBundle();
     }
-    // Mermaid 双 renderer 也按需预热。beautiful + mermaidjs 同时拉
-    // (cache 由 ensureMermaidBundle 内部协调),等真正看到 mermaid 块时已就绪
+    // Mermaid renderer 也按需预热(cache 由 ensureMermaidBundle 内部接管),
+    // 等真正看到 mermaid 块时已就绪
     if (!hasMermaidBundle() && /```mermaid\b/.test(text)) {
       ensureMermaidBundle();
     }
