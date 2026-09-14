@@ -605,3 +605,74 @@ EOF
 | §8.1 单元测试 | Task 1 + Task 2 |
 | §8.3 手动验证 | Task 4 |
 | §10 验收清单 | Task 1 + 2 + 3 + 4 全部 |
+
+---
+
+## Post-implementation fix (2026-09-14, P0 — 回归修复)
+
+实现后上线即报 `Cannot read properties of undefined (reading 'data')`(每次 Bash 调用)。
+
+**根因**:`wrapBashToolWithCwdSync` 的 `call` 只 `await originalCall(...)` 便返回,
+未把 vendor `ToolResult` 透传出来。vendor 调用方
+`opencc-src/services/tools/toolExecution.ts:1481` 为
+`const result = await tool.call(...)`,紧跟 `:1504` 读 `result.data` → `result` 为
+`undefined` → 抛错。wrap 的触达路径已核验:vendor `tools.ts` 的 `const BashTool =
+wrapBashToolWithCwdSync(__RawBashTool)` 进入 `getAllBaseTools()`,
+runtime 工具池经 `createOpenccRuntime-impl.ts:153 assembleToolPool` ← `getAllBaseTools()`
+装配,故 wrap 在 live 路径上(`compat/tools/opencc/builtin.ts` 的
+`getOpenccBuiltinTools()` 当前无调用方)。
+
+**改动**:
+- `bashCwdWrap.ts`:`const result = await runWithSdkContext(ctx, () => originalCall(...))`
+  → 写回 CwdStore 后 `return result`(throw 语义不变,仍在 CwdStore 写入前抛出)。
+- `bashCwdWrap.ts`:新增 `get checkPermissions()` 转发 raw tool —— wrap 在 bundle
+  module-init 执行,早于 compat `forceAllowCheckPermissions()`(Object.defineProperty
+  打在 raw 身份上),spread 拷贝会把该 override 冻在旧值。
+- `test/unit/compat/bashCwdWrap.test.ts`:+3 用例(返回值 ×2 + checkPermissions 转发),
+  11/11 绿;已做红检(临时去掉 `return` → 返回值为例失败),确认用例能抓住该回归。
+
+**验收**:compat 106 测试全绿;`tsc --noEmit` 干净;`pnpm run build:core` 成功,
+dist 中 wrap 已含 `return`(`_5n` → `let l = await Tk(a,...); return ..., l`)。
+
+**Checklist 补遗**:透传型 wrapper 的"返回值/rethrow 契约"必须有用例守护,
+仅断言 CwdStore 副作用不足以覆盖。
+
+---
+
+## Post-implementation fix #2 (2026-09-14, P1 — cwd 仍不保持)
+
+**现象**:`cd /tmp && pwd` 返回 `/tmp`,但下一次 `pwd` 又回到项目根;tool 输出里带
+`Shell cwd was reset to ...`。
+
+**根因**:vendor `resetCwdIfOutsideProject()`
+(`opencc-src/tools/BashTool/utils.ts:170`)——每次前台 Bash 调用后,若 cwd 漂出
+allowed working directories(`originalCwd` + `additionalWorkingDirectories`),就
+`setCwd(originalCwd)` 拉回,并把 `Shell cwd was reset to <originalCwd>` 追加到输出。
+该拉回发生在 `BashTool.call` 内部(BashTool.tsx:819-824),**早于** cwd-sync wrap 读
+`ctx.cwd`,于是漂出的 cwd 永远进不了 `CwdStore`,跨 turn 自然是项目根。
+
+**为什么是回归**:zai 早在 2026-07-19 就决定把该函数 stub 掉
+(`docs/.../2026-07-19-zai-bash-cwd-tracking-design.md` §1.3 / §6.3:
+"`resetCwdIfOutsideProject` — 保持 stub false(不做权限限制)")。stub 位于旧
+`packages/zai-agent-core/src/tools/BashTool/utils.ts`(commit `7d32eacb`),
+opencc 0.20.0 以 un-stripped 全量源码重拷(`98ee7e5a`)时被上游真实实现覆盖,从此丢失。
+
+**改动**:
+- `opencc-src/tools/BashTool/utils.ts`:`resetCwdIfOutsideProject(_ctx) { return false }`
+  + zai patch 注释(指向 07-19 设计决策);删掉随之失效的 `logEvent` / `getCwd` /
+  `pathInAllowedWorkingPath` / `setCwd` / `shouldMaintainProjectWorkingDir` import
+  (顺带让该模块不再牵入 Shell.ts 重链)。`stdErrAppendShellResetMessage` 保留原样
+  (已不可达,BashTool.tsx / PowerShellTool.tsx 两处调用点都受 reset 结果门控)。
+  调用点不动 → BashTool 与 PowerShellTool 同时生效。
+- 新增金丝雀测试 `test/unit/compat/vendor/bashCwdResetStub.test.ts`:构造
+  "cwd 已漂出 allowed dirs"的场景,断言不返回 true、不调用 `setCwd`、`ctx.cwd` 不变。
+  上游实现一旦回来,该测试立刻红(已红检:断言 `expected true to be false`)。
+
+**验收**:canary 绿 / 上游实现下红;compat 107 全绿;zai `agent.cwd` +
+`runWithSdkContext` 测试绿;`tsc --noEmit` 干净;`build:core` 成功,
+bundle 内 `tengu_bash_tool_reset_to_original_dir` 引用数 0、reset 函数体为
+`function Cbe(e){return!1}`,两个调用点仍在。
+
+**手动复测(需重启 zai 载入新 bundle)**:
+1. `cd packages/zai && pwd` → `/Users/ethan/code/opencc-web/packages/zai`
+2. 下一轮 `pwd` → 同上(不再回到项目根,输出里不再有 "Shell cwd was reset to")

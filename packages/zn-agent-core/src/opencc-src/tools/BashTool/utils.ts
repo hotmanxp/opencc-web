@@ -5,12 +5,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/index.mjs'
 import { readFile, stat } from 'fs/promises'
 import { getOriginalCwd } from 'src/bootstrap/state.js'
-import { logEvent } from 'src/services/analytics/index.js'
 import type { ToolPermissionContext } from 'src/Tool.js'
-import { getCwd } from 'src/utils/cwd.js'
-import { pathInAllowedWorkingPath } from 'src/utils/permissions/filesystem.js'
-import { setCwd } from 'src/utils/Shell.js'
-import { shouldMaintainProjectWorkingDir } from '../../utils/envUtils.js'
 import { maybeResizeAndDownsampleImageBuffer } from '../../utils/imageResizer.js'
 import { getMaxOutputLength } from '../../utils/shell/outputLimits.js'
 import { countCharInString, plural } from '../../utils/stringUtils.js'
@@ -167,27 +162,39 @@ export function formatOutput(content: string): {
 export const stdErrAppendShellResetMessage = (stderr: string): string =>
   `${stderr.trim()}\nShell cwd was reset to ${getOriginalCwd()}`
 
+/**
+ * zai patch (2026-09-14, cwd-multi-session-persistence follow-up) — STUB.
+ *
+ * Upstream semantics: after every foreground Bash call, if the shell cwd
+ * drifted outside the allowed working directories, pull it back to
+ * `originalCwd` and append "Shell cwd was reset to ..." to the tool output.
+ *
+ * Why zai disables it: that pull-back runs INSIDE `BashTool.call`
+ * (BashTool.tsx:819-824), i.e. before the cwd-sync wrap in
+ * `compat/tools/opencc/bashCwdWrap.ts` reads `ctx.cwd`. So any `cd` that
+ * leaves the project subtree is undone before it can be recorded into
+ * `CwdStore` → the next turn restarts at the project root and
+ * "working directory persists between commands" silently stops holding
+ * (`cd /tmp && pwd` → /tmp, next call `pwd` → project root).
+ *
+ * zai deliberately does NOT confine the shell to the project dir —
+ * see docs/superpowers/specs/2026-07-19-zai-bash-cwd-tracking-design.md
+ * §1.3 && §6.3 ("resetCwdIfOutsideProject — 保持 stub false(不做权限
+ * 限制)"). That stub lived in the pre-opencc `zai-agent-core` tree and was
+ * lost when opencc 0.20.0 was copied in as full un-stripped source
+ * (commit 98ee7e5a), which brought upstream's real implementation back.
+ * This restores the 2026-07-19 decision.
+ *
+ * The parameter is kept (and the call sites at BashTool.tsx:821 /
+ * PowerShellTool.tsx:794 untouched) so the vendor diff stays one line.
+ *
+ * NOTE: `stdErrAppendShellResetMessage` above is now unreachable (only the
+ * two reset call sites use it) and is left as-is on purpose — the vendor
+ * text is never emitted while this returns false.
+ */
 export function resetCwdIfOutsideProject(
-  toolPermissionContext: ToolPermissionContext,
+  _toolPermissionContext: ToolPermissionContext,
 ): boolean {
-  const cwd = getCwd()
-  const originalCwd = getOriginalCwd()
-  const shouldMaintain = shouldMaintainProjectWorkingDir()
-  if (
-    shouldMaintain ||
-    // Fast path: originalCwd is unconditionally in allWorkingDirectories
-    // (filesystem.ts), so when cwd hasn't moved, pathInAllowedWorkingPath is
-    // trivially true — skip its syscalls for the no-cd common case.
-    (cwd !== originalCwd &&
-      !pathInAllowedWorkingPath(cwd, toolPermissionContext))
-  ) {
-    // Reset to original directory if maintaining project dir OR outside allowed working directory
-    setCwd(originalCwd)
-    if (!shouldMaintain) {
-      logEvent('tengu_bash_tool_reset_to_original_dir', {})
-      return true
-    }
-  }
   return false
 }
 

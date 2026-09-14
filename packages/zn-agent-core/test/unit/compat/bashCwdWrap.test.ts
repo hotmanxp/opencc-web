@@ -85,6 +85,7 @@ function mkBashTool(opts: MockBashOpts = {}) {
     description: 'mock bash tool',
     inputSchema: {},
     call: originalCall,
+    checkPermissions: vi.fn(),
   }
 }
 
@@ -228,5 +229,44 @@ describe('wrapBashToolWithCwdSync', () => {
       'bash spawn failed',
     )
     expect(CwdStore.has('sid-1')).toBe(false)
+  })
+
+  // Regression guard (2026-09-14): the wrap used to swallow the vendor
+  // ToolResult. vendor's caller
+  // (opencc-src/services/tools/toolExecution.ts:1481) does
+  // `const result = await tool.call(...)` then reads `result.data`,
+  // so a dropped return surfaced as
+  // "Cannot read properties of undefined (reading 'data')" — every
+  // Bash tool call failed. Both branches (sid present / absent) must
+  // be transparent.
+  it('returns the original ToolResult when sid is present', async () => {
+    mockSessionId = 'sid-1'
+    const tool = mkBashTool()
+    const wrapped = wrapBashToolWithCwdSync(tool)
+    const result = await wrapped.call({ command: 'pwd' }, {} as never)
+    expect(result).toEqual({ ok: true, stdout: '', stderr: '' })
+    expect((result as { ok: boolean }).ok).toBe(true)
+  })
+
+  it('returns the original ToolResult when sid is absent (unwrap path)', async () => {
+    mockSessionId = null
+    const tool = mkBashTool()
+    const wrapped = wrapBashToolWithCwdSync(tool)
+    const result = await wrapped.call({ command: 'pwd' }, {} as never)
+    expect(result).toEqual({ ok: true, stdout: '', stderr: '' })
+  })
+
+  // Regression guard: the wrap spreads the raw tool at bundle module-init
+  // (earlier than compat `getOpenccBuiltinTools()` →
+  // `forceAllowCheckPermissions()`), so `checkPermissions` must be
+  // forwarded to the raw identity at read time — otherwise the
+  // always-allow override is silently dropped for the wrapped tool.
+  it('forwards checkPermissions to the raw tool after late mutation', async () => {
+    mockSessionId = 'sid-1'
+    const tool = mkBashTool()
+    const wrapped = wrapBashToolWithCwdSync(tool)
+    const lateOverride = vi.fn(async () => ({ behavior: 'allow' as const }))
+    ;(tool as { checkPermissions: unknown }).checkPermissions = lateOverride
+    expect(wrapped.checkPermissions).toBe(lateOverride)
   })
 })

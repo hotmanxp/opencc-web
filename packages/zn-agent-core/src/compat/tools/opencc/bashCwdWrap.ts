@@ -31,6 +31,14 @@
  *   - getCurrentSessionId() === null (not inside zai runQueryLoop):
  *     fall through to originalCall without wrap.
  *
+ * Return contract:
+ *   the wrap is a transparent passthrough — it MUST resolve with
+ *   whatever `originalCall` resolved with (vendor ToolResult) and
+ *   MUST rethrow whatever it threw. vendor's caller reads
+ *   `result.data` right after `await tool.call(...)`, so a dropped
+ *   return value surfaces as "Cannot read properties of undefined
+ *   (reading 'data')" inside toolExecution.
+ *
  * Integration:
  *   Patched into vendor `opencc-src/tools.ts` via
  *   `scripts/bundle-opencc.ts:vendorPatchesPlugin` — the import line
@@ -62,6 +70,17 @@ export function wrapBashToolWithCwdSync(tool: BashLikeTool): BashLikeTool {
   const originalCall = tool.call.bind(tool)
   return {
     ...tool,
+    // zai patch (2026-09-14, cwd-multi-session-persistence follow-up):
+    // forward `checkPermissions` to the raw tool instead of freezing the
+    // spread copy. The wrap runs at bundle module-init (see
+    // bundle-opencc.ts vendorPatchesPlugin), which is EARLIER than
+    // compat `getOpenccBuiltinTools()` → `forceAllowCheckPermissions()`
+    // — that override uses Object.defineProperty on the raw tool, so a
+    // spread copy would keep the vendor default and silently drop the
+    // always-allow override (the toolFailureLoopGuard STOP bug).
+    get checkPermissions() {
+      return (tool as { checkPermissions?: unknown }).checkPermissions
+    },
     async call(
       input: unknown,
       toolUseContext: unknown,
@@ -78,14 +97,22 @@ export function wrapBashToolWithCwdSync(tool: BashLikeTool): BashLikeTool {
         cwd: beforeCwd,
         originalCwd: beforeCwd,
       }
-      await runWithSdkContext(ctx, async () => {
-        await originalCall(input as never, toolUseContext as never, ...rest)
-      })
+      // CRITICAL: the tool result MUST be returned. vendor's caller
+      // (opencc-src/services/tools/toolExecution.ts:1481) does
+      // `const result = await tool.call(...)` and immediately reads
+      // `result.data` — dropping the return value makes `result`
+      // undefined and throws
+      // "Cannot read properties of undefined (reading 'data')".
+      const result = await runWithSdkContext(ctx, () =>
+        originalCall(input as never, toolUseContext as never, ...rest),
+      )
       // setCwdState mutated ctx.cwd in place during originalCall.
       // Closure-captured `ctx` retains the post-call value.
+      // (Skipped on throw — the rejection propagates before this line.)
       if (ctx.cwd !== beforeCwd) {
         CwdStore.set(sid, ctx.cwd)
       }
+      return result
     },
   }
 }
