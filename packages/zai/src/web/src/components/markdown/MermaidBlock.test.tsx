@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, waitFor, fireEvent } from "@testing-library/react";
+import { act } from "react";
 import { MermaidBlock } from "./MermaidBlock.js";
 
 // happy-dom 不支持 SVG layout,但字符串注入能正常跑;beautiful-mermaid
@@ -129,6 +130,160 @@ describe("looksComplete (heuristic for streaming half-code)", () => {
   it("rejects flowchart with unbalanced brackets across lines", async () => {
     const { looksComplete } = await import("./MermaidBlock.js");
     expect(looksComplete("flowchart LR\n  A[B] --> C[D")).toBe(false);
+  });
+});
+
+// ---- 外层容器:缩到全部可见 + 菜单(全屏预览 / 复制源码)------------------
+
+const WIDE_SEQ = [
+  "sequenceDiagram",
+  "  participant Client as Client (AgentInputBox)",
+  "  participant Store as Store (Zustand)",
+  "  participant Route as Route (POST /api/agent/prompt)",
+  "  participant Loop as Loop (runQueryLoop)",
+  "  Client->>Store: dispatch(sendPrompt)",
+  "  Store->>Route: POST prompt",
+  "  Route->>Loop: runQueryLoop",
+].join("\n");
+
+async function renderRendered(code: string) {
+  const utils = render(<MermaidBlock code={code} />);
+  await waitFor(
+    () => {
+      expect(utils.container.querySelector("svg")).toBeTruthy();
+    },
+    { timeout: 5000 },
+  );
+  return utils;
+}
+
+describe("MermaidBlock container menu + fullscreen preview", () => {
+  afterEach(() => {
+    // portal 挂在 document.body 上,unmount 之外的残留手动清掉
+    document
+      .querySelectorAll('[data-testid="mermaid-fullscreen"]')
+      .forEach((n) => n.remove());
+    document.body.style.overflow = "";
+  });
+
+  it("wraps the svg in a container with a header bar (title) and a closed menu by default", async () => {
+    const { container } = await renderRendered(WIDE_SEQ);
+    const block = container.querySelector('[data-testid="mermaid-block"]');
+    expect(block).toBeTruthy();
+    // svg 被容器夹住(宽度由外层决定,不靠横向滚动)
+    expect(block?.querySelector("svg")).toBeTruthy();
+
+    // 头部条:标题 + 右侧菜单,都在容器内(svg 之上)
+    const header = container.querySelector('[data-testid="mermaid-block-header"]');
+    expect(header).toBeTruthy();
+    expect(header?.textContent).toContain("Mermaid");
+    expect(header?.textContent).toContain("时序图");
+    const button = header?.querySelector('[data-testid="mermaid-block-menu-button"]');
+    expect(button).toBeTruthy();
+
+    expect(container.querySelector('[data-testid="mermaid-block-menu"]')).toBeNull();
+    expect(button?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens the menu with 全屏预览 / 复制源码 items", async () => {
+    const { container } = await renderRendered(WIDE_SEQ);
+    const button = container.querySelector(
+      '[data-testid="mermaid-block-menu-button"]',
+    ) as HTMLElement;
+    fireEvent.click(button);
+    const menu = container.querySelector('[data-testid="mermaid-block-menu"]');
+    expect(menu).toBeTruthy();
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(menu?.textContent).toContain("全屏预览");
+    expect(menu?.textContent).toContain("复制源码");
+  });
+
+  it("closes the menu when clicking outside", async () => {
+    const { container } = await renderRendered(WIDE_SEQ);
+    fireEvent.click(
+      container.querySelector(
+        '[data-testid="mermaid-block-menu-button"]',
+      ) as HTMLElement,
+    );
+    expect(container.querySelector('[data-testid="mermaid-block-menu"]')).toBeTruthy();
+    fireEvent.mouseDown(document.body);
+    expect(container.querySelector('[data-testid="mermaid-block-menu"]')).toBeNull();
+  });
+
+  it("全屏预览 portals an overlay holding the same svg, and closes on demand", async () => {
+    const { container } = await renderRendered(WIDE_SEQ);
+    fireEvent.click(
+      container.querySelector(
+        '[data-testid="mermaid-block-menu-button"]',
+      ) as HTMLElement,
+    );
+    fireEvent.click(
+      container.querySelector(
+        '[data-testid="mermaid-block-fullscreen-item"]',
+      ) as HTMLElement,
+    );
+
+    const overlay = document.querySelector(
+      '[data-testid="mermaid-fullscreen"]',
+    ) as HTMLElement;
+    expect(overlay).toBeTruthy();
+    // portal 到 body:不在组件子树里
+    expect(container.contains(overlay)).toBe(false);
+    expect(overlay.querySelector("svg")).toBeTruthy();
+    // 菜单已收起
+    expect(container.querySelector('[data-testid="mermaid-block-menu"]')).toBeNull();
+    // 背景滚动锁上
+    expect(document.body.style.overflow).toBe("hidden");
+
+    fireEvent.click(
+      document.querySelector(
+        '[data-testid="mermaid-fullscreen-close"]',
+      ) as HTMLElement,
+    );
+    expect(document.querySelector('[data-testid="mermaid-fullscreen"]')).toBeNull();
+    expect(document.body.style.overflow).not.toBe("hidden");
+    // 关闭后 inline 视图仍在
+    expect(container.querySelector('[data-testid="mermaid-block"] svg')).toBeTruthy();
+  });
+
+  it("closes the overlay with Esc", async () => {
+    const { container } = await renderRendered(WIDE_SEQ);
+    fireEvent.click(
+      container.querySelector(
+        '[data-testid="mermaid-block-menu-button"]',
+      ) as HTMLElement,
+    );
+    fireEvent.click(
+      container.querySelector(
+        '[data-testid="mermaid-block-fullscreen-item"]',
+      ) as HTMLElement,
+    );
+    expect(document.querySelector('[data-testid="mermaid-fullscreen"]')).toBeTruthy();
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    expect(document.querySelector('[data-testid="mermaid-fullscreen"]')).toBeNull();
+  });
+
+  it("复制源码 writes the raw mermaid code to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const { container } = await renderRendered(WIDE_SEQ);
+    fireEvent.click(
+      container.querySelector(
+        '[data-testid="mermaid-block-menu-button"]',
+      ) as HTMLElement,
+    );
+    const copyItem = [...container.querySelectorAll('[role="menuitem"]')].find(
+      (el) => el.textContent?.includes("复制源码"),
+    ) as HTMLElement;
+    await act(async () => {
+      fireEvent.click(copyItem);
+    });
+    expect(writeText).toHaveBeenCalledWith(WIDE_SEQ);
   });
 });
 

@@ -60,8 +60,9 @@ export default defineConfig({
             return 'syntax-highlight';
           // Mermaid 只在 ```mermaid 块首次出现时才 dynamic import
           // (MermaidBlock.tsx → mermaidRenderer.ts),单独拆 chunk 便于浏览器
-          // 长期 cache。beautiful-mermaid ~30KB;曾用的 mermaid 官方库
-          // (含 d3/dagre/elkjs,~600KB)已移除。
+          // 长期 cache。曾用的 mermaid 官方库(d3/dagre 等)已移除,但注意
+          // beautiful-mermaid 自己依赖 elkjs(见 package.json dependencies),
+          // 实测该 chunk ~1.59MB / gzip ~490KB——不是早先注释里写的 ~30KB。
           // sanitize 走自写正则,不再单独拆 chunk。
           if (id.includes('beautiful-mermaid')) return 'mermaid-beautiful';
           if (id.includes('@ant-design/icons')) return 'ant-icons';
