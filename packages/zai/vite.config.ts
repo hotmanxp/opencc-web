@@ -58,6 +58,20 @@ export default defineConfig({
             id.includes('highlight.js')
           )
             return 'syntax-highlight';
+          // Mermaid 双 renderer 各自拆 chunk,只在 ```mermaid 块首次出现时
+          // 才 dynamic import(MermaidBlock.tsx → mermaidRenderer.ts)。mermaidjs ~600KB
+          // 必须独立 chunk,beautiful-mermaid ~30KB 单独便于 Vite 单独 cache。
+          // mermaidjs 依赖 d3 / dagre / elkjs,这些跟 mermaid 走同一 chunk。
+          // sanitize 走自写正则,不再单独拆 chunk。
+          if (
+            id.includes('node_modules/mermaid') ||
+            id.includes('@mermaid-js') ||
+            (id.includes('node_modules/d3-') && !id.includes('node_modules/d3-array')) ||
+            id.includes('node_modules/dagre') ||
+            id.includes('node_modules/elkjs')
+          )
+            return 'mermaid';
+          if (id.includes('beautiful-mermaid')) return 'mermaid-beautiful';
           if (id.includes('@ant-design/icons')) return 'ant-icons';
           if (id.includes('antd') || id.includes('@ant-design/cssinjs') || id.includes('rc-'))
             return 'antd';

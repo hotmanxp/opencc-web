@@ -13,6 +13,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { MermaidBlock } from "./MermaidBlock.js";
+import { ensureMermaidBundle, hasMermaidBundle } from "./mermaidRenderer.js";
 
 const CODE_BG = "#282c34";
 const CODE_FONT_FAMILY =
@@ -111,6 +113,11 @@ function CodeBlock({
     );
   }
   const text = String(children).replace(/\n$/, "");
+  // Mermaid 路由:```mermaid``` 块走独立渲染器(双 renderer + DOMPurify sanitize),
+  // 见 mermaidRenderer.ts。其它语言继续走 syntax highlighter。
+  if (match[1] === "mermaid") {
+    return <MermaidBlock code={text} />;
+  }
   if (!hl) {
     // Fallback: identical padding/colors to the highlighted block so the
     // layout doesn't jump when SyntaxHighlighter arrives a tick later.
@@ -241,6 +248,11 @@ export const MarkdownText = React.memo(function MarkdownText({ text }: { text: s
     if (text.length > 256 && /```/.test(text)) {
       warmedRef.current = true;
       void ensureSyntaxBundle();
+    }
+    // Mermaid 双 renderer 也按需预热。beautiful + mermaidjs 同时拉
+    // (cache 由 ensureMermaidBundle 内部协调),等真正看到 mermaid 块时已就绪
+    if (!hasMermaidBundle() && /```mermaid\b/.test(text)) {
+      ensureMermaidBundle();
     }
   }, [text]);
 
