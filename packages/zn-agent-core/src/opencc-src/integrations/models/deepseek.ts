@@ -73,4 +73,25 @@ export default [
     contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
   }),
+  // deepseek-flash: vision-capable flash variant. Parameters aligned with
+  // deepseek-v4-flash (1M context / 65_536 output, no reasoning) but
+  // supportsVision flipped to true for image recognition.
+  defineModel({
+    id: 'deepseek-flash',
+    label: 'DeepSeek Flash',
+    brandId: 'deepseek',
+    vendorId: 'deepseek',
+    classification: ['chat', 'vision', 'coding'],
+    defaultModel: 'deepseek-flash',
+    capabilities: {
+      supportsVision: true,
+      supportsStreaming: true,
+      supportsFunctionCalling: true,
+      supportsJsonMode: true,
+      supportsReasoning: false,
+      supportsPreciseTokenCount: false,
+    },
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
+  }),
 ]

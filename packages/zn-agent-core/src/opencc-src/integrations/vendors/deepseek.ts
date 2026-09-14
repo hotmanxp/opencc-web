@@ -49,6 +49,13 @@ export default defineVendor({
         modelDescriptorId: 'deepseek-v4-pro',
         maxOutputTokens: 393_216,
       },
+      {
+        id: 'deepseek-flash',
+        apiName: 'deepseek-flash',
+        label: 'DeepSeek Flash',
+        modelDescriptorId: 'deepseek-flash',
+        maxOutputTokens: 393_216,
+      },
     ],
   },
   usage: { supported: false },

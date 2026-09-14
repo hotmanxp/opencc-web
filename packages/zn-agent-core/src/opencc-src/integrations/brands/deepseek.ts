@@ -17,5 +17,6 @@ export default defineBrand({
     'deepseek-reasoner',
     'deepseek-v4-flash',
     'deepseek-v4-pro',
+    'deepseek-flash',
   ],
 })

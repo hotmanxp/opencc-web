@@ -258,6 +258,7 @@ const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
   'deepseek-v4-flash':      1_048_576,
   'deepseek-v4-pro':        1_048_576,
   'deepseek-v4-pro-0813':   1_000_000,
+  'deepseek-flash':          1_048_576,
   // Legacy DeepSeek API aliases documented in the public pricing/model pages.
   'deepseek-chat':            128_000,
   'deepseek-reasoner':        128_000,
@@ -507,6 +508,7 @@ const OPENAI_MAX_OUTPUT_TOKENS: Record<string, number> = {
   'deepseek-v4-flash':        262_144,
   'deepseek-v4-pro':          262_144,
   'deepseek-v4-pro-0813':     384_000,
+  'deepseek-flash':           262_144,
   // Legacy DeepSeek API aliases documented in the public pricing/model pages.
   'deepseek-chat':              8_192,
   'deepseek-reasoner':         65_536,
