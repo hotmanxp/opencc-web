@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Drawer, Empty, Space, Tabs, Tag, Typography, Spin, Timeline, Collapse } from 'antd'
 import type { CSSProperties } from 'react'
 import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { MarkdownText } from '../markdown/MarkdownText.js'
+import { remarkPlugins, rehypePlugins } from '../markdown/markdownPlugins.js'
 import { fetchSuperTaskDetail } from '../../lib/superTaskApi'
 import { subscribeTaskEvents } from '../../lib/taskApi'
 import type { TaskDetails, TaskSummary } from '../../lib/superTaskApi'
@@ -536,7 +536,7 @@ function RenderedEventRow({
     case 'assistant-text':
       return (
         <div className="mt-0.5">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{ev.text}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>{ev.text}</ReactMarkdown>
         </div>
       )
     case 'thinking':

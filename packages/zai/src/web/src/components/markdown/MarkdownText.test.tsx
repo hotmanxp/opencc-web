@@ -53,6 +53,47 @@ describe("MarkdownText", () => {
   });
 });
 
+describe("MarkdownText math", () => {
+  it("renders a $$...$$ block as a KaTeX display formula", () => {
+    // $$ 必须独占行才是 display math(remark-math 的规则),单行
+    // `$$...$$` 会被当成行内公式,跑不出 .katex-display。
+    const { container } = render(
+      <MarkdownText
+        text={String.raw`$$
+\int_{-\infty}^{\infty} e^{-x^2} \, dx = \sqrt{\pi}
+$$`}
+      />,
+    );
+    // rehype-katex 给块级公式套 .katex-display,真正的排版 DOM 在 .katex 里
+    expect(container.querySelector(".katex-display")).toBeTruthy();
+    expect(container.querySelector(".katex")).toBeTruthy();
+  });
+
+  it("renders inline $...$ as KaTeX without a display block", () => {
+    const { container } = render(
+      <MarkdownText text={String.raw`质能方程 $E = mc^2$ 成立`} />,
+    );
+    expect(container.querySelector(".katex")).toBeTruthy();
+    expect(container.querySelector(".katex-display")).toBeNull();
+    // 公式两侧的正文照常保留
+    expect(container.textContent).toContain("质能方程");
+    expect(container.textContent).toContain("成立");
+  });
+
+  it("does not throw on invalid LaTeX (throwOnError: false)", () => {
+    // `$HOME ... $PATH` 这类 shell 变量会被 remark-math 当成行内公式。
+    // throwOnError:false 保证 KaTeX 解析失败时降级为原文,而不是把
+    // 整条消息渲染打崩。
+    expect(() =>
+      render(<MarkdownText text={String.raw`$\notacommand{x}$`} />),
+    ).not.toThrow();
+    const { container } = render(
+      <MarkdownText text={String.raw`echo $HOME and $PATH here`} />,
+    );
+    expect(container.textContent).toContain("here");
+  });
+});
+
 describe("MarkdownText file paths", () => {
   afterEach(() => {
     vi.restoreAllMocks();

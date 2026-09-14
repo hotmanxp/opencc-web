@@ -705,3 +705,12 @@ body {
   text-decoration: line-through;
   opacity: 0.7;
 }
+
+/* ── KaTeX 数学公式 ───────────────────────────────────────────────────
+   块级公式($$...$$)在窄屏(移动端 /m)常超出气泡宽度,允许横向滚动而不是
+   撑破布局;行内公式用 currentColor,深浅主题都自动跟随正文颜色。 */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}

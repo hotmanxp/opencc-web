@@ -1,7 +1,10 @@
 // Extracted verbatim from MessageBubble.tsx (formerly lines 39-228):
 // - markdownComponents custom renderer map (p/h1-h4/ul/ol/li/code/pre/table/thead/tbody/tr/th/td/blockquote/a/hr)
-// - MarkdownText memoized wrapper around ReactMarkdown + remark-gfm
+// - MarkdownText memoized wrapper around ReactMarkdown + remark-gfm + remark-math/rehype-katex
 // - CODE_BG / CODE_FONT_FAMILY constants
+//
+// 数学公式:插件链在 ./markdownPlugins.ts(与 TaskDrawer / SuperTaskDetailDrawer
+// 共用),KaTeX 样式在这里引入 —— @font-face 的字体浏览器按需下载,没公式不拉。
 //
 // Code-block highlight is now lazy: react-syntax-highlighter (~610 KB raw,
 // 224 KB gzip) is only fetched the first time a fenced ```lang block is
@@ -12,7 +15,8 @@
 // of truth.
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import "katex/dist/katex.min.css";
+import { remarkPlugins, rehypePlugins } from "./markdownPlugins.js";
 import { MermaidBlock } from "./MermaidBlock.js";
 import { ensureMermaidBundle, hasMermaidBundle } from "./mermaidRenderer.js";
 import { FilePathChip } from "./FilePathChip.js";
@@ -315,7 +319,8 @@ export const MarkdownText = React.memo(function MarkdownText({ text }: { text: s
       style={{ color: "inherit" }}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
         components={markdownComponents}
       >
         {text}

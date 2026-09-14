@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+// KaTeX 样式 + 与主 MarkdownText 共用的插件链(数学公式)
+import 'katex/dist/katex.min.css'
+import { remarkPlugins, rehypePlugins } from './markdown/markdownPlugins.js'
 import { Badge, Button, Drawer, Empty, Tag, Tooltip } from 'antd'
 import { useAppStore } from '../store/useAppStore'
 
@@ -151,7 +153,11 @@ export function MarkdownText({ text }: { text: string }) {
       data-testid="markdown-text"
       className="text-sm leading-relaxed text-inherit break-words"
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={markdownComponents}
+      >
         {text}
       </ReactMarkdown>
     </div>
