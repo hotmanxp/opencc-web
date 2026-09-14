@@ -11,12 +11,13 @@
  * Mocking strategy:
  *   - `getCurrentSessionId` (compat/runWithSessionId.ts): replaced with
  *     a controlled `mockSessionId` so each test can stage a known sid.
+ *     `runWithSessionId` is also mocked to be a no-op pass-through so
+ *     zai's runQueryLoop wrapper doesn't pollute the ALS context.
  *   - `runWithSdkContext` + `getSdkContext` (vendor bootstrap/state.ts):
- *     replaced with a single-slot pseudo-ALS that mirrors vendor's
- *     "innermost ALS wins" semantics closely enough for the wrap
- *     contract. The wrap captures the ctx object by reference; the
- *     mock BashTool mutates ctx.cwd to simulate the vendor trailer
- *     side-effect, and the wrap reads it back post-call.
+ *     used as-is — real AsyncLocalStorage semantics are exactly what
+ *     we want to test. The mock BashTool calls `getSdkContext()` to
+ *     read the active ctx and mutates ctx.cwd to simulate the vendor
+ *     trailer side-effect (setCwdState mutates ctx.cwd in place).
  *   - BashTool itself is a plain stub — we never invoke the real
  *     vendor BashTool because doing so pulls the heavy tool chain
  *     (BashTool.tsx → Shell.ts → bashProvider.ts → ripgrep vendor,
@@ -24,6 +25,7 @@
  *     contract under test is the cwd flow, not bash execution.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { CwdStore } from '../../../src/compat/cwdStore.js'
 
 let mockSessionId: string | null = null
 let activeCtx: { cwd: string; originalCwd: string; sessionId: string; sessionProjectDir: string | null } | null = null
@@ -33,10 +35,16 @@ vi.mock('../../../src/compat/runWithSessionId.js', () => ({
   runWithSessionId: <T>(_sid: string, fn: () => T): T => fn(),
 }))
 
-vi.mock('../../../src/opencc-src/bootstrap/state.js', () => ({
+// vitest's vi.mock intercepts by resolved module id. The compat
+// layer wraps vendor state.js via the `src/...` bare specifier
+// alias (see zn-agent-core/vitest.config.ts resolve.alias
+// `find: /^src\/(.+)\.js$/`). We stub the module so builtin.ts
+// can import it without dragging in the heavy vendor chain
+// (Shell.ts → bashProvider.ts → ripgrep vendor etc.). The stub
+// mirrors the two surface symbols we need: runWithSdkContext
+// (single-slot pseudo-ALS for closure semantics) + getSdkContext.
+vi.mock('src/bootstrap/state.js', () => ({
   runWithSdkContext: <T>(ctx: typeof activeCtx & object, fn: () => T): T => {
-    // Single-slot pseudo-ALS: only the most recent ctx is "active".
-    // Nested runWithSdkContext unwinds in LIFO order via prev/activeCtx.
     const prev = activeCtx
     activeCtx = ctx as typeof activeCtx
     try {
@@ -51,10 +59,13 @@ vi.mock('../../../src/opencc-src/bootstrap/state.js', () => ({
 const { wrapBashToolWithCwdSync } = await import(
   '../../../src/compat/tools/opencc/builtin.js'
 )
-const { CwdStore } = await import('../../../src/compat/cwdStore.js')
 
 interface MockBashOpts {
-  /** Called inside the wrap's runWithSdkContext closure. Can mutate ctx.cwd to simulate vendor trailer side-effect. */
+  /**
+   * Called inside the wrap's runWithSdkContext closure. Can mutate
+   * the active ctx.cwd to simulate the vendor trailer side-effect
+   * (setCwdState in opencc-src/utils/Shell.ts:425-440).
+   */
   onCall?: (input: unknown, ctx: typeof activeCtx) => void
   onCallThrow?: Error
 }
@@ -62,10 +73,9 @@ interface MockBashOpts {
 function mkBashTool(opts: MockBashOpts = {}) {
   const originalCall = vi.fn(
     async (input: unknown, _toolUseContext: unknown) => {
-      // Read the active ctx (mock) — simulates vendor's
-      // sdkStorage.getStore() inside Shell.exec → setCwdState path.
-      const ctx = activeCtx
-      if (ctx && opts.onCall) opts.onCall(input, ctx)
+      // The stubbed runWithSdkContext sets activeCtx before invoking
+      // originalCall; we mirror that lookup here.
+      if (opts.onCall) opts.onCall(input, activeCtx)
       if (opts.onCallThrow) throw opts.onCallThrow
       return { ok: true, stdout: '', stderr: '' }
     },
@@ -93,6 +103,8 @@ describe('wrapBashToolWithCwdSync', () => {
     mockSessionId = null
     const tool = mkBashTool({
       onCall: (_input, ctx) => {
+        // Even if a real vendor trailer would mutate ctx.cwd, the
+        // wrap shouldn't write when sid is missing.
         if (ctx) ctx.cwd = '/should-not-be-written'
       },
     })
@@ -117,11 +129,9 @@ describe('wrapBashToolWithCwdSync', () => {
   it('no write when ctx.cwd unchanged (preventCwdChanges / background bash simulation)', async () => {
     mockSessionId = 'sid-1'
     CwdStore.set('sid-1', '/already-set')
-    const tool = mkBashTool({
-      // Simulate vendor `Shell.ts:425` guard: setCwdState never fires,
-      // ctx.cwd stays at beforeCwd.
-      onCall: () => undefined,
-    })
+    // Simulate vendor `Shell.ts:425` guard: setCwdState never fires,
+    // ctx.cwd stays at beforeCwd.
+    const tool = mkBashTool({ onCall: () => undefined })
     const wrapped = wrapBashToolWithCwdSync(tool)
     await wrapped.call({ command: 'pwd' }, {} as never)
     expect(CwdStore.get('sid-1')).toBe('/already-set')
@@ -212,9 +222,6 @@ describe('wrapBashToolWithCwdSync', () => {
     mockSessionId = 'sid-1'
     const tool = mkBashTool({
       onCallThrow: new Error('bash spawn failed'),
-      // ctx.cwd would normally be mutated by trailer, but throw
-      // happens before trailer reads tmpfile.
-      onCall: undefined,
     })
     const wrapped = wrapBashToolWithCwdSync(tool)
     await expect(wrapped.call({ command: 'bad' }, {} as never)).rejects.toThrow(

@@ -32,6 +32,12 @@ import { fileURLToPath } from 'node:url'
 import { wrapAskUserQuestionToolAsOpencc } from './AskUserQuestionTool.js'
 import { wrapSkillToolAsOpencc } from './SkillTool.js'
 import { wrapCliAgentToolAsOpencc } from './CliAgentTool.js'
+import { CwdStore } from '../../cwdStore.js'
+import {
+  runWithSdkContext,
+  type SdkContext,
+} from 'src/bootstrap/state.js'
+import { getCurrentSessionId } from '../../runWithSessionId.js'
 
 export type OpenccBuiltinTool = any
 
@@ -71,6 +77,76 @@ export function forceAllowCheckPermissions(tool: {
       }
     },
   })
+}
+
+/**
+ * Wrap vendor BashTool with per-session cwd sync.
+ *
+ * Why this exists:
+ *   vendor's `Shell.exec()` writes the post-cd cwd into the SDK
+ *   context (or STATE.cwd if no context) via the `pwd -P >| tmpfile`
+ *   trailer. zai's `CwdStore` is a per-session Map but is **only
+ *   written manually** at session create / weixin binding — BashTool's
+ *   trailer never reaches it. Result: cross-turn cwd resets to
+ *   process.cwd().
+ *
+ * How it works:
+ *   1. Read sid from `getCurrentSessionId()` (compat ALS — zai
+ *      `runQueryLoop` sets this via `runWithSessionId`).
+ *   2. Read `CwdStore.get(sid)` as beforeCwd; fall back to
+ *      `process.cwd()` if absent.
+ *   3. Run `originalCall` inside `runWithSdkContext({ sessionId: sid,
+ *      cwd: beforeCwd, ... })`. vendor's `setCwdState()` mutates
+ *      `ctx.cwd` in place; the closure-captured `ctx` reference keeps
+ *      the post-call value visible after the ALS context exits.
+ *   4. If `ctx.cwd !== beforeCwd`, write to `CwdStore.set(sid, ctx.cwd)`.
+ *
+ * Edge cases:
+ *   - `preventCwdChanges` (subagent path): vendor's `Shell.ts:425`
+ *     guard skips `setCwdState`, so ctx.cwd stays at beforeCwd and
+ *     we don't write — correct.
+ *   - `cwdOverrideStorage` ALS (vendor subagent isolation): takes
+ *     priority over ctx.cwd in vendor's `pwd()` — wrap still writes
+ *     CwdStore with the absolute path, but vendor's subagent
+ *     correctness is preserved.
+ *   - getCurrentSessionId() === null (not inside zai runQueryLoop):
+ *     fall through to originalCall without wrap.
+ *
+ * Exported for unit testing — see
+ * test/unit/compat/builtin.cwdWrap.test.ts.
+ */
+export function wrapBashToolWithCwdSync(
+  tool: OpenccBuiltinTool,
+): OpenccBuiltinTool {
+  const originalCall = tool.call.bind(tool)
+  return {
+    ...tool,
+    async call(
+      input: unknown,
+      toolUseContext: unknown,
+      ...rest: unknown[]
+    ): Promise<unknown> {
+      const sid = getCurrentSessionId()
+      if (!sid) {
+        return originalCall(input as never, toolUseContext as never, ...rest)
+      }
+      const beforeCwd = CwdStore.get(sid) ?? process.cwd()
+      const ctx: SdkContext = {
+        sessionId: sid as never,  // SessionId is branded string
+        sessionProjectDir: null,
+        cwd: beforeCwd,
+        originalCwd: beforeCwd,
+      }
+      await runWithSdkContext(ctx, async () => {
+        await originalCall(input as never, toolUseContext as never, ...rest)
+      })
+      // setCwdState mutated ctx.cwd in place during originalCall.
+      // Closure-captured `ctx` retains the post-call value.
+      if (ctx.cwd !== beforeCwd) {
+        CwdStore.set(sid, ctx.cwd)
+      }
+    },
+  }
 }
 
 let cachedTools: OpenccBuiltinTool[] | null = null
@@ -130,6 +206,15 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   // 外部 CLI agent(见 CliAgentTool.ts 顶部注释)。
   const CliAgentOpencc = wrapCliAgentToolAsOpencc()
 
+  // zai patch (2026-09-14, cwd-multi-session-persistence): wrap vendor
+  // BashTool with per-session cwd sync. See wrapBashToolWithCwdSync
+  // comment for the trailer / setCwdState / CwdStore interaction
+  // rationale. Wrap happens BEFORE forceAllowCheckPermissions so the
+  // override attaches to the wrapped object (vendor runtime holds the
+  // wrapped reference via cachedTools; downstream ToolRegistry / tool
+  // search see the same wrapped identity).
+  const wrappedBashTool = wrapBashToolWithCwdSync(BashTool)
+
   // zai patch: short-circuit every vendor tool's checkPermissions to
   // always allow. See the module-level comment above for the root
   // cause (toolFailureLoopGuard STOP message after 5 consecutive
@@ -154,7 +239,7 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   // mode:'bypassPermissions' }` matches what main-loop bypass mode would
   // have produced (consistent telemetry with the synthetic bypass
   // context set in compat/runtime/buildOpenccQueryParams.ts).
-  forceAllowCheckPermissions(BashTool)
+  forceAllowCheckPermissions(wrappedBashTool)
   forceAllowCheckPermissions(FileReadTool)
   forceAllowCheckPermissions(FileEditTool)
   forceAllowCheckPermissions(FileWriteTool)
@@ -203,7 +288,7 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   }
 
   cachedTools = [
-    BashTool,
+    wrappedBashTool,
     FileReadTool,
     FileEditTool,
     FileWriteTool,
