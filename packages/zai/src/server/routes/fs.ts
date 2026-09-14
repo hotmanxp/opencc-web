@@ -10,7 +10,7 @@ import { resolveRgPath, runRipgrep } from '../services/ripgrep.js';
 import type {
   FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult,
   FsContentSearchEntry, FsContentSearchResult, FsUploadResult,
-  FilePreviewPayload, FilePreviewError,
+  FilePreviewPayload, FilePreviewError, FsResolveResult,
 } from '../../shared/fs.js';
 import { classifyKind, mimeFromExt } from '../../shared/fileKind.js';
 import { dirname as pathDirname, relative as pathRelative, resolve as pathResolve } from 'node:path';
@@ -1214,6 +1214,143 @@ fsRouter.post('/fs/delete', async (req, res) => {
     res.json({ ok: true } satisfies FsAck);
   } catch (err) {
     res.status(500).json({ ok: false, error: `删除失败：${err instanceof Error ? err.message : String(err)}` } satisfies FsAck);
+  }
+});
+
+// --- Multi-stage path resolution (POST /fs/resolve) ----------------------
+
+/**
+ * 把 markdown chip 给的路径按"绝对 → sessionCwd → 实例 cwd → 实例 cwd 内搜索"
+ * 逐级解析到具体文件。语义见 shared/fs.ts 的 FsResolveResult。
+ *
+ * 实例 cwd(instanceContext.cwd)由 server 启动时确定 —— 通常就是用户跑 zai
+ * 时的目录,被视作"项目 initCwd"。所有搜索在该范围内进行,避免越权读到用户
+ * 主目录下其它项目。绝对路径不在此约束内(/fs/preview 本来就无边界),按
+ * 用户输入的路径字面值直接 stat。
+ */
+const RESOLVE_SEARCH_TIMEOUT_MS = 5_000;
+const RESOLVE_MAX_CANDIDATES = 32;
+
+function notFound(res: import('express').Response): void {
+  res.json({ ok: false, code: 'ENOENT', error: '文件不存在' } satisfies FsResolveResult);
+}
+function badPath(
+  res: import('express').Response,
+  code: 'EACCES' | 'EISDIR' | 'EIO' | 'BADREQ',
+  msg: string,
+): void {
+  res.json({ ok: false, code, error: msg } satisfies FsResolveResult);
+}
+
+fsRouter.post('/fs/resolve', async (req, res) => {
+  const ctxVal = ctx(req);
+  if (!ctxVal || typeof ctxVal.cwd !== 'string') {
+    res.status(500).json({ ok: false, code: 'EIO', error: 'instance context 缺失 cwd' } satisfies FsResolveResult);
+    return;
+  }
+  const raw = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
+  if (!raw) {
+    badPath(res, 'BADREQ', 'path 必填');
+    return;
+  }
+  const sessionCwd =
+    typeof req.body?.sessionCwd === 'string' && req.body.sessionCwd
+      ? req.body.sessionCwd
+      : undefined;
+
+  // 绝对路径:直接 stat
+  const isAbs = raw.startsWith('/') || /^[A-Za-z]:[\\/]/.test(raw);
+  if (isAbs) {
+    try {
+      const info = await stat(raw);
+      if (info.isDirectory()) {
+        badPath(res, 'EISDIR', '路径是目录');
+        return;
+      }
+      res.json({ ok: 'exact', abs: raw } satisfies FsResolveResult);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') notFound(res);
+      else if (code === 'EACCES' || code === 'EPERM') badPath(res, 'EACCES', '无权限访问');
+      else badPath(res, 'EIO', String(err instanceof Error ? err.message : err));
+    }
+    return;
+  }
+
+  // 相对路径:先尝试 sessionCwd → 实例 cwd 两级直接 stat。
+  // 实例 cwd 兜底而非一并搜索,是因为同名路径在搜索里仍能命中,只是
+  // 多走一段 walk;保留它能让"会话切回原 cwd 但路径相对原 cwd"场景
+  // 不走搜索就命中。
+  const trimmed = raw.replace(/^\.\//, '');
+  for (const anchor of [sessionCwd, ctxVal.cwd]) {
+    if (!anchor) continue;
+    const abs = pathResolve(anchor, trimmed);
+    try {
+      const info = await stat(abs);
+      if (info.isFile()) {
+        res.json({ ok: 'exact', abs } satisfies FsResolveResult);
+        return;
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') continue;
+      if (code === 'EACCES' || code === 'EPERM') {
+        badPath(res, 'EACCES', '无权限访问');
+        return;
+      }
+      // 其他错误 —— 继续走搜索兜底
+    }
+  }
+
+  // 兜底:按 basename / 末段路径匹配出候选文件。
+  // 首选 ripgrep --files:Rust 遍历,原生按 .gitignore 过滤(node_modules /
+  // .claude/worktrees / 构建产物等忽略目录不进候选,也不再浪费遍历时间),
+  // stdout 为空(rg 缺失或异常)时回落 walkForSearch(纯 JS,不识别 gitignore)。
+  const root = ctxVal.cwd;
+  const basename = trimmed.split('/').pop() || trimmed;
+  if (!basename) {
+    notFound(res);
+    return;
+  }
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), RESOLVE_SEARCH_TIMEOUT_MS);
+  try {
+    let rels: string[] = [];
+    const rg = await runRipgrep(['--files', '--hidden', '-g', '!.git'], {
+      cwd: root,
+      signal: ac.signal,
+      timeoutMs: RESOLVE_SEARCH_TIMEOUT_MS,
+    });
+    if (rg.stdout.trim()) {
+      rels = rg.stdout.split('\n').filter(Boolean);
+    } else {
+      const walk = await walkForSearch(root, basename, {
+        caseSensitive: false,
+        signal: ac.signal,
+      });
+      rels = walk.entries.filter((e) => e.type === 'file').map((e) => e.path);
+    }
+    const lc = trimmed.toLowerCase();
+    const candidates: Array<{ abs: string; rel: string }> = [];
+    for (const e of rels) {
+      const eLc = e.toLowerCase();
+      if (eLc !== lc && !eLc.endsWith('/' + lc)) continue;
+      candidates.push({
+        abs: pathResolve(root, e),
+        rel: e,
+      });
+      if (candidates.length >= RESOLVE_MAX_CANDIDATES) break;
+    }
+    if (candidates.length === 0) notFound(res);
+    else if (candidates.length === 1) {
+      res.json({ ok: 'exact', abs: candidates[0]!.abs } satisfies FsResolveResult);
+    } else {
+      res.json({ ok: 'multiple', candidates } satisfies FsResolveResult);
+    }
+  } catch (err) {
+    badPath(res, 'EIO', String(err instanceof Error ? err.message : err));
+  } finally {
+    clearTimeout(timer);
   }
 });
 

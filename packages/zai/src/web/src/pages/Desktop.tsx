@@ -28,6 +28,7 @@ import { useAgentStore } from '../store/useAgentStore.js';
 import { useLocalStorageState } from '../components/splitPane/shared.js';
 import { api } from '../lib/api.js';
 import { AGENT_INPUT_INSERT_EVENT } from '../lib/agentInputEvents.js';
+import { FILE_PREVIEW_OPEN_EVENT, type FilePreviewOpenDetail } from '../lib/openFilePath.js';
 import { useEffectiveTheme } from '../hooks/useEffectiveTheme.js';
 import { useThemeToggle } from '../hooks/useThemeToggle.js';
 import { clampBounds, initWindows, initPreviewWindow, toggleMaximized, type DesktopWindowState } from '../components/desktop/windowMath.js';
@@ -494,6 +495,24 @@ const activeId = useMemo(
     setPreview(null);
     setPreviewWindow(null);
   }, []);
+
+  // Markdown 里的文件路径 chip 被点击 → 在桌面弹本页的预览浮窗。
+  // 走 window 事件而不是 store:桌面预览是页面内局部 state,挂不上 store;
+  // 认领后把 detail.handled 置 true,调用方(openFilePathPreview)就不再回落
+  // 到 FilePreviewDrawer(那条抽屉根本没挂在 /desktop 上)。
+  useEffect(() => {
+    const onOpenFile = (e: Event) => {
+      const detail = (e as CustomEvent<FilePreviewOpenDetail>).detail;
+      if (!detail?.path) return;
+      detail.handled = true;
+      const name = detail.path.split('/').pop() || detail.path;
+      const maxExisting = Math.max(0, ...windows.map((w) => w.z), previewWindow?.z ?? 0);
+      setPreview({ name, path: detail.path });
+      setPreviewWindow(initPreviewWindow(vp, name, maxExisting + 1));
+    };
+    window.addEventListener(FILE_PREVIEW_OPEN_EVENT, onOpenFile);
+    return () => window.removeEventListener(FILE_PREVIEW_OPEN_EVENT, onOpenFile);
+  }, [windows, previewWindow, vp]);
 
   // ---------- 壁纸层 ----------
   // wallpaper 取值三态:

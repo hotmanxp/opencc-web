@@ -158,3 +158,24 @@ export interface FilePreviewError {
   message: string
   meta?: { size?: number }
 }
+
+/**
+ * Result of POST /api/fs/resolve —— 把 chip 的相对路径按"会话 initCwd / 实例 cwd /
+ * gitRoot 内搜索"三级解析,落到一个或多个候选上,客户端据此决定直接打开还是
+ * 弹候选选择。响应始终是 200,语义用 ok 字段区分:
+ *
+ *   - ok: 'exact'      — 唯一命中,客户端直接打开 abs 即可
+ *   - ok: 'multiple'   — gitRoot 内搜到多条,客户端展示候选
+ *   - ok: false        — 没找到,客户端 message.error(error)
+ */
+export interface FsResolveCandidate {
+  /** 绝对路径,可直接喂给 /api/fs/preview。 */
+  abs: string;
+  /** 相对 gitRoot 的 POSIX 风格路径,UI 展示用。 */
+  rel: string;
+}
+
+export type FsResolveResult =
+  | { ok: 'exact'; abs: string }
+  | { ok: 'multiple'; candidates: FsResolveCandidate[] }
+  | { ok: false; code?: 'ENOENT' | 'EACCES' | 'EISDIR' | 'BADREQ' | 'EIO'; error: string };
