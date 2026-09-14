@@ -1,7 +1,7 @@
 /**
  * zai patch (2026-09-14, cwd-multi-session-persistence):
  * Unit tests for wrapBashToolWithCwdSync in
- * packages/zn-agent-core/src/compat/tools/opencc/builtin.ts.
+ * packages/zn-agent-core/src/compat/tools/opencc/bashCwdWrap.ts.
  *
  * The wrap takes vendor BashTool and adds a per-session cwd sync
  * layer on top: read CwdStore[sid] (or process.cwd() fallback) as
@@ -57,7 +57,7 @@ vi.mock('src/bootstrap/state.js', () => ({
 }))
 
 const { wrapBashToolWithCwdSync } = await import(
-  '../../../src/compat/tools/opencc/builtin.js'
+  '../../../src/compat/tools/opencc/bashCwdWrap.js'
 )
 
 interface MockBashOpts {

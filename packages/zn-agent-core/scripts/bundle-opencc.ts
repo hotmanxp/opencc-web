@@ -606,6 +606,28 @@ const queryEngineImportPatchRe =
 const queryEngineNonInteractivePatchRe =
   /isNonInteractiveSession: true,/g
 
+// zai patch (2026-09-14, cwd-multi-session-persistence): wrap vendor
+// BashTool so each BashTool.call inside a zai session tracks per-session
+// cwd through CwdStore. The wrap lives in
+// src/compat/tools/opencc/bashCwdWrap.ts. See that file's header for the
+// trailer / setCwdState / CwdStore interaction rationale.
+//
+// We patch vendor's `opencc-src/tools.ts` import line so the symbol
+// `BashTool` referenced in `getAllBaseTools()` (tools.ts:204) is the
+// wrapped identity — esbuild inlines everything into a single bundle,
+// so any import surface that reaches `BashTool` will get the wrapped
+// version. Using `const BashTool = wrapBashToolWithCwdSync(__RawBashTool)`
+// instead of an aliased import keeps the `BashTool,` reference in
+// `getAllBaseTools()` working unchanged.
+//
+// Sentinel pattern: the marker comment `// zai-bundle:bash-cwd-wrap`
+// lets the patch be idempotent — second builds see the sentinel and
+// skip rewriting (avoids the `const BashTool = ...` line being
+// duplicated).
+const bashCwdWrapImportRe =
+  /^import \{ BashTool \} from '\.\/tools\/BashTool\/BashTool\.js'$/m
+const bashCwdWrapSentinelRe = /\/\/ zai-bundle:bash-cwd-wrap/
+
 // zai patch (sub-agent prompt injection): see vendor-patches header.
 // Hoisted to module scope so buildRecipe() can read its `.source` for
 // the bundle-recipe fingerprint (zai patch tf-jqy5q2bi) — was previously
@@ -717,6 +739,32 @@ const vendorPatchesPlugin: esbuild.Plugin = {
           contents = contents.replace(
             queryEngineNonInteractivePatchRe,
             `isNonInteractiveSession: getIsNonInteractiveSession(),`,
+          )
+          modified = true
+        }
+      }
+
+      // zai patch (2026-09-14, cwd-multi-session-persistence): wrap
+      // vendor BashTool via a vendor-side import rewrite so the wrapped
+      // identity is what propagates into `getAllBaseTools()`. See
+      // bashCwdWrapImportRe / bashCwdWrapSentinelRe header above for the
+      // full rationale. Scoped to `opencc-src/tools.ts` (the only file
+      // that re-exports BashTool into the runtime tool pool). Idempotent
+      // via the sentinel comment so warm rebuilds don't duplicate the
+      // const declaration.
+      if (
+        (args.path.endsWith('/tools.ts') || args.path.endsWith('tools.ts')) &&
+        !bashCwdWrapSentinelRe.test(contents)
+      ) {
+        if (bashCwdWrapImportRe.test(contents)) {
+          contents = contents.replace(
+            bashCwdWrapImportRe,
+            [
+              '// zai-bundle:bash-cwd-wrap',
+              `import { BashTool as __RawBashTool } from './tools/BashTool/BashTool.js'`,
+              `import { wrapBashToolWithCwdSync } from '../compat/tools/opencc/bashCwdWrap.js'`,
+              `const BashTool = wrapBashToolWithCwdSync(__RawBashTool)`,
+            ].join('\n'),
           )
           modified = true
         }
@@ -1453,6 +1501,8 @@ function buildRecipe(): ReadonlyArray<RecipeEntry> {
     { kind: 'regex', name: 'toolExecutionStopCaseRe', source: toolExecutionStopCaseRe.source, flags: toolExecutionStopCaseRe.flags },
     { kind: 'regex', name: 'queryEngineImportPatchRe', source: queryEngineImportPatchRe.source, flags: queryEngineImportPatchRe.flags },
     { kind: 'regex', name: 'queryEngineNonInteractivePatchRe', source: queryEngineNonInteractivePatchRe.source, flags: queryEngineNonInteractivePatchRe.flags },
+    { kind: 'regex', name: 'bashCwdWrapImportRe', source: bashCwdWrapImportRe.source, flags: bashCwdWrapImportRe.flags },
+    { kind: 'regex', name: 'bashCwdWrapSentinelRe', source: bashCwdWrapSentinelRe.source, flags: bashCwdWrapSentinelRe.flags },
     { kind: 'string', name: 'queryReExportSentinel', value: queryReExportSentinel.source },
     { kind: 'string', name: 'normalizeReExportSentinel', value: normalizeReExportSentinel.source },
     { kind: 'string', name: 'taskChangedReExportSentinel', value: taskChangedReExportSentinel.source },
