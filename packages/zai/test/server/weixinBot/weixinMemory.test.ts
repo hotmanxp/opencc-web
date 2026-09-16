@@ -29,7 +29,8 @@ describe('weixinMemory', () => {
   })
 
   function seedTranscript(sessionId: string): void {
-    const projDir = join(dataDir, 'transcripts', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
+    // 现行布局:legacyTranscriptStore → <dataDir>/projects/<san-cwd>/<sid>.jsonl
+    const projDir = join(dataDir, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
     mkdirSync(projDir, { recursive: true })
     const messages = [
       { role: 'user', content: '帮我把项目构建脚本改成 pnpm' },
@@ -38,8 +39,44 @@ describe('weixinMemory', () => {
       { role: 'assistant', content: '好的,已记住。' },
       { role: 'user', content: '下一步:把 CI 也切到 pnpm,还没做' },
     ]
-    writeFileSync(join(projDir, `${sessionId}.json`), JSON.stringify(messages))
+    writeFileSync(join(projDir, `${sessionId}.jsonl`), messages.map((m) => JSON.stringify(m)).join('\n'))
   }
+
+  it('兼容旧布局:transcripts/projects/<san>/<sid>.json(JSON 数组)也能读到', async () => {
+    const oldSid = 'sess-22222222-2222-2222-2222-222222222222'
+    const projDir = join(dataDir, 'transcripts', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
+    mkdirSync(projDir, { recursive: true })
+    writeFileSync(
+      join(projDir, `${oldSid}.json`),
+      JSON.stringify([{ role: 'user', content: '旧布局里的消息:CI 迁移未完成' }]),
+    )
+    const summary = await recordRotationSummary({
+      conversationKey: KEY,
+      oldSessionId: oldSid,
+      cwd,
+      dataDir,
+      skipLlm: true,
+    })
+    expect(summary).toContain('CI')
+  })
+
+  it('cwd 对不上时全局扫描 projects/* 兜底', async () => {
+    const oldSid = 'sess-33333333-3333-3333-3333-333333333333'
+    const otherDir = join(dataDir, 'projects', '-Users-ethan-somewhere-else')
+    mkdirSync(otherDir, { recursive: true })
+    writeFileSync(
+      join(otherDir, `${oldSid}.jsonl`),
+      [{ role: 'user', content: '绑定 cwd 变了,transcript 在别的 project 目录' }].map((m) => JSON.stringify(m)).join('\n'),
+    )
+    const summary = await recordRotationSummary({
+      conversationKey: KEY,
+      oldSessionId: oldSid,
+      cwd,
+      dataDir,
+      skipLlm: true,
+    })
+    expect(summary).toContain('cwd 变了')
+  })
 
   it('recordRotationSummary(skipLlm) 读取 transcript → 落盘 rotations → 快照可见', async () => {
     const oldSid = 'sess-11111111-1111-1111-1111-111111111111'
