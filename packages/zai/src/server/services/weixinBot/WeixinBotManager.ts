@@ -411,7 +411,7 @@ export class WeixinBotManager {
     // 切到「设置 / 连接」形态。见 hasCreds 字段的注释。
     this.hasCreds = true
 
-    // 会话轮转策略:settings.weixinBot.sessionTtlHours(默认 6h,0 = 永不)。
+    // 会话轮转策略:settings.weixinBot.sessionTtlHours(默认 12h,0 = 永不)。
     // 同一微信对话的绑定 session 超过 TTL 后,下一条消息自动迁入新 sess-uuid。
     getWeixinSessionMap().setRotationPolicy({
       ttlMs: s.sessionTtlHours > 0 ? s.sessionTtlHours * 3_600_000 : null,
@@ -884,7 +884,7 @@ export class WeixinBotManager {
       sendChunkRetries: 4,
       rateLimitCircuitThreshold: 1,
       rateLimitCircuitOpenSeconds: 30.0,
-      sessionTtlHours: 6,
+      sessionTtlHours: 12,
       // QR 登录期间用不到实例编排参数,但 WeixinBotSettings 要求完整形状
       // (schema 给了 default,所以类型是 required)。
       instancePort: DEFAULT_WEIXIN_INSTANCE_PORT,
@@ -985,7 +985,7 @@ export class WeixinBotManager {
         sendChunkRetries: base.sendChunkRetries ?? 4,
         rateLimitCircuitThreshold: base.rateLimitCircuitThreshold ?? 1,
         rateLimitCircuitOpenSeconds: base.rateLimitCircuitOpenSeconds ?? 30.0,
-        sessionTtlHours: base.sessionTtlHours ?? 6,
+        sessionTtlHours: base.sessionTtlHours ?? 12,
         instancePort: base.instancePort ?? DEFAULT_WEIXIN_INSTANCE_PORT,
         instanceCwd: base.instanceCwd ?? '',
         ilinkUserId,
