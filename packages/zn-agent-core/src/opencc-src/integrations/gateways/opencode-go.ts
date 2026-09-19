@@ -50,6 +50,7 @@ function catalogEntry(spec: OpenCodeGoCatalogSpec) {
 
 const goModels: OpenCodeGoCatalogSpec[] = [
   { id: 'glm-5.2', apiName: 'glm-5.2', label: 'GLM 5.2', zaiGlm: true },
+  { id: 'glm-5.3', apiName: 'glm-5.3', label: 'GLM 5.3', zaiGlm: true },
   { id: 'qwen3.7-max', apiName: 'qwen3.7-max', label: 'Qwen3.7 Max', endpointPath: '/messages' },
   { id: 'kimi-k2.7-code', apiName: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
   { id: 'mimo-v2.5-pro', apiName: 'mimo-v2.5-pro', label: 'MiMo V2.5 Pro' },

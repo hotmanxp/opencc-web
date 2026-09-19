@@ -164,7 +164,7 @@ router.get('/settings', async (_req: Request, res: Response) => {
       dmPolicy: s?.dmPolicy ?? 'pairing',
       groupPolicy: s?.groupPolicy ?? 'disabled',
       allowFrom: s?.allowFrom ?? [],
-      sessionTtlHours: s?.sessionTtlHours ?? 12,
+      sessionTtlHours: s?.sessionTtlHours ?? 6,
       // 专用实例编排参数(主实例用):端口 + 工作目录。
       instancePort: s?.instancePort ?? DEFAULT_WEIXIN_INSTANCE_PORT,
       instanceCwd: s?.instanceCwd ?? '',

@@ -21,6 +21,7 @@ export default defineBrand({
     'openplatform-qwen3.7-max',
     'openplatform-glm-5.1',
     'openplatform-glm-5.2',
+    'openplatform-glm-5.3',
     'openplatform-glm-5',
     'openplatform-deepseek-v4-flash',
     'openplatform-deepseek-v4-pro',

@@ -1056,8 +1056,15 @@ class OpenAIShimMessages {
     // option, or `?reasoning=<level>` query — i.e. when caller passes a
     // reasoningEffort option. request.reasoning is filled by the provider
     // resolution layer in that case.
+    // Z.AI-hosted GLM models only accept their own vocabulary on the wire
+    // (`high` / `max`); the option value is OpenAI-shaped (`low` / `medium` /
+    // `high` / `xhigh`), so normalize for allowlisted GLM ids before sending —
+    // otherwise GLM 400s with "reasoning_effort must be one of ...".
     if (this.reasoningEffort !== undefined && !body.reasoning_effort) {
-      body.reasoning_effort = this.reasoningEffort
+      const fallbackModelForEffort = request.resolvedModel ?? params.model
+      body.reasoning_effort = supportsZaiReasoningEffort(fallbackModelForEffort)
+        ? normalizeZaiReasoningEffort(this.reasoningEffort)
+        : this.reasoningEffort
     }
 
     if (params.stream && !isLocalProviderUrl(request.baseUrl)) {
@@ -1154,7 +1161,10 @@ class OpenAIShimMessages {
       }
 
       if (this.reasoningEffort !== undefined && !responsesBody.reasoning_effort) {
-        responsesBody.reasoning_effort = this.reasoningEffort
+        const fallbackModelForEffort = request.resolvedModel ?? params.model
+        responsesBody.reasoning_effort = supportsZaiReasoningEffort(fallbackModelForEffort)
+          ? normalizeZaiReasoningEffort(this.reasoningEffort)
+          : this.reasoningEffort
       }
 
       const systemText = convertSystemPrompt(params.system)

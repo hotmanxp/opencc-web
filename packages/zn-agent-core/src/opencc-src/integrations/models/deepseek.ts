@@ -94,4 +94,24 @@ export default [
     contextWindow: 1_048_576,
     maxOutputTokens: 262_144,
   }),
+  // deepseek-v4.1-flash: same shape as deepseek-flash (vision-capable flash
+  // variant, 1M context / 262,144 output, no reasoning).
+  defineModel({
+    id: 'deepseek-v4.1-flash',
+    label: 'DeepSeek V4.1 Flash',
+    brandId: 'deepseek',
+    vendorId: 'deepseek',
+    classification: ['chat', 'vision', 'coding'],
+    defaultModel: 'deepseek-v4.1-flash',
+    capabilities: {
+      supportsVision: true,
+      supportsStreaming: true,
+      supportsFunctionCalling: true,
+      supportsJsonMode: true,
+      supportsReasoning: false,
+      supportsPreciseTokenCount: false,
+    },
+    contextWindow: 1_048_576,
+    maxOutputTokens: 262_144,
+  }),
 ]

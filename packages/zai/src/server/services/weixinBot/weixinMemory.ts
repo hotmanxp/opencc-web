@@ -23,7 +23,7 @@
  */
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { weixinDataDir } from '../paths.js'
@@ -104,100 +104,27 @@ function extractReadable(entry: unknown): { role: string; text: string } | null 
   return { role, text }
 }
 
-/**
- * 按优先级列出旧 session transcript 的候选路径。
- *
- * ⚠ 实际运行时的 transcript 由 zn-agent-core 的 legacyTranscriptStore 写:
- *   `<dataDir>/projects/<sanitizePath(cwd)>/<sessionId>.jsonl`(JSONL,每行一条)。
- * 早期实现读的是 `<dataDir>/transcripts/projects/<id>.json`(core paths.ts 的
- * 旧布局),与真实落盘位置完全错开 → 轮转摘要永远读到 0 条消息、什么也不写
- * (`~/.zai/weixin/memory/` 始终不存在),记忆系统整体失联。
- * 这里把两种布局都兼容,并追加"全局扫 projects/*"兜底(旧绑定 cwd 变更后,
- * transcript 实际落在另一个 project 目录,如 sess-3272d1e6 在 -Users-ethan 下)。
- */
-function transcriptCandidates(dataDir: string, sessionId: string, cwd: string): string[] {
-  const list: string[] = []
-  if (cwd) {
-    const san = sanitizePath(cwd)
-    // 现行布局:legacyTranscriptStore(JSONL)
-    list.push(join(dataDir, 'projects', san, `${sessionId}.jsonl`))
-    list.push(join(dataDir, 'projects', san, `${sessionId}.json`))
-    // 旧布局:core compat/transcript/paths.ts(JSON 数组)
-    list.push(join(dataDir, 'transcripts', 'projects', san, `${sessionId}.json`))
-  }
-  list.push(join(dataDir, `${sessionId}.jsonl`))
-  list.push(join(dataDir, `${sessionId}.json`))
-  return list
-}
-
-/** cwd 对不上时的兜底:扫 projects/* 找同名 sessionId(量级小,只在前面全 miss 时才走)。 */
-function findTranscriptByScan(dataDir: string, sessionId: string): string | null {
-  for (const base of [join(dataDir, 'projects'), join(dataDir, 'transcripts', 'projects')]) {
-    let entries: string[]
-    try {
-      entries = existsSync(base) ? readdirSync(base) : []
-    } catch {
-      continue
-    }
-    for (const proj of entries) {
-      for (const ext of ['.jsonl', '.json']) {
-        const p = join(base, proj, `${sessionId}${ext}`)
-        if (existsSync(p)) return p
-      }
-    }
-  }
-  return null
-}
-
-/** 解析 transcript 文本:兼容 JSONL(每行一条)与 JSON 数组两种格式。 */
-function parseTranscriptText(raw: string): Array<{ role: string; text: string }> {
-  const trimmed = raw.trim()
-  if (!trimmed) return []
-  let list: unknown[]
-  if (trimmed.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(trimmed) as unknown
-      list = Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  } else {
-    list = []
-    for (const line of trimmed.split('\n')) {
-      const t = line.trim()
-      if (!t) continue
-      try {
-        list.push(JSON.parse(t) as unknown)
-      } catch {
-        // 单行损坏跳过,不影响其余
-      }
-    }
-  }
-  return list
-    .map(extractReadable)
-    .filter((x): x is { role: string; text: string } => x !== null)
-    .slice(-SUMMARY_MAX_MESSAGES)
-}
-
 /** 读旧 session 的 transcript,返回最近 N 条可读消息(时间正序)。 */
 export function readTranscriptExcerpt(dataDir: string, sessionId: string, cwd: string): Array<{ role: string; text: string }> {
-  const candidates = transcriptCandidates(dataDir, sessionId, cwd)
+  const base = join(dataDir, 'transcripts')
+  const candidates = cwd
+    ? [join(base, 'projects', sanitizePath(cwd), `${sessionId}.json`), join(base, `${sessionId}.json`)]
+    : [join(base, `${sessionId}.json`)]
   for (const path of candidates) {
     if (!existsSync(path)) continue
     try {
-      const parsed = parseTranscriptText(readFileSync(path, 'utf-8'))
-      if (parsed.length > 0) return parsed
+      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown
+      const list = Array.isArray(parsed)
+        ? parsed
+        : typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { messages?: unknown[] }).messages)
+          ? (parsed as { messages: unknown[] }).messages
+          : []
+      const readable = list
+        .map(extractReadable)
+        .filter((x): x is { role: string; text: string } => x !== null)
+      return readable.slice(-SUMMARY_MAX_MESSAGES)
     } catch {
       // 损坏文件 → 尝试下一个候选
-    }
-  }
-  const scanned = findTranscriptByScan(dataDir, sessionId)
-  if (scanned) {
-    try {
-      const parsed = parseTranscriptText(readFileSync(scanned, 'utf-8'))
-      if (parsed.length > 0) return parsed
-    } catch {
-      // 扫描命中但解析失败 → 放弃
     }
   }
   return []

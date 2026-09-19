@@ -46,6 +46,7 @@ describe('getModelMaxOutputTokens', () => {
     // lookup fell through to DEFAULT (64k) while the picker displayed the
     // descriptor value — 262K shown, 64K actually sent.
     expect(getModelMaxOutputTokens('deepseek-flash')).toBe(262_144)
+    expect(getModelMaxOutputTokens('deepseek-v4.1-flash')).toBe(262_144)
     expect(getModelMaxOutputTokens('deepseek-v4-flash')).toBe(262_144)
     expect(getModelMaxOutputTokens('deepseek-v4-pro')).toBe(262_144)
   })

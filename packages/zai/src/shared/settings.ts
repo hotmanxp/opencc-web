@@ -190,7 +190,7 @@ export interface ZaiSettings {
      * 与 shared/weixin.ts:WeixinBotSettingsSchema 对齐。
      */
     ilinkUserId?: string
-    /** 会话轮转 TTL(小时),默认 12;0 = 永不轮转。与 shared/weixin.ts 对齐。 */
+    /** 会话轮转 TTL(小时),默认 6;0 = 永不轮转。与 shared/weixin.ts 对齐。 */
     sessionTtlHours?: number
     /**
      * 微信专用实例的端口(默认 9199)。`enabled=true` 时主实例启动会用它

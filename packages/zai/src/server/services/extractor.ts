@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, readdir, rm, mkdir, stat } from 'node:fs/promises';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import AdmZip from 'adm-zip';
+import yaml from 'js-yaml';
 import { resolveSpawnCommand } from './spawner.js';
 import {
   PLUGIN_PKG,
@@ -167,12 +168,60 @@ export async function getCachedExtraction(
  * `collectionSize`. Platform-folder collections (commands/<platform>/,
  * agents/<platform>/) additionally carry isPlatformFolder so the UI can
  * render them as platform buckets rather than generic collections.
+ *
+ * `description` is filled for skills from their SKILL.md frontmatter.
  */
 export interface ListedResource {
   name: string;
   isCollection?: boolean;
   collectionSize?: number;
   isPlatformFolder?: boolean;
+  description?: string;
+}
+
+/**
+ * Frontmatter can sit at the top of a large SKILL.md, so only the head
+ * of the file is read — enough for any sane description block without
+ * slurping whole documents while listing a directory of skills.
+ */
+const FRONTMATTER_HEAD_BYTES = 8192;
+
+/**
+ * Read the `description` field from a Markdown file's YAML frontmatter.
+ * Returns undefined for missing files, files without frontmatter, or a
+ * frontmatter block without a usable string description. Multi-line
+ * descriptions (YAML `|` / `>` blocks) are collapsed to a single line so
+ * the UI can render them as a one-liner.
+ */
+export function readMarkdownDescription(file: string): string | undefined {
+  let fd: number;
+  try {
+    fd = openSync(file, 'r');
+  } catch {
+    return undefined;
+  }
+  let raw: string;
+  try {
+    const buf = Buffer.alloc(FRONTMATTER_HEAD_BYTES);
+    const read = readSync(fd, buf, 0, buf.length, 0);
+    raw = buf.subarray(0, read).toString('utf-8');
+  } catch {
+    return undefined;
+  } finally {
+    closeSync(fd);
+  }
+
+  if (!raw.startsWith('---')) return undefined;
+  const end = raw.indexOf('\n---', 3);
+  if (end < 0) return undefined;
+  try {
+    const data = yaml.load(raw.slice(3, end)) as Record<string, unknown> | null;
+    const desc = data?.description;
+    if (typeof desc !== 'string' || !desc.trim()) return undefined;
+    return desc.replace(/\s+/g, ' ').trim();
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -218,7 +267,10 @@ function scanType(root: string, type: ResourceType): ListedResource[] {
       if (!entry.isDirectory()) continue;
       // Single skill: top-level directory has SKILL.md
       if (existsSync(join(abs, 'SKILL.md'))) {
-        out.push({ name: entry.name });
+        out.push({
+          name: entry.name,
+          description: readMarkdownDescription(join(abs, 'SKILL.md')),
+        });
         continue;
       }
       // Otherwise it's a collection of skills
@@ -236,7 +288,10 @@ function scanType(root: string, type: ResourceType): ListedResource[] {
           collectionSize: skillChildren.length,
         });
         for (const sc of skillChildren) {
-          out.push({ name: `${entry.name}/${sc.name}` });
+          out.push({
+            name: `${entry.name}/${sc.name}`,
+            description: readMarkdownDescription(join(abs, sc.name, 'SKILL.md')),
+          });
         }
       }
     } else if (type === 'commands') {

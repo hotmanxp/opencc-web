@@ -137,6 +137,17 @@ export default [
     maxOutputTokens: 131_072,
   }),
   defineModel({
+    id: 'openplatform-glm-5.3',
+    label: 'GLM 5.3 (Open Platform)',
+    brandId: 'openplatform',
+    vendorId: 'anthropic',
+    classification: ['chat', 'reasoning', 'coding'],
+    defaultModel: 'glm-5.3',
+    capabilities: openplatformTextOnlyCapabilities,
+    contextWindow: 1_048_576,
+    maxOutputTokens: 131_072,
+  }),
+  defineModel({
     id: 'openplatform-deepseek-v4-flash',
     label: 'DeepSeek V4 Flash (Open Platform)',
     brandId: 'openplatform',

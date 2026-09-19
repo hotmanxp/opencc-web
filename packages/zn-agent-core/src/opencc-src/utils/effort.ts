@@ -128,8 +128,11 @@ export function supportsZaiReasoningEffort(model: string | undefined): boolean {
   const normalized = normalizedBaseModel(model)
   return normalized === 'glm-5.2'
       || normalized === 'zai-org/glm-5.2'
+      || normalized === 'glm-5.3'
+      || normalized === 'zai-org/glm-5.3'
       || normalized === 'zhiniao-glm-5.1'
       || normalized.endsWith('/glm-5.2')
+      || normalized.endsWith('/glm-5.3')
 }
 
 // Z.AI's wire protocol only accepts `high` or `max` for reasoning_effort.
@@ -284,6 +287,14 @@ export function resolveAppliedEffort(
   }
   const resolved =
     envOverride ?? appStateEffortValue ?? getDefaultEffortForModel(model)
+  // Z.AI-hosted GLM models (anthropic route via zn-nova included) only accept
+  // `low` / `high` / `max` as reasoning effort — the gateway maps it straight
+  // to OpenAI's `reasoning_effort`, which has no `medium`. Clamp medium up to
+  // high so the web UI's default never 400s GLM with
+  // "'reasoning_effort' must be one of: 'low', 'high', 'max'".
+  if (resolved === 'medium' && supportsZaiReasoningEffort(model)) {
+    return 'high'
+  }
   // API rejects 'max' on non-Opus-4.6 Anthropic models — downgrade to 'high'.
   // OpenAI/Codex models use 'max' as the standard form of 'xhigh'; the client
   // shim converts it back to 'xhigh' on the wire, so don't clamp it here.

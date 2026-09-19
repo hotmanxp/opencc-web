@@ -64,6 +64,12 @@
      窗口永远深色回退, 配 --text-primary 深色文字 → 黑底黑字不可见. */
   --bg-elevated: #1c1c26;
   --bg-elevated-92: rgba(28, 28, 38, 0.92);
+  /* 资源管理页 (/manage?tab=resources) 卡片网格: 全局 --bg-card (#12121a)
+     与页面底色 --bg-body (#0a0a0f) 只差一档, 卡片几乎融进背景. 这里给
+     该页卡片单独一层明显提亮的底色 + hover 再亮一档, 不动物全局卡片变量. */
+  --resource-card-bg: #23232f;
+  --resource-card-bg-hover: #2e2e3d;
+  --resource-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 6px rgba(0, 0, 0, 0.45);
   --desktop-chrome-bg: rgba(0, 0, 0, 0.35);
   --desktop-chrome-bg-strong: rgba(0, 0, 0, 0.22);
   /* 壁纸之上的快捷方式标签/文件图标: 壁纸(图片或深色预设)不随主题变化,
@@ -154,6 +160,11 @@
   /* 桌面浮层/light 主题: 白色 elevate + 浅色半透明 chrome, 与深色文字对称. */
   --bg-elevated: #ffffff;
   --bg-elevated-92: rgba(255, 255, 255, 0.85);
+  /* 资源管理页卡片: light 主题下外层容器卡是浅灰 (#f1f5f5), 资源卡改用白色
+     才能"浮"在容器上; 页面本身是白底, 靠灰色容器卡 + 橙色描边区分层次. */
+  --resource-card-bg: #ffffff;
+  --resource-card-bg-hover: #f8fafc;
+  --resource-card-shadow: 0 1px 3px rgba(15, 23, 42, 0.10);
   --desktop-chrome-bg: rgba(255, 255, 255, 0.6);
   --desktop-chrome-bg-strong: rgba(255, 255, 255, 0.28);
   --file-icon-neutral-bg: rgba(15, 23, 42, 0.10);
@@ -272,6 +283,21 @@ body {
    var(--bg-card) 白底在浅色对话区 (--bg-body=#eef2f7) 上突兀跳出。tf-k93br2hc,2026-09-05。*/
 .ant-card.runtime-error-card { background: transparent !important; border-color: var(--accent-end) !important; }
 .ant-card.runtime-error-card:hover { border-color: var(--accent-end) !important; box-shadow: none; }
+
+/* 资源管理页 (/manage?tab=resources) 的卡片网格: 全局 .ant-card 的底色
+   (--bg-card) 与页面底色只差一档、边框权重 (--border-subtle) 也只有 18%
+   透明橙, 卡片在背景上几乎看不出边界. 这里给该页卡片单独一层提亮底色 +
+   active 权重描边, hover 再亮一档到 accent 全亮. */
+.resource-card.ant-card {
+  background: var(--resource-card-bg) !important;
+  border-color: var(--border-active) !important;
+  box-shadow: var(--resource-card-shadow) !important;
+}
+.resource-card.ant-card:hover {
+  background: var(--resource-card-bg-hover) !important;
+  border-color: var(--accent-start) !important;
+  box-shadow: 0 0 20px var(--glow) !important;
+}
 
 .ant-table { background: transparent !important; }
 .ant-table-thead > tr > th { background: var(--bg-card) !important; color: var(--text-secondary) !important; border-bottom: 1px solid var(--border-subtle) !important; }

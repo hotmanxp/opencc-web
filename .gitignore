@@ -53,10 +53,6 @@ Thumbs.db
 .claude/worktrees/
 .zai/worktrees/
 
-# Claude Code local state (settings.json / commands/ etc.) — release snapshots
-# should not bring in developer-local Claude tooling state.
-.claude/
-
 # Superpowers local task artifacts (briefs/reviews)
 .superpowers/briefs/
 .superpowers/reviews/
@@ -68,7 +64,6 @@ Thumbs.db
 
 # Local runtime artifacts (ego browser task outputs etc.)
 var/
-.workbuddy/
 docs/superpowers/plans/screenshots
 docs/superpowers/verification
 CONTEXT.md

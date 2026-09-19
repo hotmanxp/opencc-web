@@ -29,6 +29,11 @@ const STATIC_MODEL_CAPABILITIES: Readonly<Record<string, ModelCapability>> = {
     max_input_tokens: 1_048_576, // openaiContextWindows.ts:399
     max_tokens: 131_072, // openaiContextWindows.ts:613
   },
+  'glm-5.3': {
+    id: 'glm-5.3',
+    max_input_tokens: 1_048_576,
+    max_tokens: 131_072,
+  },
   'MiniMax-M2.7-highspeed': {
     id: 'MiniMax-M2.7-highspeed',
     max_input_tokens: 204_800, // openaiContextWindows.ts:328

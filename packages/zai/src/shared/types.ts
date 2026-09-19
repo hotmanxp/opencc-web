@@ -80,6 +80,13 @@ export interface ResourceItem {
   /** Number of resources inside the collection. Only set when isCollection. */
   collectionSize?: number;
   /**
+   * Short human description parsed from the resource's own definition
+   * file — skills read the `description` field from `SKILL.md`
+   * frontmatter. Undefined when the file is unreadable or has no
+   * description (collections, extensions, and non-skill types today).
+   */
+  description?: string;
+  /**
    * True when the collection represents a platform bucket
    * (commands/nova, agents/opencode, …). UI renders these as "平台"
    * folders; install logic routes them only to the matching platform.

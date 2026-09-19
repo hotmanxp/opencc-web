@@ -115,6 +115,7 @@ router.get('/resources/:type', async (req, res) => {
       isCollection: entry.isCollection,
       isPlatformFolder: entry.isPlatformFolder,
       collectionSize: entry.collectionSize,
+      description: entry.description,
     };
   });
   res.json(items);

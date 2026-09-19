@@ -73,6 +73,7 @@ const MODEL_MAX_OUTPUT_TOKENS: ReadonlyMap<string, number> = new Map([
   // (64_000) while the picker displays the descriptor value — the display /
   // request mismatch this table exists to prevent.
   ['deepseek-flash', 262_144],
+  ['deepseek-v4.1-flash', 262_144],
   ['deepseek-v4-flash', 262_144],
   ['deepseek-v4-pro', 262_144],
   ['deepseek-v4-pro-0813', 384_000],

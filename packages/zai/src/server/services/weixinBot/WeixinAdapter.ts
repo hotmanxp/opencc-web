@@ -370,11 +370,6 @@ export class WeixinAdapter {
       }
 
       this.consecutiveFailures = 0
-      // 成功轮询必须把状态机拉回 connected:否则一旦因连续失败进入
-      // `reconnecting` 就再也不会恢复,而 sendText/_sendFile 在非 connected
-      // 时会**静默**返回 success:false(不抛错),上层 .catch 拿不到 →
-      // 表现为「agent 明明回复了,微信端永远收不到」。
-      if (this._state !== 'connected') this.setState('connected')
       const newBuf = response.get_updates_buf
       if (newBuf) {
         syncBuf = newBuf

@@ -47,6 +47,7 @@ const openplatformCaps: Record<string, ModelCapabilities> = {
   'qwen3.8-flash':        allCaps({ contextWindow: 1_000_000, maxOutputTokens: 131_072, supportsVision: true }),
   'glm-5.1':              allCaps({ contextWindow: 202_745, maxOutputTokens: 65_536, supportsVision: false }),
   'glm-5.2':              allCaps({ contextWindow: 1_000_000, maxOutputTokens: 131_072, supportsVision: false }),
+  'glm-5.3':              allCaps({ contextWindow: 1_000_000, maxOutputTokens: 131_072, supportsVision: false }),
   'deepseek-v4-flash':    allCaps({ contextWindow: 1_000_000, maxOutputTokens: 262_144, supportsVision: false }),
   'deepseek-v4-pro':      allCaps({ contextWindow: 1_000_000, maxOutputTokens: 262_144, supportsVision: false }),
   'deepseek-v4-pro-0813': allCaps({ contextWindow: 1_000_000, maxOutputTokens: 384_000, supportsVision: false }),

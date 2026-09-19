@@ -18,5 +18,6 @@ export default defineBrand({
     'deepseek-v4-flash',
     'deepseek-v4-pro',
     'deepseek-flash',
+    'deepseek-v4.1-flash',
   ],
 })

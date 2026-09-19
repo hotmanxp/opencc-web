@@ -58,12 +58,10 @@ import {
   getPlanFilePath,
   persistFileSnapshotIfRemote,
 } from './plans.js'
-import { getPlatform } from './platform.js'
 import { countFilesRoundedRg } from './ripgrep.js'
 import { jsonStringify } from './slowOperations.js'
 import type { SystemPrompt } from './systemPromptType.js'
 import { getToolSchemaCache } from './toolSchemaCache.js'
-import { windowsPathToPosixPath } from './windowsPaths.js'
 import { zodToJsonSchema } from './zodToJsonSchema.js'
 
 // Extended BetaTool type with strict mode and defer_loading support
@@ -641,14 +639,26 @@ export function normalizeToolInput<T extends Tool>(
       // Validated upstream, won't throw
       const parsed = BashTool.inputSchema.parse(input)
       const { command, timeout, description } = parsed
-      const cwd = getCwd()
-      let normalizedCommand = command.replace(`cd ${cwd} && `, '')
-      if (getPlatform() === 'windows') {
-        normalizedCommand = normalizedCommand.replace(
-          `cd ${windowsPathToPosixPath(cwd)} && `,
-          '',
-        )
-      }
+      // zai patch (2026-09-16, shell-cwd-drift): upstream strips a leading
+      // `cd ${getCwd()} && ` here, on the assumption that the shell always
+      // starts in getCwd() — that invariant holds upstream because
+      // `resetCwdIfOutsideProject` pulls the shell cwd back after every
+      // foreground call. zai deliberately stubs that reset to `false`
+      // (tools/BashTool/utils.ts) so the per-session cwd survives across
+      // turns, and the shell is spawned with `cwd = pwd()`, i.e. the cwd of
+      // the SDK context that compat bashCwdWrap opens per Bash call
+      // (`CwdStore.get(sid)`, Shell.ts:234/359). This function instead runs
+      // in the QUERY-scoped SDK context (createOpenccRuntime-impl.ts:825/848,
+      // `cwd = options.defaultCwd`) — reached from normalizeContentFromAPI
+      // while streaming the assistant message — so `getCwd()` here is the
+      // runtime's fixed default cwd. Once the session cwd drifts away from
+      // that default — exactly what cross-turn cwd persistence allows — the
+      // strip deletes a `cd` that was NOT a no-op and the command silently
+      // runs in the wrong directory (observed: `cd <repo-root> && pnpm
+      // release:patch` executing in a previously cd'd subdirectory). Keep the
+      // command verbatim: a redundant `cd <already-current-dir> && ` costs a
+      // few tokens and is harmless.
+      let normalizedCommand = command
 
       // Replace \\; with \; (commonly needed for find -exec commands)
       normalizedCommand = normalizedCommand.replace(/\\\\;/g, '\\;')

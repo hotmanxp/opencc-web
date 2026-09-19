@@ -129,6 +129,19 @@ export default defineGateway({
           },
         },
       },
+      {
+        id: 'opengateway-glm-5.3',
+        apiName: 'z-ai/glm-5.3',
+        label: 'GLM 5.3 (via Opengateway)',
+        modelDescriptorId: 'glm-5.3',
+        transportOverrides: {
+          openaiShim: {
+            ...ZAI_GLM_OPENAI_SHIM,
+            maxTokensField: 'max_completion_tokens',
+            removeBodyFields: ['store', 'stream_options'],
+          },
+        },
+      },
       // OpenRouter :free endpoint — bills $0 and bypasses the gateway credit
       // gate, so it works even with an empty credit balance.
       {
