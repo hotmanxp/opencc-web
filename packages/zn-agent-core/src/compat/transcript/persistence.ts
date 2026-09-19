@@ -196,22 +196,6 @@ export async function appendUserMessageV2(
       cwd: pathOpts?.cwd ?? ctx.cwd,
       subagent: pathOpts?.subagent,
     })
-  // [MID-TURN-VERIFY] transcript appendUserMessageV2
-  console.log('[MID-TURN-VERIFY] transcript-appendUserMessageV2', JSON.stringify({
-    sessionId,
-    turnIndex,
-    isSkillInjection,
-    isMeta,
-    contentPreview: typeof normalized === 'string'
-      ? normalized.slice(0, 200)
-      : JSON.stringify(normalized).slice(0, 200),
-    contentLength: typeof normalized === 'string'
-      ? normalized.length
-      : JSON.stringify(normalized).length,
-    isAttachment: typeof normalized === 'string' && normalized.includes('<task-notification>'),
-    hasQueuedCommandAttachment: typeof normalized === 'string' && normalized.includes('queued_command'),
-    timestamp: Date.now(),
-  }))
     return base.uuid
   } catch (err) {
     if (process.env.ZAI_DEBUG === '1')
