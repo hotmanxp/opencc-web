@@ -2739,6 +2739,17 @@ if (
           (cmd.agentId === currentAgentId && (cmd as any).sessionId === undefined))
       )
     })
+    // [MID-TURN-VERIFY] mid-turn drain filter result
+    console.log('[MID-TURN-VERIFY] mid-turn-drain', JSON.stringify({
+      sleepRan,
+      isMainThread,
+      currentAgentId,
+      snapshotLen: queuedCommandsSnapshot.length,
+      snapshotModes: queuedCommandsSnapshot.map(c => c.mode),
+      snapshotUuids: queuedCommandsSnapshot.map(c => c.uuid),
+      snapshotTaskKinds: queuedCommandsSnapshot.map(c => (c as any).taskKind),
+      timestamp: Date.now(),
+    }))
 
     for await (const attachment of getAttachmentMessages(
       null,

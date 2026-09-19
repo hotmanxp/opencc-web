@@ -156,6 +156,18 @@ export function enqueue(command: QueuedCommand): void {
  * 不污染 vendor agentId 字段。
  */
 export function enqueuePendingNotification(command: QueuedCommand): void {
+  // [MID-TURN-VERIFY] enqueuePendingNotification entrypoint
+  console.log('[MID-TURN-VERIFY] enqueuePendingNotification', JSON.stringify({
+    mode: command.mode,
+    priority: command.priority,
+    agentId: command.agentId,
+    sessionId: (command as any).sessionId,
+    taskKind: (command as any).taskKind,
+    uuid: command.uuid,
+    valuePreview: typeof command.value === 'string' ? command.value.slice(0, 120) : '<non-string>',
+    queueDepthBefore: commandQueue.length,
+    timestamp: Date.now(),
+  }))
   // zai patch (2026-09-01): 同 enqueue,统一盖章 enqueuedAt。
   commandQueue.push({
     ...command,

@@ -144,5 +144,16 @@ export function zaiEnqueuePendingNotification(cmd: ZaiQueuedCommand): void {
       `[zaiEnqueuePendingNotification] vendor bridge not installed. call installMessageQueueAdapterBridges() at server startup (or in test setup).`,
     )
   }
+  // [MID-TURN-VERIFY] zaiEnqueuePendingNotification dispatch
+  console.log('[MID-TURN-VERIFY] zaiEnqueuePendingNotification', JSON.stringify({
+    sessionId,
+    mode: cmd.mode,
+    priority: cmd.priority,
+    taskKind: cmd.taskKind,
+    agentId: cmd.agentId,
+    uuid: cmd.uuid,
+    valuePreview: typeof cmd.value === 'string' ? cmd.value.slice(0, 120) : '<non-string>',
+    timestamp: Date.now(),
+  }))
   return fn({ ...cmd, sessionId })
 }
