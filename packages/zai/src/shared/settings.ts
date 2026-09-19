@@ -145,6 +145,37 @@ export interface ZaiSettings {
    */
   enableDynamicWorkflow?: boolean
   /**
+   * 是否启用 Computer Use (cua-driver MCP).
+   *
+   * 默认 false — desktop control 风险高(可代点鼠标、敲键盘),必须由用户在
+   * SettingsDrawer 主动打开。开启时 zai-server 自动注入
+   * `mcpServers['cua-driver'] = { command: 'cua-driver', args: ['mcp'] }`,
+   * MCP client 拉起 `cua-driver mcp` 子进程,把 55 个桌面控制工具
+   * (list_apps / click / type_text / hotkey / browser_*) 注册进 zai 工具池。
+   * 平台检查:非 darwin PUT 返回 409 requires_darwin。
+   * 二次门控:vendor 的 `getComputerUseSettings()` 在
+   * `process.env.OPENCC_ENABLE_COMPUTER_USE` 未设时不会注入(server 启动时设)
+   * — 用户的 settings 是持久化意图,真正生效还要等 env gate。
+   * 关闭时 LLM 看不到任何 mcp__cua-driver__* 工具 — schema 都不发,不仅拒绝调用。
+   *
+   * 缺失 / 非 boolean → false。
+   */
+  enableComputerUse?: boolean
+  /**
+   * Computer Use 子配置 — 与 vendor 的 `computerUse` 字段同 schema。
+   * `enabled` 才是持久化真源(`enableComputerUse` 是 hydration 派生字段,
+   * GET /api/agent/settings 从这里读出来填到响应里),`command`/`args`/
+   * `binaryPath`/`platforms` 由用户在 settings.json 里手写。
+   * 二者写在一处,免得 PUT 一次要双写两份不同 key 的字段。
+   */
+  computerUse?: {
+    enabled?: boolean
+    command?: string
+    args?: string[]
+    binaryPath?: string
+    platforms?: Array<'darwin' | 'linux' | 'win32'>
+  }
+  /**
    * 是否启用 zai 自身版本自动升级检测。
    *
    * 默认 true — 启动时 `maybeAutoUpdate()`(services/updater.ts)在后台异步

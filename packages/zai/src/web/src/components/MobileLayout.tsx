@@ -25,6 +25,7 @@ export default function MobileLayout() {
   const setOutputStyle = useAppStore((s) => s.setOutputStyle)
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
   const setEnableDynamicWorkflow = useAppStore((s) => s.setEnableDynamicWorkflow)
+  const setEnableComputerUse = useAppStore((s) => s.setEnableComputerUse)
   const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed)
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export default function MobileLayout() {
         outputStyle?: 'default' | 'compact' | 'verbose'
         maxVisibleMessages?: number
         enableDynamicWorkflow?: boolean
+        enableComputerUse?: boolean
       }>(
         '/agent/settings',
       )
@@ -91,12 +93,15 @@ export default function MobileLayout() {
         if (typeof data.enableDynamicWorkflow === 'boolean') {
           setEnableDynamicWorkflow(data.enableDynamicWorkflow)
         }
+        if (typeof data.enableComputerUse === 'boolean') {
+          setEnableComputerUse(data.enableComputerUse)
+        }
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setMaxVisibleMessages, setEnableDynamicWorkflow, setTranscriptCollapsed])
+  }, [setOutputStyle, setMaxVisibleMessages, setEnableDynamicWorkflow, setEnableComputerUse, setTranscriptCollapsed])
 
   return (
     <div

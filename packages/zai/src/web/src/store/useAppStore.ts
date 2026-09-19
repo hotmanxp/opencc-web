@@ -163,6 +163,16 @@ interface AppState {
   enableDynamicWorkflow: boolean;
   setEnableDynamicWorkflow: (v: boolean) => void;
   /**
+   * 是否启用 Computer Use (cua-driver MCP).
+   * 持久化到 ~/.zai/settings.json (settings.computerUse.enabled).
+   * 平台检查在服务端:非 darwin PUT 返回 409 requires_darwin。
+   * 关闭时 MCP client 不注入 cua-driver server,LLM 完全看不到 55 个工具。
+   * 开启时若 OPENCC_ENABLE_COMPUTER_USE 未设,server-side 注入会自动跳过,
+   * 但 settings 仍写入磁盘 — 用户重启时若 env var 设了就生效。
+   */
+  enableComputerUse: boolean;
+  setEnableComputerUse: (v: boolean) => void;
+  /**
    * 是否启用 zai 自身版本自动升级检测。
    * 默认 true — 启动时 `maybeAutoUpdate()` 在后台跑 `npm view` + (必要时)
    * `npm install -g`,完成后 SSE 推 `app.update.complete` 事件,
@@ -238,6 +248,7 @@ export const useAppStore = create<AppState>((set) => ({
   maxVisibleMessages: 20,
   defaultSplitScreen: false,
   enableDynamicWorkflow: false,
+  enableComputerUse: false,
   // 默认 true — 与服务端 BUILTIN_DEFAULT_SETTINGS.autoUpdate 对齐,
   // Layout mount effect GET /api/agent/settings 会重新 hydrate(用户
   // 在 SettingsDrawer 显式关掉后,重启就该是 false)。
@@ -375,6 +386,7 @@ export const useAppStore = create<AppState>((set) => ({
   setMaxVisibleMessages: (n) => set({ maxVisibleMessages: n }),
   setDefaultSplitScreen: (v) => set({ defaultSplitScreen: v }),
   setEnableDynamicWorkflow: (v) => set({ enableDynamicWorkflow: v }),
+  setEnableComputerUse: (v) => set({ enableComputerUse: v }),
   setAutoUpdate: (v) => set({ autoUpdate: v }),
   applyAppUpdate: (event) => set((state) => {
     // 同一 process 只走一轮 check → install → (complete|failed)。

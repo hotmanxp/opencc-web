@@ -12,6 +12,7 @@ import { profilesToModelEntries } from '../../shared/profileProjection.js'
 import {
   isValidAutoUpdate,
   isValidDefaultSplitScreen,
+  isValidEnableComputerUse,
   isValidEnableDynamicWorkflow,
   isValidOpenccCliDangerouslySkip,
   isValidOutputStyle,
@@ -20,6 +21,7 @@ import {
   readZaiSettings,
   resolveAutoUpdate,
   resolveDefaultSplitScreen,
+  resolveEnableComputerUse,
   resolveEnableDynamicWorkflow,
   resolveOpenccCliDangerouslySkip,
   resolveOutputStyle,
@@ -103,6 +105,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
         : 20
     const defaultSplitScreen = resolveDefaultSplitScreen(settings)
     const enableDynamicWorkflow = resolveEnableDynamicWorkflow(settings)
+    const enableComputerUse = resolveEnableComputerUse(settings)
     const autoUpdate = resolveAutoUpdate(settings)
     // zai patch (2026-08-20): 主 Agent —— 当前选择 + 可选列表(内置 + 外置
     // ~/.zai/main-agents/*.js 合并),供 SettingsDrawer 的 Agent 选择行渲染。
@@ -120,6 +123,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       maxVisibleMessages,
       defaultSplitScreen,
       enableDynamicWorkflow,
+      enableComputerUse,
       autoUpdate,
       mainAgent: mainAgent.name,
       mainAgents: mainAgents.map((a) => ({
@@ -390,5 +394,99 @@ router.put(
     }
   },
 )
+
+/**
+ * PUT /api/agent/settings/computer-use — persist the web UI's
+ * "启用 Computer Use (cua-driver)" toggle. Body is `{ value: boolean }`.
+ *
+ * Mirrors enable-dynamic-workflow's pattern:
+ *   - zai controls whether the cua-driver MCP server gets injected.
+ *   - The toggle writes the persisted flag AND mutates
+ *     `process.env.OPENCC_ENABLE_COMPUTER_USE` so vendor's
+ *     `isComputerUseEnabled()` returns true on the very next
+ *     `getClaudeCodeMcpConfigs()` call. The MCP client re-spawns the
+ *     cua-driver subprocess lazily; existing sessions pick up the new
+ *     tool pool on their next query() call (the tool list is reassembled
+ *     per query).
+ *
+ * Platform gate: non-darwin rejects with 409 `requires_darwin`. The UI
+ * also disables the row on non-darwin; this is the server-side
+ * enforcement for the case where someone Pokes the API directly.
+ *
+ * The cua-driver binary itself is NOT bundled — user must install it
+ * (brew install --cask cua-driver) or set `binaryPath` in
+ * `~/.zai/settings.json` under `computerUse.binaryPath`. A separate
+ * GET /api/agent/computer-use/status surfaces whether the binary is
+ * resolvable on $PATH so the UI can show a one-line hint.
+ */
+router.put('/agent/settings/computer-use', async (req: Request, res: Response) => {
+  const raw = (req.body as { value?: unknown } | undefined)?.value
+  if (!isValidEnableComputerUse(raw)) {
+    return res
+      .status(400)
+      .json({ error: `invalid enableComputerUse: ${String(raw)}` })
+  }
+  if (raw && process.platform !== 'darwin') {
+    return res.status(409).json({
+      error: `requires_darwin: computer use only ships on macOS (got ${process.platform})`,
+    })
+  }
+  try {
+    // Single source of truth: write to the vendor schema field
+    // `settings.computerUse.enabled`. Preserves any sibling fields
+    // (command / args / binaryPath / platforms) the user already set.
+    const current = await readZaiSettings()
+    const cu = current.computerUse ?? {}
+    const next = await updateZaiSettings({
+      computerUse: { ...cu, enabled: raw },
+      // Mirror to the legacy flat field for any code paths that still
+      // read it. The `resolveEnableComputerUse()` reader prefers the
+      // nested field, so this is a pure additive write.
+      enableComputerUse: raw,
+    })
+    // Bridge to vendor's runtime gate, same shape as the workflow PUT.
+    if (raw) {
+      process.env.OPENCC_ENABLE_COMPUTER_USE = '1'
+    } else {
+      delete process.env.OPENCC_ENABLE_COMPUTER_USE
+    }
+    res.json({ value: resolveEnableComputerUse(next) })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+/**
+ * GET /api/agent/computer-use/status — probe whether the cua-driver
+ * binary is resolvable so the settings drawer can show a one-line hint.
+ * Returns `{ installed: boolean, path?: string, command: string, args: string[] }`.
+ *
+ * Cheap (a single `which` exec per call); SettingsDrawer calls it once on
+ * mount. We do NOT cache — a 200ms hiccup if the user just installed
+ * cua-driver is acceptable, and caching would need invalidation on PATH
+ * changes.
+ */
+router.get('/agent/computer-use/status', async (_req: Request, res: Response) => {
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const execFileP = promisify(execFile)
+  const command = 'cua-driver'
+  try {
+    const { stdout } = await execFileP('which', [command])
+    const resolved = stdout.split('\n')[0]?.trim()
+    res.json({
+      installed: typeof resolved === 'string' && resolved.length > 0,
+      path: resolved && resolved.length > 0 ? resolved : undefined,
+      command,
+      args: ['mcp'],
+    })
+  } catch {
+    res.json({
+      installed: false,
+      command,
+      args: ['mcp'],
+    })
+  }
+})
 
 export default router

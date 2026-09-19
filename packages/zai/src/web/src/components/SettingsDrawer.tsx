@@ -583,6 +583,7 @@ function buildStaticSchema(
   maxVisibleMessages: number,
   defaultSplitScreen: boolean,
   enableDynamicWorkflow: boolean,
+  enableComputerUse: boolean,
   autoUpdate: boolean,
   mainAgent: string,
   agentOptions: EnumOption[],
@@ -767,6 +768,31 @@ function buildStaticSchema(
       ],
     },
     {
+      // Computer Use — 桌面控制。默认 OFF — desktop control 风险高
+      // (可代点鼠标、敲键盘),必须由用户在 SettingsDrawer 主动打开。
+      // 平台检查在 server 端:非 darwin PUT 返回 409 requires_darwin,
+      // 这里也在客户端 disable 这一行让用户看到原因。
+      // 开启时:server 端同步写 process.env.OPENCC_ENABLE_COMPUTER_USE=1
+      // → vendor 的 isComputerUseEnabled() 返回 true → MCP client 下次
+      // getClaudeCodeMcpConfigs() 自动注入 cua-driver stdio server →
+      // 55 个桌面控制工具 (list_apps / click / type_text / hotkey / ...)
+      // 被发现并注册为 zai Tool。每条工具调用都仍走 PermissionConfirmCard
+      // (MCPTool 默认 checkPermissions = passthrough) — 开关只是把工具
+      // 暴露给 LLM,不绕过权限门。
+      // 二进制要求:cua-driver 必须装在 $PATH(或 settings.computerUse.
+      // binaryPath 显式指定)。SettingsDrawer 打开时拉一次
+      // GET /api/agent/computer-use/status,把结果以 hint 行展示。
+      section: 'Computer Use',
+      rows: [
+        {
+          key: 'enableComputerUse',
+          label: '启用桌面控制 (cua-driver MCP)',
+          kind: 'boolean',
+          value: enableComputerUse,
+        },
+      ],
+    },
+    {
       // zai 自身版本自动升级。默认 ON — dev 模式 (ZAI_FROM_GLOBAL_INSTALL
       // 未设) server 端直接 skip,不影响开发体验。关闭后启动时不再跑
       // `npm view @zn-ai/zai version` 也不会 spawn npm install -g。
@@ -844,6 +870,8 @@ export default function SettingsDrawer() {
   const setDefaultSplitScreen = useAppStore((s) => s.setDefaultSplitScreen)
   const enableDynamicWorkflow = useAppStore((s) => s.enableDynamicWorkflow)
   const setEnableDynamicWorkflow = useAppStore((s) => s.setEnableDynamicWorkflow)
+  const enableComputerUse = useAppStore((s) => s.enableComputerUse)
+  const setEnableComputerUse = useAppStore((s) => s.setEnableComputerUse)
   const autoUpdate = useAppStore((s) => s.autoUpdate)
   const setAutoUpdate = useAppStore((s) => s.setAutoUpdate)
   // 切换 outputStyle 时同步把 transcriptCollapsed 重置为新默认 — 'compact' 切换到
@@ -884,7 +912,7 @@ export default function SettingsDrawer() {
   ])
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions),
+    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, enableComputerUse, autoUpdate, mainAgent, agentOptions),
   )
   // mount 时拉一次 GET /api/agent/settings → 填充 agentOptions + 当前 mainAgent。
   // destroyOnClose 每次打开都会重新挂载,列表保持新鲜(新增外置 agent 文件后
@@ -1005,11 +1033,14 @@ export default function SettingsDrawer() {
           if (r.key === 'enableDynamicWorkflow' && r.kind === 'boolean') {
             return { ...r, value: enableDynamicWorkflow }
           }
+          if (r.key === 'enableComputerUse' && r.kind === 'boolean') {
+            return { ...r, value: enableComputerUse }
+          }
           return r
         }),
       })),
     )
-  }, [enableDynamicWorkflow])
+  }, [enableDynamicWorkflow, enableComputerUse])
   // 同步 store autoUpdate → schema 行。跟 enableDynamicWorkflow 完全对称:
   // store 是 settings.json 持久化的真源,单向投影,不改用户输入。
   useEffect(() => {
@@ -1172,6 +1203,22 @@ export default function SettingsDrawer() {
       if (key === 'enableDynamicWorkflow' && typeof value === 'boolean') {
         setEnableDynamicWorkflow(value)
         void fetch('/api/agent/settings/enable-dynamic-workflow', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
+      // Computer Use toggle — 跟 enable-dynamic-workflow 同结构:写 store 让
+      // UI 立即翻牌,PUT settings.json 让下次 query() 触发的 MCP config 重
+      // 拉时把 cua-driver server 注入。server 端 PUT handler 会同步写
+      // process.env.OPENCC_ENABLE_COMPUTER_USE,也会在非 darwin 返回 409
+      // (PUT fetch 静默吞错,翻牌由 store 维持,409 时用户重启或换平台前
+      // 工具仍不会注入 — fail silent in v1)。
+      if (key === 'enableComputerUse' && typeof value === 'boolean') {
+        setEnableComputerUse(value)
+        void fetch('/api/agent/settings/computer-use', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ value }),

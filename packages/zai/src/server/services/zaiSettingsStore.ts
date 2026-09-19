@@ -217,6 +217,37 @@ export function isValidEnableDynamicWorkflow(value: unknown): value is boolean {
 }
 
 /**
+ * Resolve the persisted "enable Computer Use" flag with validation.
+ * Unknown / missing values collapse to false — desktop control stays opt-in.
+ *
+ * The zai-side storage is the vendor schema field `settings.computerUse.
+ * enabled` (single source of truth — vendor's `isComputerUseEnabled()`
+ * reads from the same place via `getInitialSettings().computerUse`). The
+ * `enableComputerUse` field on ZaiSettings is a hydration convenience —
+ * GET /api/agent/settings reads from `settings.computerUse.enabled` and
+ * puts it in the response under `enableComputerUse` so SettingsDrawer's
+ * boolean row can subscribe without learning about the nested shape.
+ *
+ * Cold-start bridge: `applyZaiComputerUseEnableFromSettings()` in
+ * compat/openccInit.ts reads `settings.computerUse.enabled` and sets
+ * `process.env.OPENCC_ENABLE_COMPUTER_USE` accordingly. Live PUT route
+ * also mutates the env var so a runtime toggle takes effect on the next
+ * MCP config refresh without a process restart.
+ */
+export function resolveEnableComputerUse(settings: ZaiSettings): boolean {
+  // Prefer the nested vendor schema field. Fall back to the legacy flat
+  // field for backward compat with any pre-refactor settings.json.
+  const nested = settings.computerUse?.enabled
+  if (typeof nested === 'boolean') return nested
+  return settings.enableComputerUse === true
+}
+
+/** Validate a candidate enable-Computer-Use value before persisting. */
+export function isValidEnableComputerUse(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}
+
+/**
  * Resolve the persisted "auto-update zai" flag with validation.
  * Unknown / missing values collapse to true — we want new users to get
  * silent auto-updates by default. SettingsDrawer is the explicit opt-out.
