@@ -18,8 +18,15 @@ import { FileStateCache } from '../utils/fileStateCache.js'
 import { transitionPermissionMode } from '../utils/permissions/permissionSetup.js'
 import { assembleToolPool } from '../tools.js'
 import { mergeAndFilterTools } from '../utils/toolPool.js'
-import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
+import {
+  clearServerCache,
+  getMcpToolsCommandsAndResources,
+} from '../services/mcp/client.js'
 import { getAllMcpConfigs } from '../services/mcp/config.js'
+import {
+  connectMcpWithRetry,
+  type McpConnectAttemptResult,
+} from './mcpConnectRetry.js'
 import { assemblePluginList } from './pluginListAssembly.js'
 import {
   installPluginOp,
@@ -158,8 +165,24 @@ export async function createOpenccRuntimeImpl(options) {
   // startup stays fast (HTTP listener binds immediately) but MCP tools
   // still become available for the first query's later turns (and are
   // picked up by computeTools via appState.mcp.tools). Dedup by name.
+  //
+  // zai patch (2026-09-19): 外面包一层有界重试,见 ./mcpConnectRetry.ts。
+  // boot 期单次连接抖动(实例堆重启 / 多实例同时起 / server 冷启动)以前
+  // 会让整个进程生命周期都没有 MCP 工具 —— 运行期没有任何重试路径,连带
+  // `computer-operator` 这类声明 requiredMcpServers 的 agent 永远不出现。
   if (!ctx.config.connectMcp) {
-    void (async () => {
+    // 上一轮以 `failed` 收尾的 server:重新连接前必须先清掉
+    // `connectToServer` 的 memoize(否则重试拿到的是缓存里的同一个失败对象,
+    // 根本不会重新 spawn —— 实测就是重试后依然 "1/3 failed" 且没有新进程)。
+    let retryCandidates: Array<{
+      name: string
+      config: Parameters<typeof clearServerCache>[1]
+    }> = []
+    const connectMcpOnce = async (): Promise<McpConnectAttemptResult> => {
+      for (const cand of retryCandidates) {
+        await clearServerCache(cand.name, cand.config)
+      }
+      retryCandidates = []
       // zai patch (2026-08-29): 主 Agent mcp 插槽改为走 AgentRegistry。
       // 启动期尚未有 session 绑定(zai-server initAgentRuntime 之后才
       // registryAgent),此处按 options.mainAgent ?? 'default' 查 builtin
@@ -167,7 +190,9 @@ export async function createOpenccRuntimeImpl(options) {
       // AgentSlotFn 允许 Promise,但启动期连接是 await pattern,此处走
       // resolveAgent + 直接 fn 调 与原行为等价,绕开 async slot() 在
       // 启动期不需要 sessionId 的边界场景)。
-      // MCP 连接是启动时一次性,槽切换需重启生效。
+      // MCP 连接是启动时一次性,槽切换需重启生效 —— 重试时重新解析一次
+      // 配置,让 boot 期间刚落盘的改动(如用户刚打开的 Computer Use)也能
+      // 被这一轮带上。
       let mcpConfigs: Record<string, unknown> | undefined = undefined
       {
         const reg = getAgentRegistry()
@@ -179,8 +204,22 @@ export async function createOpenccRuntimeImpl(options) {
           mcpConfigs = mcpFn(all.servers, '__startup__')
         }
       }
+      const seen = new Set<string>()
+      let total = 0
+      let failed = 0
       await getMcpToolsCommandsAndResources(
         ({ client, tools: mcpTools, commands: mcpCommands }) => {
+          // `disabled` 是配置层面禁用,不计入连接失败(也不触发重试)。
+          if (client.type !== 'disabled' && !seen.has(client.name)) {
+            seen.add(client.name)
+            total++
+            if (client.type === 'failed') {
+              failed++
+              if (client.config) {
+                retryCandidates.push({ name: client.name, config: client.config })
+              }
+            }
+          }
           ctx.appState.setState(prev => {
             const mcp =
               prev.mcp ?? {
@@ -216,9 +255,31 @@ export async function createOpenccRuntimeImpl(options) {
         },
         mcpConfigs,
       )
-    })().catch(err => {
-      console.warn('[openccRuntime] async MCP connect failed:', err)
+      return { total, failed }
+    }
+    void connectMcpWithRetry(connectMcpOnce, {
+      onError: (err, attemptIndex) => {
+        console.warn(
+          `[openccRuntime] MCP connect attempt #${attemptIndex + 1} threw:`,
+          err,
+        )
+      },
+      onRetry: ({ attempt, failed, total, delayMs }) => {
+        console.warn(
+          `[openccRuntime] MCP connect incomplete (${failed}/${total} server(s) failed) — retry #${attempt} in ${delayMs}ms`,
+        )
+      },
     })
+      .then(result => {
+        if (result.failed > 0) {
+          console.warn(
+            `[openccRuntime] MCP connect still incomplete after retries: ${result.failed}/${result.total} server(s) failed — MCP tools stay unavailable for this process until restart`,
+          )
+        }
+      })
+      .catch(err => {
+        console.warn('[openccRuntime] async MCP connect failed:', err)
+      })
   }
 
   // zai patch (并发多会话): vendor QueryEngine 是单会话设计——`mutableMessages`
