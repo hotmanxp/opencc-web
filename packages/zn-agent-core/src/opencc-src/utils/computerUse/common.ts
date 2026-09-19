@@ -1,7 +1,10 @@
 import { normalizeNameForMCP } from '../../services/mcp/normalization.js'
 import { env } from '../env.js'
 
-export const COMPUTER_USE_MCP_SERVER_NAME = 'computer-use'
+// Renamed from 'computer-use' → 'cua-driver' to match the upstream MCP
+// server name exposed by `cua-driver mcp`. All `false ?` gates in
+// services/mcp/{client,config}.ts and main.tsx read through this constant.
+export const COMPUTER_USE_MCP_SERVER_NAME = 'cua-driver'
 
 /**
  * Sentinel bundle ID for the frontmost gate. OpenCC is a terminal — it has

@@ -323,6 +323,54 @@ export function applyZaiWorkflowEnableFromSettings(): boolean {
   return enabled
 }
 
+/**
+ * Mirror of `applyZaiWorkflowEnableFromSettings` for the Computer Use
+ * toggle. Reads `enableComputerUse` from settings.json and sets
+ * `process.env.OPENCC_ENABLE_COMPUTER_USE` accordingly so vendor's
+ * `isComputerUseEnabled()` returns the right answer from the first MCP
+ * config fetch on boot. The live PUT route in zai-server mirrors this;
+ * calling this function on boot is just the cold-start bridge.
+ *
+ * Platform note: this helper does NOT enforce the darwin gate — that's
+ * zai-server's responsibility (PUT /api/agent/settings/computer-use
+ * returns 409 on non-darwin). On a non-darwin host, the persisted
+ * `enableComputerUse=true` setting will still flip the env var on boot;
+ * `isComputerUseEnabled()` then re-checks the platform allow-list and
+ * returns false, so no cua-driver MCP server is injected. The persisted
+ * intent survives a darwin-to-other-OS move so the user's choice
+ * isn't silently lost.
+ */
+export function applyZaiComputerUseEnableFromSettings(): boolean {
+  const settingsPath = join(
+    process.env.ZAI_DATA_DIR ?? join(homedir(), '.zai'),
+    'settings.json',
+  )
+  let enabled = false
+  if (existsSync(settingsPath)) {
+    try {
+      const raw = readFileSync(settingsPath, 'utf8')
+      const parsed = raw.trim()
+        ? (JSON.parse(raw) as {
+            enableComputerUse?: unknown
+            computerUse?: { enabled?: unknown }
+          })
+        : null
+      // Prefer the nested vendor schema field; fall back to the legacy flat
+      // field for backward compat with pre-refactor settings.json.
+      const nested = parsed?.computerUse?.enabled
+      enabled = nested === true || parsed?.enableComputerUse === true
+    } catch {
+      enabled = false
+    }
+  }
+  if (enabled) {
+    process.env.OPENCC_ENABLE_COMPUTER_USE = '1'
+  } else {
+    delete process.env.OPENCC_ENABLE_COMPUTER_USE
+  }
+  return enabled
+}
+
 // ----- entry point -----
 
 let enabled = false
@@ -410,6 +458,11 @@ export async function enableOpenccConfigs(
   // so a runtime toggle takes effect on the next `query()` call without
   // requiring this boot sequence to re-run.
   applyZaiWorkflowEnableFromSettings()
+  // Same cold-start bridge for Computer Use — sets OPENCC_ENABLE_COMPUTER_USE
+  // so vendor's `isComputerUseEnabled()` returns the right answer from the
+  // first `getClaudeCodeMcpConfigs()` call. Live PUT route in zai-server
+  // mirrors this on toggle.
+  applyZaiComputerUseEnableFromSettings()
 
   const bundle = (await import(/* @vite-ignore */ BUNDLE_URL as any)) as any
 

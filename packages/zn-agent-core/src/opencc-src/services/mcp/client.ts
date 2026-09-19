@@ -88,6 +88,8 @@ import {
 import { WebSocketTransport } from '../../utils/mcpWebSocketTransport.js'
 import { memoizeWithLRU } from '../../utils/memoize.js'
 import { getWebSocketTLSOptions } from '../../utils/mtls.js'
+import { isComputerUseEnabled } from '../../utils/settings/types.js'
+import { projectCuaDriverImageBlocks } from './cuaDriverImageBlocks.js'
 import {
   getProxyFetchOptions,
   getWebSocketProxyAgent,
@@ -232,14 +234,16 @@ import { isClaudeInChromeMCPServer } from '../../utils/claudeInChrome/common.js'
 const claudeInChromeToolRendering =
   (): typeof import('../../utils/claudeInChrome/toolRendering.js') =>
     require('../../utils/claudeInChrome/toolRendering.js')
-// Lazy: wrapper.tsx → hostAdapter.ts → executor.ts pulls both native modules
-// (@ant/computer-use-input + @ant/computer-use-swift). Runtime-gated by
-// GrowthBook tengu_malort_pedway (see gates.ts).
-const computerUseWrapper = false
-  ? (): typeof import('../../utils/computerUse/wrapper.js') =>
-    require('../../utils/computerUse/wrapper.js')
+// cua-driver MCP tool metadata overrides: rendering + image projection +
+// maxResultSizeChars. Lazy-required because toolRendering.tsx pulls React/ink.
+// Gated on isComputerUseEnabled() — the function is pure (name comparison
+// against the constant), but the import pulls a lot of transitive deps that
+// the bundle shouldn't carry when Computer Use is off.
+const getComputerUseMCPRenderingOverrides = isComputerUseEnabled()
+  ? (require('../../utils/computerUse/toolRendering.js') as typeof import('../../utils/computerUse/toolRendering.js'))
+      .getComputerUseMCPRenderingOverrides
   : undefined
-const isComputerUseMCPServer = false
+const isComputerUseMCPServer = isComputerUseEnabled()
   ? (
     require('../../utils/computerUse/common.js') as typeof import('../../utils/computerUse/common.js')
   ).isComputerUseMCPServer
@@ -2039,10 +2043,21 @@ export const fetchToolsForClient = memoizeWithLRU(
                 tool.name,
               )
               : {}),
-            ...(false &&
+            // cua-driver MCP tool metadata overrides. We deliberately do NOT
+            // override .call() — MCPTool's default call already goes through
+            // callMCPToolWithUrlElicitationRetry, which is exactly the JSON-RPC
+            // dispatch we want. We override only presentation + image
+            // projection: cua-driver returns `{type:'image', mimeType, data}`
+            // (camelCase), Anthropic SDK wants `{type:'image', source:{type:
+            // 'base64', media_type, data}}` (snake_case media_type).
+            ...(isComputerUseEnabled() &&
               (client.config.type === 'stdio' || !client.config.type) &&
               isComputerUseMCPServer!(client.name)
-              ? computerUseWrapper!().getComputerUseMCPToolOverrides(tool.name)
+              ? {
+                  ...getComputerUseMCPRenderingOverrides(tool.name),
+                  maxResultSizeChars: 500_000,
+                  mapToolResultToToolResultBlockParam: projectCuaDriverImageBlocks,
+                }
               : {}),
           }
         })

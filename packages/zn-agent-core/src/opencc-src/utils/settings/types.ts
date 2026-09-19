@@ -29,6 +29,7 @@ export {
 import { type HookCommand, HooksSchema } from '../../schemas/hooks.js'
 import { AutoFixConfigSchema } from '../../services/autoFix/autoFixConfig.js'
 import { count } from '../array.js'
+import { getInitialSettings } from './settings.js'
 
 /**
  * Schema for environment variables
@@ -306,6 +307,54 @@ export const SettingsSchema = lazySchema(() =>
               .optional()
               .describe(
                 'XAA (SEP-990) IdP connection. Configure once; all XAA-enabled MCP servers reuse this.',
+              ),
+          }
+        : {}),
+      // Computer Use — opt-in MCP-backed desktop control via `cua-driver`.
+      // Gated by OPENCC_ENABLE_COMPUTER_USE so non-darwin / pre-binary
+      // builds don't surface this in GlobalClaudeSettings. Read via
+      // getComputerUseSettings(). `cuaDriverConfig.ts` auto-injects a stdio
+      // MCP server entry when enabled && supported platform. Image content
+      // is projected by services/mcp/client.ts per-tool override.
+      ...(isEnvTruthy(process.env.OPENCC_ENABLE_COMPUTER_USE)
+        ? {
+            computerUse: z
+              .object({
+                enabled: z
+                  .boolean()
+                  .optional()
+                  .describe(
+                    'Whether to auto-inject the cua-driver MCP server. ' +
+                      'Default false. Each computer-use tool call still requires explicit user approval via PermissionConfirmCard.',
+                  ),
+                command: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Executable name or absolute path for cua-driver. Default: "cua-driver".',
+                  ),
+                args: z
+                  .array(z.string())
+                  .optional()
+                  .describe(
+                    'Arguments passed to the cua-driver executable. Default: ["mcp"].',
+                  ),
+                binaryPath: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Absolute path to the cua-driver binary. Takes precedence over command when set; use when the binary is not on $PATH.',
+                  ),
+                platforms: z
+                  .array(z.enum(['darwin', 'linux', 'win32']))
+                  .optional()
+                  .describe(
+                    'Platforms on which the toggle is honored. Default: ["darwin"]. Other values are accepted by the schema but not wired in v1.',
+                  ),
+              })
+              .optional()
+              .describe(
+                'Computer Use settings. When enabled on a supported platform, zai auto-injects the cua-driver MCP stdio server and exposes its 55 desktop-control tools. Requires the cua-driver binary on $PATH (or binaryPath set).',
               ),
           }
         : {}),
@@ -1375,4 +1424,59 @@ export type PluginConfig = {
   mcpServers?: {
     [serverName: string]: UserConfigValues
   }
+}
+
+/**
+ * Resolved Computer Use settings — pure function over `getInitialSettings()`.
+ * Returns the same defaults regardless of whether the OPENCC_ENABLE_COMPUTER_USE
+ * env gate is on; the gate only affects whether the schema accepts the field.
+ * Caller decides whether to apply (use isComputerUseEnabled()).
+ */
+export type ComputerUseSettings = {
+  enabled: boolean
+  command: string
+  args: string[]
+  binaryPath: string | undefined
+  platforms: ReadonlyArray<'darwin' | 'linux' | 'win32'>
+}
+
+type ComputerUseRaw = {
+  enabled?: boolean
+  command?: string
+  args?: string[]
+  binaryPath?: string
+  platforms?: Array<'darwin' | 'linux' | 'win32'>
+}
+
+/** Cast the settings record to one that may carry `computerUse`. The field
+ *  is only present in the SettingsJson type when OPENCC_ENABLE_COMPUTER_USE
+ *  is set at build time; the runtime read still works because .passthrough()
+ *  on the outer schema keeps unknown keys alive. Same trick xaaIdp uses. */
+function readComputerUseRaw(): ComputerUseRaw {
+  const s = getInitialSettings() as SettingsJson & { computerUse?: ComputerUseRaw }
+  return s.computerUse ?? {}
+}
+
+export function getComputerUseSettings(): ComputerUseSettings {
+  const raw = readComputerUseRaw()
+  return {
+    enabled: raw.enabled ?? false,
+    command: raw.command ?? 'cua-driver',
+    args: raw.args ?? ['mcp'],
+    binaryPath: raw.binaryPath,
+    platforms: raw.platforms ?? (['darwin'] as const),
+  }
+}
+
+/**
+ * Whether zai should auto-inject the cua-driver MCP server on this run.
+ * True iff the user has enabled it in settings AND the current process
+ * platform is in the allow-list AND the OPENCC_ENABLE_COMPUTER_USE env
+ * gate is on (the env gate is the only way to bypass the build-time
+ * disable; the schema field is hidden otherwise).
+ */
+export function isComputerUseEnabled(): boolean {
+  if (!isEnvTruthy(process.env.OPENCC_ENABLE_COMPUTER_USE)) return false
+  const s = getComputerUseSettings()
+  return s.enabled && s.platforms.includes(process.platform as 'darwin' | 'linux' | 'win32')
 }

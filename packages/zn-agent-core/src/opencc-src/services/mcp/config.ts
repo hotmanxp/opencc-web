@@ -6,6 +6,7 @@ import { getPlatform } from 'src/utils/platform.js'
 import type { PluginError } from '../../types/plugin.js'
 import { getPluginErrorMessage } from '../../types/plugin.js'
 import { isClaudeInChromeMCPServer } from '../../utils/claudeInChrome/common.js'
+import { CUA_DRIVER_SERVER_NAME, getCuaDriverMcpServerConfig } from './cuaDriverConfig.js'
 import {
   getCurrentProjectConfig,
   getGlobalConfig,
@@ -31,6 +32,7 @@ import {
   isMcpServerCommandEntry,
   isMcpServerNameEntry,
   isMcpServerUrlEntry,
+  isComputerUseEnabled,
   type SettingsJson,
 } from '../../utils/settings/types.js'
 import type { ValidationError } from '../../utils/settings/validation.js'
@@ -637,7 +639,7 @@ export async function addMcpConfig(
     throw new Error(`Cannot add MCP server "${name}": this name is reserved.`)
   }
 
-  if (false) {
+  if (isComputerUseEnabled()) {
     const { isComputerUseMCPServer } = await import(
       '../../utils/computerUse/common.js'
     )
@@ -1246,6 +1248,17 @@ export async function getClaudeCodeMcpConfigs(
     filtered[name] = serverConfig as ScopedMcpServerConfig
   }
 
+  // Auto-inject the cua-driver MCP server when Computer Use is enabled and
+  // the current platform is supported. Skipped silently if a user-defined
+  // entry with the same name already won the merge above — we never clobber
+  // an explicit user config. Skipped silently if enterprise policy denies it.
+  const cua = getCuaDriverMcpServerConfig()
+  if (cua && !(CUA_DRIVER_SERVER_NAME in filtered)) {
+    if (isMcpServerAllowedByPolicy(CUA_DRIVER_SERVER_NAME, cua)) {
+      filtered[CUA_DRIVER_SERVER_NAME] = cua
+    }
+  }
+
   return { servers: filtered, errors: mcpErrors }
 }
 
@@ -1508,6 +1521,14 @@ export function areMcpConfigsAllowedWithEnterpriseMcpConfig(
  * enabledMcpServers. Shows up in /mcp as disabled until the user enables it.
  */
 /* eslint-disable @typescript-eslint/no-require-imports */
+// A "default-disabled builtin" is a server that is always present in the
+// effective list but requires an explicit `enabledMcpServers` opt-in —
+// `isMcpServerDisabled()` reports such a name as disabled otherwise.
+//
+// cua-driver must NOT be one: zai injects it only when the user has already
+// opted in via `settings.computerUse.enabled`, so classifying it here would
+// silently skip the subprocess spawn even after successful injection.
+// See CUA_DRIVER_IS_DEFAULT_DISABLED_BUILTIN in cuaDriverConfig.ts.
 const DEFAULT_DISABLED_BUILTIN = false
   ? (
       require('../../utils/computerUse/common.js') as typeof import('../../utils/computerUse/common.js')
