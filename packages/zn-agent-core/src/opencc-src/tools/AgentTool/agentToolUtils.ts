@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { z } from 'zod/v4'
+import { isPrefixWildcard, toolSpecMatches } from './agentToolMatching.js'
 import {
   mirrorAppendBgEvent,
   mirrorAttachTaskToBg,
@@ -210,15 +211,25 @@ export function resolveAgentTools(
       // fall through to normal resolution below.
     }
 
-    const tool = availableToolMap.get(toolName)
-    if (tool) {
-      validTools.push(toolSpec)
-      if (!resolvedToolsSet.has(tool)) {
-        resolved.push(tool)
-        resolvedToolsSet.add(tool)
-      }
-    } else {
+    // Exact name, else prefix wildcard expanded against the disallow-filtered
+    // pool (so a wildcard can never re-admit a disallowed tool). A spec that
+    // selects nothing is reported as invalid rather than silently ignored.
+    const matches = isPrefixWildcard(toolName)
+      ? allowedAvailableTools.filter(t => toolSpecMatches(toolName, t))
+      : availableToolMap.has(toolName)
+        ? [availableToolMap.get(toolName)!]
+        : []
+
+    if (matches.length === 0) {
       invalidTools.push(toolSpec)
+      continue
+    }
+    validTools.push(toolSpec)
+    for (const match of matches) {
+      if (!resolvedToolsSet.has(match)) {
+        resolved.push(match)
+        resolvedToolsSet.add(match)
+      }
     }
   }
 

@@ -2,9 +2,11 @@ import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { CODE_REVIEWER_AGENT } from './built-in/codeReviewerAgent.js'
+import { COMPUTER_OPERATOR_AGENT } from './built-in/computerOperatorAgent.js'
 import { EXPLORE_AGENT } from './built-in/exploreAgent.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { PLAN_AGENT } from './built-in/planAgent.js'
+import { isComputerUseEnabled } from '../../utils/settings/types.js'
 import { getCoordinatorAgents } from '../../coordinator/workerAgent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
@@ -39,6 +41,15 @@ export function getBuiltInAgents(): AgentDefinition[] {
     agents.push(EXPLORE_AGENT, PLAN_AGENT)
   }
 
+  // Computer Use is opt-in and off by default; the operator only makes sense
+  // when the cua-driver MCP server will actually be mounted. Mounting it
+  // unconditionally would advertise an agent whose tools resolve to an empty
+  // set. (The agent additionally declares `requiredMcpServers`, which hides it
+  // if the server fails to connect at runtime.)
+  if (isComputerUseEnabled()) {
+    agents.push(COMPUTER_OPERATOR_AGENT)
+  }
+
   // // Include Code Guide agent for non-SDK entrypoints
   // const isNonSdkEntrypoint =
   //   process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-ts' &&
@@ -60,6 +71,7 @@ const BUILT_IN_AGENT_TYPES = new Set([
   CODE_REVIEWER_AGENT.agentType,
   EXPLORE_AGENT.agentType,
   PLAN_AGENT.agentType,
+  COMPUTER_OPERATOR_AGENT.agentType,
 ])
 
 export function isBuiltInAgentType(agentType: string): boolean {
