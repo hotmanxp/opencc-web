@@ -22,8 +22,13 @@ import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { Stream } from '@anthropic-ai/sdk/streaming.mjs'
 import { randomUUID } from 'crypto'
 import {
+  prepareImagesForAnthropicRequest,
+  usesAnthropicImageLimits,
+} from '../../utils/requestImageValidation.js'
+import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
+  isGithubNativeAnthropicMode,
 } from 'src/utils/model/providers.js'
 import { getCLISyspromptPrefix } from '../../constants/system.js'
 import {
@@ -1870,6 +1875,18 @@ async function* queryModel(
     // zai patch (2026-08-09): 每次外层流式 query 入口记 1 次 API 请求;
     // 内部 withRetry retry 不重复计(详见 sessionApiCounter.ts 注释)。
     recordApiCall()
+    const apiProvider = getAPIProvider()
+    if (usesAnthropicImageLimits({
+      apiProvider,
+      isFirstPartyBaseUrl: isFirstPartyAnthropicBaseUrl(),
+      isGithubNativeAnthropicMode: isGithubNativeAnthropicMode(options.model),
+      hasProviderOverride: Boolean(options.providerOverride),
+    })) {
+      messagesForAPI = await prepareImagesForAnthropicRequest(messagesForAPI, {
+        // These partners count document blocks toward the many-image threshold.
+        countDocuments: apiProvider === 'bedrock' || apiProvider === 'vertex',
+      })
+    }
     queryCheckpoint('query_client_creation_start')
     const generator = withRetry(
       () =>
