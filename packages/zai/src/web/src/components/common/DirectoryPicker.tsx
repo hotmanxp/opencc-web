@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Input, Modal, Space, Spin } from 'antd'
 import {
-  ArrowUpOutlined, HomeOutlined, ReloadOutlined, FolderOutlined,
-} from '@ant-design/icons'
+  ArrowUpIcon,
+  HouseIcon,
+  RotateCwIcon,
+  FolderIcon,
+} from 'lucide-react';
 import type { FsPickerEntry, FsPickerList } from '../../../shared/fsPicker.js'
 
 export type DirectoryPickerProps = {
@@ -97,13 +100,13 @@ export default function DirectoryPicker({
       ]}
     >
       <Space className="mb-2" wrap>
-        <Button icon={<HomeOutlined />} disabled={!home} onClick={() => void loadPath(home)}>
+        <Button icon={<HouseIcon />} disabled={!home} onClick={() => void loadPath(home)}>
           主页
         </Button>
-        <Button icon={<ArrowUpOutlined />} disabled={!parent} onClick={() => parent && void loadPath(parent)}>
+        <Button icon={<ArrowUpIcon />} disabled={!parent} onClick={() => parent && void loadPath(parent)}>
           上级
         </Button>
-        <Button icon={<ReloadOutlined />} disabled={!currentPath || loading} onClick={() => void loadPath(currentPath)}>
+        <Button icon={<RotateCwIcon />} disabled={!currentPath || loading} onClick={() => void loadPath(currentPath)}>
           刷新
         </Button>
       </Space>
@@ -154,7 +157,7 @@ export default function DirectoryPicker({
               }}
             >
               <span className="w-4 text-center">
-                <FolderOutlined />
+                <FolderIcon />
               </span>
               <span className="flex-1">{entry.name}</span>
               <span className="text-[11px] text-[var(--text-dim-45)]">打开</span>

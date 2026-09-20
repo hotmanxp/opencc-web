@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { FolderOutlined, FileOutlined, LoadingOutlined } from "@ant-design/icons";
+import { FolderIcon, FileIcon, LoaderCircleIcon } from "lucide-react";
 import type { FsSearchEntry } from "../../../shared/fs.js";
 
 /**
@@ -132,7 +132,7 @@ export default function FileMentionPopover({
         {error && <span data-testid="file-mention-error">{error}</span>}
         {!error && loading && (
           <>
-            <LoadingOutlined />
+            <LoaderCircleIcon className="animate-spin" />
             <span>搜索中…</span>
           </>
         )}
@@ -185,7 +185,7 @@ export default function FileMentionPopover({
                 className="text-[14px] flex-shrink-0 w-4 h-4 inline-flex items-center justify-center"
                 style={{ color: isDir ? "#facc15" : "var(--text-dim-45)" }}
               >
-                {isDir ? <FolderOutlined /> : <FileOutlined />}
+                {isDir ? <FolderIcon /> : <FileIcon />}
               </span>
               <span
                 className="text-[14px] font-medium leading-[22px] font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] whitespace-nowrap overflow-hidden text-ellipsis max-w-[40%] min-w-0"

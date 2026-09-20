@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from 'react'
 import { Typography, Button } from 'antd'
-import { RobotFilled, UpOutlined } from '@ant-design/icons'
+import { BotIcon, ChevronUpIcon } from 'lucide-react';
 import {
   useAgentStoreOrCtx,
   useAgentStoreOrCtxApi,
@@ -135,7 +135,7 @@ export default function AgentConversation({
       >
         {messages.length === 0 && (
           <div className="text-center mt-20 text-[var(--text-tertiary)]">
-            <RobotFilled className="text-5xl mb-4 text-[var(--accent-start)]" />
+            <BotIcon className="text-5xl mb-4 text-[var(--accent-start)]" />
             <Paragraph type="secondary">发送消息开始与 AI Agent 对话</Paragraph>
             <Paragraph type="secondary" className="text-xs">
               支持文件搜索、读写文件和 Bash 执行
@@ -148,7 +148,7 @@ export default function AgentConversation({
             <Button
               shape="round"
               size="small"
-              icon={<UpOutlined />}
+              icon={<ChevronUpIcon />}
               onClick={() => setShowAllMessages(true)}
               data-testid="show-all-messages-pill"
             >

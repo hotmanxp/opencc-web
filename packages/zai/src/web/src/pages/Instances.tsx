@@ -23,15 +23,15 @@ import {
   message,
 } from 'antd'
 import {
-  PlayCircleOutlined,
-  StopOutlined,
-  ReloadOutlined,
-  DeleteOutlined,
-  PlusOutlined,
-  ExportOutlined,
-  FolderOpenOutlined,
-  RocketOutlined,
-} from '@ant-design/icons'
+  CirclePlayIcon,
+  SquareIcon,
+  RotateCwIcon,
+  Trash2Icon,
+  PlusIcon,
+  ExternalLinkIcon,
+  FolderOpenIcon,
+  RocketIcon,
+} from 'lucide-react';
 import { useInstanceStore } from '../store/useInstanceStore.js'
 import type { InstanceSnapshot, InstanceState } from '../../../shared/instances.js'
 import DirectoryPicker from '../components/common/DirectoryPicker.js'
@@ -340,7 +340,7 @@ export default function Instances(): JSX.Element {
       <Space wrap>
         <Button
           size="small"
-          icon={<PlayCircleOutlined />}
+          icon={<CirclePlayIcon />}
           disabled={!canStart}
           onClick={() => void act('POST', row.id, 'start')}
         >
@@ -348,7 +348,7 @@ export default function Instances(): JSX.Element {
         </Button>
         <Button
           size="small"
-          icon={<StopOutlined />}
+          icon={<SquareIcon />}
           disabled={!canStop}
           onClick={() => void act('POST', row.id, 'stop')}
         >
@@ -356,7 +356,7 @@ export default function Instances(): JSX.Element {
         </Button>
         <Button
           size="small"
-          icon={<ReloadOutlined />}
+          icon={<RotateCwIcon />}
           disabled={!canRestart}
           onClick={() => void act('POST', row.id, 'restart')}
         >
@@ -367,14 +367,14 @@ export default function Instances(): JSX.Element {
           description="如果实例正在运行，会先停止。"
           onConfirm={() => void act('DELETE', row.id)}
         >
-          <Button size="small" danger icon={<DeleteOutlined />} disabled={!canDelete}>
+          <Button size="small" danger icon={<Trash2Icon />} disabled={!canDelete}>
             删除
           </Button>
         </Popconfirm>
         {row.port != null && !row.isCurrent && (
           <Button
             size="small"
-            icon={<ExportOutlined />}
+            icon={<ExternalLinkIcon />}
             href={`http://localhost:${row.port}`}
             target="_blank"
             rel="noreferrer"
@@ -424,7 +424,7 @@ export default function Instances(): JSX.Element {
               Modal 内手动改回标准实例。
             */}
             <Button
-              icon={<RocketOutlined />}
+              icon={<RocketIcon />}
               data-testid="new-task-factory-instance"
               onClick={() => {
                 form.resetFields()
@@ -434,7 +434,7 @@ export default function Instances(): JSX.Element {
             >
               新建任务工厂实例
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+            <Button type="primary" icon={<PlusIcon />} onClick={() => setOpen(true)}>
               新建实例
             </Button>
           </Space>
@@ -566,7 +566,7 @@ export default function Instances(): JSX.Element {
                 />
               </Form.Item>
               <Button
-                icon={<FolderOpenOutlined />}
+                icon={<FolderOpenIcon />}
                 onClick={() => setPickerOpen(true)}
                 data-testid="cwd-browse"
               >

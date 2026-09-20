@@ -2,17 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, Layout as AntLayout, Menu, Switch, Tag } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  DashboardOutlined,
-  SettingOutlined,
-  RobotOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  ClusterOutlined,
-  SunOutlined,
-  MoonOutlined,
-  LoginOutlined,
-  DesktopOutlined,
-} from '@ant-design/icons';
+  GaugeIcon,
+  SettingsIcon,
+  BotIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  NetworkIcon,
+  SunIcon,
+  MoonIcon,
+  LogInIcon,
+  MonitorIcon,
+} from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useAgentStore } from '../store/useAgentStore';
 import { api } from '../lib/api';
@@ -37,11 +37,11 @@ const { Sider, Header, Content } = AntLayout;
 // "桌面"只在设置的工作模式为 office(办公)时显示:menuItems 里按 workMode
 // 过滤(见 Layout 内 useMemo)。
 const ALL_MENU_ITEMS = [
-  { key: '/agent', icon: <RobotOutlined />, label: 'Agent' },
-  { key: '/desktop', icon: <DesktopOutlined />, label: '桌面' },
-  { key: '/instances', icon: <ClusterOutlined />, label: '实例管理' },
-  { key: '/login', icon: <LoginOutlined />, label: '登录' },
-  { key: '/manage', icon: <DashboardOutlined />, label: '管理' },
+  { key: '/agent', icon: <BotIcon />, label: 'Agent' },
+  { key: '/desktop', icon: <MonitorIcon />, label: '桌面' },
+  { key: '/instances', icon: <NetworkIcon />, label: '实例管理' },
+  { key: '/login', icon: <LogInIcon />, label: '登录' },
+  { key: '/manage', icon: <GaugeIcon />, label: '管理' },
 ] as const;
 
 export default function Layout() {
@@ -247,7 +247,7 @@ export default function Layout() {
         />
         <Button
           type="text"
-          icon={<SettingOutlined className="text-base" />}
+          icon={<SettingsIcon className="text-base" />}
           onClick={openSettingsDrawer}
           aria-label="打开设置"
           data-testid="global-settings-button"
@@ -302,16 +302,16 @@ export default function Layout() {
                 boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
               }}
             >
-              <MoonOutlined className={`text-xs ${effectiveTheme === 'dark' ? 'text-[var(--accent-start)]' : 'text-[var(--text-tertiary)]'}`} />
+              <MoonIcon className={`text-xs ${effectiveTheme === 'dark' ? 'text-[var(--accent-start)]' : 'text-[var(--text-tertiary)]'}`} />
               <Switch
                 size="small"
                 checked={effectiveTheme === 'light'}
                 onChange={handleToggleTheme}
-                checkedChildren={<SunOutlined />}
-                unCheckedChildren={<MoonOutlined />}
+                checkedChildren={<SunIcon />}
+                unCheckedChildren={<MoonIcon />}
                 aria-label="切换主题"
               />
-              <SunOutlined className={`text-xs ${effectiveTheme === 'light' ? 'text-[var(--accent-start)]' : 'text-[var(--text-tertiary)]'}`} />
+              <SunIcon className={`text-xs ${effectiveTheme === 'light' ? 'text-[var(--accent-start)]' : 'text-[var(--text-tertiary)]'}`} />
             </div>
           )}
           <Outlet />

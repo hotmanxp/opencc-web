@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { CloseOutlined } from '@ant-design/icons';
+import { XIcon } from 'lucide-react';
 import type { StickyNote } from './desktopStore.js';
 
 const W = 160;
@@ -114,7 +114,7 @@ export default function StickyNotes({ notes, onChange, onDelete, onFocus, viewpo
                 onClick={() => onDelete(n.id)}
                 className={NOTE_DELETE_BTN_CLS}
               >
-                <CloseOutlined style={{ fontSize: 11 }} />
+                <XIcon style={{ fontSize: 11 }} />
               </button>
             </div>
             <textarea

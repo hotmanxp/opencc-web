@@ -149,14 +149,19 @@ describe('SettingsDrawer — 微信配置入口只在主实例显示', () => {
     })
   })
 
-  it('主实例(非受管子进程)显示「微信机器人」入口', () => {
+  // 主实例 = 顶层受管 child:它同样带 ZAI_SUPERVISOR_PID(isManagedChild === true),
+  // 只是没有 ZAI_INSTANCE_ID。判据必须是 instanceId 而不是 isManagedChild,否则
+  // 主实例的入口会被误摘掉(aeae3d9 引入的回归)。
+  it('主实例(顶层受管 child,无 instanceId)显示「微信机器人」入口', () => {
     useAppStore.setState({
       settingsDrawerOpen: true,
       instanceContext: {
         cwd: '/tmp',
         cwdName: 'tmp',
         branch: 'main',
-        isManagedChild: false,
+        isManagedChild: true,
+        supervisorPid: 12345,
+        instanceId: null,
         app: null,
       },
     })
@@ -173,7 +178,7 @@ describe('SettingsDrawer — 微信配置入口只在主实例显示', () => {
         cwdName: '~',
         branch: null,
         isManagedChild: true,
-        instanceId: 'weixin-bot',
+        instanceId: 'inst_weixinbot',
         app: 'weixin',
       },
     })
@@ -182,6 +187,22 @@ describe('SettingsDrawer — 微信配置入口只在主实例显示', () => {
     expect(screen.queryByTestId('open-weixin-bot')).not.toBeInTheDocument()
     // 常规设置列表照常渲染 —— 只摘掉微信入口,不是整个设置页空白
     expect(screen.getByText('显示')).toBeInTheDocument()
+  })
+
+  it('用户自定义子实例(instanceId 有值,app 为 null)不显示「微信机器人」入口', () => {
+    useAppStore.setState({
+      settingsDrawerOpen: true,
+      instanceContext: {
+        cwd: '/Users/foo/code',
+        cwdName: 'code',
+        branch: 'main',
+        isManagedChild: true,
+        instanceId: 'inst_567277e2',
+        app: null,
+      },
+    })
+    render(<SettingsDrawer />)
+    expect(screen.queryByTestId('settings-weixin-section')).not.toBeInTheDocument()
   })
 
   it('instanceContext 未 hydrate 时按主实例处理(向后兼容裸 dev / 旧后端)', () => {

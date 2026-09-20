@@ -1,5 +1,5 @@
 import { Popover, Tooltip } from "antd";
-import { CaretUpOutlined } from "@ant-design/icons";
+import { ChevronUpIcon } from "lucide-react";
 import TodoDropdown from "./TodoDropdown.js";
 import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
 
@@ -54,7 +54,7 @@ export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
           <span className="text-[var(--text-dim-55)] ml-2">· {open} 待开始</span>
         )}
       </span>
-      <CaretUpOutlined className="text-[10px] opacity-70" />
+      <ChevronUpIcon className="text-[10px] opacity-70" />
     </div>
   );
 

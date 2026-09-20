@@ -1,5 +1,5 @@
 import { Card, Button, Row, Col, message, Alert, Typography } from 'antd';
-import { LoginOutlined, ApiOutlined } from '@ant-design/icons';
+import { LogInIcon, WebhookIcon } from 'lucide-react';
 import { useState } from 'react';
 import type { SseEvent, LoginType } from '@shared/types';
 import { useSse } from '../lib/sse';
@@ -19,14 +19,14 @@ const loginTypes: LoginTypeConfig[] = [
     key: 'pa',
     title: 'PA 神兵登录',
     description: '通过 PA 神兵系统进行身份验证',
-    icon: <LoginOutlined className="text-3xl text-[#ff6600]" />,
+    icon: <LogInIcon className="text-3xl text-[#ff6600]" />,
     longAction: { key: 'pa-long', label: '登录(6日有效)' },
   },
   {
     key: 'op',
     title: '开放平台登录',
     description: '登录知鸟开放平台',
-    icon: <ApiOutlined className="text-3xl text-[#ff8533]" />,
+    icon: <WebhookIcon className="text-3xl text-[#ff8533]" />,
   },
 ];
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, Empty, Modal, Spin, Tag, message } from 'antd';
-import { ReloadOutlined, UndoOutlined } from '@ant-design/icons';
+import { RotateCwIcon, Undo2Icon } from 'lucide-react';
 import { useGitStatus } from './useGitStatus.js';
 import { useGitDiff } from './useGitDiff.js';
 import { DiffView } from './DiffView.js';
@@ -64,7 +64,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
   const refreshBtn = (
     <Button
       size="small"
-      icon={<ReloadOutlined />}
+      icon={<RotateCwIcon />}
       loading={status.loading}
       onClick={() => status.refetch()}
       title="刷新 git 状态"
@@ -107,7 +107,6 @@ export function GitTab({ cwd }: { cwd: string | null }) {
           className="overflow-y-auto py-1"
           style={{
             flex: '0 0 40%',
-            height: "calc(100vh - 140px)",
             borderRight: '1px solid var(--border-light)',
           }}
         >
@@ -171,7 +170,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
                   <Button
                     type="text"
                     size="small"
-                    icon={<UndoOutlined />}
+                    icon={<Undo2Icon />}
                     loading={reverting === f.path}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -203,7 +202,6 @@ export function GitTab({ cwd }: { cwd: string | null }) {
             flex: '1 1 60%',
             minWidth: 0,
             minHeight: 0,
-            height: "calc(100vh - 140px)",
           }}
         >
           {!selected ? (

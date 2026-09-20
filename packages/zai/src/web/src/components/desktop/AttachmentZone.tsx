@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
+import IconButton from "../IconButton.js";
 import { Button, message } from 'antd';
-import { CloseOutlined, PaperClipOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
+import { XIcon, PaperclipIcon, FolderIcon, FileIcon } from 'lucide-react';
 import type { FileRef } from './gatherMentions.js';
 
 export const DND_MIME = 'application/x-zai-file';
@@ -67,7 +68,7 @@ export default function AttachmentZone({ refs, onAddRef, onRemoveRef, max = DEFA
         </span>
       ) : (
         <>
-          <PaperClipOutlined style={{ color: 'var(--text-dim-45, #888)', fontSize: 12 }} />
+          <PaperclipIcon style={{ color: 'var(--text-dim-45, #888)', fontSize: 12 }} />
           {refs.map((r) => (
             // 自绘胶囊(不复用输入框专属 MentionChip:其 label 宽度按 U+FFFC 占位字形
             // 计算, 在附件区无该字体环境下名称会被裁得不可见)
@@ -78,12 +79,12 @@ export default function AttachmentZone({ refs, onAddRef, onRemoveRef, max = DEFA
               className={CHIP_CLS}
             >
               {r.kind === 'dir' ? (
-                <FolderOutlined style={{ color: '#facc15', fontSize: 12, flexShrink: 0 }} />
+                <FolderIcon style={{ color: '#facc15', fontSize: 12, flexShrink: 0 }} />
               ) : (
-                <FileOutlined style={{ color: 'var(--text-dim-45, #888)', fontSize: 12, flexShrink: 0 }} />
+                <FileIcon style={{ color: 'var(--text-dim-45, #888)', fontSize: 12, flexShrink: 0 }} />
               )}
               <span className={CHIP_NAME_CLS}>{r.name}</span>
-              <Button size="small" type="text" aria-label="移除附件" icon={<CloseOutlined />}
+              <IconButton size="small" aria-label="移除附件" icon={<XIcon />}
                 onClick={() => onRemoveRef(r.id)} style={REMOVE_BTN_STYLE} />
             </span>
           ))}

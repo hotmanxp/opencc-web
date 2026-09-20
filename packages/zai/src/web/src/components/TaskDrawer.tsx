@@ -22,11 +22,11 @@ async function loadOneDark(): Promise<Record<string, React.CSSProperties>> {
   return m.oneDark
 }
 import {
-  CheckCircleFilled,
-  CloseCircleFilled,
-  LoadingOutlined,
-  StopOutlined,
-} from '@ant-design/icons'
+  CircleCheckIcon,
+  CircleXIcon,
+  LoaderCircleIcon,
+  SquareIcon,
+} from 'lucide-react';
 import {
   cancelTask,
   killBashTask,
@@ -53,11 +53,11 @@ interface StreamedEvent {
 }
 
 const STATUS_META: Record<string, { color: string; label: string; icon: JSX.Element }> = {
-  running: { color: 'var(--accent-start)', label: '运行中', icon: <LoadingOutlined spin /> },
-  queued: { color: 'var(--text-secondary)', label: '排队中', icon: <LoadingOutlined /> },
-  completed: { color: 'var(--success)', label: '完成', icon: <CheckCircleFilled /> },
-  failed: { color: 'var(--error)', label: '失败', icon: <CloseCircleFilled /> },
-  cancelled: { color: 'var(--text-tertiary)', label: '已取消', icon: <CloseCircleFilled /> },
+  running: { color: 'var(--accent-start)', label: '运行中', icon: <LoaderCircleIcon className="animate-spin" /> },
+  queued: { color: 'var(--text-secondary)', label: '排队中', icon: <LoaderCircleIcon className="animate-spin" /> },
+  completed: { color: 'var(--success)', label: '完成', icon: <CircleCheckIcon /> },
+  failed: { color: 'var(--error)', label: '失败', icon: <CircleXIcon /> },
+  cancelled: { color: 'var(--text-tertiary)', label: '已取消', icon: <CircleXIcon /> },
 }
 
 function formatDuration(ms: number): string {
@@ -830,7 +830,7 @@ export function TaskDrawer({
           <Button
             danger
             size="small"
-            icon={<StopOutlined />}
+            icon={<SquareIcon />}
             onClick={async () => {
               try {
                 await cancelTask(detail.id, 'user cancelled')
@@ -846,7 +846,7 @@ export function TaskDrawer({
     >
       {loading && !detail && !bashTask && (
         <div className="p-6 text-center text-[var(--text-secondary)]">
-          <LoadingOutlined /> 加载中...
+          <LoaderCircleIcon className="animate-spin" /> 加载中...
         </div>
       )}
       {bashTask && (
@@ -857,7 +857,18 @@ export function TaskDrawer({
           {/* 头部信息 */}
           <div className="py-3 px-5 border-b border-[var(--border-subtle)] bg-[var(--bg-card-hover)]">
             <PromptBlock text={detail.input.prompt} />
-            <div className="flex gap-3 text-[11px] text-[var(--text-secondary)]">
+            <div className="flex items-center gap-3 text-[11px] text-[var(--text-secondary)]">
+              {/* Agent 名称色块: 原生 Agent 工具路径 = AgentDefinition.agentType
+                  (code-reviewer / Explore / general-purpose),CliAgent 路径 =
+                  provider 种类 (opencc / dsh / opencode),后者 agent 名在
+                  description 里,故用 Tooltip 兜底展示。 */}
+              {detail.agentType && (
+                <Tooltip title={detail.description}>
+                  <span className="inline-flex items-center py-0.5 px-1.5 rounded-sm bg-[var(--bg-card)] border border-solid border-[var(--accent-start)] text-[var(--accent-start)]">
+                    Agent: {detail.agentType}
+                  </span>
+                </Tooltip>
+              )}
               {detail.input.model && <span>模型: {detail.input.model}</span>}
               {detail.input.cwd && (
                 <Tooltip title={detail.input.cwd}>

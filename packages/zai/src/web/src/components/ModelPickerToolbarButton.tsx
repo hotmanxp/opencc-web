@@ -1,5 +1,5 @@
 import { Popover, Tooltip } from 'antd'
-import { CaretDownOutlined, SwapOutlined } from '@ant-design/icons'
+import { ChevronDownIcon, ArrowLeftRightIcon } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore.js'
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
 import ModelPickerPanel, { useModelBadgeText } from './ModelPickerPanel.js'
@@ -32,18 +32,18 @@ export default function ModelPickerToolbarButton() {
       aria-label={`切换模型,当前 ${badgeText ?? '未知'}`}
       data-testid="model-picker-toolbar-trigger"
       data-test-active={currentModel ? 'true' : 'false'}
-      // 对齐 toolbarIconButtonStyle 的视觉风格 (toolbarStyles.ts):
-      // 圆角 8 + flex 居中 + flexShrink:0 + 跟同行按钮同高 32px。
+      // 与同行 icon-only 按钮同一观感(见 IconButton.tsx):无边框、透明底、
+      // 三级灰线条图标,hover 出浅底 + 提亮。
       // 宽度改成 auto 容纳 "图标 + 模型名 + caret" 文本, maxWidth 避免撑爆
       // 状态行右端。
-      className="inline-flex items-center justify-center gap-1 h-8 max-w-[220px] px-2 rounded-lg border border-transparent bg-transparent text-[var(--text-secondary)] font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] text-xs cursor-pointer flex-shrink-0 transition-colors duration-100"
+      className="inline-flex items-center justify-center gap-1 h-8 max-w-[220px] px-2 rounded-lg border border-transparent bg-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-faint-06)] font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] text-xs cursor-pointer flex-shrink-0 transition-colors duration-100"
       title={`当前模型: ${tooltipText ?? '未知'}\n点击切换`}
     >
-      <SwapOutlined className="text-[13px] flex-shrink-0" />
+      <ArrowLeftRightIcon className="text-[13px] flex-shrink-0" />
       <span className="flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis">
         {badgeText ?? '未知'}
       </span>
-      <CaretDownOutlined className="text-[10px] opacity-70 flex-shrink-0" />
+      <ChevronDownIcon className="text-[10px] opacity-70 flex-shrink-0" />
     </button>
   )
 

@@ -1,5 +1,5 @@
 import { Card, Row, Col, Button, Tag, Spin, Typography, Modal, Space, message } from 'antd';
-import { SettingOutlined, DownloadOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
+import { SettingsIcon, DownloadIcon, RotateCwIcon, RefreshCwIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CliStatus, SseEvent } from '@shared/types';
@@ -154,7 +154,7 @@ export default function Tools() {
         title={<Typography.Title level={4} style={{ margin: 0 }}>工具管理</Typography.Title>}
         extra={
           <Button
-            icon={<SyncOutlined spin={refreshing} />}
+            icon={<RefreshCwIcon />}
             loading={refreshing}
             onClick={handleRefreshAll}
           >
@@ -209,7 +209,7 @@ export default function Tools() {
                   <Button
                     type="primary"
                     style={{ flex: 1, minWidth: 0 }}
-                    icon={status.installed ? <ReloadOutlined /> : <DownloadOutlined />}
+                    icon={status.installed ? <RotateCwIcon /> : <DownloadIcon />}
                     loading={installPkg === cli?.pkg}
                     disabled={status.upToDate}
                     aria-label={status.upToDate ? '已是最新' : (status.installed ? '更新' : '安装')}
@@ -219,7 +219,7 @@ export default function Tools() {
                   </Button>
                   <Button
                     style={{ flex: 1, minWidth: 0 }}
-                    icon={<SyncOutlined spin={refreshingPkg === cli?.pkg} />}
+                    icon={<RefreshCwIcon />}
                     loading={refreshingPkg === cli?.pkg}
                     disabled={!cli || !!refreshingPkg || refreshing}
                     onClick={() => cli && handleRefreshOne(cli, card.label)}
@@ -230,7 +230,7 @@ export default function Tools() {
                     <Button
                       type="primary"
                       style={{ flex: 1, minWidth: 0 }}
-                      icon={<SettingOutlined />}
+                      icon={<SettingsIcon />}
                       onClick={() => navigate(`/manage?tab=config&tool=${card.key}`)}
                     >
                       配置

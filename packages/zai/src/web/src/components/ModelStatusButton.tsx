@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Popover, Button } from 'antd'
-import { CaretDownOutlined } from '@ant-design/icons'
+import { ChevronDownIcon } from 'lucide-react';
 import { useAgentStoreOrCtx } from '../store/useAgentStore.js'
 import { useAppStore } from '../store/useAppStore.js'
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
@@ -63,7 +63,7 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
         }}
       >
         {badgeText ?? '未知'}
-        <CaretDownOutlined style={{ fontSize: 10, opacity: 0.6, marginLeft: -8 }} />
+        <ChevronDownIcon style={{ fontSize: 10, opacity: 0.6, marginLeft: -8 }} />
       </Button>
     </Popover>
   )

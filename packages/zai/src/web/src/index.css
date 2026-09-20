@@ -209,6 +209,34 @@
   color: var(--accent-start) !important;
 }
 
+/* lucide 线条图标契约 —— 全站图标已从 @ant-design/icons 切到 lucide-react.
+   lucide 的 <svg> 自带 width/height=24 属性, 直接渲染会撑成 24px; 且原先
+   antd `.anticon` 提供的行内对齐也随之消失. 这里用 CSS 覆盖 SVG 属性值
+   (CSS 优先于 presentation attribute), 把图标钉回 1em —— 于是既有调用点
+   (`className="text-[22px]"` / `style={{ fontSize: 18 }}`) 行为不变.
+
+   拆成两条规则是必需的:
+   1) 尺寸用 `:where()` 把特异性压到 0, 保证任何 Tailwind 工具类(如 `w-4 h-4`)
+      都能覆盖默认值. 但 `:where()` 同时会被 Tailwind preflight 的
+      `img, svg, ... { display: block; vertical-align: middle }` (特异性 0,0,1)
+      反压 —— 那样 svg 会变成块级元素, 放进 antd `Tag` / 文本流里会独占一行,
+      把后面的文字顶到下一行(实测 "Vision" 标签就断成了两行).
+   2) 因此 `display` / `vertical-align` 必须放在 `svg.lucide`(0,1,1) 里,
+      才能真正盖住 preflight. 这两项本来也不该由工具类逐处覆盖.
+
+   `stroke-width` 在此收口为全站线宽唯一真源(24 网格下的值, 实际像素线宽
+   = 字号 / 24 * 该值). */
+:where(svg.lucide) {
+  width: 1em;
+  height: 1em;
+  stroke-width: 2;
+}
+
+svg.lucide {
+  display: inline-block;
+  vertical-align: -0.125em;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
@@ -223,14 +251,24 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
-/* dark 主题: 显式锁定滚动条颜色, 防止 light 主题 selector 渗漏.
-   与 :root --text-tertiary = #94a3b8 (slate-400) / --text-secondary = #cbd5e1
-   (slate-300) 当前值一致, 后续 --text-* 变化不会影响滚动条. */
-:root[data-theme='dark'] ::-webkit-scrollbar-thumb {
-  background: #94a3b8;
-}
-:root[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
-  background: #cbd5e1;
+/* 桌面端滚动条 (min-width: 768px, 与 useIsMobile 的 MOBILE_BREAKPOINT 同口径).
+   移动端完全走上面那组基础规则 (6px / 圆角 3px / var(--text-tertiary)), 这里
+   一条都不下发.
+   1) 尺寸: 6px → 8px. 圆角必须同步 3px → 4px — 半径 = 宽度/2 才是胶囊形,
+      8px 宽配 3px 圆角会变成方头.
+   2) dark 主题颜色: 实色 slate-400 (#94a3b8) → 半透明. 实色在近黑底上是一根
+      常亮的浅灰条, 比 light 主题的 rgba(...,0.32) 抢眼太多; 现在与 light 同构
+      (静止 35% / hover 60%), 静止时几乎融进背景, hover 才提亮. */
+@media (min-width: 768px) {
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { border-radius: 4px; }
+
+  :root[data-theme='dark'] ::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.35);
+  }
+  :root[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.6);
+  }
 }
 
 /* light 主题下滚动条颜色在浅色背景上太深 (slate-500 #64748b),
@@ -258,7 +296,8 @@ body {
    这里强制 selected 文字为深色, 与橙渐变背景形成对比, 选中态更醒目。
    dark 主题下 selected 默认就是白色 (#fff) 配橙背景, 不需要覆盖。 */
 :root[data-theme='light'] .ant-menu-light .ant-menu-item-selected,
-:root[data-theme='light'] .ant-menu-light .ant-menu-item-selected .anticon {
+:root[data-theme='light'] .ant-menu-light .ant-menu-item-selected .anticon,
+:root[data-theme='light'] .ant-menu-light .ant-menu-item-selected svg.lucide {
   color: var(--text-primary) !important;
 }
 
@@ -310,6 +349,33 @@ body {
 .ant-tabs-tab { color: var(--text-secondary) !important; }
 .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--accent-start) !important; }
 .ant-tabs-ink-bar { background: linear-gradient(90deg, var(--accent-start), var(--accent-end)) !important; }
+
+/* SplitPane 分屏 Tab 的高度链路.
+   antd 的 .ant-tabs 是 flex column, .ant-tabs-content-holder 是 flex:auto +
+   min-height:0, 但它没有给 .ant-tabs-content / .ant-tabs-tabpane 定高 ——
+   两者默认按内容高度收缩, 于是 pane 内的 h-full / flex-1 全部塌成内容高度.
+   这两条把 pane 拉满, 让 FsTab / GitTab / BashTab 直接用 flex 布局撑满,
+   不再依赖 calc(100vh - Npx) 这类跟外层结构耦合的魔数.
+   作用域限定在 .zai-pane-fill (只加在 SplitPane 的 Tabs 上), 不影响
+   MobileQuickDrawer 等其它共用 antd Tabs 的地方. */
+.zai-pane-fill > .ant-tabs-content-holder { min-height: 0; }
+.zai-pane-fill .ant-tabs-content { height: 100%; }
+.zai-pane-fill .ant-tabs-tabpane { height: 100%; }
+
+/* 分屏宽度拖动中 (SplitPane 的 handle pointerdown 时挂到 body, 抬起/取消时
+   摘掉). 拖动时指针会离开 12px 命中区, 甚至划过消息区的文本节点 —— 只靠
+   handle 自身的 cursor / user-select 管不住, 必须在 body 上整体压一层:
+     * user-select: none — 拖动过程中不会选中正文 (pointerdown 里的
+       preventDefault 是主防线, 这条兜住拖动途中划过的其它元素);
+     * cursor: col-resize — 光标在窗口任何位置都保持左右拉伸, 不会跳回
+       文本光标/箭头, 否则手感像是"拖丢了".
+   作用域只在拖动期间, 不影响常驻样式. */
+body.zai-split-resizing,
+body.zai-split-resizing * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: col-resize !important;
+}
 
 /* .ant-input { background: var(--bg-input) !important; border: 1px solid var(--border-subtle) !important; color: var(--text-primary) !important; border-radius: 8px !important; } */
 /* .ant-input:focus { border-color: var(--accent-start) !important; box-shadow: 0 0 0 2px rgba(249,115,22,0.20) !important; } */
@@ -371,7 +437,8 @@ body {
   overflow: hidden !important;
 }
 
-[data-testid="fs-tree"] .ant-tree-node-content-wrapper .anticon {
+[data-testid="fs-tree"] .ant-tree-node-content-wrapper .anticon,
+[data-testid="fs-tree"] .ant-tree-node-content-wrapper svg.lucide {
   vertical-align: 0.5em;
 }
 

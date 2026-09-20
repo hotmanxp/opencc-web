@@ -113,7 +113,10 @@ export const COMPLETION_MARKERS =
 
 // 行尾终止标点(英文 + 中文)。中文总结以「。」/「！」等收尾时同样视为已正常收尾,
 // 否则 full-text fallback 会把任何中文总结都当成"无终止标点"并误触发 nudge。
-export const TERMINAL_PUNCTUATION = /[.!?。！？…”’」』"'`)\]]\s*$/
+// 集合与 opencc a92aa04 对齐:除句末标点外补齐全角成对符号的右半(）】》」』〕),
+// 使以「(说明)」/「《文档》」/「【结论】」/「〔附录〕」收尾的中文回复不再被判为
+// 无终止标点,从而不再被 full-text fallback 误 nudge。
+export const TERMINAL_PUNCTUATION = /[.!?。！？…”’）】》」』〕"'`)\]]\s*$/
 
 export type ContinuationResult = {
   shouldNudge: boolean

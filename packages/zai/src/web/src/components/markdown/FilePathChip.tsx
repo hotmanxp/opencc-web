@@ -11,12 +11,12 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { Dropdown, Popover, message } from 'antd'
 import {
-  CodeOutlined,
-  CopyOutlined,
-  EyeOutlined,
-  FileTextOutlined,
-  FolderOutlined,
-} from '@ant-design/icons'
+  CodeIcon,
+  CopyIcon,
+  EyeIcon,
+  FileTextIcon,
+  FolderIcon,
+} from 'lucide-react';
 import { useAgentStore } from '../../store/useAgentStore.js'
 import {
   FILE_PREVIEW_OPEN_EVENT,
@@ -80,7 +80,7 @@ function FilePathChipInner({ path }: { path: string }) {
     () => [
       {
         key: 'preview',
-        icon: <EyeOutlined />,
+        icon: <EyeIcon />,
         label: '预览',
         onClick: () => {
           // 右键菜单触发的预览,绕过 e.stopPropagation 不需要 MouseEvent
@@ -90,20 +90,20 @@ function FilePathChipInner({ path }: { path: string }) {
       { type: 'divider' as const },
       {
         key: 'reveal',
-        icon: <FolderOutlined />,
+        icon: <FolderIcon />,
         label: '在文件管理器中显示',
         onClick: () => fsCommand('reveal', '已在文件管理器中打开'),
       },
       {
         key: 'open-terminal',
-        icon: <CodeOutlined />,
+        icon: <CodeIcon />,
         label: '在终端中打开',
         onClick: () => fsCommand('open-terminal', '已打开终端'),
       },
       { type: 'divider' as const },
       {
         key: 'copy',
-        icon: <CopyOutlined />,
+        icon: <CopyIcon />,
         label: '复制路径',
         onClick: () => {
           navigator.clipboard
@@ -166,7 +166,7 @@ function FilePathChipInner({ path }: { path: string }) {
           onClick={preview}
           className="inline-flex items-center gap-[3px] align-baseline text-[0.9em] font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] text-[#a78bfa] bg-[var(--bg-faint-05)] border border-[var(--border-light)] rounded-[4px] py-[1px] px-[6px] cursor-pointer hover:border-[#a78bfa]"
         >
-          <FileTextOutlined className="text-[0.85em] opacity-70" />
+          <FileTextIcon className="text-[0.85em] opacity-70" />
           {path}
         </button>
       </Dropdown>

@@ -2,19 +2,19 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import type { ReactNode } from "react";
 import { Input, Button, message, Popover, Tooltip } from "antd";
 import {
-  PictureOutlined,
-  ToolOutlined,
-  CompressOutlined,
-  ExpandOutlined,
-  ShareAltOutlined,
-  StopOutlined,
-  AppstoreAddOutlined,
-  CloseOutlined,
-  PlusOutlined,
-  EditOutlined,
-  ArrowUpOutlined,
-  CheckOutlined,
-} from "@ant-design/icons";
+  ImageIcon,
+  WrenchIcon,
+  Minimize2Icon,
+  Maximize2Icon,
+  Share2Icon,
+  SquareIcon,
+  LayoutGridIcon,
+  XIcon,
+  PlusIcon,
+  PencilIcon,
+  ArrowUpIcon,
+  CheckIcon,
+} from "lucide-react";
 import { useSplitPaneCompactLock } from "../hooks/useSplitPaneCompactLock.js";
 import { useSubmitPrompt } from "../hooks/useSubmitPrompt.js";
 import {
@@ -33,7 +33,7 @@ import ConversationInfoButton from "../components/ConversationInfoButton";
 import SettingsButton from './SettingsButton'
 import PluginButton from './PluginButton'
 import SharePopover from "./SharePopover.js";
-import { toolbarIconButtonStyle, TOOLBAR_ACTIVE_COLOR } from "./toolbarStyles.js";
+import IconButton from "./IconButton.js";
 import ModelPickerToolbarButton from "./ModelPickerToolbarButton.js";
 import TodoDropdown from "./TodoDropdown.js";
 import QuickCommandPopover from "./QuickCommandPopover.js";
@@ -1532,7 +1532,7 @@ export default React.memo(function AgentInputBox({
             修复历史: 早期版本 streaming 时整段不渲染, 用户反馈"被遮"; 改为始终
             渲染 + 流式期间降透明, 视觉上不与 spinner 抢眼, 又不丢信息.
             flex 保护: flexShrink:0 + whiteSpace:nowrap + overflow:hidden/textOverflow:
-            ellipsis 防止右端按钮(PictureOutlined + InfoCircleOutlined)通过
+            ellipsis 防止右端按钮(ImageIcon + InfoCircleOutlined)通过
             flex spacer 把任务摘要挤到 0 宽 — 之前症状: 窄屏/长任务文本时
             "X/Y 任务 · K 待开始" 整段被挤不可见. */}
         {totalTasks > 0 && (
@@ -1587,15 +1587,15 @@ export default React.memo(function AgentInputBox({
             (次高频) 与命令面板 (最高频) 区隔开。 */}
         {showModelPicker && <ModelPickerToolbarButton />}
         {/* 「+ 命令」按钮: 桌面 + 移动端均挂载. 行为完全相同 — 点击弹出
-            QuickCommandPopover (跨端复用). 移动端另保留 AppstoreAddOutlined
+            QuickCommandPopover (跨端复用). 移动端另保留 LayoutGridIcon
             按钮 (→ MobileQuickDrawer 3 Tab) 作为补充入口 (bash/prompt/git
             移动端专属).
             位置: spacer 后第一个,作为工具栏右端第一入口 — 命令面板是用户最
             常用的辅助操作之一,放在最左能让拇指/鼠标最快够到. aria-pressed
             传达开关态, 红色高亮 active 状态. */}
         <Tooltip title="命令/技能" placement="top">
-          <Button
-            icon={<PlusOutlined />}
+          <IconButton
+            icon={<PlusIcon />}
             onClick={() => {
               setQuickOpen((v) => !v);
               // 两条路径互斥: 打开 + 弹层时关闭 / slash 自动补全下拉,
@@ -1605,13 +1605,7 @@ export default React.memo(function AgentInputBox({
             data-testid="quick-command-trigger"
             aria-label="打开命令/技能列表"
             aria-pressed={quickOpen}
-            style={{
-              ...toolbarIconButtonStyle,
-              ...(quickOpen && {
-                color: TOOLBAR_ACTIVE_COLOR,
-                borderColor: TOOLBAR_ACTIVE_COLOR,
-              }),
-            }}
+            active={quickOpen}
           />
         </Tooltip>
         {/* Share 按钮: 分享当前 session 到 LAN.
@@ -1639,18 +1633,12 @@ export default React.memo(function AgentInputBox({
             destroyTooltipOnHide
             content={<SharePopover />}
           >
-            <Button
-              icon={<ShareAltOutlined />}
+            <IconButton
+              icon={<Share2Icon />}
               data-testid="share-button"
               disabled={!sessionId}
               aria-pressed={shareOpen}
-              style={{
-                ...toolbarIconButtonStyle,
-                ...(shareOpen && {
-                  color: TOOLBAR_ACTIVE_COLOR,
-                  borderColor: TOOLBAR_ACTIVE_COLOR,
-                }),
-              }}
+              active={shareOpen}
             />
           </Popover>
         </Tooltip>
@@ -1658,8 +1646,8 @@ export default React.memo(function AgentInputBox({
         <SettingsButton />
         {!hideShareAndPlugin && <PluginButton />}
         {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
-            图标在 collapsed=false 时显示 ExpandOutlined (可折叠), true 时显示
-            CompressOutlined (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮
+            图标在 collapsed=false 时显示 Maximize2Icon (可折叠), true 时显示
+            Minimize2Icon (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮
             视觉风格保持一致 (icon-only + flexShrink:0).
 
             视觉态 = transcriptCollapsed, 初值由 Layout 根据 settings.outputStyle
@@ -1679,11 +1667,10 @@ export default React.memo(function AgentInputBox({
             }
             placement="top"
           >
-            <Button
-              icon={transcriptCollapsed ? <CompressOutlined /> : <ExpandOutlined />}
+            <IconButton
+              icon={transcriptCollapsed ? <Minimize2Icon /> : <Maximize2Icon />}
               data-testid="transcript-collapse-button"
               onClick={() => setTranscriptCollapsed(!transcriptCollapsed)}
-              style={toolbarIconButtonStyle}
             />
           </Tooltip>
         )}
@@ -1701,8 +1688,8 @@ export default React.memo(function AgentInputBox({
           }
           placement="top"
         >
-          <Button
-            icon={<ToolOutlined />}
+          <IconButton
+            icon={<WrenchIcon />}
             data-testid="transcript-repair-button"
             disabled={!sessionId || status === "streaming"}
             loading={repairing}
@@ -1745,17 +1732,15 @@ export default React.memo(function AgentInputBox({
                 setRepairing(false)
               }
             }}
-            style={toolbarIconButtonStyle}
           />
         </Tooltip>
         )}
 
-        <Button
-          icon={<PictureOutlined />}
+        <IconButton
+          icon={<ImageIcon />}
           onClick={() => fileInputRef.current?.click()}
           title="上传图片"
           disabled={status === "streaming" || pendingAsk?.status === "pending"}
-          style={toolbarIconButtonStyle}
         />
         <ConversationInfoButton />
         {/* 移动端「常用指令」按钮: 仅 isMobile 时挂载.
@@ -1765,12 +1750,11 @@ export default React.memo(function AgentInputBox({
             行为: 调 useAppStore.setQuickDrawerOpen(true) 打开右侧 Drawer. */}
         {isMobile && (
           <Tooltip title="常用指令" placement="top">
-            <Button
-              icon={<AppstoreAddOutlined />}
+            <IconButton
+              icon={<LayoutGridIcon />}
               onClick={() => useAppStore.getState().setQuickDrawerOpen(true)}
               data-testid="mobile-quick-drawer-toggle"
               aria-label="打开常用指令"
-              style={toolbarIconButtonStyle}
             />
           </Tooltip>
         )}
@@ -1829,21 +1813,19 @@ export default React.memo(function AgentInputBox({
                 )}
                 {editingQueuedId === p.id ? (
                   <>
-                    <Button
-                      type="text"
+                    <IconButton
                       size="small"
-                      icon={<CheckOutlined />}
+                      icon={<CheckIcon />}
                       onClick={() => void saveEditQueued()}
                       aria-label="保存排队消息"
-                      className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-secondary)]"
+                      className="flex-shrink-0 !w-5 !h-5 !text-[10px]"
                     />
-                    <Button
-                      type="text"
+                    <IconButton
                       size="small"
-                      icon={<CloseOutlined />}
+                      icon={<XIcon />}
                       onClick={cancelEditQueued}
                       aria-label="取消编辑排队消息"
-                      className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-dim-45)]"
+                      className="flex-shrink-0 !w-5 !h-5 !text-[10px]"
                     />
                   </>
                 ) : (
@@ -1851,32 +1833,29 @@ export default React.memo(function AgentInputBox({
                     <Tooltip
                       title={status === "streaming" ? "插话发送：插入到当前轮之后最先执行" : "仅生成中可插话发送"}
                     >
-                      <Button
-                        type="text"
+                      <IconButton
                         size="small"
-                        icon={<ArrowUpOutlined />}
+                        icon={<ArrowUpIcon />}
                         onClick={() => void steerQueued(p.id)}
                         disabled={status !== "streaming" || editingQueuedId !== null}
                         aria-label="插入提示"
-                        className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-dim-45)]"
+                        className="flex-shrink-0 !w-5 !h-5 !text-[10px]"
                       />
                     </Tooltip>
-                    <Button
-                      type="text"
+                    <IconButton
                       size="small"
-                      icon={<EditOutlined />}
+                      icon={<PencilIcon />}
                       onClick={() => startEditQueued(p)}
                       disabled={editingQueuedId !== null}
                       aria-label="编辑排队消息"
-                      className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-dim-45)]"
+                      className="flex-shrink-0 !w-5 !h-5 !text-[10px]"
                     />
-                    <Button
-                      type="text"
+                    <IconButton
                       size="small"
-                      icon={<CloseOutlined />}
+                      icon={<XIcon />}
                       onClick={() => void cancelQueued(p.id)}
                       aria-label="取消排队消息"
-                      className="flex-shrink-0 !w-5 !h-5 !text-[10px] !text-[var(--text-dim-45)]"
+                      className="flex-shrink-0 !w-5 !h-5 !text-[10px]"
                     />
                   </>
                 )}
@@ -2120,7 +2099,7 @@ export default React.memo(function AgentInputBox({
                 }}
                 className="!h-auto flex items-center justify-center gap-1 py-1.5 px-3.5 !bg-[rgba(255,102,0,0.15)] !border !border-solid !border-[#ff6600] !rounded-md !text-[#ff6600] !font-semibold !text-[13px] cursor-pointer"
               >
-                <StopOutlined />
+                <SquareIcon />
                 <span>停止</span>
               </Button>
             ) : (
@@ -2173,7 +2152,7 @@ export default React.memo(function AgentInputBox({
                       : "pointer",
                 }}
               >
-                <ArrowUpOutlined />
+                <ArrowUpIcon />
                 <span>发送</span>
               </Button>
             )}

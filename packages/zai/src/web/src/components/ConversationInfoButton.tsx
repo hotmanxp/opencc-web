@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Button, Modal, Popover } from 'antd'
-import { InfoCircleOutlined } from '@ant-design/icons'
+import { Modal, Popover } from 'antd'
+import { InfoIcon } from 'lucide-react';
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
 import ConversationInfoCard from './ConversationInfoCard.js'
 import { useAppStore } from '../store/useAppStore.js'
-import { toolbarIconButtonStyle } from './toolbarStyles.js'
+import IconButton from './IconButton.js'
 
 /**
  * 工具栏 [i] 按钮 — 展示会话元信息。
@@ -39,11 +39,10 @@ export default function ConversationInfoButton() {
   if (isMobile) {
     return (
       <>
-        <Button
-          icon={<InfoCircleOutlined />}
+        <IconButton
+          icon={<InfoIcon />}
           aria-label="查看对话信息"
           title="查看对话信息"
-          style={toolbarIconButtonStyle}
           data-testid="conversation-info-trigger"
           onClick={handleTriggerClick}
         />
@@ -73,11 +72,10 @@ export default function ConversationInfoButton() {
       overlayInnerStyle={{ padding: 12 }}
       destroyTooltipOnHide
     >
-      <Button
-        icon={<InfoCircleOutlined />}
+      <IconButton
+        icon={<InfoIcon />}
         aria-label="查看对话信息"
         title="查看对话信息"
-        style={toolbarIconButtonStyle}
         data-testid="conversation-info-trigger"
       />
     </Popover>

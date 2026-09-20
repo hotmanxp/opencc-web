@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Drawer, Segmented, Button, Input, App as AntApp, Modal, Empty, Spin } from 'antd'
 import {
-  ReloadOutlined,
-  PlusOutlined,
-  DeleteOutlined,
-  ClearOutlined,
-  UndoOutlined,
-} from '@ant-design/icons'
+  RotateCwIcon,
+  PlusIcon,
+  Trash2Icon,
+  EraserIcon,
+  Undo2Icon,
+} from 'lucide-react';
 import { useAgentStore } from '../store/useAgentStore.js'
 import { useAppStore } from '../store/useAppStore.js'
 import { useQuickPrompts, MAX_TEXT } from '../hooks/useQuickPrompts.js'
@@ -112,7 +112,7 @@ function GitTab({ cwd }: GitTabProps) {
         </span>
         <Button
           size="small"
-          icon={<ReloadOutlined />}
+          icon={<RotateCwIcon />}
           loading={status.loading}
           onClick={() => status.refetch()}
           data-testid="mobile-quick-drawer-git-refresh"
@@ -191,7 +191,7 @@ function GitTab({ cwd }: GitTabProps) {
                 type="text"
                 size="small"
                 danger
-                icon={<UndoOutlined />}
+                icon={<Undo2Icon />}
                 loading={reverting === file.path}
                 onClick={(e) => {
                   e.stopPropagation()
@@ -380,7 +380,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
           <div className="flex justify-end mb-2">
             <Button
               size="small"
-              icon={<ReloadOutlined />}
+              icon={<RotateCwIcon />}
               onClick={() => void refreshTopCommands()}
               data-testid="mobile-quick-drawer-bash-refresh"
             >
@@ -429,7 +429,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
             <Button
               size="small"
               type="primary"
-              icon={<PlusOutlined />}
+              icon={<PlusIcon />}
               onClick={() => setAdding((v) => !v)}
               data-testid="mobile-quick-drawer-prompt-add"
             >
@@ -501,7 +501,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
                 type="text"
                 size="small"
                 danger
-                icon={<DeleteOutlined />}
+                icon={<Trash2Icon />}
                 onClick={(e) => {
                   e.stopPropagation()
                   remove(p.id)
@@ -516,7 +516,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
                 danger
                 type="text"
                 size="small"
-                icon={<ClearOutlined />}
+                icon={<EraserIcon />}
                 onClick={clear}
                 data-testid="mobile-quick-drawer-prompt-clear"
               >

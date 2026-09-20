@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Input, Segmented, Spin, Switch, Tree, message } from 'antd';
-import { LockOutlined, ReloadOutlined, UnlockOutlined } from '@ant-design/icons';
+import { XIcon, FolderOpenIcon, RotateCwIcon } from 'lucide-react';
 import { FileIcon, DirIcon } from './fileIcon.js';
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
@@ -16,14 +16,6 @@ import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
 import { FsContextMenu } from './FsContextMenu.js';
 import { useFsWrite } from './useFsWrite.js';
-import {
-  DEFAULT_FS_TREE_WIDTH,
-  FS_TREE_MAX_WIDTH,
-  FS_TREE_MIN_WIDTH,
-  STORAGE_KEYS,
-  clampFsTreeWidth,
-  useLocalStorageState,
-} from './shared.js';
 
 // TextEditor: dynamic-imported CodeMirror; we keep a module-scoped
 // cache rather than React.lazy + Suspense so FsTab tests don't need
@@ -485,11 +477,98 @@ const FilePreviewMemo = memo(FilePreview, (prev, next) => {
   return true;
 });
 
+/** 「文件」(文件树) tab 的哨兵 key. 文件 tab 的 key 是相对 cwd 的 POSIX 路径, 不会撞上它. */
+const FILES_TAB = 'files';
+
+/** tab 标题只显示 basename; 完整路径走 title 属性. */
+function basenameOf(path: string): string {
+  const idx = path.lastIndexOf('/');
+  return idx < 0 ? path : path.slice(idx + 1);
+}
+
+/**
+ * 一个 tab chip: [icon] [名字] [×].
+ *
+ * 用 div[role=tab] 而不是 <button>: 文件 tab 内部还要嵌一个关闭按钮,
+ * button 不能嵌套 button. 键盘可达性 (Enter/Space 激活) 手动补齐.
+ *
+ * closable=false 用于「文件」tab —— 它始终存在, 关掉就没有文件树入口了.
+ */
+function TabItem({
+  label,
+  icon,
+  active,
+  closable,
+  title,
+  testId,
+  onSelect,
+  onClose,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  closable: boolean;
+  title: string;
+  testId: string;
+  onSelect: () => void;
+  onClose?: () => void;
+}) {
+  return (
+    <div
+      role="tab"
+      aria-selected={active}
+      tabIndex={active ? 0 : -1}
+      data-testid={testId}
+      title={title}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`shrink-0 flex items-center gap-1 h-7 pl-2 pr-1 rounded-t cursor-pointer select-none border-b-2 ${
+        active
+          ? 'border-b-[color:var(--accent-start)] text-[color:var(--text-primary)] bg-[var(--bg-card)]'
+          : 'border-b-transparent text-[color:var(--text-secondary)] hover:bg-[var(--bg-card-hover)]'
+      }`}
+    >
+      {icon}
+      <span className="max-w-[160px] overflow-hidden text-ellipsis whitespace-nowrap text-xs">
+        {label}
+      </span>
+      {closable && (
+        <button
+          type="button"
+          data-testid={`${testId}-close`}
+          aria-label={`关闭 ${label}`}
+          title={`关闭 ${label}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose?.();
+          }}
+          className="w-4 h-4 p-0 inline-flex items-center justify-center rounded border-0 bg-transparent cursor-pointer text-[10px] opacity-60 hover:opacity-100 text-[color:var(--text-dim-55)]"
+        >
+          <XIcon />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function FsTab({ cwd }: { cwd: string | null }) {
   const root = useFsList(cwd, '');
-  const [selected, setSelected] = useState<string | null>(null);
+  // 打开的**文件** tab (相对 cwd 的路径, 按打开顺序). 「文件」tab 是隐式的
+  // 第一个, 不入数组 —— 它不可关闭, 始终存在.
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  // 激活的 tab: FILES_TAB 或某个文件路径.
+  const [activeKey, setActiveKey] = useState<string>(FILES_TAB);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [loaded, setLoaded] = useState<LoadedMap>({});
+  // 只有激活的文件 tab 才拉内容: 后台 tab 不占网络/内存, 切回来重新拉.
+  // 代价是切 tab 有一次 loading 闪烁, 换来的是「打开 N 个文件 = N 次请求」
+  // 变成最多 1 次.
+  const selected = activeKey === FILES_TAB ? null : activeKey;
   const file = useFsFile(cwd, selected);
   const [contextMenu, setContextMenu] = useState<{ path: string; absPath: string; x: number; y: number; kind?: 'file' | 'dir' } | null>(null);
   // Search-mode toggle. When non-empty after trim, the left pane renders
@@ -532,76 +611,27 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(new Set());
 
-  // 文件树 ↔ 预览区 之间的宽度 (相对 FsTab 自身, 整数百分比).
-  // 持久化到 localStorage, 跨刷新保留; 范围 15-85% 由 clampFsTreeWidth 守卫.
-  // 拖动锁 (跟 SplitPane 一致): 默认锁定防误触, 点悬浮按钮解锁后才能拖动.
-  const [widthStored, setWidthStored] = useLocalStorageState<number>(
-    STORAGE_KEYS.fsTreeWidth,
-    DEFAULT_FS_TREE_WIDTH,
-  );
-  const fsTreeWidth = clampFsTreeWidth(widthStored);
-  const [lockedStored, setLockedStored] = useLocalStorageState<boolean>(
-    STORAGE_KEYS.fsTreeLocked,
-    true,
-  );
+  // 打开(或聚焦)一个文件 tab. 已打开则只切过去, 不重复入栈.
+  // line 非空时同时设置 pendingLine, 让 FilePreview 跳转到该行 (内容搜索
+  // 结果点击); 普通打开 (文件树点击) 传 null, 清掉上一次的跳转目标 ——
+  // 否则切到另一个 tab 时旧的行号会对新文件重新触发一次高亮/滚动.
+  const openFile = useCallback((path: string, line: number | null = null) => {
+    setOpenTabs((cur) => (cur.includes(path) ? cur : [...cur, path]));
+    setActiveKey(path);
+    setPendingLine(line);
+  }, []);
 
-  // Splitter drag state. widthStored 存的是百分比 (整数), 但 mouse 移动
-  // 给出 px; 拖拽过程中实时把 px delta 折算成 pct delta:
-  //   delta_pct = delta_px / startWPx * 100
-  // 然后加到 startW (pct) 上, clamp 进 [MIN, MAX].
-  //
-  // 关键: 分母必须是 *拖动开始时* fs-tree 的 px 宽度 (startWPx), 而不是
-  // 每次 move 时实时读 clientWidth. 因为 setWidthStored 会立即触发 React
-  // re-render, fs-tree 的 width 变 → clientWidth 跟着变. 如果分母用变化的
-  // clientWidth, delta_pct = delta_px / 变化的分母 → 鼠标移动距离和 fs-tree
-  // 实际变化非线性 (用户感觉鼠标"飘"或"加速")。用 startWPx 锁定分母, 整个
-  // 拖动过程 delta_pct 跟鼠标移动呈纯线性: 鼠标走 X px, fs-tree 增/减
-  // X / startWPx * 100 %.
-  const fsTreeContainerRef = useRef<HTMLDivElement | null>(null);
-  // 拖拽时用「父容器宽度」作为 px→pct 换算分母. fs-tree 的 width 是百分比,
-  // 相对的是父级 flex 容器 (FsTab.tsx 里 `display:flex` 那行), 不是 fs-tree
-  // 自身. 若分母用 fs-tree 自身的 clientWidth (它总是 < 容器宽), delta_pct =
-  // delta_px / fsTreePx * 100 会被放大成 delta_px / (W/100) — 文件树右边缘
-  // 移动 `100/W` 倍于鼠标距离 (W=40 时是 2.5x), 就是用户感觉"拖拽距离和鼠标
-  // 不一样、树飘过去"的根因. 分母锁在鼠标按下时的容器宽 (拖动期间不变),
-  // 让 delta_pct 跟鼠标移动严格 1:1 线性.
-  const dragRef = useRef<{ startX: number; startW: number; containerPx: number } | null>(null);
-  const onFsHandleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      // 防御性 bail: 锁定时不应触发拖动 (UI 上 drag surface 的 pointer-events
-      // 已被设为 none, 但 hook 自身也短路避免任何 race 触发越权写入).
-      if (lockedStored) return;
-      const container = fsTreeContainerRef.current?.parentElement;
-      const containerPx = container?.clientWidth || 0;
-      // 拿不到父容器宽度 (如未挂载 / 隐藏) 就不启动拖动, 避免分母为 0 除零.
-      if (!containerPx) return;
-      dragRef.current = { startX: e.clientX, startW: fsTreeWidth, containerPx };
-      const onMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return;
-        // Drag right → grow fs-tree (follow mouse direction); left → shrink.
-        // 直觉: handle 在 fs-tree 的 right 边缘 (position: absolute, right: -6),
-        // fs-tree 的 width 是 ${pct}%. 鼠标向右移动 X px:
-        //   - delta_pct = delta_px / containerPx * 100 → fs-tree 右边缘恰好
-        //     移动 delta_px px, handle (right: -6) 跟着 fs-tree 右边缘同步走
-        //   - handle 在视觉上跟着鼠标走, fs-tree 也跟着鼠标走 → 1:1 一致
-        // 分母锁在 mouseDown 时记录的 containerPx — 拖动期间不变 (delta_pct
-        // 跟鼠标移动纯线性); 若用实时变化的 clientWidth (setWidthStored 触发
-        // re-render 后 fs-tree / 容器宽度都会变), delta_pct 会非线性"飘".
-        const deltaPx = ev.clientX - dragRef.current.startX;
-        const deltaPct = (deltaPx / dragRef.current.containerPx) * 100;
-        const next = dragRef.current.startW + deltaPct;
-        setWidthStored(clampFsTreeWidth(next));
-      };
-      const onUp = () => {
-        dragRef.current = null;
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-      };
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-    },
-    [fsTreeWidth, setWidthStored, lockedStored],
-  );
+  // 关闭一个文件 tab. 关掉的是当前激活 tab 时, 焦点依次退到右邻居 →
+  // 左邻居 → 「文件」tab, 不会出现「tab 全关掉但面板空白」的状态.
+  const closeTab = (path: string) => {
+    const idx = openTabs.indexOf(path);
+    if (idx < 0) return;
+    const next = openTabs.filter((p) => p !== path);
+    setOpenTabs(next);
+    if (activeKey === path) {
+      setActiveKey(next[idx] ?? next[idx - 1] ?? FILES_TAB);
+    }
+  };
 
   // Save handler — marks dirty by tree path key so renderTree lookup matches.
   const handleSave = async (path: string, content: string) => {
@@ -646,9 +676,10 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     }
   };
 
-  // Reset on cwd change.
+  // Reset on cwd change. 打开的 tab 全部作废 —— 它们是相对旧 cwd 的路径.
   useEffect(() => {
-    setSelected(null);
+    setOpenTabs([]);
+    setActiveKey(FILES_TAB);
     setExpandedKeys([]);
     setLoaded({});
     setContextMenu(null);
@@ -760,7 +791,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const refreshBtn = (
     <Button
       size="small"
-      icon={<ReloadOutlined />}
+      icon={<RotateCwIcon />}
       loading={root.loading}
       onClick={refreshAll}
       title="刷新目录"
@@ -770,6 +801,10 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   );
 
   const treeData = root.data?.ok && root.data.entries ? renderTree(root.data.entries) : [];
+
+  const isFilesTab = activeKey === FILES_TAB;
+  // 头部路径行: 「文件」tab 显示 cwd 本身, 文件 tab 显示该文件的绝对路径.
+  const activePathLabel = isFilesTab ? (cwd ?? '') : buildAbsPath(cwd, activeKey);
 
   return (
     <div
@@ -789,41 +824,82 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       onDragLeave={() => setDropHover(false)}
       onDrop={(e) => void handleFsDrop(e)}
     >
+      {/* Tab 条: 「文件」(文件树, 不可关闭) + 已打开的文件 (可关闭).
+          取代旧的「文件树 | 预览」左右分栏 —— 同一时刻只显示一个面板. */}
+      <div
+        data-testid="fs-tab-strip"
+        role="tablist"
+        className="flex items-center gap-1 px-2 pt-1 shrink-0 overflow-x-auto bg-[var(--bg-tab)] border-b border-b-[color:var(--border-light)]"
+      >
+        <TabItem
+          testId="fs-tab-files"
+          label="文件"
+          title={cwd}
+          icon={<FolderOpenIcon />}
+          active={isFilesTab}
+          closable={false}
+          onSelect={() => setActiveKey(FILES_TAB)}
+        />
+        {openTabs.map((p) => (
+          <TabItem
+            key={p}
+            testId={`fs-file-tab-${p}`}
+            label={basenameOf(p)}
+            title={buildAbsPath(cwd, p)}
+            icon={<FileIcon name={basenameOf(p)} size={14} />}
+            active={activeKey === p}
+            closable
+            onSelect={() => setActiveKey(p)}
+            onClose={() => closeTab(p)}
+          />
+        ))}
+      </div>
       <div
         data-testid="fs-tab-header"
-        className="flex items-center gap-2 py-1.5 px-3"
-        style={{ borderBottom: '1px solid var(--border-light)' }}
+        className="flex items-center gap-2 py-1.5 px-3 shrink-0 border-b border-b-[color:var(--border-light)]"
       >
-        <span className="text-xs whitespace-nowrap" style={{ color: 'var(--text-dim-55)' }}>
-          Files
+        {/* 当前 tab 的路径: 「文件」tab 显示 cwd, 文件 tab 显示该文件的绝对
+            路径. 搜索框只在「文件」tab 出现 —— 在文件 tab 上输入搜索词会把
+            树的结果换掉, 而那时树并不在视野里. */}
+        <span
+          data-testid="fs-path"
+          className="flex-1 min-w-0 font-mono text-xs truncate"
+          style={{ color: 'var(--text-dim-55)' }}
+          title={activePathLabel}
+        >
+          {activePathLabel}
         </span>
-        <Input
-          data-testid="fs-search-input"
-          size="small"
-          placeholder="搜索文件…(回车搜索)"
-          allowClear
-          value={draft}
-          onChange={(e) => {
-            const v = e.target.value;
-            setDraft(v);
-            // Allowing the user to clear the search by hitting the
-            // × icon (or selecting all + delete) should also collapse
-            // back to the directory tree — so empty drafts commit
-            // immediately, mirroring an "Enter" with no input.
-            if (v === '') setSubmittedQuery('');
-          }}
-          onPressEnter={() => setSubmittedQuery(draft.trim())}
-          className="flex-1"
-        />
-        <Switch
-          size="small"
-          data-testid="fs-search-mode"
-          aria-label="切换文件名/内容搜索"
-          checked={mode === 'content'}
-          onChange={(v) => setMode(v ? 'content' : 'name')}
-          checkedChildren="内容"
-          unCheckedChildren="文件名"
-        />
+        {isFilesTab && (
+          <>
+            <Input
+              data-testid="fs-search-input"
+              size="small"
+              placeholder="搜索文件…(回车搜索)"
+              allowClear
+              value={draft}
+              onChange={(e) => {
+                const v = e.target.value;
+                setDraft(v);
+                // Allowing the user to clear the search by hitting the
+                // × icon (or selecting all + delete) should also collapse
+                // back to the directory tree — so empty drafts commit
+                // immediately, mirroring an "Enter" with no input.
+                if (v === '') setSubmittedQuery('');
+              }}
+              onPressEnter={() => setSubmittedQuery(draft.trim())}
+              className="w-44 shrink-0"
+            />
+            <Switch
+              size="small"
+              data-testid="fs-search-mode"
+              aria-label="切换文件名/内容搜索"
+              checked={mode === 'content'}
+              onChange={(v) => setMode(v ? 'content' : 'name')}
+              checkedChildren="内容"
+              unCheckedChildren="文件名"
+            />
+          </>
+        )}
         {showHtmlToggle && (
           <Segmented
             data-testid="fs-html-mode"
@@ -871,179 +947,104 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             </Button>
           </>
         )}
-        {refreshBtn}
+        {isFilesTab && refreshBtn}
       </div>
-      <div className="flex flex-1 min-h-0">
-        <div
-          ref={fsTreeContainerRef}
-          data-testid="fs-tree"
-          className="relative min-w-0 px-2 py-1"
-          style={{
-            // 宽度用百分比 (相对 FsTab 容器), 持久化到 localStorage, 用户
-            // 拖动调整; position:relative 让内部的 drag handle / lock 按钮
-            // 用 absolute 锚定到 fs-tree 右边缘 (borderRight 视觉分割线).
-            flex: '0 0 auto',
-            width: `${fsTreeWidth}%`,
-            // 显式高度 (calc(100vh - 140px)) 让 fs-tree 在 flex 行里
-            // 有确定的高度, antd Tree 自然渲染的内容超出时被父容器
-            // overflow:auto 截断并显示原生滚动条; minHeight:0 防止
-            // Tree 自然高度反向撑爆 calc.
-            height: 'calc(100vh - 140px)',
-            minHeight: 0,
-            overflow: 'auto',
-            borderRight: '1px solid var(--border-light)',
-          }}
-        >
-          {submittedQuery.length > 0 ? (
-            mode === 'content' ? (
-              <FsContentSearchList
-                entries={contentSearch.data?.entries ?? []}
-                loading={contentSearch.loading}
-                error={contentSearch.error}
-                truncated={contentSearch.data?.truncated ?? false}
-                query={submittedQuery}
-                onSelect={(p, l) => { setSelected(p); setPendingLine(l); }}
-                onItemContextMenu={openContextMenu}
-              />
+      {/* 面板区: 高度链路走 flex (SplitPane 的 Tabs 被 .zai-pane-fill 拉满),
+          不再用 calc(100vh - Npx) 这类跟外层结构耦合的魔数. */}
+      <div data-testid="fs-panel" className="flex-1 min-h-0">
+        {isFilesTab ? (
+          <div data-testid="fs-tree" className="h-full overflow-auto px-2 py-1">
+            {submittedQuery.length > 0 ? (
+              mode === 'content' ? (
+                <FsContentSearchList
+                  entries={contentSearch.data?.entries ?? []}
+                  loading={contentSearch.loading}
+                  error={contentSearch.error}
+                  truncated={contentSearch.data?.truncated ?? false}
+                  query={submittedQuery}
+                  onSelect={(p, l) => openFile(p, l)}
+                  onItemContextMenu={openContextMenu}
+                />
+              ) : (
+                <FsSearchList
+                  entries={search.data?.entries ?? []}
+                  loading={search.loading}
+                  error={search.error}
+                  truncated={search.data?.truncated ?? false}
+                  query={submittedQuery}
+                  onSelect={(p) => openFile(p)}
+                  onItemContextMenu={openContextMenu}
+                />
+              )
+            ) : root.error && !root.data?.ok ? (
+              <Empty description={root.error} />
+            ) : root.loading && treeData.length === 0 ? (
+              <div className="p-4 text-center">
+                <Spin />
+              </div>
+            ) : treeData.length === 0 ? (
+              <div className="p-4 text-xs" style={{ color: 'var(--text-dim-45)' }}>
+                目录为空
+              </div>
             ) : (
-              <FsSearchList
-                entries={search.data?.entries ?? []}
-                loading={search.loading}
-                error={search.error}
-                truncated={search.data?.truncated ?? false}
-                query={submittedQuery}
-                onSelect={(p) => setSelected(p)}
-                onItemContextMenu={openContextMenu}
+              <Tree
+                treeData={treeData}
+                showIcon
+                // 目录树是纯导航控件: 节点文字是"点进去"的靶子, 拖选它没有
+                // 意义 (要路径走右键菜单的"复制相对/绝对路径", 2026-09-20).
+                // 不加这条时, 在树上拖拽会划出一片蓝底选中文本, 还会和
+                // 单击打开文件/目录的手感打架.
+                className="select-none"
+                loadData={handleLoadData}
+                expandedKeys={expandedKeys}
+                onExpand={(keys) => setExpandedKeys(keys)}
+                onSelect={(_keys, info) => {
+                  // Files: open them in a new tab (or focus the existing one).
+                  // Directories: toggle expand on click. Loading is lazy —
+                  // adding an unloaded dir to expandedKeys triggers loadData
+                  // since renderTree leaves `children` undefined until loaded.
+                  const key = String(info.node.key);
+                  if (info.node.isLeaf) {
+                    openFile(key);
+                  } else {
+                    setExpandedKeys((cur) =>
+                      cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key],
+                    );
+                  }
+                }}
+                onRightClick={({ node, event }) => {
+                  event.preventDefault();
+                  openContextMenu(String(node.key), event.clientX, event.clientY, node.isLeaf ? 'file' : 'dir');
+                }}
               />
-            )
-          ) : root.error && !root.data?.ok ? (
-            <Empty description={root.error} />
-          ) : root.loading && treeData.length === 0 ? (
-            <div className="p-4 text-center">
-              <Spin />
-            </div>
-          ) : treeData.length === 0 ? (
-            <div className="p-4 text-xs" style={{ color: 'var(--text-dim-45)' }}>
-              目录为空
-            </div>
-          ) : (
-            <Tree
-              treeData={treeData}
-              showIcon
-              loadData={handleLoadData}
-              expandedKeys={expandedKeys}
-              onExpand={(keys) => setExpandedKeys(keys)}
-              onSelect={(_keys, info) => {
-                // Files: preview their content.
-                // Directories: toggle expand on click. Loading is lazy —
-                // adding an unloaded dir to expandedKeys triggers loadData
-                // since renderTree leaves `children` undefined until loaded.
-                const key = String(info.node.key);
-                if (info.node.isLeaf) {
-                  setSelected(key);
-                } else {
-                  setExpandedKeys((cur) =>
-                    cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key],
-                  );
-                }
-              }}
-              onRightClick={({ node, event }) => {
-                event.preventDefault();
-                openContextMenu(String(node.key), event.clientX, event.clientY, node.isLeaf ? 'file' : 'dir');
-              }}
-            />
-          )}
-          {/* Splitter drag surface — 锚定在 fs-tree 右边缘 (borderRight 视觉分割
-              线位置, 文件树 ↔ 预览区 的分界). 锁定时整条 12px 宽 surface
-              pointer-events: none, 误触不会拖动. 解锁后变 ew-resize cursor +
-              半透明高亮, 鼠标按下开始拖动. 实现跟 SplitPane 完全一致. */}
+            )}
+          </div>
+        ) : (
           <div
-            data-testid="fs-tree-drag-handle"
-            onMouseDown={onFsHandleMouseDown}
-            className="absolute top-0 -right-1.5 w-3 h-full z-[5]"
-            style={{
-              cursor: lockedStored ? 'default' : 'ew-resize',
-              background: lockedStored
-                ? 'transparent'
-                : 'rgba(255,102,0,0.06)',
-              pointerEvents: lockedStored ? 'none' : 'auto',
-            }}
-            onMouseEnter={(e) => {
-              if (lockedStored) return;
-              (e.currentTarget as HTMLDivElement).style.background =
-                'rgba(255,102,0,0.18)';
-            }}
-            onMouseLeave={(e) => {
-              if (lockedStored) return;
-              (e.currentTarget as HTMLDivElement).style.background =
-                'rgba(255,102,0,0.06)';
-            }}
-            title={
-              lockedStored
-                ? `文件树宽度已锁定 — 点击悬浮按钮解锁后拖动调整 (${FS_TREE_MIN_WIDTH}-${FS_TREE_MAX_WIDTH}%)`
-                : `拖动以调整文件树宽度 (${FS_TREE_MIN_WIDTH}-${FS_TREE_MAX_WIDTH}%) — 点击悬浮按钮可锁定`
-            }
-          />
-          {/* Splitter lock toggle — floating button 居中悬浮在分割线上.
-              永远可点击 (zIndex > handle); 锁定时显示锁图标, 解锁时显示开锁
-              图标 + ew-resize cursor (按钮自身也是拖动目标的一环).
-              位置 right: -14 让按钮左右对称跨在 borderRight 这条线上. */}
-          <button
-            type="button"
-            data-testid="fs-tree-lock-toggle"
-            aria-label={lockedStored ? '解锁文件树宽度拖动' : '锁定文件树宽度拖动'}
-            onClick={() => setLockedStored(!lockedStored)}
-            className="absolute top-1/2 -right-3.5 w-7 h-7 p-0 rounded-full border border-[color:var(--border-light)] flex items-center justify-center z-[6] text-sm -translate-y-1/2"
-            style={{
-              background: lockedStored ? 'var(--bg-card)' : 'var(--accent-start)',
-              color: lockedStored ? 'var(--text-secondary)' : '#fff',
-              cursor: lockedStored ? 'pointer' : 'ew-resize',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
-            }}
-            title={
-              lockedStored
-                ? '文件树宽度已锁定, 点击解锁后可拖动调整'
-                : '文件树宽度可拖动调整, 点击锁定'
-            }
+            data-testid="fs-preview"
+            className="h-full flex flex-col p-3 overflow-hidden font-mono text-xs"
           >
-            {lockedStored ? <LockOutlined /> : <UnlockOutlined />}
-          </button>
-        </div>
-        <div
-          data-testid="fs-preview"
-          className="flex flex-col p-3 overflow-hidden font-mono text-xs"
-          style={{
-            // fs-tree 用固定百分比 width 占左侧, fs-preview 用 flex:1 填
-            // 剩余空间; minWidth:0 让预览区可以被 fs-tree 挤压 (而不是
-            // 因 SyntaxHighlighter / <pre> 自然宽度反向撑爆 flex 行).
-            flex: 1,
-            minWidth: 0,
-            height: 'calc(100vh - 140px)',
-            minHeight: 0,
-          }}
-        >
-          {!selected ? (
-            <Empty description="选择左侧文件查看内容" />
-          ) : file.loading ? (
-            <div className="text-center p-6">
-              <Spin />
-            </div>
-          ) : file.error ? (
-            <Empty description={file.error} />
-          ) : file.data && editingPath && file.data.path === editingPath && file.data.kind === 'text' && file.data.content !== undefined ? (
-            <LazyTextEditor
-              initialContent={file.data.content}
-              language={file.data.name ? extToLanguage(file.data.name) : null}
-              saving={saving}
-              onSave={(newContent) => void handleSave(editingPath, newContent)}
-              onCancel={handleCancel}
-            />
-          ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html') ? (
-            <FilePreviewMemo file={file.data} htmlMode={htmlMode} pendingLine={pendingLine} />
-          ) : (
-            <Empty description="没有内容" />
-          )}
-        </div>
+            {file.loading ? (
+              <div className="text-center p-6">
+                <Spin />
+              </div>
+            ) : file.error ? (
+              <Empty description={file.error} />
+            ) : file.data && editingPath && file.data.path === editingPath && file.data.kind === 'text' && file.data.content !== undefined ? (
+              <LazyTextEditor
+                initialContent={file.data.content}
+                language={file.data.name ? extToLanguage(file.data.name) : null}
+                saving={saving}
+                onSave={(newContent) => void handleSave(editingPath, newContent)}
+                onCancel={handleCancel}
+              />
+            ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html') ? (
+              <FilePreviewMemo file={file.data} htmlMode={htmlMode} pendingLine={pendingLine} />
+            ) : (
+              <Empty description="没有内容" />
+            )}
+          </div>
+        )}
       </div>
       {contextMenu && cwd && (
         <FsContextMenu
@@ -1053,7 +1054,13 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           kind={contextMenu.kind}
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
-          onDeleted={() => { setContextMenu(null); refreshAll(); }}
+          onDeleted={() => {
+            setContextMenu(null);
+            // 被删掉的文件可能正开在某个 tab 里 —— 关掉它, 免得留一个
+            // 永远报「文件不存在」的僵尸 tab.
+            closeTab(contextMenu.path);
+            refreshAll();
+          }}
         />
       )}
     </div>

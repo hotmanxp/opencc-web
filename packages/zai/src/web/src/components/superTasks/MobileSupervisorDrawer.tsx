@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import IconButton from "../IconButton.js";
 import { Button, Drawer, Popconfirm, Tooltip, message } from 'antd'
-import { CommentOutlined, ReloadOutlined } from '@ant-design/icons'
+import { MessageSquareTextIcon, RotateCwIcon } from 'lucide-react';
 import AgentConversation from '../../pages/AgentConversation'
 import { useAgentStore } from '../../store/useAgentStore'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
@@ -49,7 +50,7 @@ export default function MobileSupervisorDrawer({
           boxShadow: '0 4px 12px rgba(0,0,0,.18)',
         }}
       >
-        <CommentOutlined className="text-[22px] text-white" />
+        <MessageSquareTextIcon className="text-[22px] text-white" />
         {streaming && (
           <span
             data-testid="mobile-supervisor-fab-dot"
@@ -103,9 +104,8 @@ export default function MobileSupervisorDrawer({
             }}
           >
             <Tooltip title="清空当前任务调度器会话,触发全新引导">
-              <Button
-                type="text"
-                icon={<ReloadOutlined />}
+              <IconButton
+                icon={<RotateCwIcon />}
                 loading={resetting}
                 disabled={resetting}
                 aria-label="重置任务调度器会话"

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import IconButton from "../components/IconButton.js";
 import {
   Button,
   Typography,
@@ -7,13 +8,13 @@ import {
   message,
 } from "antd";
 import {
-  MessageOutlined,
-  PlusOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  DeleteOutlined,
-  PictureOutlined,
-} from "@ant-design/icons";
+  MessageSquareIcon,
+  PlusIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  Trash2Icon,
+  ImageIcon,
+} from "lucide-react";
 import { useAgentStore } from "../store/useAgentStore";
 import { useAppStore } from "../store/useAppStore";
 import ConfigStatusBar from "../components/ConfigStatusBar";
@@ -132,7 +133,7 @@ export default function Agent() {
   // 新 pwd 下首次打开 Agent 页面时, server 端 /api/agent/sessions 会返回
   // 空数组 — loadSessions 当前对空列表不做任何处理, UI 会停在空白态.
   // 在这里补一刀: 等 loadSessions 完成后如果 sessions 仍是空, 就调用
-  // createNewSession() (复用了 PlusOutlined 按钮的 onClick 逻辑 — POST
+  // createNewSession() (复用了 PlusIcon 按钮的 onClick 逻辑 — POST
   // /api/agent/sessions 建一条空 transcript, 立即在 sidebar 占位).
   useEffect(() => {
     (async () => {
@@ -185,13 +186,12 @@ export default function Agent() {
             // 用 absolute + transform 让三个图标按钮绝对居中于 40px 列宽,
             // 绕开 AntD Button 内部 icon 偏左导致的视觉不齐.
             // 第 2 个 N 按钮 = 新 tab 打开 /agent?sid=newID (不影响当前 tab).
-            // 第 3 个按钮 = "展开会话历史" 切换 (MenuUnfoldOutlined).
+            // 第 3 个按钮 = "展开会话历史" 切换 (PanelLeftOpenIcon).
             // height = 96 让三个 28px 按钮 + 2 段 32px 间距全放下 (top 0/32/64).
             <div className="relative w-full h-24">
-              <Button
-                type="text"
+              <IconButton
                 size="small"
-                icon={<PlusOutlined />}
+                icon={<PlusIcon />}
                 onClick={createNewSession}
                 disabled={isBusy}
                 aria-label="创建新会话"
@@ -218,10 +218,9 @@ export default function Agent() {
               >
                 N
               </Button>
-              <Button
-                type="text"
+              <IconButton
                 size="small"
-                icon={<MenuUnfoldOutlined />}
+                icon={<PanelLeftOpenIcon />}
                 onClick={sessionPanel.expand}
                 aria-label="展开会话历史"
                 title="展开会话历史"
@@ -231,14 +230,13 @@ export default function Agent() {
           ) : (
             <>
               <Space className="text-xs">
-                <MessageOutlined />
+                <MessageSquareIcon />
                 历史
               </Space>
               <Space size={4}>
-                <Button
-                  type="text"
+                <IconButton
                   size="small"
-                  icon={<PlusOutlined />}
+                  icon={<PlusIcon />}
                   onClick={createNewSession}
                   disabled={isBusy}
                   aria-label="创建新会话"
@@ -264,10 +262,9 @@ export default function Agent() {
                 >
                   N
                 </Button>
-                <Button
-                  type="text"
+                <IconButton
                   size="small"
-                  icon={<MenuFoldOutlined />}
+                  icon={<PanelLeftCloseIcon />}
                   onClick={sessionPanel.collapse}
                   aria-label="收起会话历史"
                   title="收起会话历史"
@@ -347,7 +344,7 @@ export default function Agent() {
                             type="text"
                             size="small"
                             danger
-                            icon={<DeleteOutlined />}
+                            icon={<Trash2Icon />}
                             disabled={isBusy}
                             onClick={(e) => e.stopPropagation()}
                             aria-label="删除会话"

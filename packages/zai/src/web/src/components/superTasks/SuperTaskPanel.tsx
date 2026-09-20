@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Button, Checkbox, Popconfirm, Tooltip, message } from 'antd'
-import { DeleteOutlined } from '@ant-design/icons'
+import { Trash2Icon } from 'lucide-react';
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import type { TaskSummary } from '../../lib/superTaskApi'
 import NewSuperTaskModal from './NewSuperTaskModal'
@@ -115,7 +115,7 @@ export default function SuperTaskPanel(): JSX.Element {
               <Button
                 size="small"
                 danger
-                icon={<DeleteOutlined />}
+                icon={<Trash2Icon />}
                 disabled={sel.length === 0}
                 data-testid={`delete-selected-${key}`}
               >
@@ -124,7 +124,7 @@ export default function SuperTaskPanel(): JSX.Element {
             </Popconfirm>
           ) : (
             <Tooltip title={isLocked ? '执行/验证中任务不可批量删除' : '不可删除'}>
-              <Button size="small" danger icon={<DeleteOutlined />} disabled data-testid={`delete-selected-${key}`}>
+              <Button size="small" danger icon={<Trash2Icon />} disabled data-testid={`delete-selected-${key}`}>
                 删除选中
               </Button>
             </Tooltip>

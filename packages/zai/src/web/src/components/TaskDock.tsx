@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Badge, Modal, Popover, Tooltip } from 'antd'
-import { AppstoreOutlined, CaretRightOutlined, CheckCircleFilled, CloseCircleFilled, CodeOutlined, LoadingOutlined } from '@ant-design/icons'
+import { LayoutGridIcon, ChevronRightIcon, CircleCheckIcon, CircleXIcon, CodeIcon, LoaderCircleIcon } from 'lucide-react';
 import { useBackgroundTasks } from '../hooks/useBackgroundTasks.js'
 import type { BackgroundTaskSummary } from '../hooks/useBackgroundTasks.js'
 import { useBashBackgroundTasks } from '../hooks/useBashBackgroundTasks.js'
@@ -8,11 +8,11 @@ import type { BashTaskInfo } from '../lib/taskApi.js'
 import { useAppStore } from '../store/useAppStore.js'
 
 const STATUS_ICON: Record<string, JSX.Element> = {
-  running: <LoadingOutlined className="text-[var(--accent-start)]" spin />,
-  queued: <CaretRightOutlined className="text-[var(--ui-text-color)]" />,
-  completed: <CheckCircleFilled className="text-[var(--success)]" />,
-  failed: <CloseCircleFilled className="text-[var(--error)]" />,
-  cancelled: <CloseCircleFilled className="text-[var(--ui-text-color)]" />,
+  running: <LoaderCircleIcon className="animate-spin text-[var(--accent-start)]" />,
+  queued: <ChevronRightIcon className="text-[var(--ui-text-color)]" />,
+  completed: <CircleCheckIcon className="text-[var(--success)]" />,
+  failed: <CircleXIcon className="text-[var(--error)]" />,
+  cancelled: <CircleXIcon className="text-[var(--ui-text-color)]" />,
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -46,6 +46,15 @@ function Row({
       <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
         {truncatePrompt(task.prompt || '(空 prompt)')}
       </span>
+      {/* Agent 名称色块 (见 lib/taskApi.ts BackgroundTask.agentType 语义说明)。
+          description 走 tooltip, 兜底 CLI 路径下 agentType 只是 provider 种类。 */}
+      {task.detail?.agentType && (
+        <Tooltip title={task.detail.description}>
+          <span className="text-[10px] px-1 rounded-sm border border-solid border-[var(--accent-start)] text-[var(--accent-start)] max-w-[96px] overflow-hidden text-ellipsis whitespace-nowrap">
+            {task.detail.agentType}
+          </span>
+        </Tooltip>
+      )}
       {/* 重试角标: attemptCount > 1 时显示, 让用户在 dock 列表里一眼看到
           "这条任务被自动重试过 N-1 次". 用紫色与失败红色区分. */}
       {task.detail?.attemptCount !== undefined && task.detail.attemptCount > 1 && (
@@ -63,10 +72,10 @@ function Row({
 }
 
 const BASH_STATUS_ICON: Record<string, JSX.Element> = {
-  running: <CodeOutlined className="text-[var(--accent-start)]" spin />,
-  completed: <CheckCircleFilled className="text-[var(--success)]" />,
-  failed: <CloseCircleFilled className="text-[var(--error)]" />,
-  killed: <CloseCircleFilled className="text-[var(--ui-text-color)]" />,
+  running: <CodeIcon className="animate-spin text-[var(--accent-start)]" />,
+  completed: <CircleCheckIcon className="text-[var(--success)]" />,
+  failed: <CircleXIcon className="text-[var(--error)]" />,
+  killed: <CircleXIcon className="text-[var(--ui-text-color)]" />,
 }
 
 function BashRow({
@@ -222,7 +231,7 @@ export function TaskDock({
         {isLite ? (
           // isLite (分屏展开 / 移动端) 模式: 只显示图标,省掉"后台任务"文本.
           // 视觉与 ModeStatusButton 在 compact 下的精简策略一致.
-          <AppstoreOutlined
+          <LayoutGridIcon
             className="px-1 text-[14px] leading-none"
             aria-label="后台任务"
           />

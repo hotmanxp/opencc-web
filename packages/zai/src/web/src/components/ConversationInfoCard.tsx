@@ -1,6 +1,7 @@
 import { Button, Descriptions, message, Typography } from 'antd'
+import IconButton from "./IconButton.js";
 import { copyToClipboard } from '../lib/clipboard.js'
-import { CopyOutlined } from '@ant-design/icons'
+import { CopyIcon } from 'lucide-react';
 import type { ConversationInfo } from '../hooks/useConversationInfo.js'
 
 const { Text } = Typography
@@ -68,10 +69,9 @@ export default function ConversationInfoCard({ info }: Props) {
           <Text code className="text-xs break-all">
             {info.sessionId}
           </Text>
-          <Button
-            type="text"
+          <IconButton
             size="small"
-            icon={<CopyOutlined />}
+            icon={<CopyIcon />}
             aria-label="复制 sessionId"
             onClick={handleCopy}
             title="复制 sessionId"

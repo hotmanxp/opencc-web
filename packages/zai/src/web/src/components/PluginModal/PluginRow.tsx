@@ -1,5 +1,5 @@
 import { Dropdown, Switch, Tag, Tooltip, Typography } from 'antd'
-import { DownOutlined } from '@ant-design/icons'
+import { ChevronDownIcon } from 'lucide-react';
 import type { PluginDto } from '../../../../shared/plugins.js'
 
 type Props = {
@@ -107,7 +107,7 @@ export function PluginRow({ plugin, writing, onToggle, onUpdate, onUninstall }: 
               ],
             }}
           >
-            <DownOutlined style={{ cursor: 'pointer', color: 'var(--text-secondary)' }} />
+            <ChevronDownIcon style={{ cursor: 'pointer', color: 'var(--text-secondary)' }} />
           </Dropdown>
         )}
       </div>

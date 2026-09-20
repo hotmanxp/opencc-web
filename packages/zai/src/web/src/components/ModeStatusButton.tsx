@@ -1,12 +1,12 @@
 import { useMemo, useRef, useState } from 'react'
 import { Button, Popover } from 'antd'
 import {
-  CodeOutlined,
-  FileTextOutlined,
-  QuestionCircleOutlined,
-  SelectOutlined,
-  ThunderboltOutlined,
-} from '@ant-design/icons'
+  CodeIcon,
+  FileTextIcon,
+  CircleQuestionMarkIcon,
+  SquareDashedMousePointerIcon,
+  ZapIcon,
+} from 'lucide-react';
 import { useAgentStore } from '../store/useAgentStore.js'
 import { useAppStore } from '../store/useAppStore.js'
 import type { PermissionMode } from '@zn-ai/zn-agent-core'
@@ -73,11 +73,11 @@ export const MODE_CYCLE_ORDER = MODE_CYCLE
 
 function IconFor({ mode }: { mode: PermissionMode }) {
   switch (mode) {
-    case 'default': return <SelectOutlined />
-    case 'acceptEdits': return <CodeOutlined />
-    case 'plan': return <FileTextOutlined />
-    case 'bypassPermissions': return <ThunderboltOutlined />
-    case 'dontAsk': return <QuestionCircleOutlined />
+    case 'default': return <SquareDashedMousePointerIcon />
+    case 'acceptEdits': return <CodeIcon />
+    case 'plan': return <FileTextIcon />
+    case 'bypassPermissions': return <ZapIcon />
+    case 'dontAsk': return <CircleQuestionMarkIcon />
   }
 }
 

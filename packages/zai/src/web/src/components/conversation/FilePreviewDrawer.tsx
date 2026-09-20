@@ -12,8 +12,9 @@
  * 右侧 720px 抽屉不变,且支持全屏宽度切换。
  */
 import React, { useEffect, useState } from "react"
+import IconButton from "../IconButton.js";
 import { Alert, Button, Drawer, Spin, Tooltip } from "antd"
-import { ColumnWidthOutlined } from "@ant-design/icons"
+import { Columns3Icon } from "lucide-react";
 import { useAgentStore } from "../../store/useAgentStore.js"
 import { useAppStore } from "../../store/useAppStore.js"
 import {
@@ -115,12 +116,11 @@ export function FilePreviewDrawer() {
         ? {
             extra: (
               <Tooltip title={fullWidth ? '恢复默认宽度' : '宽度全屏'}>
-                <Button
-                  type="text"
+                <IconButton
                   size="small"
                   aria-label={fullWidth ? '恢复默认宽度' : '宽度全屏'}
                   data-testid="preview-width-toggle"
-                  icon={<ColumnWidthOutlined />}
+                  icon={<Columns3Icon />}
                   onClick={() => setFullWidth((v) => !v)}
                 />
               </Tooltip>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Input } from 'antd';
-import { PlusOutlined, CloseOutlined } from '@ant-design/icons';
+import { PlusIcon, XIcon } from 'lucide-react';
 import type { TodoItem } from './desktopStore.js';
 
 export interface TodoPanelProps {
@@ -48,7 +48,7 @@ export default function TodoPanel({ todos, onAdd, onToggle, onDelete, onClose }:
           aria-label="关闭待办"
           className={CLOSE_BTN_CLS}
         >
-          <CloseOutlined style={{ fontSize: 12 }} />
+          <XIcon style={{ fontSize: 12 }} />
         </button>
       </div>
       <div className={INPUT_ROW_CLS}>
@@ -66,7 +66,7 @@ export default function TodoPanel({ todos, onAdd, onToggle, onDelete, onClose }:
           aria-label="添加待办"
           className={ADD_BTN_CLS}
         >
-          <PlusOutlined />
+          <PlusIcon />
         </button>
       </div>
       {todos.length === 0 ? (
@@ -90,7 +90,7 @@ export default function TodoPanel({ todos, onAdd, onToggle, onDelete, onClose }:
                 aria-label="删除待办"
                 className={ITEM_DELETE_BTN_CLS}
               >
-                <CloseOutlined style={{ fontSize: 11 }} />
+                <XIcon style={{ fontSize: 11 }} />
               </button>
             </li>
           ))}

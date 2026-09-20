@@ -108,7 +108,6 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
         data-testid="bash-output"
         className="flex-1 min-h-0 overflow-auto p-3 text-xs"
         style={{
-          maxHeight: 'calc(100vh - 150px)',
           fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
           lineHeight: 1.55,
           color: 'var(--text-dim-85)',

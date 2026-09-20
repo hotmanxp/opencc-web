@@ -1,5 +1,6 @@
 import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, Popconfirm, Select, Space, Modal, Tooltip, Tag, List } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import IconButton from "../components/IconButton.js";
+import { PlusIcon, Trash2Icon, PencilIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ConfigTool, ProviderProfile, SystemInfo, ModelCapabilities, AgentsMdFile } from '@shared/types';
@@ -189,7 +190,7 @@ function ProviderForm({
       title={title}
       size="small"
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
+        <Button type="primary" icon={<PlusIcon />} onClick={openAddModal}>
           添加
         </Button>
       }
@@ -217,16 +218,15 @@ function ProviderForm({
                   }
                 extra={
                   <Space size={0} onClick={(e) => e.stopPropagation()}>
-                    <Button
-                      type="text"
+                    <IconButton
                       size="small"
-                      icon={<EditOutlined />}
+                      icon={<PencilIcon />}
                       disabled={!item.id}
                       aria-label="编辑 Provider"
                       onClick={() => openEditModal(item)}
                     />
                     <Popconfirm title="确定删除？" aria-label="删除 Provider" onConfirm={() => item.id && handleDelete(item.id)}>
-                      <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label="删除 Provider" loading={saving} />
+                      <Button type="text" danger size="small" icon={<Trash2Icon />} aria-label="删除 Provider" loading={saving} />
                     </Popconfirm>
                   </Space>
                 }
@@ -425,7 +425,7 @@ function PluginForm() {
       title="OpenCode 插件"
       size="small"
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
+        <Button type="primary" icon={<PlusIcon />} onClick={openAddModal}>
           添加
         </Button>
       }
@@ -440,7 +440,7 @@ function PluginForm() {
           <List.Item
             actions={[
               <Popconfirm key="del" title="确定删除？" aria-label="删除插件" onConfirm={() => handleDelete(item)}>
-                <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label="删除插件" loading={saving} />
+                <Button type="text" danger size="small" icon={<Trash2Icon />} aria-label="删除插件" loading={saving} />
               </Popconfirm>,
             ]}
           >
@@ -586,7 +586,7 @@ function JsonFileEditor({
       title={title}
       size="small"
       extra={
-        <Button type="primary" icon={<EditOutlined />} aria-label={missing ? '新增' : '编辑'} onClick={openEditor}>
+        <Button type="primary" icon={<PencilIcon />} aria-label={missing ? '新增' : '编辑'} onClick={openEditor}>
           {missing ? '新增' : '编辑'}
         </Button>
       }
@@ -716,7 +716,7 @@ function AgentsMdEditor({
       title={`${label} AGENTS.md`}
       size="small"
       extra={
-        <Button type="primary" icon={<EditOutlined />} aria-label={missing ? '新增' : '编辑'} onClick={openEditor}>
+        <Button type="primary" icon={<PencilIcon />} aria-label={missing ? '新增' : '编辑'} onClick={openEditor}>
           {missing ? '新增' : '编辑'}
         </Button>
       }

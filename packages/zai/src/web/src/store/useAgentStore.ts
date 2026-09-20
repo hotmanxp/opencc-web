@@ -178,6 +178,36 @@ interface BackgroundTaskSummary {
   lastKnownSessionId?: string
 }
 
+/**
+ * 归一化服务端 BackgroundTask record → store / dock / drawer 消费的
+ * summary 视图 (HRMSV3-ZN-WEBSITE#668)。
+ *
+ * 必须走这里, 不能把 record 原样塞进 `agentTasksBySession`: 服务端 shape 是
+ * `{ id, input: { prompt }, error?, … }`(见 zn-agent-core
+ * compat/background/types.ts), 而消费方按 `BackgroundTaskSummary` 读
+ * `taskId` / `prompt` / `detail`。形状不匹配时 TaskDock 行显示 "(空 prompt)"、
+ * TaskDrawer 按 `taskId` 查不到 → 抽屉空壳。
+ *
+ * 两条写入路径共用:
+ *  - SSE `applyAgentTaskChanged` (实时)
+ *  - `hydrateSessionState` (/api/agent/sessions/:id/state 的 agentTasks 冷启动快照)
+ */
+function toBackgroundTaskSummary(
+  task: BackgroundTask,
+  sessionId: string,
+): BackgroundTaskSummary {
+  return {
+    taskId: task.id,
+    status: task.status,
+    prompt: task.input.prompt,
+    createdAt: task.createdAt,
+    finishedAt: task.finishedAt,
+    error: task.error?.message,
+    detail: task,
+    lastKnownSessionId: sessionId,
+  }
+}
+
 // 收到 server runtime.compacted 事件时 reducer 推入的 toast. expiresAt
 // (timestamp + 5000ms) 让 UI 用 setTimeout 自动回收, 不用 reducer 再起
 // 定时器. 注意: 不要复用 useAppStore 的 ToastInfo (message/ts 字段名),
@@ -1098,7 +1128,7 @@ export function createAgentStore() {
       cwd?: { cwd: string; updatedAt: number } | null
       v2Tasks?: unknown
       bashTasks?: unknown
-      agentTasks?: unknown
+      agentTasks?: BackgroundTask[]
     }
     try {
       const res = await fetch(
@@ -1131,9 +1161,12 @@ export function createAgentStore() {
         }
       }
       if (Array.isArray(snap.agentTasks)) {
+        // /state 的 agentTasks 是 BackgroundRuntime.list() 的原始 record
+        // (见 server/routes/sessionState.ts), 必须归一化后再入库 — 否则
+        // dock 读不到 prompt、drawer 按 taskId 查不到 detail。
         next.agentTasksBySession = {
           ...s.agentTasksBySession,
-          [sid]: snap.agentTasks as never,
+          [sid]: snap.agentTasks.map((t) => toBackgroundTaskSummary(t, sid)),
         }
       }
       return next
@@ -2137,16 +2170,7 @@ export function createAgentStore() {
       // 把后端 BackgroundTask 转换成 dock 用的 BackgroundTaskSummary.
       // prompt 走 event.task.input.prompt (cli 派发时由 LLM 在 input
       // 里塞入, 与 BackgroundTask.input schema 一致).
-      const summary: BackgroundTaskSummary = {
-        taskId: event.task.id,
-        status: event.task.status,
-        prompt: event.task.input.prompt,
-        createdAt: event.task.createdAt,
-        finishedAt: event.task.finishedAt,
-        error: event.task.error?.message,
-        detail: event.task,
-        lastKnownSessionId: sid,
-      }
+      const summary = toBackgroundTaskSummary(event.task, sid)
       // 已存在 → 替换; 不存在 → prepend (新派发的 task 排在顶部).
       const idx = list.findIndex((t) => t.taskId === event.task.id)
       const next =

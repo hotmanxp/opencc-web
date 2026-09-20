@@ -1,7 +1,7 @@
-import { Button, Tooltip } from 'antd'
-import { SettingOutlined } from '@ant-design/icons'
+import { Tooltip } from 'antd'
+import { SettingsIcon } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore'
-import { toolbarIconButtonStyle } from './toolbarStyles'
+import IconButton from './IconButton'
 
 /**
  * 移动端对话工具栏的"设置"按钮 — 触发 SettingsDrawer(Layout 顶层 mount)。
@@ -11,8 +11,8 @@ import { toolbarIconButtonStyle } from './toolbarStyles'
  * (data-testid="global-settings-button", 见 Layout.tsx),在工具栏里再
  * 渲染一次就冗余了 — 隐藏以避免两处入口并存导致用户困惑。
  *
- * 视觉对齐:与同行其他 icon-only 工具栏按钮一致,样式由 `toolbarIconButtonStyle`
- * 统一管理(颜色 + flexShrink),调整一处即可生效。
+ * 视觉对齐:与同行其他 icon-only 工具栏按钮一致,走 `IconButton`(线条形,
+ * 无边框 + hover 浅底),调整一处即可生效。
  * 位置:AgentInputBox.tsx 状态行右端工具栏。
  */
 export default function SettingsButton() {
@@ -23,12 +23,11 @@ export default function SettingsButton() {
   if (!isMobile) return null
   return (
     <Tooltip title="设置" aria-label="设置提示" placement="top">
-      <Button
-        icon={<SettingOutlined />}
+      <IconButton
+        icon={<SettingsIcon />}
         aria-label="设置"
         onClick={open}
         data-testid="agent-settings-button"
-        style={toolbarIconButtonStyle}
       />
     </Tooltip>
   )

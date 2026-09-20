@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import { Input, type InputRef } from "antd";
-import { CloseOutlined } from "@ant-design/icons";
+import { XIcon } from "lucide-react";
 import type { SlashItem } from "./quickCommandTypes.js";
 
 /**
@@ -210,7 +210,7 @@ export default function QuickCommandPopover({
           data-testid="quick-command-close"
           className="bg-transparent border-none text-[var(--text-dim-45)] cursor-pointer p-1 rounded inline-flex items-center justify-center"
         >
-          <CloseOutlined />
+          <XIcon />
         </button>
       </div>
 

@@ -1,5 +1,5 @@
 import { Card, Col, Row, Statistic, Button, Spin, Alert, message, Select } from 'antd';
-import { RocketOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { RocketIcon, CircleCheckIcon, CircleXIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { SystemInfo, CliStatus, SseEvent } from '@shared/types';
 import { KNOWN_REGISTRIES } from '@shared/types';
@@ -85,9 +85,9 @@ export default function Dashboard() {
               value={systemInfo?.nodeVersion || '未知'}
               prefix={
                 systemInfo?.nodeMajor && systemInfo.nodeMajor >= 20 ? (
-                  <CheckCircleOutlined className="text-[var(--success)]" />
+                  <CircleCheckIcon className="text-[var(--success)]" />
                 ) : (
-                  <CloseCircleOutlined className="text-[var(--error)]" />
+                  <CircleXIcon className="text-[var(--error)]" />
                 )
               }
             />
@@ -155,7 +155,7 @@ export default function Dashboard() {
         />
       )}
 
-      <Button type="primary" size="large" icon={<RocketOutlined />} onClick={handleQuickstart}>
+      <Button type="primary" size="large" icon={<RocketIcon />} onClick={handleQuickstart}>
         快速启动
       </Button>
 

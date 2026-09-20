@@ -13,8 +13,8 @@ vi.mock("../store/useAppStore.js", () => ({
 // 触发 React #310 (Rendered fewer hooks than expected) 如果组件把 hook 放在
 // 条件 return 之后.
 const state = vi.hoisted(() => ({
-  runningTasks: [] as Array<{ taskId: string; status: string; prompt: string }>,
-  recentTasks: [] as Array<{ taskId: string; status: string; prompt: string }>,
+  runningTasks: [] as Array<{ taskId: string; status: string; prompt: string; detail?: { agentType?: string; description?: string } }>,
+  recentTasks: [] as Array<{ taskId: string; status: string; prompt: string; detail?: { agentType?: string; description?: string } }>,
   bashTasks: [] as Array<{ taskId: string; status: string; command: string; description: string; startedAt: number }>,
 }));
 
@@ -159,6 +159,25 @@ describe("TaskDock — 桌面端点击弹出 Popover", () => {
     // 修复前, 可见触发器在 Popover 外面, AntD 把它当作外部点击 → 立刻关闭.
     await new Promise((r) => setTimeout(r, 100));
     expect(screen.queryByText("refactor auth")).not.toBeNull();
+  });
+
+  test("运行中的行渲染 Agent 名称色块 (task.detail.agentType)", async () => {
+    state.runningTasks = [
+      {
+        taskId: "agent-typed",
+        status: "running",
+        prompt: "read-only code review",
+        detail: { agentType: "code-reviewer", description: "Independent code review" },
+      },
+    ];
+    state.recentTasks = [];
+    state.bashTasks = [];
+
+    render(<TaskDock onSelect={() => {}} />);
+    fireEvent.click(screen.getAllByText("后台任务")[0]);
+    await waitFor(() => {
+      expect(screen.getByText("code-reviewer")).toBeInTheDocument();
+    });
   });
 
   test("点击 Popover 内部某行 → 触发 onSelect 并收起 Popover", async () => {

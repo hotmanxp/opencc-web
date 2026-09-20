@@ -1,5 +1,5 @@
 import { Button, Spin } from 'antd'
-import { CloseOutlined } from '@ant-design/icons'
+import { XIcon } from 'lucide-react';
 
 export type StripAttachment = {
   localId: string
@@ -147,7 +147,7 @@ export function AttachmentStrip({
               <Button
                 size="small"
                 type="text"
-                icon={<CloseOutlined />}
+                icon={<XIcon />}
                 aria-label="移除附件"
                 onClick={(e) => {
                   // 阻止冒泡到外层 onClick, 避免点 X 同时触发放大.

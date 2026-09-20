@@ -3,8 +3,11 @@ import {
   Alert, Button, Drawer, Input, InputNumber, Select, Space, Spin, Tag, Typography, message,
 } from 'antd'
 import {
-  CheckCircleFilled, CloseCircleFilled, FolderOpenOutlined, ReloadOutlined,
-} from '@ant-design/icons'
+  CircleCheckIcon,
+  CircleXIcon,
+  FolderOpenIcon,
+  RotateCwIcon,
+} from 'lucide-react';
 import DirectoryPicker from '../common/DirectoryPicker.js'
 import {
   fetchFactorySettings,
@@ -73,8 +76,8 @@ function DirBadge({
   if (!path) return <Tag>未设置</Tag>
   if (dirty) return <Tag color="warning">待保存校验</Tag>
   return exists
-    ? <Tag color="success" icon={<CheckCircleFilled />}>存在</Tag>
-    : <Tag color="error" icon={<CloseCircleFilled />}>目录不存在</Tag>
+    ? <Tag color="success" icon={<CircleCheckIcon />}>存在</Tag>
+    : <Tag color="error" icon={<CircleXIcon />}>目录不存在</Tag>
 }
 
 export default function FactorySettingsDrawer({
@@ -201,7 +204,7 @@ export default function FactorySettingsDrawer({
                     placeholder="如 /Users/you/team/docs(绝对路径)"
                   />
                   <Button
-                    icon={<FolderOpenOutlined />}
+                    icon={<FolderOpenIcon />}
                     data-testid="factory-settings-pick-docs-dir"
                     onClick={() => setPicking('docsDir')}
                   >
@@ -230,7 +233,7 @@ export default function FactorySettingsDrawer({
                     placeholder="如 /Users/you/repos(绝对路径)"
                   />
                   <Button
-                    icon={<FolderOpenOutlined />}
+                    icon={<FolderOpenIcon />}
                     data-testid="factory-settings-pick-repo-root"
                     onClick={() => setPicking('repoRoot')}
                   >
@@ -330,8 +333,8 @@ export default function FactorySettingsDrawer({
                       <div className="mt-1.5 text-[13px]">
                         全局命令:{' '}
                         {a.commandFound
-                          ? <Tag color="success" icon={<CheckCircleFilled />}>已安装</Tag>
-                          : <Tag color="error" icon={<CloseCircleFilled />}>未找到</Tag>}
+                          ? <Tag color="success" icon={<CircleCheckIcon />}>已安装</Tag>
+                          : <Tag color="error" icon={<CircleXIcon />}>未找到</Tag>}
                         {a.commandPath && (
                           <Typography.Text code className="text-xs">{a.commandPath}</Typography.Text>
                         )}
@@ -339,7 +342,7 @@ export default function FactorySettingsDrawer({
                       <div className="mt-1 text-[13px]">
                         settings.json 注册:{' '}
                         {a.registered
-                          ? <Tag color="success" icon={<CheckCircleFilled />}>已注册</Tag>
+                          ? <Tag color="success" icon={<CircleCheckIcon />}>已注册</Tag>
                           : <Tag color="default">未注册</Tag>}
                         {!a.registered && (
                           <Button
@@ -371,7 +374,7 @@ export default function FactorySettingsDrawer({
         <div
           className="border-t border-[var(--border-subtle,#e5e9f0)] py-2.5 px-4 flex justify-end gap-2 bg-white"
         >
-          <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={loading}>
+          <Button icon={<RotateCwIcon />} onClick={() => void load()} disabled={loading}>
             重新加载
           </Button>
           <Button

@@ -829,18 +829,28 @@ export default function SettingsDrawer() {
 
   // 微信配置只在**主实例**(用户日常访问的那个 Web 服务进程)里显示,子进程一律不显示。
   //
-  // 判据沿用 GET /api/system 回显的 `isManagedChild`(与下方「服务」区块同源,见
-  // useAppStore.instanceContext):微信通道的编排者是主实例 —— 它负责拉起/配置/重启
-  // `app=weixin` 的专用实例(见 services/weixinBot/weixinDedicatedInstance.ts),
-  // 专用实例自己在 9199 上再摆一份配置入口只会导致"在子实例里改配置"这类误操作;
-  // task-factory / 用户自定义的子实例同理,它们的设置页不该出现与自身无关的微信配置。
+  // 判据是 GET /api/system 回显的 `instanceId` 为空 —— 即本进程没有
+  // `ZAI_INSTANCE_ID`。这正是后端自己的"主实例"定义(routes/weixin.ts 顶部进程模型
+  // 注释、weixinDedicatedInstance.ts 的 instance_child 门禁):微信通道的编排者是主实例
+  // —— 它负责拉起/配置/重启 `app=weixin` 的专用实例(见
+  // services/weixinBot/weixinDedicatedInstance.ts),专用实例自己在 9199 上再摆一份
+  // 配置入口只会导致"在子实例里改配置"这类误操作;task-factory / 用户自定义的子实例
+  // 同理(都由 instanceSupervisor 派生,带 `ZAI_INSTANCE_ID`),它们的设置页不该出现
+  // 与自身无关的微信配置。
+  //
+  // **判据不能用 `isManagedChild`**:那只是 `ZAI_SUPERVISOR_PID` 是否存在,而主实例
+  // 本身也是 CLI supervisor 派生出来的 child(cli/supervisor.ts:80 给顶层 child 就注入
+  // 了这个变量),所以主实例的 isManagedChild 同样是 true —— 用它当判据会让主实例的
+  // 设置页里微信入口凭空消失(aeae3d9 引入,v0.8.4 起生效)。真正的子实例判据是
+  // `instanceId`(instanceSupervisor.ts:305 只给 spawn 出来的实例注入),与下方
+  // showServiceSection 的 `isManagedChild && instanceId != null` 互补。
   //
   // 注意与下方 showServiceSection 的默认方向**相反**:那里是"instanceContext 未
   // hydrate(undefined)就不显示",因为误显示会给出不能用的重启/关闭按钮;这里未
   // hydrate 时按主实例处理(显示),否则主实例用户会遇到"设置页里微信入口凭空消失",
   // 而子实例顶多多显示一瞬、下一次 /api/system 回来即消失。裸 `zai dev`
-  // (isManagedChild 未设)与旧版后端(字段未回传)也走显示分支,保持向后兼容。
-  const weixinConfigVisible = useAppStore((s) => s.instanceContext?.isManagedChild !== true)
+  // (ZAI_INSTANCE_ID 未设)与旧版后端(字段未回传)也走显示分支,保持向后兼容。
+  const weixinConfigVisible = useAppStore((s) => (s.instanceContext?.instanceId ?? null) === null)
 
   useEffect(() => {
     if (!open || !weixinConfigVisible) return

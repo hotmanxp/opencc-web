@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Input, Tabs, Alert, Empty, Spin, Segmented } from 'antd';
-import { ArrowUpOutlined } from '@ant-design/icons';
+import { ArrowUpIcon } from 'lucide-react';
 import { api } from '../../lib/api.js';
 import type { DesktopFsList, DesktopFsEntry } from '../../../shared/desktopFs.js';
 import { DirIcon, FileIcon } from '../splitPane/fileIcon.js';
@@ -138,7 +138,7 @@ export default function DesktopExplorer({ cwd, home, onOpenFile, onDragFile, def
               onPressEnter={() => void go(pathInput.trim() || null)} style={{ flex: 1 }} />
             <button aria-label="上级" title="上级目录" onClick={() => parent && void go(parent)}
               disabled={!parent} className={`border-0 bg-transparent ${parent ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-              <ArrowUpOutlined />
+              <ArrowUpIcon />
             </button>
           </div>
           <div className="px-5 pb-[6px]">

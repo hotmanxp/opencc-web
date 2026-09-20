@@ -1,5 +1,5 @@
 import { Button, Space, Tooltip } from 'antd'
-import { EyeOutlined, FolderOpenOutlined } from '@ant-design/icons'
+import { EyeIcon, FolderOpenIcon } from 'lucide-react';
 import { useAgentStore, type AgentMessage } from '../store/useAgentStore'
 import { computeLineDiff, summarizeDiff, type DiffRow } from '../lib/diff'
 
@@ -114,13 +114,13 @@ export default function DiffBlock({ msg }: { msg: AgentMessage }) {
             <Tooltip title="预览文件内容">
               <Button
                 size="small"
-                icon={<EyeOutlined />}
+                icon={<EyeIcon />}
                 onClick={() => openPreview(filePath)}
               >
                 预览
               </Button>
             </Tooltip>
-            <Button size="small" icon={<FolderOpenOutlined />} onClick={onReveal}>
+            <Button size="small" icon={<FolderOpenIcon />} onClick={onReveal}>
               打开目录
             </Button>
           </Space>

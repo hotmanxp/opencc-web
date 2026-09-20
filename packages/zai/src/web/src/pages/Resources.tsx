@@ -1,11 +1,11 @@
 import { Tabs, Button, Spin, message, Card, Empty, Typography, Space, Tag } from 'antd';
 import {
-  DownloadOutlined,
-  SyncOutlined,
-  CheckCircleOutlined,
-  FolderOutlined,
-  FileOutlined,
-} from '@ant-design/icons';
+  DownloadIcon,
+  RefreshCwIcon,
+  CircleCheckIcon,
+  FolderIcon,
+  FileIcon,
+} from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
 import type { ResourceItem, ResourceType, SseEvent } from '@shared/types';
 import { api } from '../lib/api';
@@ -82,7 +82,7 @@ function VersionLine({ item }: { item: ResourceItem }) {
     return (
       <Space size={4}>
         <span className={strong}>v{installedVersion}</span>
-        <Tag icon={<CheckCircleOutlined />} color="success">已是最新</Tag>
+        <Tag icon={<CircleCheckIcon />} color="success">已是最新</Tag>
       </Space>
     );
   }
@@ -162,11 +162,11 @@ function InstallButton({ item, handlers }: { item: ResourceItem; handlers: CardH
       type={isInstalled ? 'default' : 'primary'}
       icon={
         isInstalled ? (
-          <SyncOutlined />
+          <RefreshCwIcon />
         ) : item.isCollection ? (
-          <FolderOutlined />
+          <FolderIcon />
         ) : (
-          <DownloadOutlined />
+          <DownloadIcon />
         )
       }
       loading={handlers.installingName === item.name}
@@ -184,7 +184,7 @@ function ResourceCard({ item, handlers }: { item: ResourceItem; handlers: CardHa
     <Card size="small" className={CARD_CLASS} styles={{ body: CARD_BODY_STYLE }}>
       <div className="flex flex-col gap-2 h-full">
         <div className="flex items-center gap-2 min-w-0">
-          <FileOutlined className="text-[var(--text-tertiary)]" />
+          <FileIcon className="text-[var(--text-tertiary)]" />
           <span className="text-sm font-medium truncate text-[var(--text-primary)]" title={item.name}>
             {item.name}
           </span>
@@ -217,7 +217,7 @@ function CollectionCard({ group, handlers }: { group: ResourceGroup; handlers: C
     <Card size="small" className={CARD_CLASS} styles={{ body: CARD_BODY_STYLE }}>
       <div className="flex flex-col gap-2 h-full">
         <div className="flex items-center gap-2 min-w-0">
-          <FolderOutlined className="text-[var(--accent-start)]" />
+          <FolderIcon className="text-[var(--accent-start)]" />
           <span className="text-sm font-medium truncate text-[var(--text-primary)]" title={collection.name}>
             {collection.name}
           </span>
@@ -242,7 +242,7 @@ function CollectionCard({ group, handlers }: { group: ResourceGroup; handlers: C
               >
                 {isInstalling ? (
                   <Space size={4}>
-                    <SyncOutlined spin className="text-[var(--accent-start)]" />
+                    <RefreshCwIcon className="animate-spin text-[var(--accent-start)]" />
                     {shortName}
                   </Space>
                 ) : (
@@ -334,7 +334,7 @@ export default function Resources() {
         title={<Typography.Title level={4} style={{ margin: 0 }}>资源管理</Typography.Title>}
         extra={
           <Button
-            icon={<SyncOutlined />}
+            icon={<RefreshCwIcon />}
             loading={globalRefreshing}
             onClick={handleGlobalRefresh}
           >

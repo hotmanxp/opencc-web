@@ -13,11 +13,10 @@
  * 不再 f.map 抛错。P2 替换为 vendor query() 真实集成。
  *
  * zai patch (2026-08-30, plan P3): slash command 路由。
- * /-prefixed prompt 在 submit 后立即识别,已知命令(loop/swarm/send)
- * yield `kind: '<cmd>-scheduled'` notification + runtime.done;未知
- * slash yield `kind: 'unknown-command'` notification + runtime.done。
- * 永不 yield runtime.error — Path 4/7/8 12-path 验证 fail 的根因。
- * 非 slash prompt 走原路径不变。
+ * 白名单内的 TUI 命令(loop/swarm/send)yield `kind: '<cmd>-scheduled'`
+ * notification + runtime.done,永不 yield runtime.error。
+ * zai fix (2026-09-20): 白名单之外的 /-prefix prompt(未知命令、以路径开头
+ * 的普通提问)不再被吞 —— 一律委托 OpenccRuntime 走正常 turn。
  */
 
 import {
@@ -108,30 +107,29 @@ export class ReplRuntime {
     // 分支。识别 /-prefix prompt 后立即产出 notification + done,不走
     // normal turn;不调真 handler,永不 yield runtime.error。openccRuntime
     // 是否注入都不影响该路径。
+    //
+    // zai fix (2026-09-20): 只有白名单内的 TUI 命令(`/loop` `/swarm` `/send`)
+    // 才走这条 stub 路径。判据**不能**是「parseSlashCommand 解析成功」——
+    // 它只要求首个 token 以 `/` 开头,于是 `/Users/x/FIX_REPORT.md 这个文件
+    // 内容是什么`、`/tmp 里有什么` 这类「以路径开头的普通提问」会被判成
+    // 未知命令,产出 notification + runtime.done 后直接 return:不落盘、
+    // 不调模型、不报错,前端只看到刚发出的气泡和"就绪",消息被静默吞掉。
+    // 语义对齐:前端 AgentInputBox 已把「首 token 含 `/`/`.` 等非命令字符」
+    // 的文本直通 /agent/prompt;vendor `processSlashCommand` 也用
+    // looksLikeCommand + 文件存在性判定路径。本层不再二次猜测,非白名单
+    // 命令(含未知命令、路径文本)一律委托 OpenccRuntime。
     const slash = parseSlashCommand(typeof input.prompt === 'string' ? input.prompt : '')
-    if (slash) {
+    if (slash && isKnownSlashCommand(slash.command)) {
       const turnIndexForSlash =
         typeof input.turnIndex === 'number' ? input.turnIndex : 0
-      if (isKnownSlashCommand(slash.command)) {
-        yield {
-          type: 'runtime.notification',
-          sessionId: input.sessionId,
-          turnIndex: turnIndexForSlash,
-          kind: `${slash.command}-scheduled`,
-          payload: { args: slash.args, raw: slash.raw },
-          ts: Date.now(),
-        } as RuntimeEvent
-      } else {
-        // Unknown slash command — emit unknown-event, NO runtime.error
-        yield {
-          type: 'runtime.notification',
-          sessionId: input.sessionId,
-          turnIndex: turnIndexForSlash,
-          kind: 'unknown-command',
-          payload: { command: slash.command, args: slash.args },
-          ts: Date.now(),
-        } as RuntimeEvent
-      }
+      yield {
+        type: 'runtime.notification',
+        sessionId: input.sessionId,
+        turnIndex: turnIndexForSlash,
+        kind: `${slash.command}-scheduled`,
+        payload: { args: slash.args, raw: slash.raw },
+        ts: Date.now(),
+      } as RuntimeEvent
       yield {
         type: 'runtime.done',
         sessionId: input.sessionId,

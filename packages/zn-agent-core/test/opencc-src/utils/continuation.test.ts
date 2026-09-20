@@ -11,7 +11,7 @@
  *    ("The user keeps sending Continue with the task …").
  */
 import { describe, expect, it } from 'vitest'
-import { analyzeContinuationIntent } from '../../../src/opencc-src/utils/continuation.js'
+import { TERMINAL_PUNCTUATION, analyzeContinuationIntent } from '../../../src/opencc-src/utils/continuation.js'
 
 describe('continuation nudge — opencc 官方行为(移植自 bugfixes.test.ts)', () => {
   it('transition intent detected (requires explicit action verb)', () => {
@@ -176,5 +176,21 @@ describe('continuation nudge — 中文完成语与收尾标点', () => {
   it('中文总结且无英文信号:保持原有不触发行为', () => {
     // opencc 信号体系不识别中文意图词,纯中文"接下来将继续"也无法检测 —— 现状即不触发
     expect(analyzeContinuationIntent('接下来我将继续处理第二个文件。').shouldNudge).toBe(false)
+  })
+
+  it('全角成对符号的右半视为终止标点(同步 opencc a92aa04)', () => {
+    expect(TERMINAL_PUNCTUATION.test('详见说明（附在提交里）')).toBe(true)
+    expect(TERMINAL_PUNCTUATION.test('参见《开发规范》')).toBe(true)
+    expect(TERMINAL_PUNCTUATION.test('结论见【验收记录】')).toBe(true)
+    expect(TERMINAL_PUNCTUATION.test('补充材料见〔附录〕')).toBe(true)
+    // 分句标点(，)表示"还有下文",不算已收尾
+    expect(TERMINAL_PUNCTUATION.test('还有两件事，')).toBe(false)
+  })
+
+  it('以全角右括号收尾的回复不再被 full-text fallback 误 nudge', () => {
+    // 修复前「）」不在终止标点集合内 → 判为无终止标点 → 全文 signal 命中即 nudge
+    expect(analyzeContinuationIntent('Time to compile the source（见计划）').shouldNudge).toBe(false)
+    // 同一句话去掉收尾括号(等价于旧行为)仍应 nudge,证明用例确实覆盖到标点判定
+    expect(analyzeContinuationIntent('Time to compile the source').shouldNudge).toBe(true)
   })
 })

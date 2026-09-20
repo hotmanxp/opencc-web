@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Badge, Button, ConfigProvider, Empty, Segmented, Spin, Tooltip, Typography, message, theme as antdTheme } from 'antd'
-import { PlayCircleOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { CirclePlayIcon, PlusIcon, ZapIcon } from 'lucide-react';
 import MobileSupervisorDrawer from '../components/superTasks/MobileSupervisorDrawer'
 import MobileSuperTaskCard from '../components/superTasks/MobileSuperTaskCard'
 import NewSuperTaskModal from '../components/superTasks/NewSuperTaskModal'
@@ -207,7 +207,7 @@ export default function MobileSuperTasks(): JSX.Element {
                 <Button
                   type="primary"
                   size="small"
-                  icon={<PlayCircleOutlined />}
+                  icon={<CirclePlayIcon />}
                   loading={startingAll}
                   disabled={startAllDisabled}
                   onClick={() => void handleStartAll()}
@@ -220,7 +220,7 @@ export default function MobileSuperTasks(): JSX.Element {
             <Button
               type="primary"
               size="small"
-              icon={<PlusOutlined />}
+              icon={<PlusIcon />}
               onClick={() => setNewOpen(true)}
               data-testid="mobile-new-task-button"
             >
@@ -232,7 +232,7 @@ export default function MobileSuperTasks(): JSX.Element {
                 仍 640px 居中 Modal,零回归。 */}
             <Button
               size="small"
-              icon={<ThunderboltOutlined />}
+              icon={<ZapIcon />}
               onClick={() => setQuickOpen(true)}
               data-testid="mobile-quick-create-button"
             >

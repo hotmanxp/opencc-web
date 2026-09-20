@@ -1,24 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Popover, Switch, message } from 'antd';
 import {
-  ArrowLeftOutlined,
-  SettingOutlined,
-  SunOutlined,
-  MoonOutlined,
-  PictureOutlined,
-  FileOutlined,
-  PaperClipOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  RobotFilled,
-  FolderFilled,
-  PictureFilled,
-  CheckSquareFilled,
-  CloseCircleFilled,
-  EyeFilled,
-  MessageOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
+  ArrowLeftIcon,
+  SettingsIcon,
+  SunIcon,
+  MoonIcon,
+  ImageIcon,
+  FileIcon,
+  PaperclipIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  BotIcon,
+  FolderIcon,
+  SquareCheckIcon,
+  CircleXIcon,
+  EyeIcon,
+  MessageSquareIcon,
+  PlusIcon,
+} from 'lucide-react';
 import NotesIcon from '../components/desktop/NotesIcon.js';
 import { useNavigate } from 'react-router-dom';
 import AgentConversation from './AgentConversation.js';
@@ -690,7 +689,7 @@ const activeId = useMemo(
             {sc.kind === 'dir' ? (
               <FolderOutlined className="text-[36px] text-[#facc15]" />
             ) : (
-              <FileOutlined className="text-[32px] text-[var(--desktop-icon-color,rgba(255,255,255,.85))]" />
+              <FileIcon className="text-[32px] text-[var(--desktop-icon-color,rgba(255,255,255,.85))]" />
             )}
             <span
               className="text-xs text-center break-all max-w-full"
@@ -740,7 +739,7 @@ const activeId = useMemo(
                 className={`border-0 bg-transparent inline-flex items-center rounded px-1.5 py-0.5 ${sessionBusy ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
                 style={{ color: 'var(--text-secondary, #aaa)' }}
               >
-                <PlusOutlined className="text-xs" />
+                <PlusIcon className="text-xs" />
               </button>
             ) : undefined}
           >
@@ -761,7 +760,7 @@ const activeId = useMemo(
                   >
                     <div className="flex items-center justify-between py-[6px] pl-2.5 pr-2">
                       <span className="text-xs inline-flex items-center gap-1.5" style={{ color: 'var(--text-secondary, #aaa)' }}>
-                        <PaperClipOutlined className="text-xs" /> 附件
+                        <PaperclipIcon className="text-xs" /> 附件
                       </span>
                       <button
                         type="button"
@@ -770,7 +769,7 @@ const activeId = useMemo(
                         className="border-0 bg-transparent cursor-pointer p-0.5 rounded"
                         style={{ color: 'var(--text-secondary, #aaa)' }}
                       >
-                        <MenuFoldOutlined className="text-[11px]" />
+                        <PanelLeftCloseIcon className="text-[11px]" />
                       </button>
                     </div>
                     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -805,7 +804,7 @@ const activeId = useMemo(
                       color: 'var(--text-secondary, #aaa)',
                     }}
                   >
-                    <PaperClipOutlined className="text-[13px]" />
+                    <PaperclipIcon className="text-[13px]" />
                     <span className="text-[10px]" style={{ writingMode: 'vertical-rl' }}>附件</span>
                   </button>
                 )}
@@ -827,7 +826,7 @@ const activeId = useMemo(
                   >
                     <div className="flex items-center justify-between py-[6px] pl-2.5 pr-2">
                       <span className="text-xs inline-flex items-center gap-1.5" style={{ color: 'var(--text-secondary, #aaa)' }}>
-                        <MessageOutlined className="text-xs" /> 会话
+                        <MessageSquareIcon className="text-xs" /> 会话
                       </span>
                       <span className="inline-flex items-center gap-0.5">
                         <button
@@ -840,7 +839,7 @@ const activeId = useMemo(
                           className={`border-0 bg-transparent p-0.5 rounded ${sessionBusy ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
                           style={{ color: 'var(--text-secondary, #aaa)' }}
                         >
-                          <PlusOutlined className="text-[11px]" />
+                          <PlusIcon className="text-[11px]" />
                         </button>
                         <button
                           type="button"
@@ -849,7 +848,7 @@ const activeId = useMemo(
                           className="border-0 bg-transparent cursor-pointer p-0.5 rounded"
                           style={{ color: 'var(--text-secondary, #aaa)' }}
                         >
-                          <MenuUnfoldOutlined className="text-[11px]" />
+                          <PanelLeftOpenIcon className="text-[11px]" />
                         </button>
                       </span>
                     </div>
@@ -905,7 +904,7 @@ const activeId = useMemo(
                       color: 'var(--text-secondary, #aaa)',
                     }}
                   >
-                    <MessageOutlined className="text-[13px]" />
+                    <MessageSquareIcon className="text-[13px]" />
                     <span className="text-[10px]" style={{ writingMode: 'vertical-rl' }}>会话</span>
                     {currentSessionId && (
                       <span
@@ -970,7 +969,7 @@ const activeId = useMemo(
                 color: 'var(--text-secondary, #aaa)',
               }}
             >
-              <PictureOutlined />
+              <ImageIcon />
               <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap" title={preview.path}>
                 {preview.path}
               </span>
@@ -1048,7 +1047,7 @@ const activeId = useMemo(
             className="border-0 bg-transparent inline-flex items-center gap-1 px-1.5 py-0.5 rounded cursor-pointer"
             style={{ color: 'inherit' }}
           >
-            <ArrowLeftOutlined /> 退出桌面
+            <ArrowLeftIcon /> 退出桌面
           </button>
           <span aria-label="时钟" data-testid="desktop-clock" className="font-mono">
             {clockText}
@@ -1059,8 +1058,8 @@ const activeId = useMemo(
             size="small"
             checked={isLight}
             onChange={handleToggleTheme}
-            checkedChildren={<SunOutlined />}
-            unCheckedChildren={<MoonOutlined />}
+            checkedChildren={<SunIcon />}
+            unCheckedChildren={<MoonIcon />}
             aria-label="切换主题"
           />
           <Popover
@@ -1104,7 +1103,7 @@ const activeId = useMemo(
               className="border-0 bg-transparent cursor-pointer px-1.5 py-0.5 rounded"
               style={{ color: 'inherit' }}
             >
-              <PictureOutlined /> 壁纸
+              <ImageIcon /> 壁纸
             </button>
           </Popover>
           <button
@@ -1113,7 +1112,7 @@ const activeId = useMemo(
             aria-label="设置"
             style={{ border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '2px 6px', borderRadius: 4 }}
           >
-            <SettingOutlined />
+            <SettingsIcon />
           </button>
         </div>
       </div>
@@ -1135,22 +1134,22 @@ const activeId = useMemo(
           zIndex: 100,
         }}
       >
-        <DockButton label="Agent" active={activeId === 'agent'} onClick={() => dockClick('agent')} icon={<RobotFilled />} color="var(--accent-start, #ff6600)" />
-        <DockButton label="资源管理器" active={activeId === 'explorer'} onClick={() => dockClick('explorer')} icon={<FolderFilled />} color="#faad14" />
+        <DockButton label="Agent" active={activeId === 'agent'} onClick={() => dockClick('agent')} icon={<BotIcon />} color="var(--accent-start, #ff6600)" />
+        <DockButton label="资源管理器" active={activeId === 'explorer'} onClick={() => dockClick('explorer')} icon={<FolderIcon />} color="#faad14" />
         {/* 预览按钮:仅在预览窗口存在时显示;点聚焦/再点关闭(预览是临时窗口无最小化) */}
         {previewWindow && preview && (
           <DockButton
             label="预览"
             active={activeId === 'preview'}
             onClick={() => dockClick('preview')}
-            icon={<EyeFilled />}
+            icon={<EyeIcon />}
             color="#1677ff"
           />
         )}
-        <DockButton label="壁纸设置" active={false} onClick={() => dockClick('wallpaper')} icon={<PictureFilled />} color="#13c2c2" />
+        <DockButton label="壁纸设置" active={false} onClick={() => dockClick('wallpaper')} icon={<ImageIcon />} color="#13c2c2" />
         <DockButton label="便签" active={false} onClick={() => dockClick('notes')} icon={<NotesIcon />} color="#faad14" />
-        <DockButton label="待办" active={todoOpen} onClick={() => dockClick('todo')} icon={<CheckSquareFilled />} color="#52c41a" />
-        <DockButton label="退出桌面" active={false} onClick={() => dockClick('exit')} icon={<CloseCircleFilled />} color="#ff4d4f" />
+        <DockButton label="待办" active={todoOpen} onClick={() => dockClick('todo')} icon={<SquareCheckIcon />} color="#52c41a" />
+        <DockButton label="退出桌面" active={false} onClick={() => dockClick('exit')} icon={<CircleXIcon />} color="#ff4d4f" />
       </div>
 
       {/* 全局 SettingsDrawer — 顶层 mount 让任意路由(/desktop 等)都能唤起 */}

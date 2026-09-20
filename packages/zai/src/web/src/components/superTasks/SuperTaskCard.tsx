@@ -1,6 +1,6 @@
 import { createElement, useEffect, useState, type JSX } from 'react'
 import { Button, Checkbox, Popconfirm, Space, Tag, Tooltip } from 'antd'
-import { ClockCircleOutlined, DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons'
+import { ClockIcon, Trash2Icon, CirclePlayIcon, CirclePauseIcon } from 'lucide-react';
 import type { TaskSummary } from '../../lib/superTaskApi'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 
@@ -307,7 +307,7 @@ export default function SuperTaskCard({
             <Tooltip title="启动任务">
               <Button
                 size="small"
-                icon={<PlayCircleOutlined />}
+                icon={<CirclePlayIcon />}
                 data-testid={`quick-start-task-${task.id}`}
                 onClick={(e) => {
                   stop(e)
@@ -322,7 +322,7 @@ export default function SuperTaskCard({
           {task.bucket === 'queue-tasks' && isStarting && (
             <Tooltip title="已排队,等待调度中">
               <Tag
-                icon={<ClockCircleOutlined />}
+                icon={<ClockIcon />}
                 color="processing"
                 data-testid={`queued-indicator-${task.id}`}
                 style={{ pointerEvents: 'none', cursor: 'default', marginInlineEnd: 0 }}
@@ -335,8 +335,9 @@ export default function SuperTaskCard({
             <>
               <Tooltip title="暂停">
                 <Button
+                  type="text"
                   size="small"
-                  icon={<PauseCircleOutlined />}
+                  icon={<CirclePauseIcon />}
                   onClick={(e) => { stop(e); void pause(task.id) }}
                 />
               </Tooltip>
@@ -350,8 +351,9 @@ export default function SuperTaskCard({
           {showResume && (
             <Tooltip title="继续">
               <Button
+                type="text"
                 size="small"
-                icon={<PlayCircleOutlined />}
+                icon={<CirclePlayIcon />}
                 onClick={(e) => { stop(e); void resume(task.id) }}
               />
             </Tooltip>
@@ -365,11 +367,11 @@ export default function SuperTaskCard({
           )}
           {inProcessing ? (
             <Tooltip title="进行中任务需先暂停才能删除">
-              <Button size="small" danger icon={<DeleteOutlined />} disabled onClick={stop} />
+              <Button type="text" size="small" danger icon={<Trash2Icon />} disabled onClick={stop} />
             </Tooltip>
           ) : inVerifying ? (
             <Tooltip title="验证中任务不可删除(等待 verifier 结论或强制通过)">
-              <Button size="small" danger icon={<DeleteOutlined />} disabled onClick={stop} />
+              <Button type="text" size="small" danger icon={<Trash2Icon />} disabled onClick={stop} />
             </Tooltip>
           ) : (
             <Popconfirm
@@ -380,9 +382,10 @@ export default function SuperTaskCard({
             >
               <Tooltip title="删除任务">
                 <Button
+                  type="text"
                   size="small"
                   danger
-                  icon={<DeleteOutlined />}
+                  icon={<Trash2Icon />}
                   onClick={stop}
                 />
               </Tooltip>

@@ -9,7 +9,7 @@
  *   dir 以尾部 `/` 识别(引用插入时 ref 保留 dir 尾部斜杠)。
  * - 纯展示组件(仅展示不交互):onMouseDown 仅用于防止焦点离开 textarea。
  */
-import { FolderOutlined, FileOutlined } from "@ant-design/icons";
+import { FolderIcon, FileIcon } from "lucide-react";
 
 export interface MentionChipData {
   /** 引用目标完整路径(dir 以 `/` 结尾) */
@@ -47,11 +47,11 @@ export default function MentionChip({ data, onMouseDown }: MentionChipProps) {
           一致,不漂移。 */}
       <span className="agent-input-ref-chip-label">
         {isDir ? (
-          <FolderOutlined
+          <FolderIcon
             className="agent-input-ref-chip-icon text-[#facc15]"
           />
         ) : (
-          <FileOutlined
+          <FileIcon
             className="agent-input-ref-chip-icon text-[var(--text-dim-45)]"
           />
         )}

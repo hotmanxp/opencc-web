@@ -9,7 +9,7 @@
  */
 import React from "react"
 import { Button, Card, Tag, Space, Tooltip, Typography } from "antd"
-import { FileTextOutlined, EyeOutlined, FolderOpenOutlined, FileImageOutlined, CodeOutlined, FileUnknownOutlined } from "@ant-design/icons"
+import { FileTextIcon, EyeIcon, FolderOpenIcon, FileImageIcon, CodeIcon, FileQuestionIcon } from "lucide-react";
 import type { ToolRenderer } from "./types.js"
 import { useAgentStore } from "../../store/useAgentStore.js"
 
@@ -32,10 +32,10 @@ function humanSize(n: number): string {
 
 function kindIcon(kind: FileMeta['kind']): React.ReactNode {
   switch (kind) {
-    case 'text': return <FileTextOutlined />
-    case 'image': return <FileImageOutlined />
-    case 'html': return <CodeOutlined />
-    default: return <FileUnknownOutlined />
+    case 'text': return <FileTextIcon />
+    case 'image': return <FileImageIcon />
+    case 'html': return <CodeIcon />
+    default: return <FileQuestionIcon />
   }
 }
 
@@ -116,14 +116,14 @@ function FileCard({ file }: { file: FileMeta }) {
           <Tooltip title={previewTooltip}>
             <Button
               size="small"
-              icon={<EyeOutlined />}
+              icon={<EyeIcon />}
               disabled={!previewable}
               onClick={() => openPreview(file.path)}
             >
               预览
             </Button>
           </Tooltip>
-          <Button size="small" icon={<FolderOpenOutlined />} onClick={onReveal}>
+          <Button size="small" icon={<FolderOpenIcon />} onClick={onReveal}>
             打开目录
           </Button>
         </Space>

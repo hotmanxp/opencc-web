@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 
 beforeEach(() => {
   // 清掉拖动宽度 / lock 状态, 避免测试间 localStorage 泄漏导致初始值非默认.
@@ -118,6 +118,14 @@ const mockSearch = useFsSearch as unknown as ReturnType<typeof vi.fn>;
 const mockContentSearch = useFsContentSearch as unknown as ReturnType<typeof vi.fn>;
 const mockWrite = useFsWrite as unknown as ReturnType<typeof vi.fn>;
 
+/**
+ * 点文件树里的节点. 必须限定在 fs-tree 内查询 —— 打开过的文件在 tab 条里
+ * 也有一份同名文本, 全局 getByText 会撞上多个匹配.
+ */
+function clickTreeNode(name: string) {
+  fireEvent.click(within(screen.getByTestId('fs-tree')).getByText(name));
+}
+
 describe('FsTab', () => {
   beforeEach(() => {
     mockSearch.mockReturnValue({ data: null, loading: false, error: null, durationMs: null });
@@ -145,7 +153,8 @@ describe('FsTab', () => {
     expect(screen.getByText('src')).toBeTruthy();
   });
 
-  it('renders empty hint when nothing selected', () => {
+  it('defaults to the 文件 tab with the directory tree mounted', () => {
+    // 默认停在「文件」tab: 文件树直接可见, 而不是旧版「左树右预览」的分栏.
     mockList.mockReturnValue({
       data: { ok: true, entries: [] },
       loading: false,
@@ -154,7 +163,10 @@ describe('FsTab', () => {
     });
     mockFile.mockReturnValue({ data: null, loading: false, error: null });
     render(<FsTab cwd="/repo" />);
-    expect(screen.getByText(/选择左侧文件查看内容/i)).toBeTruthy();
+    expect(screen.getByTestId('fs-tab-files').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('fs-tree')).toBeTruthy();
+    // 「文件」tab 不可关闭 —— 关掉就没有文件入口了.
+    expect(screen.queryByTestId('fs-tab-files-close')).toBeNull();
   });
 
   it('shows error from useFsList', () => {
@@ -561,11 +573,11 @@ describe('FsTab', () => {
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
   });
 
-  it('mounts fs-tree with a calc(100vh - 140px) height + overflow:auto so scroll always works', () => {
-    // 关键修复: fs-tree / fs-preview 都写死 height: calc(100vh - 140px),
-    // 不依赖 flex 父级 stretch race. fs-tree overflow:auto 兜底滚动
-    // (antd Tree 自然渲染的内容超出时被父容器截断并显示原生滚动条).
-    // minHeight:0 防止 Tree 自然高度反向撑爆 calc.
+  it('fs-tree 撑满面板高度 (走 flex 链路, 不再依赖 calc(100vh - Npx))', () => {
+    // 旧实现给 fs-tree / fs-preview 写死 height: calc(100vh - 140px) 绕开
+    // 「antd Tabs 的 pane 没有确定高度」的问题. 现在 SplitPane 的 Tabs 带
+    // zai-pane-fill (index.css 把 content / tabpane 拉满), 高度由 flex 决定,
+    // fs-tree 只要 h-full + overflow:auto 兜底滚动.
     mockList.mockReturnValue({
       data: { ok: true, entries: [] },
       loading: false,
@@ -575,9 +587,11 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({ data: null, loading: false, error: null });
     render(<FsTab cwd="/repo" />);
     const tree = screen.getByTestId('fs-tree') as HTMLElement;
-    expect(tree.style.height).toBe('calc(100vh - 140px)');
-    expect(tree.style.overflow).toBe('auto');
-    expect(tree.style.minHeight).toMatch(/^0(px)?$/);
+    expect(tree.style.height).toBe('');
+    expect(tree.className).toContain('h-full');
+    expect(tree.className).toContain('overflow-auto');
+    // 面板容器负责 flex-1 撑开剩余高度 (tab 条 + 路径行是固定高度).
+    expect((screen.getByTestId('fs-panel') as HTMLElement).className).toContain('flex-1');
   });
 
   it('tags file tree icons with data-file-ext (so CSS can color them)', () => {
@@ -1045,7 +1059,7 @@ it('toggling the Switch renders FsContentSearchList when query is non-empty', ()
   expect(screen.getByTestId('fs-content-list')).toBeTruthy();
 });
 
-it('clicking a content search row passes pendingLine to FilePreview', () => {
+it('clicking a content search row passes pendingLine to FilePreview', async () => {
   mockList.mockReturnValue({ data: { ok: true, entries: [] }, loading: false, error: null, refetch: vi.fn() });
   mockFile.mockReturnValue({
     data: {
@@ -1077,11 +1091,15 @@ it('clicking a content search row passes pendingLine to FilePreview', () => {
   fireEvent.keyDown(input, { key: 'Enter' });
   fireEvent.click(screen.getByTestId('fs-search-mode'));
   fireEvent.click(screen.getByTestId('fs-content-row'));
-  // pendingLine=2 should mark the second <span data-line="2"> as highlighted
-  const line2 = document.querySelector('[data-line="2"]') as HTMLElement | null;
-  expect(line2).toBeTruthy();
-  // Background fades in via inline style. The data-line attr is what
-  // marks it; the actual inline style is asserted in FsContentSearchList.
+
+  // 预览里的 data-line 锚点由 SyntaxHighlighter chunk 异步挂载, 所以要等.
+  // 断言必须限定在 fs-preview-code 内部: FsContentSearchList 自己的行也带
+  // data-line, 而旧的分栏布局下检索列表一直挂载在左栏 —— 只查 document 的话
+  // 命中的是搜索结果行, 断言会"假通过".
+  await waitFor(() => {
+    const codeBlock = screen.getByTestId('fs-preview-code');
+    expect(codeBlock.querySelector('[data-line="2"]')).toBeTruthy();
+  });
 });
 
 it('code preview renders a line-number gutter and per-line data-line anchors', async () => {
@@ -1297,230 +1315,150 @@ it('刷新会重拉根目录及已展开的子目录,而不是只刷新根节点
   }
 });
 
-// --- Task N: file-tree ↔ preview 拖动分隔条 (与 SplitPane 一致) ---
+// --- Tab 条: 「文件」+ 打开的文件 ---
 
-// happy-dom 不实现 layout, clientWidth 默认 0. 拖动逻辑用 clientWidth 折算
-// px → pct, 必须 mock 一个非零值才能让 delta 计算有数值.
-//
-// 关键 (修复的核心): 拖动换算的分母是「父容器宽度」(parentElement.clientWidth),
-// 不是 fs-tree 自身宽度. 所以这里要区分两个元素:
-//   - fs-tree 自身 (data-testid="fs-tree"): 返回 tree (40% @ 800 容器 = 320)
-//   - 其余元素 (父 flex 容器): 返回 container (800)
-// 旧实现把 fs-tree 自身的 clientWidth (320) 当分母 → 80px 会算出 25pct →
-// 65% (放大 2.5 倍, 鼠标对不上); 修复后读容器 800 → 80px = 10pct → 50%,
-// 才 1:1. mock 区分两者, 才让"分母取错"的回归能被测试抓住.
-function mockFsTreeClientWidth(opts: { tree?: number; container?: number } = {}): () => void {
-  const tree = opts.tree ?? 320;        // fs-tree 自身宽度 (40% @ 800 容器)
-  const container = opts.container ?? 800; // 父 flex 容器宽度
-  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (this.getAttribute('data-testid') === 'fs-tree') return tree;
-      return container;
-    },
-  });
-  return () => {
-    if (original) {
-      Object.defineProperty(HTMLElement.prototype, 'clientWidth', original);
-    } else {
-      // @ts-expect-error cleanup when there was no original descriptor
-      delete HTMLElement.prototype.clientWidth;
-    }
-  };
-}
-
-// onFsHandleMouseDown 在 window 上注册原生 mousemove/mouseup listener (不是
-// React 合成事件), fireEvent.mouseMove(window, ...) 走 React 合成事件路径不会
-// 触发原生 listener. 用 dispatchEvent + new MouseEvent 直接派发原生事件.
-function dispatchNativeMouse(target: EventTarget, type: 'mousemove' | 'mouseup', clientX = 0): void {
-  target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX }));
-}
-
-it('fs-tree 默认宽度 40% (空 localStorage)', () => {
+it('点击文件树节点会在 tab 条里新开一个文件 tab 并显示内容', () => {
   mockList.mockReturnValue({
-    data: { ok: true, entries: [] },
+    data: { ok: true, entries: [{ name: 'foo.ts', path: 'foo.ts', type: 'file', size: 1 }] },
     loading: false, error: null, refetch: vi.fn(),
   });
-  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/foo.ts', name: 'foo.ts', size: 1, mtime: '', content: 'export const x = 1;' },
+    loading: false, error: null,
+  });
   render(<FsTab cwd="/repo" />);
-  const tree = screen.getByTestId('fs-tree') as HTMLElement;
-  expect(tree.style.width).toBe('40%');
+  // 打开前只有「文件」一个 tab, 文件树可见.
+  expect(screen.getAllByRole('tab').length).toBe(1);
+  fireEvent.click(screen.getByText('foo.ts'));
+  const tab = screen.getByTestId('fs-file-tab-foo.ts');
+  expect(tab.getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByTestId('fs-tab-files').getAttribute('aria-selected')).toBe('false');
+  // 文件 tab 上渲染的是内容面板, 文件树让位.
+  expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
+  expect(screen.queryByTestId('fs-tree')).toBeNull();
+  // 头部路径行换成该文件的绝对路径.
+  expect(screen.getByTestId('fs-path').textContent).toBe('/repo/foo.ts');
 });
 
-it('fs-tree 宽度从 localStorage 恢复', () => {
-  localStorage.setItem('zai.fsTab.treeWidthPct', '65');
+it('打开第二个文件新增 tab; 重复打开同一个文件只切回去, 不重复入栈', () => {
   mockList.mockReturnValue({
-    data: { ok: true, entries: [] },
+    data: { ok: true, entries: [
+      { name: 'a.ts', path: 'a.ts', type: 'file', size: 1 },
+      { name: 'b.ts', path: 'b.ts', type: 'file', size: 1 },
+    ]},
     loading: false, error: null, refetch: vi.fn(),
   });
-  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/a.ts', name: 'a.ts', size: 1, mtime: '', content: 'a' },
+    loading: false, error: null,
+  });
   render(<FsTab cwd="/repo" />);
-  const tree = screen.getByTestId('fs-tree') as HTMLElement;
-  expect(tree.style.width).toBe('65%');
+  clickTreeNode('a.ts');
+  // 回「文件」tab 才能再点树里的 b.ts (树在文件 tab 上不挂载).
+  fireEvent.click(screen.getByTestId('fs-tab-files'));
+  clickTreeNode('b.ts');
+
+  expect(screen.getAllByRole('tab').map((el) => el.getAttribute('data-testid'))).toEqual([
+    'fs-tab-files',
+    'fs-file-tab-a.ts',
+    'fs-file-tab-b.ts',
+  ]);
+  expect(screen.getByTestId('fs-file-tab-b.ts').getAttribute('aria-selected')).toBe('true');
+
+  // 再点一次 a.ts → 复用已有 tab, 只切焦点.
+  fireEvent.click(screen.getByTestId('fs-tab-files'));
+  clickTreeNode('a.ts');
+  expect(screen.queryAllByTestId('fs-file-tab-a.ts').length).toBe(1);
+  expect(screen.getAllByRole('tab').length).toBe(3);
+  expect(screen.getByTestId('fs-file-tab-a.ts').getAttribute('aria-selected')).toBe('true');
 });
 
-it('fs-tree 宽度 clamp 在 [15, 85] 范围 (localStorage 越界值被 clamp)', () => {
-  // 5 < MIN(15) → 15; 99 > MAX(85) → 85
-  localStorage.setItem('zai.fsTab.treeWidthPct', '5');
+it('关闭当前激活 tab 后焦点落到右邻居; 关掉最后一个文件 tab 回到「文件」', () => {
   mockList.mockReturnValue({
-    data: { ok: true, entries: [] },
+    data: { ok: true, entries: [
+      { name: 'a.ts', path: 'a.ts', type: 'file', size: 1 },
+      { name: 'b.ts', path: 'b.ts', type: 'file', size: 1 },
+    ]},
     loading: false, error: null, refetch: vi.fn(),
   });
-  mockFile.mockReturnValue({ data: null, loading: false, error: null });
-  const { unmount } = render(<FsTab cwd="/repo" />);
-  expect((screen.getByTestId('fs-tree') as HTMLElement).style.width).toBe('15%');
-  unmount();
-
-  localStorage.setItem('zai.fsTab.treeWidthPct', '99');
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/a.ts', name: 'a.ts', size: 1, mtime: '', content: 'a' },
+    loading: false, error: null,
+  });
   render(<FsTab cwd="/repo" />);
-  expect((screen.getByTestId('fs-tree') as HTMLElement).style.width).toBe('85%');
+  clickTreeNode('a.ts');
+  fireEvent.click(screen.getByTestId('fs-tab-files'));
+  clickTreeNode('b.ts');
+  fireEvent.click(screen.getByTestId('fs-tab-files'));
+  clickTreeNode('a.ts');  // 激活 a (左), b 在右
+
+  fireEvent.click(screen.getByTestId('fs-file-tab-a.ts-close'));
+  expect(screen.queryByTestId('fs-file-tab-a.ts')).toBeNull();
+  expect(screen.getByTestId('fs-file-tab-b.ts').getAttribute('aria-selected')).toBe('true');
+
+  fireEvent.click(screen.getByTestId('fs-file-tab-b.ts-close'));
+  expect(screen.queryByTestId('fs-file-tab-b.ts')).toBeNull();
+  // 没有文件 tab 可退 → 回到「文件」, 文件树可见.
+  expect(screen.getByTestId('fs-tab-files').getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByTestId('fs-tree')).toBeTruthy();
 });
 
-it('fs-preview 默认 flex: 1 (填满剩余空间, 不再硬编码 60%)', () => {
-  // Regression: fs-preview 之前是 `flex: '0 0 60%'`. 改成 flex:1 让它跟随
-  // fs-tree 的动态宽度; 视觉上 fs-tree + fs-preview 总和仍是 100%.
-  // 注: React 把 `flex: 1` 序列化为 "1 1 0%" (浏览器默认 flex-shrink=1,
-  // flex-basis=0%). 断言 *starts with* "1" 即可, 不必严格相等.
+it('关闭非激活 tab 不影响当前激活 tab', () => {
   mockList.mockReturnValue({
-    data: { ok: true, entries: [] },
+    data: { ok: true, entries: [
+      { name: 'a.ts', path: 'a.ts', type: 'file', size: 1 },
+      { name: 'b.ts', path: 'b.ts', type: 'file', size: 1 },
+    ]},
     loading: false, error: null, refetch: vi.fn(),
   });
-  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/b.ts', name: 'b.ts', size: 1, mtime: '', content: 'b' },
+    loading: false, error: null,
+  });
   render(<FsTab cwd="/repo" />);
-  const preview = screen.getByTestId('fs-preview') as HTMLElement;
-  expect(preview.style.flex.startsWith('1')).toBe(true);
-  expect(preview.style.flex).not.toContain('60%');
+  clickTreeNode('a.ts');
+  fireEvent.click(screen.getByTestId('fs-tab-files'));
+  clickTreeNode('b.ts');
+
+  fireEvent.click(screen.getByTestId('fs-file-tab-a.ts-close'));
+  expect(screen.getByTestId('fs-file-tab-b.ts').getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByTestId('fs-path').textContent).toBe('/repo/b.ts');
 });
 
-it('lock toggle 默认锁定, drag handle 是 default cursor + pointer-events: none', () => {
-  // 默认锁定的视觉契约: drag handle 的 cursor 是 default, pointer-events
-  // 是 none (误触不会触发拖动). 解锁后才变 ew-resize + auto.
+it('cwd 变化清空所有已打开的文件 tab, 回到「文件」', () => {
   mockList.mockReturnValue({
-    data: { ok: true, entries: [] },
+    data: { ok: true, entries: [{ name: 'a.ts', path: 'a.ts', type: 'file', size: 1 }] },
     loading: false, error: null, refetch: vi.fn(),
   });
-  mockFile.mockReturnValue({ data: null, loading: false, error: null });
-  render(<FsTab cwd="/repo" />);
-  const handle = screen.getByTestId('fs-tree-drag-handle') as HTMLElement;
-  expect(handle.style.cursor).toBe('default');
-  expect(handle.style.pointerEvents).toBe('none');
-  const lockBtn = screen.getByTestId('fs-tree-lock-toggle');
-  expect(lockBtn.getAttribute('aria-label')).toBe('解锁文件树宽度拖动');
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo1/a.ts', name: 'a.ts', size: 1, mtime: '', content: 'a' },
+    loading: false, error: null,
+  });
+  const { rerender } = render(<FsTab cwd="/repo1" />);
+  fireEvent.click(screen.getByText('a.ts'));
+  expect(screen.getByTestId('fs-file-tab-a.ts')).toBeTruthy();
+
+  rerender(<FsTab cwd="/repo2" />);
+  // tab 是相对旧 cwd 的路径, 换 cwd 后全部作废.
+  expect(screen.queryByTestId('fs-file-tab-a.ts')).toBeNull();
+  expect(screen.getByTestId('fs-tab-files').getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByTestId('fs-path').textContent).toBe('/repo2');
 });
 
-it('click lock toggle 解锁后, drag handle 变 ew-resize + pointer-events: auto', () => {
+it('搜索框只在「文件」tab 渲染 (搜索作用于文件树, 不是当前预览的文件)', () => {
   mockList.mockReturnValue({
-    data: { ok: true, entries: [] },
+    data: { ok: true, entries: [{ name: 'a.ts', path: 'a.ts', type: 'file', size: 1 }] },
     loading: false, error: null, refetch: vi.fn(),
   });
-  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/a.ts', name: 'a.ts', size: 1, mtime: '', content: 'a' },
+    loading: false, error: null,
+  });
   render(<FsTab cwd="/repo" />);
-  fireEvent.click(screen.getByTestId('fs-tree-lock-toggle'));
-  const handle = screen.getByTestId('fs-tree-drag-handle') as HTMLElement;
-  expect(handle.style.cursor).toBe('ew-resize');
-  expect(handle.style.pointerEvents).toBe('auto');
-  expect(screen.getByTestId('fs-tree-lock-toggle').getAttribute('aria-label')).toBe(
-    '锁定文件树宽度拖动',
-  );
-});
-
-it('drag handle 的 mousedown 在锁定时被短路 (不会写入 localStorage)', () => {
-  // 防御性 bail: 即使有人手动调 onMouseDown, 锁定时也不应该写 width.
-  // UI 上 pointer-events: none 通常会阻止事件, 但 hook 也应自己短路.
-  mockList.mockReturnValue({
-    data: { ok: true, entries: [] },
-    loading: false, error: null, refetch: vi.fn(),
-  });
-  mockFile.mockReturnValue({ data: null, loading: false, error: null });
-  render(<FsTab cwd="/repo" />);
-  const handle = screen.getByTestId('fs-tree-drag-handle');
-  // 锁定态 — act() 包裹确保 mousemove handler 注册 / 清理都被 React 跟踪.
-  act(() => {
-    fireEvent.mouseDown(handle, { clientX: 100 });
-    dispatchNativeMouse(window, 'mousemove', 200);
-    dispatchNativeMouse(window, 'mouseup');
-  });
-  expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBeNull();
-});
-
-it('解锁后 mousedown → mousemove → mouseup 完整路径调整宽度并持久化', () => {
-  const restore = mockFsTreeClientWidth();
-  try {
-    mockList.mockReturnValue({
-      data: { ok: true, entries: [] },
-      loading: false, error: null, refetch: vi.fn(),
-    });
-    mockFile.mockReturnValue({ data: null, loading: false, error: null });
-    render(<FsTab cwd="/repo" />);
-    fireEvent.click(screen.getByTestId('fs-tree-lock-toggle'));
-    const handle = screen.getByTestId('fs-tree-drag-handle');
-    // 起点 x=100, 起点宽度 40%. fs-tree 自身 320px, 父容器 800px. 方向:
-    // fs-tree 跟随鼠标, 右拖 fs-tree 变大 (handle 跟着 fs-tree 右边缘走).
-    // 修复后分母是父容器 800 → 80px = 10pct → 50%; 若分母误用 fs-tree 自身
-    // 320 → 80px = 25pct → 65% (放大), 这里断言 50% 即锁死 1:1 行为.
-    act(() => {
-      fireEvent.mouseDown(handle, { clientX: 100 });
-      // 右拖 80px → 80 / 800 * 100 = 10pct → 50%
-      dispatchNativeMouse(window, 'mousemove', 180);
-      dispatchNativeMouse(window, 'mouseup');
-    });
-    expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBe('50');
-    expect((screen.getByTestId('fs-tree') as HTMLElement).style.width).toBe('50%');
-  } finally {
-    restore();
-  }
-});
-
-it('drag 超过 [15, 85] 边界时被 clampFsTreeWidth 限制', () => {
-  const restore = mockFsTreeClientWidth();
-  try {
-    mockList.mockReturnValue({
-      data: { ok: true, entries: [] },
-      loading: false, error: null, refetch: vi.fn(),
-  });
-    mockFile.mockReturnValue({ data: null, loading: false, error: null });
-    render(<FsTab cwd="/repo" />);
-    fireEvent.click(screen.getByTestId('fs-tree-lock-toggle'));
-    const handle = screen.getByTestId('fs-tree-drag-handle');
-    // 起点 40%, 右拖 800px → +100pct → 应该 clamp 到 MAX(85)
-    act(() => {
-      fireEvent.mouseDown(handle, { clientX: 100 });
-      dispatchNativeMouse(window, 'mousemove', 900);
-      dispatchNativeMouse(window, 'mouseup');
-    });
-    expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBe('85');
-    expect((screen.getByTestId('fs-tree') as HTMLElement).style.width).toBe('85%');
-  } finally {
-    restore();
-  }
-});
-
-it('drag mouseup 后 mousemove 不再触发更新 (handle 已清理)', () => {
-  // 防御性验证: dragRef 在 mouseup 时清空, 后续 mousemove 是 no-op.
-  const restore = mockFsTreeClientWidth();
-  try {
-    mockList.mockReturnValue({
-      data: { ok: true, entries: [] },
-      loading: false, error: null, refetch: vi.fn(),
-    });
-    mockFile.mockReturnValue({ data: null, loading: false, error: null });
-    render(<FsTab cwd="/repo" />);
-    fireEvent.click(screen.getByTestId('fs-tree-lock-toggle'));
-    const handle = screen.getByTestId('fs-tree-drag-handle');
-    act(() => {
-      fireEvent.mouseDown(handle, { clientX: 100 });
-      // 右拖 50px → 50/800*100 = 6.25pct → 40 + 6 = 46
-      dispatchNativeMouse(window, 'mousemove', 150);
-      dispatchNativeMouse(window, 'mouseup');
-    });
-    expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBe('46');
-    // mouseup 之后再 move, 不应该影响 localStorage.
-    act(() => {
-      dispatchNativeMouse(window, 'mousemove', 1000);
-    });
-    expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBe('46');
-  } finally {
-    restore();
-  }
+  expect(screen.getByTestId('fs-search-input')).toBeTruthy();
+  fireEvent.click(screen.getByText('a.ts'));
+  expect(screen.queryByTestId('fs-search-input')).toBeNull();
+  expect(screen.queryByTestId('fs-search-mode')).toBeNull();
+  fireEvent.click(screen.getByTestId('fs-tab-files'));
+  expect(screen.getByTestId('fs-search-input')).toBeTruthy();
 });

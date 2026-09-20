@@ -1,7 +1,7 @@
-import { Button, Tooltip } from "antd";
-import { MenuUnfoldOutlined } from "@ant-design/icons";
+import { Tooltip } from "antd";
+import { PanelLeftOpenIcon } from "lucide-react";
 import { STORAGE_KEYS, useLocalStorageState } from "./shared.js";
-import { toolbarIconButtonStyle, TOOLBAR_ACTIVE_COLOR } from "../toolbarStyles.js";
+import IconButton from "../IconButton.js";
 
 /**
  * 右侧分屏 toggle 按钮 — 原先内嵌在 AgentInputBox 工具栏里,2026-09-02 起
@@ -12,7 +12,7 @@ import { toolbarIconButtonStyle, TOOLBAR_ACTIVE_COLOR } from "../toolbarStyles.j
  *
  * 数据源 STORAGE_KEYS.open 与 SplitPane + 左侧栏 toggle 共享,任意一处写 →
  * 全局同步(useLocalStorageState 自带 same-tab 'zai-localstorage-sync' 事件)。
- * open 时用品牌色高亮,关闭时与同行其他按钮颜色一致。
+ * open 时用品牌色高亮(`IconButton` 的 active 态),关闭时为普通三级灰。
  */
 export default function SplitPaneToggleButton() {
   const [splitPaneOpen, setSplitPaneOpen] = useLocalStorageState<boolean>(
@@ -22,18 +22,12 @@ export default function SplitPaneToggleButton() {
 
   return (
     <Tooltip title="切换右侧分屏" placement="top">
-      <Button
-        icon={<MenuUnfoldOutlined />}
+      <IconButton
+        icon={<PanelLeftOpenIcon />}
+        active={splitPaneOpen}
         data-testid="split-pane-toggle-inputbox"
         aria-pressed={splitPaneOpen}
         onClick={() => setSplitPaneOpen(!splitPaneOpen)}
-        style={{
-          ...toolbarIconButtonStyle,
-          ...(splitPaneOpen && {
-            color: TOOLBAR_ACTIVE_COLOR,
-            borderColor: TOOLBAR_ACTIVE_COLOR,
-          }),
-        }}
       />
     </Tooltip>
   );

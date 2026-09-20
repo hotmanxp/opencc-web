@@ -24,6 +24,15 @@ export interface BackgroundTask {
    * agent_task 派发 (例如 cli 任务) 或老数据,与 session 无关。
    */
   parentSessionId?: string
+  /**
+   * 派发该子代理的 agent 名。原生 Agent 工具路径下是 AgentDefinition.agentType
+   * (如 'code-reviewer' / 'Explore' / 'general-purpose');CliAgent / SpawnAgent
+   * 路径下是 CLI provider 种类 ('opencc' | 'dsh' | 'opencode'),agent 名在
+   * description 里兜底。服务端字段见 zn-agent-core compat/background/types.ts。
+   */
+  agentType?: string
+  /** AgentTool.description ?? prompt 摘要;CLI 路径下承载 spawn.name 兜底值。 */
+  description?: string
 }
 
 export interface TaskEvent {

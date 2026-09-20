@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import IconButton from "../components/IconButton.js";
 import { Button, ConfigProvider, Tooltip, Typography, theme as antdTheme } from 'antd'
-import { CommentOutlined, DoubleLeftOutlined } from '@ant-design/icons'
+import { MessageSquareTextIcon, ChevronsLeftIcon } from 'lucide-react';
 import AgentConversation from './AgentConversation'
 import SuperTaskPanel from '../components/superTasks/SuperTaskPanel'
 import { useAgentStore } from '../store/useAgentStore'
@@ -142,7 +143,7 @@ export default function SuperTasks(): JSX.Element {
           }}
         >
           <Tooltip title="展开调度器对话" placement="right">
-            <Button type="text" icon={<CommentOutlined />} onClick={() => setCollapsed(false)} />
+            <IconButton icon={<MessageSquareTextIcon />} onClick={() => setCollapsed(false)} />
           </Tooltip>
           <span
             className="text-xs mt-3.5 tracking-[4px] text-[var(--text-secondary,#666)]"
@@ -173,7 +174,7 @@ export default function SuperTasks(): JSX.Element {
               任务调度器
             </Typography.Title>
             <Tooltip title="折叠调度器对话">
-              <Button type="text" size="small" icon={<DoubleLeftOutlined />} onClick={() => setCollapsed(true)} />
+              <IconButton size="small" icon={<ChevronsLeftIcon />} onClick={() => setCollapsed(true)} />
             </Tooltip>
           </div>
           {/* flex:1 + display:flex + flexDirection:'column' 三件套,AgentConversation

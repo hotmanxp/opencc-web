@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Card, Space, Typography } from 'antd'
-import { RobotFilled, UserOutlined } from '@ant-design/icons'
+import { BotIcon, UserIcon } from 'lucide-react';
 import type { AgentMessage } from '../../store/useAgentStore.js'
 import { MarkdownText } from '../markdown/MarkdownText.js'
 import { MessageCopyButton, StreamingMarkdown, ThinkingBlock } from './MessageBubble.js'
@@ -20,8 +20,8 @@ const AI_TEXT_MAX_HEIGHT_PX = 140
 // CollapsedMessageBubble — collapsed transcript 下的单条文本气泡.
 //
 // 设计要点 (与 expanded 视图完全对齐, 见 MessageBubble.tsx):
-// - 用户消息: 右对齐 + antd Card (深底浅字, 由 index.css 全局覆盖) + UserOutlined 图标 + line-clamp:6
-// - AI 消息:   左对齐 + antd Card + RobotFilled 图标 + 完整 Markdown 渲染 + maxHeight ~6 行 + "显示更多"
+// - 用户消息: 右对齐 + antd Card (深底浅字, 由 index.css 全局覆盖) + UserIcon 图标 + line-clamp:6
+// - AI 消息:   左对齐 + antd Card + BotIcon 图标 + 完整 Markdown 渲染 + maxHeight ~6 行 + "显示更多"
 // - Thinking:   直接走 MessageBubble 的 ThinkingBlock, 与 expanded 视图视觉一致
 //               (思考块 spec §3.4 要求始终完整、不折叠、不截断)
 // - Tool 错误:  红条 stripe (兜底, 正常路径下 tool_use:error 已被 deriveTranscriptNodes
@@ -69,7 +69,7 @@ export function CollapsedMessageBubble({
     )
   }
 
-  // Assistant text: 左对齐, antd Card (深底浅字) + RobotFilled 图标, 与 expanded 一致
+  // Assistant text: 左对齐, antd Card (深底浅字) + BotIcon 图标, 与 expanded 一致
   if (t === 'assistant.text') {
     return (
       <div className="flex justify-start mb-4 mr-5">
@@ -79,7 +79,7 @@ export function CollapsedMessageBubble({
         >
           <MessageCopyButton text={(m.text as string) || ''} variant="ai" />
           <Space align="start" size={8} className="w-full">
-            <RobotFilled style={{ color: 'var(--accent-start)', fontSize: 18 }} />
+            <BotIcon style={{ color: 'var(--accent-start)', fontSize: 18 }} />
             <div className="flex-1 min-w-0">
               <AssistantTextBody
                 text={(m.text as string) || ''}
@@ -93,7 +93,7 @@ export function CollapsedMessageBubble({
     )
   }
 
-  // User text: 右对齐, antd Card + UserOutlined 图标, 与 expanded 一致 + clamp
+  // User text: 右对齐, antd Card + UserIcon 图标, 与 expanded 一致 + clamp
   if (t === 'user.text' || t === 'user.message') {
     const text = (m.text as string) || (m.prompt as string) || ''
     // 修复: collapsed 视图下也需要渲染附件缩略图. 历史上这里只渲染 text + 头像,
@@ -113,7 +113,7 @@ export function CollapsedMessageBubble({
             maxWidth: expandUserBubble ? '100%' : '70%',
           }}
         >
-          {/* 横向 flex: [copy inline] [text+attachments flex:1] [UserOutlined]
+          {/* 横向 flex: [copy inline] [text+attachments flex:1] [UserIcon]
               copy 与 expanded 视图一致用 inline 嵌最左, 避免短消息 + 右上绝对按钮盖住文字. */}
           <div className="flex items-start gap-2 min-w-0">
             <MessageCopyButton text={text} variant="user" placement="inline" />
@@ -136,7 +136,7 @@ export function CollapsedMessageBubble({
                 {linkifyText(text)}
               </Paragraph>
             </div>
-            <UserOutlined className="flex-shrink-0 mt-0.5" />
+            <UserIcon className="flex-shrink-0 mt-0.5" />
           </div>
         </Card>
       </div>

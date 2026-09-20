@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, QRCode, Space, Typography, message } from "antd";
-import { CopyOutlined } from "@ant-design/icons";
+import { CopyIcon } from "lucide-react";
 import { useAppStore } from "../store/useAppStore.js";
 import { useAgentStore } from "../store/useAgentStore.js";
 
@@ -79,7 +79,7 @@ export default function SharePopover() {
           </div>
           <Button
             size="small"
-            icon={<CopyOutlined />}
+            icon={<CopyIcon />}
             data-testid="share-copy-primary"
             onClick={() => void handleCopy(primaryIp)}
             aria-label="复制首选 URL"
@@ -112,7 +112,7 @@ export default function SharePopover() {
                   </Text>
                   <Button
                     size="small"
-                    icon={<CopyOutlined />}
+                    icon={<CopyIcon />}
                     data-testid={`share-copy-${ip}`}
                     onClick={() => void handleCopy(ip)}
                     aria-label={errored ? `选择 ${ip} URL` : `复制 ${ip}`}
@@ -155,7 +155,7 @@ export default function SharePopover() {
                   </Text>
                   <Button
                     size="small"
-                    icon={<CopyOutlined />}
+                    icon={<CopyIcon />}
                     data-testid={`share-proxy-copy-${ip}`}
                     onClick={() => void navigator.clipboard
                       .writeText(template)

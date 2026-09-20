@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Input, Popover, Spin, Tooltip, message } from "antd";
-import { CaretDownOutlined, CheckOutlined, BranchesOutlined } from "@ant-design/icons";
+import { ChevronDownIcon, CheckIcon, GitPullRequestIcon } from "lucide-react";
 import { gitApi } from "../lib/gitApi.js";
 import { useAppStore } from "../store/useAppStore.js";
 import type { GitBranch } from "../../../shared/git.js";
@@ -190,9 +190,12 @@ export default function BranchSelector({
             }
           }}
         >
-          <BranchesOutlined className="text-[11px] opacity-85" />
+          {/* 线条图标换成 GitPullRequest 而非 GitBranch:后者字形只占自身 24 网格
+              的 ~58%,在 11px 下会缩成一小团("显示不全"观感);GitPullRequest
+              的绘制区域接近满格,同字号下与旧的 antd BranchesOutlined 光学大小相当。 */}
+          <GitPullRequestIcon className="text-[11px] opacity-85" />
           {displayedBranch}
-          <CaretDownOutlined style={{ fontSize: 10, opacity: 0.6, marginLeft: -4 }} />
+          <ChevronDownIcon style={{ fontSize: 10, opacity: 0.6, marginLeft: -4 }} />
         </span>
       </Tooltip>
     </Popover>
@@ -309,7 +312,7 @@ function BranchList({
                   className="w-[14px] text-[11px] text-center flex-shrink-0"
                   style={{ color: b.isCurrent ? "#52c41a" : "var(--text-dim-25)" }}
                 >
-                  {switching ? <Spin size="small" /> : b.isCurrent ? <CheckOutlined /> : "·"}
+                  {switching ? <Spin size="small" /> : b.isCurrent ? <CheckIcon /> : "·"}
                 </span>
                 <span
                   className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"

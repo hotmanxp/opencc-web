@@ -326,6 +326,48 @@ describe('TaskDrawer', () => {
     expect(queryByText(/^Prompt:$/)).toBeNull()
   })
 
+  // 抽屉头部应展示派发该子代理的 agent 名 (BackgroundTask.agentType)。
+  // 原生 Agent 工具路径 = AgentDefinition.agentType (code-reviewer / Explore …);
+  // CliAgent 路径 = CLI provider 种类,agent 名在 description 里 (走 Tooltip)。
+  test('头部渲染 Agent 名称色块 (agentType)', async () => {
+    const fetchMock = vi.fn(async () => new Response('', {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    useAgentStore.setState({
+      bashTasksBySession: {},
+      agentTasksBySession: {
+        'session-1': [
+          {
+            taskId: 'task-agent-1',
+            status: 'running',
+            prompt: 'Read-only code review',
+            detail: {
+              id: 'task-agent-1',
+              status: 'running',
+              input: { prompt: 'Read-only code review' },
+              createdAt: Date.now(),
+              startedAt: Date.now(),
+              eventCount: 0,
+              agentType: 'code-reviewer',
+              description: 'Independent code review',
+            },
+          },
+        ],
+      },
+    })
+
+    try {
+      const { baseElement } = render(
+        <TaskDrawer taskId="task-agent-1" onClose={() => {}} />,
+      )
+      expect(baseElement.textContent).toContain('Agent: code-reviewer')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   test('收到 task.ended 时追加时间线且不调用已删除的本地 setter', async () => {
     const fetchMock = vi.fn(async () => new Response(
       'id: 1\nevent: task.ended\ndata: {"status":"completed","resultText":"done"}\n\n',

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Input, Popover, Tooltip, Tag } from 'antd'
-import { CheckOutlined, CaretDownOutlined, EyeOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { CheckIcon, ChevronDownIcon, EyeIcon, WrenchIcon } from 'lucide-react';
 import { useAgentStoreOrCtx } from '../store/useAgentStore.js'
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
 import type { ModelEntry, ModelCapabilities } from '../../../shared/settings.js'
@@ -381,7 +381,7 @@ function Row({ entry, isCurrent, isSelected, onClick, rowRef }: RowProps) {
             {entry.label ?? entry.alias}
           </span>
         </div>
-        {isCurrent && <CheckOutlined className="!text-[#a78bfa] !text-[11px]" />}
+        {isCurrent && <CheckIcon className="!text-[#a78bfa] !text-[11px]" />}
       </div>
       {entry.description && (
         <span className="text-[11px] text-[var(--text-dim-40)] pl-3.5">
@@ -417,14 +417,14 @@ function CapabilityBadges({ capabilities }: { capabilities?: ModelCapabilities }
       {capabilities.supportsVision && (
         <Tooltip title="支持图片多模态">
           <Tag color="purple" className="!m-0 !text-[10px] !leading-[14px] !py-0 !px-1">
-            <EyeOutlined /> Vision
+            <EyeIcon /> Vision
           </Tag>
         </Tooltip>
       )}
       {capabilities.supportsFunctionCalling && (
         <Tooltip title="支持工具调用">
           <Tag color="cyan" className="!m-0 !text-[10px] !leading-[14px] !py-0 !px-1">
-            <ThunderboltOutlined /> Tools
+            <WrenchIcon /> Tools
           </Tag>
         </Tooltip>
       )}

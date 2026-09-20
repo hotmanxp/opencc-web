@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import IconButton from "../IconButton.js";
 import { Button, Popconfirm, Tag, Tooltip, message } from 'antd'
-import { ClockCircleOutlined, CloseOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import { ClockIcon, XIcon, CirclePlayIcon } from 'lucide-react';
 import type { TaskSummary } from '../../lib/superTaskApi'
 import { deleteSuperTasks } from '../../lib/superTaskApi'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
@@ -34,7 +35,7 @@ import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
  * 原 start 按钮点击后,服务端 queued→processing 有一小段时间窗,
  * 「按钮消失 / 状态文字切换」在快速操作后不够直观,用户回头看
  * 卡片会觉得「刚才点的按钮到底有没有生效」。
- * 现 Tag icon=ClockCircleOutlined + color=processing,data-testid 改
+ * 现 Tag icon=ClockIcon + color=processing,data-testid 改
  * 为 mobile-card-queued-<id>,挂 Tooltip title="已排队,等待调度中"。
  * pointerEvents: none + cursor: default,从 DOM 层阻断交互意图。
  * 跟桌面 SuperTaskCard L319-337 同步行为。
@@ -125,10 +126,10 @@ export default function MobileSuperTaskCard({
 
   const deleteBtn = (
     <Tooltip title={deletable ? '删除该任务' : '处理中任务不可删(避免打断正在执行/验证的工作流)'}>
-      <Button
+      <IconButton
         size="small"
         shape="circle"
-        icon={<CloseOutlined />}
+        icon={<XIcon />}
         disabled={!deletable}
         aria-label={`删除任务 ${task.title}`}
         data-testid={`mobile-card-delete-${task.id}`}
@@ -239,7 +240,7 @@ export default function MobileSuperTaskCard({
             <Button
               size="small"
               type="primary"
-              icon={<PlayCircleOutlined />}
+              icon={<CirclePlayIcon />}
               aria-label={`启动任务 ${task.title}`}
               data-testid={`mobile-start-task-${task.id}`}
               onClick={(e) => { e.stopPropagation(); void handleStart() }}
@@ -251,7 +252,7 @@ export default function MobileSuperTaskCard({
         {showQueueAction && isStarting && (
           <Tooltip title="已排队,等待调度中">
             <Tag
-              icon={<ClockCircleOutlined />}
+              icon={<ClockIcon />}
               color="processing"
               data-testid={`mobile-card-queued-${task.id}`}
               className="pointer-events-none !cursor-default !text-xs !leading-[18px]"

@@ -64,12 +64,6 @@ Thumbs.db
 
 # Local runtime artifacts (ego browser task outputs etc.)
 var/
-.workbuddy/
 docs/superpowers/plans/screenshots
 docs/superpowers/verification
 CONTEXT.md
-
-# Local agent / dev tooling state — release snapshots must not bring these in
-.remember/
-.codegraph/
-.npmrc

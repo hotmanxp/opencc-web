@@ -15,7 +15,7 @@
  */
 import React, { useEffect, useState } from "react"
 import { Alert, Button, Spin, Typography } from "antd"
-import { FolderOpenOutlined } from "@ant-design/icons"
+import { FolderOpenIcon } from "lucide-react";
 import { MarkdownText } from "../markdown/MarkdownText.js"
 
 export type FilePreviewKind = 'text' | 'image' | 'html' | 'binary'
@@ -196,7 +196,7 @@ function BinaryPreview({ ext, path }: { ext?: string; path: string }) {
         <div>
           {ext && <Typography.Paragraph>扩展名: {ext}</Typography.Paragraph>}
           <Button
-            icon={<FolderOpenOutlined />}
+            icon={<FolderOpenIcon />}
             onClick={() => void fetch('/api/fs/reveal', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },

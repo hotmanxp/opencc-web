@@ -1,5 +1,6 @@
 import { Button } from 'antd'
-import { MenuOutlined, PlusOutlined } from '@ant-design/icons'
+import IconButton from "./IconButton.js";
+import { MenuIcon, PlusIcon } from 'lucide-react';
 import { useAgentStore } from '../store/useAgentStore'
 import { useProjection } from '../store/useProjection'
 
@@ -39,9 +40,8 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
         flexShrink: 0,
       }}
     >
-      <Button
-        type="text"
-        icon={<MenuOutlined />}
+      <IconButton
+        icon={<MenuIcon />}
         onClick={onOpenSessionDrawer}
         data-testid="mobile-header-drawer-toggle"
         aria-label="打开会话列表"
@@ -63,9 +63,8 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
       >
         {title}
       </div>
-      <Button
-        type="text"
-        icon={<PlusOutlined />}
+      <IconButton
+        icon={<PlusIcon />}
         onClick={() => void createNewSession()}
         disabled={isBusy}
         title={isBusy ? "对话进行中,请等待当前回复结束" : undefined}

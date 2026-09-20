@@ -139,11 +139,13 @@ describe('ModeStatusButton', () => {
     })
   })
 
-  // T10: each row renders its corresponding antd icon as an SVG
-  it('renders an antd icon SVG inside every mode row', () => {
+  // T10: each row renders its corresponding stroke icon as an SVG
+  it('renders a stroke icon SVG inside every mode row', () => {
     render(<ModeStatusButton />)
     fireEvent.click(screen.getByTestId('mode-status-button'))
-    // Every row should contain an <svg class="anticon ...">.
+    // 全站图标已从 @ant-design/icons 切到 lucide 线条图标, 渲染结果是
+    // <svg class="lucide lucide-xxx" fill="none" stroke="currentColor"> —— 不再有
+    // antd 的 `span.anticon` 外壳(见 index.css 的 `:where(svg.lucide)` 契约)。
     const rows = [
       'mode-row-default',
       'mode-row-acceptEdits',
@@ -153,10 +155,8 @@ describe('ModeStatusButton', () => {
     ]
     for (const testid of rows) {
       const row = screen.getByTestId(testid)
-      // AntD icons render as <span class="anticon"><svg>...</svg></span>;
-      // the `anticon` class lives on the wrapper span, not the inner <svg>.
-      const wrapper = row.querySelector('span.anticon')
-      expect(wrapper, `expected antd icon wrapper in ${testid}`).toBeTruthy()
+      const icon = row.querySelector('svg.lucide')
+      expect(icon, `expected stroke icon in ${testid}`).toBeTruthy()
     }
   })
 })

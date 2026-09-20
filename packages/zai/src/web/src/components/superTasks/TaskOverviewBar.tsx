@@ -1,5 +1,5 @@
 import { Button, Popconfirm, Space, Switch, Tooltip, message } from 'antd'
-import { ReloadOutlined, SettingOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { RotateCwIcon, SettingsIcon, ZapIcon } from 'lucide-react';
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 
 /** 看板筛选维度。'all' 不筛选；其余按任务 status 匹配。 */
@@ -150,7 +150,7 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
           }}
         >
           <Tooltip title="清空当前任务调度器会话,触发全新引导">
-            <Button icon={<ReloadOutlined />} data-testid="reset-supervisor-button">
+            <Button icon={<RotateCwIcon />} data-testid="reset-supervisor-button">
               重置会话
             </Button>
           </Tooltip>
@@ -158,7 +158,7 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
         {/* 工厂设置(tf-pnsl5m5e):齿轮入口,打开 FactorySettingsDrawer。 */}
         <Tooltip title="工厂设置(文档目录/代码库/并行上限/cliAgent)">
           <Button
-            icon={<SettingOutlined />}
+            icon={<SettingsIcon />}
             data-testid="factory-settings-button"
             onClick={onOpenSettings}
           >
@@ -176,7 +176,7 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
         {onOpenQuickCreate && (
           <Tooltip title="快速创建(跳过头脑风暴,适合文案/样式/小 bug 修复)">
             <Button
-              icon={<ThunderboltOutlined />}
+              icon={<ZapIcon />}
               onClick={onOpenQuickCreate}
               data-testid="quick-create-button"
             >

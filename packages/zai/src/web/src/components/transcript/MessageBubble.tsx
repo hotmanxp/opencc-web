@@ -11,18 +11,19 @@
 // (module-private) — extraction of those helpers is out of scope for Task 3.
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import IconButton from "../IconButton.js";
 import { Button, Card, Collapse, Modal, Space, Tag, Tooltip, Typography, message } from "antd";
 import {
-  RobotFilled,
-  UserOutlined,
-  ToolOutlined,
-  BulbOutlined,
-  CaretDownOutlined,
-  CaretRightOutlined,
-  CopyOutlined,
-  CheckOutlined,
-  ExportOutlined,
-} from "@ant-design/icons";
+  BotIcon,
+  UserIcon,
+  WrenchIcon,
+  LightbulbIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  CheckIcon,
+  ExternalLinkIcon,
+} from "lucide-react";
 import { MarkdownText } from "../markdown/MarkdownText.js";
 import type { AgentMessage } from "../../store/useAgentStore.js";
 import { useAgentStore } from "../../store/useAgentStore.js";
@@ -230,7 +231,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                   }
                   style={{ background: THINKING_ACCENT }}
                 >
-                  <BulbOutlined
+                  <LightbulbIcon
                     className={streaming ? "zai-thinking-bulb zai-thinking-bulb-active" : "zai-thinking-bulb"}
                     style={{ fontSize: 11 }}
                   />
@@ -256,7 +257,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                 <span
                   className="text-[13px] text-[var(--text-secondary)] inline-flex items-center flex-shrink-0 leading-[1.6]"
                 >
-                  {active ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                  {active ? <ChevronDownIcon /> : <ChevronRightIcon />}
                 </span>
                 <span
                   className="text-xs text-[var(--text-secondary)] italic overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0"
@@ -305,7 +306,7 @@ const TOOL_PILL_COLORS: Record<
 // 适合 AI 气泡 (卡片占满 maxWidth:100%, 按钮贴在右上不挤压长 markdown).
 // `inline` 模式: 普通 inline-flex, 嵌入父级 flex 容器, 与其它元素平级.
 // 用于 user 气泡: user.text 卡片 maxWidth:70%, 短消息 + 右上绝对按钮会盖住文字,
-// 改成横向 flex [copy inline] [text flex:1] [UserOutlined] 后, copy 与 user icon
+// 改成横向 flex [copy inline] [text flex:1] [UserIcon] 后, copy 与 user icon
 // 夹住文字, 任何长度都不会重叠.
 export function MessageCopyButton({
   text,
@@ -346,10 +347,9 @@ export function MessageCopyButton({
       : "bg-transparent rounded flex-shrink-0";
 
   return (
-    <Button
-      type="text"
+    <IconButton
       size="small"
-      icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+      icon={copied ? <CheckIcon /> : <CopyIcon />}
       onClick={handleClick}
       title="复制"
       aria-label={variant === "ai" ? "复制助手回答" : "复制用户消息"}
@@ -375,7 +375,7 @@ function ReadPreviewIcon({ path }: { path: string }) {
           openFilePreview(path);
         }}
       >
-        <ExportOutlined />
+        <ExternalLinkIcon />
       </span>
     </Tooltip>
   );
@@ -525,7 +525,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                 <span
                   className="text-[13px] text-[var(--text-secondary)] inline-flex items-center flex-shrink-0 leading-[1.6]"
                 >
-                  {active ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                  {active ? <ChevronDownIcon /> : <ChevronRightIcon />}
                 </span>
                 {preview && (
                   <Text
@@ -704,7 +704,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </Text>
               )}
             </div>
-            <UserOutlined className="flex-shrink-0 mt-0.5" />
+            <UserIcon className="flex-shrink-0 mt-0.5" />
           </div>
         </Card>
         {/* 附件大图预览: 跟气泡同级, 不影响 maxWidth:70% 气泡本身宽度.
@@ -754,7 +754,7 @@ export const MessageBubble = React.memo(function MessageBubble({
         >
           <MessageCopyButton text={text} variant="ai" />
           <Space align="start" size={8} className="w-full">
-            <RobotFilled style={{ color: "var(--accent-start)", fontSize: 18 }} />
+            <BotIcon style={{ color: "var(--accent-start)", fontSize: 18 }} />
             <div className="flex-1 min-w-0">
               {streaming ? (
                 <StreamingMarkdown text={text} />
@@ -803,7 +803,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               key: "tool-call",
               label: (
                 <Space>
-                  <ToolOutlined />
+                  <WrenchIcon />
                   <Text code>{toolName}</Text>
                   <Tag color="blue">调用</Tag>
                 </Space>
@@ -835,7 +835,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               key: "tool-result",
               label: (
                 <Space>
-                  <ToolOutlined />
+                  <WrenchIcon />
                   <Text code>{toolName}</Text>
                   <Tag color={isError ? "red" : "green"}>
                     {isError ? "错误" : "结果"}
@@ -907,7 +907,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           className="w-full max-w-full mr-5 bg-[var(--bg-card)] rounded-xl"
         >
           <Space align="start" size={8}>
-            <RobotFilled style={{ color: "var(--accent-start)", fontSize: 18 }} />
+            <BotIcon style={{ color: "var(--accent-start)", fontSize: 18 }} />
             <MarkdownText text={text} />
           </Space>
         </Card>

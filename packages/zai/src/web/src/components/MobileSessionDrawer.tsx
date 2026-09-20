@@ -1,5 +1,6 @@
 import { Drawer, Button, Popconfirm } from 'antd'
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
+import IconButton from "./IconButton.js";
+import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { useAgentStore } from '../store/useAgentStore'
 
 export interface MobileSessionDrawerProps {
@@ -39,9 +40,8 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
       styles={{ body: { padding: 0 } }}
       data-testid="mobile-session-drawer"
       extra={
-        <Button
-          type="text"
-          icon={<PlusOutlined />}
+        <IconButton
+          icon={<PlusIcon />}
           onClick={() => void createNewSession()}
           disabled={isBusy}
           aria-label="新建会话"
@@ -102,7 +102,7 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
                   type="text"
                   size="small"
                   danger
-                  icon={<DeleteOutlined />}
+                  icon={<Trash2Icon />}
                   disabled={isBusy}
                   onClick={(e) => e.stopPropagation()}
                   aria-label="删除会话"

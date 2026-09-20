@@ -13,7 +13,7 @@ import {
   Empty,
   Skeleton,
 } from 'antd';
-import { FolderOutlined, FileOutlined, CopyOutlined, DownloadOutlined } from '@ant-design/icons';
+import { FolderIcon, FileIcon, CopyIcon, DownloadIcon } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
 import type { DirectoryStatus, DirInfo, GlobalSkillsInfo } from '@shared/types';
 import { api } from '../lib/api';
@@ -36,12 +36,12 @@ function buildTree(info: DirInfo): TreeNode {
       </span>
     ),
     key: `${info.path}/${name}`,
-    icon: <FolderOutlined />,
+    icon: <FolderIcon />,
     isLeaf: false,
     children: items.items.map((item) => ({
       title: item,
       key: `${info.path}/${name}/${item}`,
-      icon: <FileOutlined />,
+      icon: <FileIcon />,
       isLeaf: true,
     })),
   });
@@ -54,7 +54,7 @@ function buildTree(info: DirInfo): TreeNode {
       </span>
     ),
     key: info.path,
-    icon: <FolderOutlined />,
+    icon: <FolderIcon />,
     isLeaf: false,
     children: info.exists
       ? [
@@ -80,12 +80,12 @@ function buildGlobalSkillsTree(info: GlobalSkillsInfo): TreeNode {
       </span>
     ),
     key: info.path,
-    icon: <FolderOutlined />,
+    icon: <FolderIcon />,
     isLeaf: false,
     children: info.items.map((item) => ({
       title: item,
       key: `${info.path}/${item}`,
-      icon: <FileOutlined />,
+      icon: <FileIcon />,
       isLeaf: true,
     })),
   };
@@ -291,7 +291,7 @@ export default function Directory() {
       >
         <Space className="mb-3" wrap>
           <Button
-            icon={<CopyOutlined />}
+            icon={<CopyIcon />}
             onClick={handleCopy}
             disabled={!viewerFile}
             size="small"
@@ -299,7 +299,7 @@ export default function Directory() {
             复制内容
           </Button>
           <Button
-            icon={<DownloadOutlined />}
+            icon={<DownloadIcon />}
             onClick={handleDownload}
             disabled={!viewerFile}
             size="small"

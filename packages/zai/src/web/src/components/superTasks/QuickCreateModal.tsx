@@ -8,7 +8,7 @@ import {
   Tag,
   message,
 } from 'antd'
-import { ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import { ZapIcon, CircleCheckIcon } from 'lucide-react';
 import { api } from '../../lib/api'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import {
@@ -371,10 +371,10 @@ export default function QuickCreateModal({
         className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[var(--border-color,#e5e7eb)] flex-shrink-0"
       >
         <Space size={8} wrap>
-          <ThunderboltOutlined style={{ color: '#fa8c16' }} />
+          <ZapIcon style={{ color: '#fa8c16' }} />
           <span className="font-medium">intake researcher (lite)</span>
           {designReady ? (
-            <Tag icon={<CheckCircleOutlined />} color="success" data-testid="quick-chat-design-ready">
+            <Tag icon={<CircleCheckIcon />} color="success" data-testid="quick-chat-design-ready">
               方案已就绪
             </Tag>
           ) : (
@@ -386,7 +386,7 @@ export default function QuickCreateModal({
           <Button
             type="primary"
             size="small"
-            icon={<CheckCircleOutlined />}
+            icon={<CircleCheckIcon />}
             loading={confirming}
             disabled={!designReady || confirming || cancelling}
             data-testid="quick-chat-confirm-button"
@@ -470,7 +470,7 @@ export default function QuickCreateModal({
           <div>
             <DrawerPullHandle testId="quick-drawer-handle" onClose={handleContainerClose} />
             <Space className="flex pb-2">
-              <ThunderboltOutlined style={{ color: '#fa8c16' }} />
+              <ZapIcon style={{ color: '#fa8c16' }} />
               <span>快速创建任务</span>
             </Space>
           </div>
@@ -493,7 +493,7 @@ export default function QuickCreateModal({
       destroyOnHidden
       title={(
         <Space>
-          <ThunderboltOutlined style={{ color: '#fa8c16' }} />
+          <ZapIcon style={{ color: '#fa8c16' }} />
           <span>快速创建任务</span>
         </Space>
       )}
