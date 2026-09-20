@@ -38,6 +38,15 @@ export function rearrangePipeCommand(command: string): string {
     return quoteWithEvalStdinRedirect(command)
   }
 
+  // Skip if command has an unquoted tilde word (~ or ~/foo). shell-quote >= 1.9
+  // added ~ to quote()'s backslash-escape class, and buildCommandParts() quotes
+  // every token individually — so a bare `~/foo` token is rebuilt as `\~/foo`,
+  // which suppresses shell tilde expansion inside eval. Falling back to whole-
+  // command quoting lets eval re-parse the raw text and expand the tilde.
+  if (/(^|[\s;&|(])~(?=\/|\s|$)/.test(command)) {
+    return quoteWithEvalStdinRedirect(command)
+  }
+
   // Join continuation lines before parsing: shell-quote doesn't handle \<newline>
   // and produces empty string tokens for each occurrence, causing spurious empty
   // arguments in the reconstructed command
