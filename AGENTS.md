@@ -130,7 +130,6 @@ pnpm release:major
 **已知坑点**：
 - `pnpm publish` 在 workspace 上下文中 auth 传递有问题，第二个包（`@zn-ai/zai`）会报 `ENEEDAUTH`，即使 `npm whoami` 正常。**解决方案**：脚本已内置 fallback 自动降级到 `npm publish`。
 - `npm publish` 不识别 pnpm 的 `workspace:*` 协议，如果降级到 `npm publish`，脚本会自动将 `workspace:*` 替换为实际版本号再发布，发布后恢复原始内容。
-- 本仓库**origin 指向 GitHub 私有 fork**(git@github.com:hotmanxp/opencc-web.git,默认分支 main),`release:*` 脚本发布后 commit + tag 默认只留本地,**不自动 push**;需要时显式 `git push origin main [--tags]`。
 
 ## 文档入口
 
