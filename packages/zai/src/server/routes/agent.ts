@@ -1414,7 +1414,18 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
           // zai patch (2026-08-28): slash 指令的展开 prompt 以 meta 消息提交给
           // runtime —— vendor 语义下 isMeta 消息 LLM 可见、UI/恢复层隐藏,
           // 保证 runtime 侧若写盘也不会泄漏展开提示词为可见用户消息。
-          ...(cmd.displayText ? { isMeta: true } : {}),
+          //
+          // zai patch (2026-09-20, fix inbox-notification leak): inbox 来源
+          // 的 sub-agent <task-notification> 也走 isMeta:true —— 与上文
+          // `appendUserMessageV2(... cmd.displayText || cmd.fromInbox ? ...)
+          // 守卫对齐。但 legacy TranscriptStore.append 是 no-op
+          // (legacyTranscriptStore.ts:462),真正的落盘走 runtime.query →
+          // QueryEngine.submitMessage → processUserInput → createUserMessage
+          // → recordTranscript,所以 isMeta 必须透传到这里,否则 reload 后
+          // `<task-notification>` XML 会作为 user 消息泄漏到 UI
+          // (lan-agent / Web 都受影响;实测 lan-agent zai 实例 cwd=
+          // /Users/ethan/code/lan-agent 的 7 条 inbox 通知全部漏)。
+          ...(cmd.displayText || cmd.fromInbox ? { isMeta: true } : {}),
           cwd,
           // sessionId: 显式指定 ID. 不管新建还是续传, vendor runtime 都用这个
           // ID 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
