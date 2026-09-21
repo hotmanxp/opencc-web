@@ -20,7 +20,7 @@
 | 目录 | 职责 |
 |------|------|
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
-| `packages/zn-agent-core/` | `compat/`(verbatim 移植的 zai 兼容垫片)+ `opencc-src/`(opencc 0.20.0 拷贝,Bun 兼容(un-stripped));`scripts/bundle-opencc.ts` 把 `src/bundle-entry.ts` 编成单一 `dist/opencc-core.mjs`(esbuild bundle)。**运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出**(2026-08-16 起废除全部 subpath);`dist/bundle-entry.d.ts` 由 `bundle-opencc.ts` 机械生成,与 bundle 同步 |
+| `packages/zn-agent-core/` | `src/compat/`(verbatim 移植的 zai 兼容垫片)+ `src/opencc-src/`(opencc 0.20.0 拷贝,Bun 兼容(un-stripped));`scripts/bundle-opencc.ts` 把 `src/bundle-entry.ts` 编成单一 `dist/opencc-core.mjs`(esbuild bundle)。**运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出**(2026-08-16 起废除全部 subpath);`dist/bundle-entry.d.ts` 由 `bundle-opencc.ts` 机械生成,与 bundle 同步 |
 | `docs/` | 设计/参考/操作指南;`docs/superpowers/specs/` 是各特性 spec,`docs/superpowers/plans/` 是实施计划 |
 | `examples/` `scripts/` | 示例 / 仓库脚本 |
 
@@ -40,23 +40,33 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 **关键陷阱**:
 - **plugin 改文件走 `~/.zai/plugins/cache/claude-plugins-official/<name>/<version>/`**,不要去 `~/.claude/plugins/cache/`(迁移后 zai 不读)。
 - **LSP/MCP 类 plugin**(typescript-lsp / pyright-lsp / context7 / chrome-devtools-mcp / ralph-loop / code-review)在 `~/.zai/plugins/cache/` 下有缓存但 zai 的 `/api/plugins` 不返回——要么缺 `.claude-plugin/plugin.json`、要么走 LSP/MCP 路径被静默排除。
-- **`~/.zai/zn-assets/`** 是 `paths.ts:7-17` 注释里描述的预期 layout,当前未部署,实际 `@zn-ai/plugin` 资源走 `~/.agents/skills`(见 `agentRuntime.ts:285`)。
+- **`~/.zai/zn-assets/`** 是 `paths.ts:7-17` 注释里描述的预期 layout,当前未部署,实际 `@zn-ai/plugin` 资源走 `~/.agents/skills`(见 `agentRuntime.ts:557` 注释「默认走 `~/.agents/skills`」)。
 
 ## 强制开发规则
 
 - **系统提示词一律用英文**:所有写入代码的系统提示词(system prompt)——包括 Agent 定义描述(description/systemPrompt)、subagent 提示词、工具描述、LLM 指令模板——**必须用英文编写,禁止直接写中文**。用户可见的 UI 文案走 i18n,不受此限。**Why:** 提示词是发给模型的,英文指令遵循度与跨模型稳定性更好,且避免编码/ tokenizer 问题。**How to apply:** 新增/修改任何 prompt 字符串(Agent 描述、`prompt:` 字段、skill/agent frontmatter description、vendor 内的提示词补丁)时检查一遍。
 - **真实浏览器验收(非必须,先询问)**:问题修复或特性新增完成前,**询问用户**是否要启动 ego-browser 真实浏览器验证(走完用户路径:页面加载、按钮点击、表单提交、截图等);用户确认后再用 `/ego-browser` skill 执行,不再作为强制完成门禁。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。**ego-browser 在 zai dev 跑着时(SSE 长连接)实际可用**——通过 `browser-operator` skill 调真实浏览器(ego-browser)即可。早期 `feedback-ego-browser-sse-blocked` memory 已过时,不要因为旧经验跳过视觉验证。
-- **路由访问路径**:zai 提供三条独立顶层路径,验证时务必按目标切路由,不要靠缩窗口判断:
-  - **`/agent`** → PC 端(`Layout.tsx` + `AgentConversation.tsx`,左侧 Sider + 右侧分屏 tab)。默认入口。
-  - **`/m`** → 移动端(`pages/MobileAgent.tsx`,整页重写为顶部 hamburger + 底部输入 + Drawer)。验证 mobile-only 功能(`MobileQuickDrawer` / `useBashRepl` 在 drawer 内的 toast 等)时务必切到这里。视口宽度 `< 768`(`useIsMobile.ts` `MOBILE_BREAKPOINT=768`)时 `Layout` 自身也会响应式收紧(隐藏 Sider、SplitPane 收起),但这跟 `/m` 是两条独立路径,**显式 mobile 路由不依赖视口宽度**。ego-browser 验证 mobile drawer 时直接访问 `/m`,无需 `Emulation.setDeviceMetricsOverride`。
-  - **`/desktop`** → PC 端办公桌面(`pages/Desktop.tsx` + `components/desktop/`,2026-08-26 起 draft)。**脱离 Layout**(无 Sider)、全屏沉浸式:壁纸 + Dock + 可拖拽浮窗(资源管理器 + Agent 对话),资源拖入 `AttachmentZone` 即作为 `@` 文件引用上下文。验证时直接访问 `/desktop`,**不走 `/agent`**;`useIsMobile` 为 true 时访问 `/desktop` 会重定向到 `/agent`。资源 API 走 `/api/desktop/fs/*`(`routes/desktopFs.ts`)。
+- **API 端点索引**(均在 `packages/zai/src/server/index.ts:212-238` 一系列 `app.use` 挂载):核心路径 `/api/agent/*`(sessions / sessions/:id/state / prompt / sessions/:id/model / sessions/:id/mode / permission-response / answer 等)、`/api/slash`、`/api/instances`、`/api/session-state`、`/api/tasks`、`/api/bash-tasks`、`/api/bash-repl`、`/api/v2-tasks`、`/api/repl-history`、`/api/transcript/*`、`/api/voice/getASRToken`、`/api/super-tasks`、`/api/desktop/fs/*`、`/api/desktop/wallpaper/*`、`/api/weixin/*`(`/status`、`/connect`、`/disconnect`、`/settings`、`/setup/*`、`/pairings/*`、`/owner/takeover`、`/send` 等子端点,详见 `routes/weixin.ts`)、`/api/plugins`、`/api/system` 及其子端点(`/system/status`、`/system/restart`、`/system/restart/cancel`、`/system/stop`)。所有路由前缀都通过 `app.use('/api', <router>)` 挂载,具体子路径看各 `routes/*.ts` 的内部声明。
+
+- **路由访问路径**:zai 提供多条顶层路径(`router.tsx`),验证时务必按目标切路由,不要靠缩窗口判断:
+  - **`/`** → 重定向到 `/agent`(标准实例)或 `/super-tasks`(任务工厂实例);由 `TaskFactoryRedirect` 根据 `instanceContext.app` 分流。
+  - **`/login`** → 登录页(`pages/Login.tsx`),顶层菜单入口(免进 tab)。
+  - **`/manage`** → 管理面板(`pages/Manage.tsx`),用 AntD Tabs 切换 `resources` / `config` / `dirs` / `tools` 四个 tab。老 URL `/tools` `/resources` `/config` `/dirs` 通过 `<Navigate>` 重定向到 `/manage?tab=<key>`,书签不丢。
+  - **`/agent`** → PC 端(`Layout.tsx` + `pages/Agent.tsx`(内含 `<AgentConversation>` 子组件),左侧 Sider + 右侧分屏 tab)。默认入口。task-factory 实例下 `<TaskFactoryAgentEntry>` 会重定向到 `/super-tasks`。
+  - **`/dashboard`** → 仪表盘(`pages/Dashboard.tsx`)。
+  - **`/instances`** → 实例管理(`pages/Instances.tsx`),受 `<InstanceRouteGuard>` 包裹——instance 子实例直接 URL 访问会被重定向到 `/agent`。
+  - **`/m`** → 移动端(`pages/MobileAgent.tsx`,整页重写为顶部 hamburger + 底部输入 + Drawer),走 `MobileLayout`(无 Sider,挂 visualViewport)。验证 mobile-only 功能(`MobileQuickDrawer` / `useBashRepl` 在 drawer 内的 toast 等)时务必切到这里。视口宽度 `< 768`(`useIsMobile.ts` `MOBILE_BREAKPOINT=768`)时 `Layout` 自身也会响应式收紧(隐藏 Sider、SplitPane 收起),但这跟 `/m` 是两条独立路径,**显式 mobile 路由不依赖视口宽度**。ego-browser 验证 mobile drawer 时直接访问 `/m`,无需 `Emulation.setDeviceMetricsOverride`。
+  - **`/m-super-tasks`** → 移动端任务工厂页(`pages/MobileSuperTasks.tsx`),与 `/m` 是两条独立顶层路径,不按 instance profile 分流——移动端由 lan-agent 卡片或直接 URL 显式进入。
+  - **`/desktop`** → PC 端办公桌面(`pages/Desktop.tsx` + `components/desktop/`,2026-08-26 起 draft)。**脱离 Layout**(无 Sider)、全屏沉浸式:壁纸 + Dock + 可拖拽浮窗(资源管理器 + Agent 对话),资源拖入 `AttachmentZone` 即作为 `@` 文件引用上下文。验证时直接访问 `/desktop`,**不走 `/agent`**。资源 API 走 `/api/desktop/fs/*`(`routes/desktopFs.ts`,挂在 `app.use('/api', ...)` 下)。
+  - **`/super-tasks`** → 任务工厂面板(`pages/SuperTasks.tsx`,2026-09-04 起),脱离 Layout 的顶层路由,与 `/desktop` 并列;`/`、`/agent`、通配 fallback 都在 task-factory 实例下落到这里。
+  - **`*`** → 通配 fallback:`TaskFactoryRedirect` 把未知路径分流到 `/super-tasks`(任务工厂)或 `/agent`(标准实例)。
 - **core 改动必须先 build:core**:`packages/zn-agent-core/` 改完后的修复或特性,ego-browser 验证前**必须**先 `pnpm run build:core`。zai 进程通过 `node_modules/@zn-ai/zn-agent-core/` 加载的内容里,`dist/opencc-core.mjs` 单一 bundle、`dist/bundle-entry.d.ts`(主入口 types,机械生成)、以及 `dist/opencc-src/server/*.d.ts` 等被 bundle-entry 引用的小段 d.ts 都是构建产物,改源不会自动生效;不重建就用 ego 验证会复现到旧 core 行为,误导排错。仅改 `packages/zai/src/web/`(纯前端)或只改 zai 服务端源码(无 core 依赖)时**不需要** build:core。
 - **Node-direct runtime(默认)**:`zai dev` 默认走 Node,入口为 `tsx --loader .../bun-protocol.mjs`,通过 loader 拦截 `bun:bundle` / `bun:feature`(漏掉会 `ERR_UNSUPPORTED_ESM_URL_SCHEME`)。保留 `dev:bun`(`bun run src/cli/index.ts dev`)作为可选快速运行方式。opencc vendor 是 un-stripped 全量,Node 冷启动加载较慢,属预期。
-- **opencc-src vs compat**:`opencc-src/` 是 opencc 上游拷贝,但**允许修改**(类型修复、zai 补丁——改后需 `build:core` 生效)。compat 是 zai 专属别名载体。**zai 调用方统一从主入口 `@zn-ai/zn-agent-core` 取值**(2026-08-16 起全部 subpath 已废除);`src/bundle-entry.ts` 把 vendor 与 compat 符号聚合 re-export,主入口暴露 plugin DTO 等类型(`export type * from './opencc-src/server/index.js'`)与运行时。**禁止**用 tsc 整编 opencc-src(拖入 UI 传递依赖);`dist/opencc-src/server/*.d.ts` 由 `tsc -p tsconfig.server.json` 机械发射,由 `scripts/verify-server-types-self-contained.mjs` 守护 self-contained。
-- **MACRO stub**:`zai-server` 启动时需在 `enableOpenccConfigs` 内调 `installMacroStub()` 预填 `globalThis.MACRO`,否则 vendor 顶层 `MACRO.X` 引用 panic。
+- **opencc-src vs compat**:`src/opencc-src/` 是 opencc 上游拷贝,但**允许修改**(类型修复、zai 补丁——改后需 `build:core` 生效)。`src/compat/` 是 zai 专属别名载体。**zai 调用方统一从主入口 `@zn-ai/zn-agent-core` 取值**(2026-08-16 起全部 subpath 已废除);`src/bundle-entry.ts` 把 vendor 与 compat 符号聚合 re-export,主入口暴露 plugin DTO 等类型(`export type * from './opencc-src/server/index.js'`)与运行时。**禁止**用 tsc 整编 opencc-src(拖入 UI 传递依赖);`dist/opencc-src/server/*.d.ts` 由 `tsc -p tsconfig.server.json` 机械发射,由 `scripts/verify-server-types-self-contained.mjs` 守护 self-contained。
+- **MACRO stub**:`installMacroStub()` 在 zn-agent-core vendor 内部调用,`packages/zn-agent-core/src/compat/openccInit.ts:418`(`prepareBundle()` 内)+ `packages/zn-agent-core/src/opencc-src/server/createHeadlessContext-impl.ts:145` 都会触发,预填 `globalThis.MACRO`;若未执行,vendor 顶层 `MACRO.X` 引用 panic。**zai-server 的 `enableOpenccConfigs` 不直接调 `installMacroStub`**,它只触发 `initAgentRuntime()` 链路到 vendor,由 vendor 内部按需执行。
 - **CodeGraph 优先**:理解代码用 `codegraph_explore` 单调用,不要 grep + read 轮询;索引未初始化时跑 `codegraph init -i`。`codegraph_context` / `codegraph_trace` 当前 v1.4.1 不可用。
 - **端口使用(必查)**:启动 `zai dev` / `zai start` 或任何本地服务前,先 `lsof -i :<port>` 确认端口空闲再起。显式 `--port` / `--api-port` 被占用必须报错退出(EADDRINUSE,dev.ts/start.ts 已实现),**禁止**静默递增换端口——多个实例静默换端口共享同一 API key 是请求风暴根因(见 `docs/superpowers/plans/` 请求风暴修复)。只有未显式指定端口时才允许自动扫描(`ports.ts resolveServerPort`)。开发中如需多实例,用不同 `--port` 显式指定空闲端口。
-- **微信通道归属:只有 `app=weixin` 的专用实例跑通道**:主实例(用户日常访问的 Web 服务)**不再自己跑微信通道** —— 它启动时按 `settings.weixinBot.enabled` 检查机器级 owner 锁,无锁则拉起一个 `app=weixin` 的受管子实例独占通道(默认端口 9199、cwd 默认用户主目录,均在微信面板可配)。判定锚点 `isWeixinChannelHost()`(`src/server/services/weixinBot/channelProfile.ts`,`ZAI_APP === 'weixin'`);编排逻辑 `weixinDedicatedInstance.ts`(端口/目录/锁检查/拉起),通道启动 `weixinRuntimeBoot.ts`(受管 + weixin 双门禁),`WeixinBotManager.start()` 里还有一道同样的 profile 门禁兜底。**Why 必须同进程**:入站注入走进程内 `getSessionInbox().followup()`、出站镜像订阅进程内 `eventBus`,所以"收发消息"与"跑 agent turn"不能拆到两个进程 —— 专用实例必须是一个完整 zai 进程,不能是轻量转发进程。**已知副作用**:专用实例的会话只出现在它自己的 Web UI(默认 9199),主实例看不到(无跨实例会话聚合);重启主实例会连带停掉专用实例(`shutdownInstanceSupervisor`)再重新拉起;改了端口/cwd/dmPolicy 等需重启专用实例才生效(面板的保存动作会自动重启它)。**微信配置入口只在主实例显示(2026-09-13)**:设置页底部的「微信机器人」入口按 `/api/system` 回显的 `isManagedChild` 门控(`SettingsDrawer.tsx` 的 `weixinConfigVisible`)——受管子进程(app=weixin 专用实例 / task-factory / 用户自定义实例)不渲染该入口,避免在子实例上重复配置;`instanceContext` 未 hydrate 时按主实例处理(显示),裸 `zai dev` 行为不变。前端门控只影响可见性,`/api/weixin/*` 路由本身对子实例**不**做拦截(专用实例自己要调这些接口连通道)。
+- **微信通道归属:只有 `app=weixin` 的专用实例跑通道**:主实例(用户日常访问的 Web 服务)**不再自己跑微信通道** —— 它启动时按 `settings.weixinBot.enabled` 检查机器级 owner 锁,无锁则拉起一个 `app=weixin` 的受管子实例独占通道(默认端口 9199、cwd 默认用户主目录,均在微信面板可配)。判定锚点 `isWeixinChannelHost()`(`src/server/services/weixinBot/channelProfile.ts:36-37`,`process.env.ZAI_APP === WEIXIN_CHANNEL_PROFILE`,`WEIXIN_CHANNEL_PROFILE = 'weixin'`);编排逻辑 `src/server/services/weixinBot/weixinDedicatedInstance.ts`(端口/目录/锁检查/拉起),通道启动 `src/server/services/weixinBot/weixinRuntimeBoot.ts`(受管 + weixin 双门禁),`src/server/services/weixinBot/WeixinBotManager.ts:90` 注释里还有一道同样的 profile 门禁兜底。**Why 必须同进程**:入站注入走进程内 `getSessionInbox().followup()`、出站镜像订阅进程内 `eventBus`,所以"收发消息"与"跑 agent turn"不能拆到两个进程 —— 专用实例必须是一个完整 zai 进程,不能是轻量转发进程。**已知副作用**:专用实例的会话只出现在它自己的 Web UI(默认 9199),主实例看不到(无跨实例会话聚合);重启主实例会连带停掉专用实例(`shutdownInstanceSupervisor`)再重新拉起;改了端口/cwd/dmPolicy 等需重启专用实例才生效(面板的保存动作会自动重启它)。**微信配置入口只在主实例显示(2026-09-13)**:设置页底部的「微信机器人」入口按 `instanceContext.instanceId == null` 门控(`SettingsDrawer.tsx:853` 的 `weixinConfigVisible`)——受管子进程(app=weixin 专用实例 / task-factory / 用户自定义实例)不渲染该入口,避免在子实例上重复配置。**判据不能用 `isManagedChild`**(代码注释 832-846 行显式反驳:主实例在某些 supervisor 启动路径下 `isManagedChild` 也是 true,会让主实例误关微信入口);`instanceId` 由 `instanceSupervisor.ts:305` 只给 spawn 出来的实例注入,与下方 `showServiceSection` 的 `isManagedChild && instanceId != null` 互补。`instanceContext` 未 hydrate 时按主实例处理(显示),裸 `zai dev` 行为不变。前端门控只影响可见性,`/api/weixin/*` 路由本身对子实例**不**做拦截(专用实例自己要调这些接口连通道)。
 - **小步可逆**:实现细节见 `docs/DEVELOPMENT_REFERENCE.md`;设计/取舍见 `docs/superpowers/specs/` 与对应 `plans/`。
 - **测试粒度:功能改动后只跑相关单元测试**:`pnpm -r test` 全量跑 zai + zn-agent-core 全部 190+ 测试文件 / 1400+ 用例,冷启动 ~30s+ 解析 + 数十秒执行,日常反馈太慢。功能改动后只跑**直接受影响**的测试文件(以及它们的依赖文件若有连锁影响),用路径过滤:
   ```bash
@@ -120,7 +130,7 @@ pnpm release:major
 **已知坑点**：
 - `pnpm publish` 在 workspace 上下文中 auth 传递有问题，第二个包（`@zn-ai/zai`）会报 `ENEEDAUTH`，即使 `npm whoami` 正常。**解决方案**：脚本已内置 fallback 自动降级到 `npm publish`。
 - `npm publish` 不识别 pnpm 的 `workspace:*` 协议，如果降级到 `npm publish`，脚本会自动将 `workspace:*` 替换为实际版本号再发布，发布后恢复原始内容。
-- 本仓库**origin 指向 code.paic.com.cn 私有仓库**(git@code.paic.com.cn:git/zn-ai-zbuddy.git,默认分支 main),`release:*` 脚本发布后 commit + tag 默认只留本地,**不自动 push**;需要时显式 `git push origin main [--tags]`。
+- 本仓库**origin 指向 GitHub 私有 fork**(git@github.com:hotmanxp/opencc-web.git,默认分支 main),`release:*` 脚本发布后 commit + tag 默认只留本地,**不自动 push**;需要时显式 `git push origin main [--tags]`。
 
 ## 文档入口
 
@@ -149,4 +159,4 @@ pnpm release:major
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 
-<!-- updated: 2026-09-02 -->
+<!-- updated: 2026-09-22 (fix(docs): sync AGENTS.md with actual code state — see deep-research report 2026-09-22) -->
