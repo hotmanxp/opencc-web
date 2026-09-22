@@ -207,6 +207,10 @@ router.patch('/instances/:id', async (req, res) => {
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
   try {
+    // `cwd` is intentionally absent from the HTTP surface: the only caller
+    // that mutates it is the weixin orchestration (which validates the
+    // directory itself, see weixinDedicatedInstance.ts). `name` is not
+    // patchable at all.
     const patch: { lan?: boolean; port?: number | null } = {}
     if (lan.value !== undefined) patch.lan = lan.value
     if (port.value !== undefined) patch.port = port.value

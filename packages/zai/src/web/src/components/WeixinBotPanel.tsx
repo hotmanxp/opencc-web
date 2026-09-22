@@ -405,7 +405,10 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
     }
   }, [])
 
-  /** 保存专用实例编排参数(端口 / 工作目录)。 */
+  /**
+   * 保存专用实例编排参数(端口 / 工作目录)。服务端收到后会把这几个值对齐到
+   * 专用实例定义并重启它 —— 所以保存即生效,不需要用户手动重启实例。
+   */
   const handleSaveInstanceConfig = useCallback(async () => {
     setLoading(true)
     try {
@@ -414,12 +417,15 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instancePort, instanceCwd }),
       })
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      message.success('已保存。端口与工作目录在专用实例下次启动时生效。')
+      if (!r.ok) throw new Error(await settingsErrorDetail(r))
+      message.success('已保存,专用实例已按新的端口 / 工作目录重启(无实例时下次启动按该配置创建)。')
       await refresh()
       await loadDiagnostics()
     } catch (err) {
       message.error(`保存失败: ${(err as Error).message}`)
+      // 失败时同样刷新:工作目录非法时 settings 已落盘、实例仍在旧目录上跑,
+      // 刷新才能让用户看到实例卡片与表单不一致。
+      await refresh()
     } finally {
       setLoading(false)
     }
@@ -700,7 +706,7 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
             </div>
             <Button onClick={() => void handleSaveInstanceConfig()}>保存实例配置</Button>
             <p className="text-xs text-[#999] mt-2">
-              微信会话会绑定到该目录对应的 project;端口与目录改动后需重启专用实例才生效。
+              微信会话会绑定到该目录对应的 project;保存后专用实例会按新端口 / 目录自动重启。
             </p>
 
             <div className="font-medium mb-1 mt-4">通道策略</div>
@@ -838,6 +844,21 @@ function stateColor(state: WeixinStatus['state']): string {
       return 'default'
     default:
       return 'default'
+  }
+}
+
+/**
+ * 读 `PUT /api/weixin/settings` 失败响应的 `detail`,让 toast 说清原因。
+ * 服务端在这个端点上会拒绝两种情况:`invalid_cwd`(工作目录不存在,400)和
+ * 专用实例重启失败(502)—— 只说「HTTP 400/502」用户没法修。
+ */
+async function settingsErrorDetail(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: unknown; detail?: unknown }
+    const error = typeof body.error === 'string' ? body.error : `HTTP ${res.status}`
+    return typeof body.detail === 'string' && body.detail ? `${error}: ${body.detail}` : error
+  } catch {
+    return `HTTP ${res.status}`
   }
 }
 

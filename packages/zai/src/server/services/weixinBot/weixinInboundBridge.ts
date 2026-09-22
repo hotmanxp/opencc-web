@@ -32,6 +32,7 @@ import { getWeixinSessionMap, conversationKeyOf, type WeixinSessionMap } from '.
 import { getWeixinPairingStore, type WeixinPairingStore } from './WeixinPairingStore.js'
 import { getWeixinPendingStore, type WeixinPendingStore, type PendingInbound } from './WeixinPendingStore.js'
 import { parseWeixinCommand, findWeixinCommand } from './weixinCommands.js'
+import { isValidDir } from './cwdValidity.js'
 import {
   loadMemorySnapshot,
   invalidateMemorySnapshot,
@@ -278,7 +279,7 @@ export class WeixinInboundBridge {
       },
       cwd,
     )
-    CwdStoreSet(binding.sessionId, binding.cwd || cwd)
+    seedSessionCwd(binding.sessionId, binding.cwd || cwd)
 
     const readableMedia = await this.mirrorMedia(msg, binding.cwd || cwd)
     const key = conversationKeyOf(msg)
@@ -482,7 +483,7 @@ export class WeixinInboundBridge {
           displayText: item.text || (item.mediaPaths.length > 0 ? '[媒体消息]' : ''),
           createdAt: this.deps.now(),
         }
-        CwdStoreSet(binding.sessionId, binding.cwd || this.deps.getCwd())
+        seedSessionCwd(binding.sessionId, binding.cwd || this.deps.getCwd())
         this.deps.inboxFor(binding.sessionId).followup(binding.sessionId, inboxMessage)
         this.config?.onInjected?.(binding.sessionId, item.chatId)
         this.metricsState.inbound += 1
@@ -528,8 +529,21 @@ export class WeixinInboundBridge {
 
 // ─── 内部小工具 ──────────────────────────────────────────────────────
 
-function CwdStoreSet(sessionId: string, cwd: string): void {
+/**
+ * 把绑定 cwd 种子化进 `CwdStore` —— **只在该会话尚无有效 cwd 时**。
+ *
+ * 早期实现是无条件覆写(`CwdStore.set` 每轮入站消息都执行一次),两个副作用:
+ *   1. 绑定目录被删后,CwdStore 被反复写回那个死路径,Bash 工具永久失效
+ *      (它只认 CwdStore;Read/Write 不 chdir 所以看起来"只有 Bash 坏了");
+ *   2. agent 在会话里 `cd` 到别处(或 Bash 的 pwd trailer 同步了 cwd)之后,
+ *      下一条微信消息会把它静默打回原目录。
+ *
+ * 已有且有效的 cwd 一律不动 —— 会话内的 cwd 归会话自己管。
+ */
+function seedSessionCwd(sessionId: string, cwd: string): void {
   try {
+    const existing = CwdStore.get(sessionId)
+    if (existing && isValidDir(existing)) return
     CwdStore.set(sessionId, cwd)
   } catch {
     // CwdStore 是纯内存实现,不应抛;兜底让 runQueryLoop 退回 process.cwd()。

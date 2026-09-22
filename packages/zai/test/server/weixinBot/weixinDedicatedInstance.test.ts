@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
     startInstance: vi.fn(),
     stopInstance: vi.fn(),
     restartInstance: vi.fn(),
+    updateInstance: vi.fn(),
   },
   settingsMock: { current: null as Record<string, unknown> | null },
   ownerMock: { current: null as unknown },
@@ -93,6 +94,9 @@ describe('weixinDedicatedInstance', () => {
     supervisorMock.startInstance.mockReset().mockResolvedValue(makeSnapshot({ state: 'starting' }))
     supervisorMock.stopInstance.mockReset().mockResolvedValue(makeSnapshot())
     supervisorMock.restartInstance.mockReset().mockResolvedValue(makeSnapshot({ state: 'starting' }))
+    supervisorMock.updateInstance.mockReset().mockImplementation(async (id: string, patch: Record<string, unknown>) =>
+      makeSnapshot({ id, ...patch, startPort: (patch.port as number | undefined) ?? null }),
+    )
   })
 
   afterEach(() => {
@@ -186,8 +190,22 @@ describe('weixinDedicatedInstance', () => {
     settingsMock.current = { enabled: true, instancePort: 9499 }
     const r = await provisionDedicatedInstance({ force: false })
     expect(r).toMatchObject({ attempted: true, reason: 'started', instanceId: 'inst_wx' })
-    expect(supervisorMock.startInstance).toHaveBeenCalledWith('inst_wx', { port: 9499 })
+    // 端口先写回定义(否则 startInstance 只会用到创建时的旧 pin),再按定义启动。
+    expect(supervisorMock.updateInstance).toHaveBeenCalledWith('inst_wx', { port: 9499 })
+    expect(supervisorMock.startInstance).toHaveBeenCalledWith('inst_wx')
     expect(supervisorMock.createInstance).not.toHaveBeenCalled()
+  })
+
+  it('已有定义 + settings 改了 cwd → 启动前把新 cwd patch 进定义', async () => {
+    const nextCwd = tmpdir()
+    supervisorMock.getSnapshots.mockReturnValue([
+      makeSnapshot({ state: 'stopped', cwd: '/Users/someone-else', startPort: 9199 }),
+    ])
+    settingsMock.current = { enabled: true, instancePort: 9199, instanceCwd: nextCwd }
+    const r = await provisionDedicatedInstance({ force: false })
+    expect(r).toMatchObject({ attempted: true, reason: 'started' })
+    expect(supervisorMock.updateInstance).toHaveBeenCalledWith('inst_wx', { cwd: nextCwd })
+    expect(supervisorMock.startInstance).toHaveBeenCalledWith('inst_wx')
   })
 
   it('已有定义且 running → already_running', async () => {
@@ -252,5 +270,40 @@ describe('weixinDedicatedInstance', () => {
     const r = await restartDedicatedInstance()
     expect(r).toMatchObject({ attempted: true, reason: 'provisioned' })
     expect(supervisorMock.createInstance).toHaveBeenCalled()
+  })
+
+  // 面板「保存实例配置」走的就是这条路径 —— 这是「配了工作目录却不生效」的
+  // 回归测试:重启前必须把 settings 的 cwd / 端口写回定义。
+  it('restartDedicatedInstance:重启前把 settings 的 cwd + 端口 patch 进定义', async () => {
+    const nextCwd = tmpdir()
+    supervisorMock.getSnapshots.mockReturnValue([
+      makeSnapshot({ state: 'running', cwd: homedir(), startPort: 9199 }),
+    ])
+    settingsMock.current = { enabled: true, instancePort: 9399, instanceCwd: nextCwd }
+    const r = await restartDedicatedInstance()
+    expect(r).toMatchObject({ attempted: true, reason: 'started' })
+    expect(supervisorMock.updateInstance).toHaveBeenCalledWith('inst_wx', { cwd: nextCwd, port: 9399 })
+    expect(supervisorMock.restartInstance).toHaveBeenCalledWith('inst_wx')
+  })
+
+  it('restartDedicatedInstance:定义已与 settings 一致 → 不写空 patch(会抛 INVALID_STATE)', async () => {
+    supervisorMock.getSnapshots.mockReturnValue([
+      makeSnapshot({ state: 'running', cwd: homedir(), startPort: DEFAULT_WEIXIN_INSTANCE_PORT }),
+    ])
+    settingsMock.current = { enabled: true, instancePort: DEFAULT_WEIXIN_INSTANCE_PORT }
+    await restartDedicatedInstance()
+    expect(supervisorMock.updateInstance).not.toHaveBeenCalled()
+    expect(supervisorMock.restartInstance).toHaveBeenCalledWith('inst_wx')
+  })
+
+  it('restartDedicatedInstance:cwd 不存在 → invalid_cwd,不 patch 不重启(保留旧定义)', async () => {
+    supervisorMock.getSnapshots.mockReturnValue([
+      makeSnapshot({ state: 'running', cwd: homedir(), startPort: 9199 }),
+    ])
+    settingsMock.current = { enabled: true, instanceCwd: '/definitely/not/here/xyz' }
+    const r = await restartDedicatedInstance()
+    expect(r).toMatchObject({ attempted: false, reason: 'invalid_cwd', instanceId: 'inst_wx' })
+    expect(supervisorMock.updateInstance).not.toHaveBeenCalled()
+    expect(supervisorMock.restartInstance).not.toHaveBeenCalled()
   })
 })

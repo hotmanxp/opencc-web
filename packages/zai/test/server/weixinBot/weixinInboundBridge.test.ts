@@ -2,7 +2,7 @@
  * weixinInboundBridge 测试 —— P0 注入 / D2 车道语义 / P1 配对 / P2 重放 / P3 媒体。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CwdStore } from '@zn-ai/zn-agent-core'
@@ -25,10 +25,13 @@ interface Harness {
   sent: Array<{ chatId: string; text: string }>
   followup: ReturnType<typeof vi.fn>
   cwd: string
+  /** 模拟"实例重启后换到新工作目录":getCwd() 读的是这份可变槽。 */
+  setCwd: (next: string) => void
 }
 
 function makeHarness(dmPolicy: DmPolicy, allowFrom: string[] = []): Harness {
   const cwd = mkdtempSync(join(tmpdir(), 'zai-wx-proj-'))
+  let currentCwd = cwd
   const sessionMap = new WeixinSessionMap()
   const pairing = new WeixinPairingStore()
   const pending = new WeixinPendingStore()
@@ -41,7 +44,7 @@ function makeHarness(dmPolicy: DmPolicy, allowFrom: string[] = []): Harness {
     pairing,
     pending,
     inboxFor: () => inbox,
-    getCwd: () => cwd,
+    getCwd: () => currentCwd,
     now: () => Date.now(),
     log: () => { /* quiet */ },
   })
@@ -52,7 +55,10 @@ function makeHarness(dmPolicy: DmPolicy, allowFrom: string[] = []): Harness {
     allowFrom,
     sendToChat: (chatId, text) => { sent.push({ chatId, text }) },
   })
-  return { bridge, inbox, sessionMap, pairing, pending, sent, followup, cwd }
+  return {
+    bridge, inbox, sessionMap, pairing, pending, sent, followup, cwd,
+    setCwd: (next) => { currentCwd = next },
+  }
 }
 
 let msgSeq = 0
@@ -118,6 +124,73 @@ describe('weixinInboundBridge', () => {
     expect(inboxMsg.content).toContain('列出当前目录文件')
     // cwd 绑定
     expect(CwdStore.get(sid)).toBe(h.cwd)
+  })
+
+  it('会话内 cd 过的 cwd 不会被下一条入站消息打回原目录', async () => {
+    const h = makeHarness('open')
+    await h.bridge.deliver(dm('第一条'))
+    const [sid] = h.followup.mock.calls[0] as [string, unknown]
+    const elsewhere = mkdtempSync(join(tmpdir(), 'zai-wx-elsewhere-'))
+    CwdStore.set(sid, elsewhere) // 模拟 Bash 的 pwd trailer 同步
+
+    await h.bridge.deliver(dm('第二条'))
+    expect(CwdStore.get(sid)).toBe(elsewhere)
+  })
+
+  it('CwdStore 残留失效目录时,入站消息把它纠正为绑定 cwd', async () => {
+    const h = makeHarness('open')
+    await h.bridge.deliver(dm('第一条'))
+    const [sid] = h.followup.mock.calls[0] as [string, unknown]
+    const dead = mkdtempSync(join(tmpdir(), 'zai-wx-dead-'))
+    rmSync(dead, { recursive: true, force: true })
+    CwdStore.set(sid, dead)
+
+    await h.bridge.deliver(dm('第二条'))
+    expect(CwdStore.get(sid)).toBe(h.cwd)
+  })
+
+  it('复现线上故障:绑定目录被删 + 实例重启换了目录 → 下一条消息即自愈', async () => {
+    const h = makeHarness('open')
+    await h.bridge.deliver(dm('第一条'))
+    const [sid] = h.followup.mock.calls[0] as [string, unknown]
+
+    // 目录被删(worktree 被清理),实例重启后 working dir 换成新目录
+    rmSync(h.cwd, { recursive: true, force: true })
+    const fresh = mkdtempSync(join(tmpdir(), 'zai-wx-fresh-'))
+    h.setCwd(fresh)
+
+    await h.bridge.deliver(dm('重启后的第二条'))
+    // CwdStore 不再卡在死目录(修复前:Bash 永久报 no longer a valid directory)
+    expect(CwdStore.get(sid)).toBe(fresh)
+    // 绑定的 cwd 也自愈并落盘(会话 id 不变,对话历史不断)
+    const b = await h.sessionMap.lookupBySessionId(sid)
+    expect(b!.cwd).toBe(fresh)
+    expect(b!.sessionId).toBe(sid)
+  })
+
+  it('replayPending:已有有效 cwd 时不被打回', async () => {
+    const h = makeHarness('open')
+    const binding = await h.sessionMap.resolveOrCreate(
+      { accountId: 'acct', chatType: 'dm', chatId: 'user_a', senderId: 'user_a' },
+      h.cwd,
+    )
+    const elsewhere = mkdtempSync(join(tmpdir(), 'zai-wx-elsewhere-'))
+    CwdStore.set(binding.sessionId, elsewhere)
+    await h.pending.save({
+      messageId: 'crash-cwd',
+      accountId: 'acct',
+      chatType: 'dm',
+      chatId: 'user_a',
+      senderId: 'user_a',
+      text: '崩溃前的那条',
+      mediaPaths: [],
+      mediaTypes: [],
+      contextToken: 'CT',
+      receivedAt: Date.now() - 1000,
+    })
+
+    expect(await h.bridge.replayPending()).toBe(1)
+    expect(CwdStore.get(binding.sessionId)).toBe(elsewhere)
   })
 
   it('同 messageId 重复投递 → 只注入一次(幂等)', async () => {

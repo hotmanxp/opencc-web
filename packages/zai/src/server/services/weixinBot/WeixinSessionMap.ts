@@ -23,6 +23,7 @@ import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { WeixinSessionBinding } from '../../../shared/weixin.js'
 import { weixinDataDir, weixinSessionsFile } from '../paths.js'
+import { isValidDir } from './cwdValidity.js'
 
 const FILE_MODE = 0o600
 
@@ -135,6 +136,7 @@ export class WeixinSessionMap {
   async rotate(
     conversationKey: string,
     reason: string,
+    cwd?: string,
   ): Promise<{ old: WeixinSessionBinding; fresh: WeixinSessionBinding } | null> {
     await this.ensureLoaded()
     const oldBinding = this.byConversation.get(conversationKey)
@@ -146,6 +148,9 @@ export class WeixinSessionMap {
       createdAt: now,
       lastActiveAt: now,
     }
+    // 轮转沿用旧绑定的 cwd(spread 已带上),但死目录不继承 —— 否则
+    // 「/new 开新会话」也救不回卡在失效目录的 Bash(历史 bug)。
+    if (cwd) this.healStaleCwd(fresh, cwd)
     // 旧绑定从 conversation 索引摘除但保留 sessionId 索引;
     // 持久化文件只写 byConversation(values),旧绑定重启后自然淡出。
     this.byConversation.set(conversationKey, fresh)
@@ -161,9 +166,30 @@ export class WeixinSessionMap {
   }
 
   /**
+   * 绑定目录失效后的 cwd 自愈:目录已不存在(被删 / 改名 / 变成文件)时,
+   * 用当前 cwd 覆盖,返回 true 让调用方落盘。
+   *
+   * 为什么需要:`cwd` 冻结在首次绑定是有意设计(见 resolveOrCreate),但那
+   * 前提是目录还在。目录消失后这条冻结会变成毒药 —— bridge 每轮把
+   * `binding.cwd` 写进 `CwdStore`,而 Bash 工具子进程的 cwd 只认 `CwdStore`
+   * (zai 的 bashCwdWrap 还把 `originalCwd` 设成同一个值,导致 vendor Shell
+   * 的"回落到原目录"自愈分支也无效)。结果:该会话的 Bash 永久报
+   * `no longer a valid directory`,而 Read/Write/Glob/Grep 照常可用,症状
+   * 表现为「文件工具正常,只有 Bash 坏了」,且重启服务也修不好。
+   *
+   * 目录仍有效时**绝不动它** —— 老对话不该因为服务重启换了 cwd 被搬走。
+   */
+  private healStaleCwd(binding: WeixinSessionBinding, currentCwd: string): boolean {
+    if (isValidDir(binding.cwd)) return false
+    binding.cwd = currentCwd
+    return true
+  }
+
+  /**
    * 取该微信会话的绑定;不存在则新建一个合规 sessionId 并落盘。
    * `cwd` 只在首次创建时写入 —— 后续不覆盖,避免服务重启换了 cwd 之后
-   * 老对话被"搬走"到另一个 project。
+   * 老对话被"搬走"到另一个 project。**唯一例外是原目录已失效**
+   * (被删/改名/变成文件):那种冻结只会让会话永久卡死,见 healStaleCwd。
    *
    * 轮转:绑定存在且存活超过 rotationTtlMs → 自动迁入新 session,
    * 并在 pendingRotations 留事件供 bridge 消费(记忆沉淀)。
@@ -178,7 +204,7 @@ export class WeixinSessionMap {
     const existing = this.byConversation.get(key)
     if (existing) {
       if (this.rotationTtlMs != null && now - existing.createdAt >= this.rotationTtlMs) {
-        const rotated = await this.rotate(key, 'ttl')
+        const rotated = await this.rotate(key, 'ttl', cwd)
         if (rotated) return rotated.fresh
       }
       let changed = false
@@ -191,6 +217,7 @@ export class WeixinSessionMap {
         changed = true
       }
       existing.lastActiveAt = now
+      if (this.healStaleCwd(existing, cwd)) changed = true
       if (changed) await this.enqueuePersist()
       else this.schedulePersist()
       return existing

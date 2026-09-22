@@ -2,7 +2,7 @@
  * WeixinSessionMap 测试 —— D1 映射表(合规 sessionId + 双向反查 + 持久化)。
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -70,13 +70,62 @@ describe('WeixinSessionMap', () => {
     expect(again.sessionId).toBe(b.sessionId)
   })
 
-  it('cwd 只在首次绑定写入,后续 resolve 不覆盖', async () => {
+  it('cwd 只在首次绑定写入,后续 resolve 不覆盖(两个目录都还在)', async () => {
+    const projA = mkdtempSync(join(tmpdir(), 'zai-wx-proja-'))
+    const projB = mkdtempSync(join(tmpdir(), 'zai-wx-projb-'))
     const first = make()
-    const b = await first.resolveOrCreate(input, '/proj-a')
+    const b = await first.resolveOrCreate(input, projA)
     const second = make()
-    const again = await second.resolveOrCreate(input, '/proj-b')
+    const again = await second.resolveOrCreate(input, projB)
     expect(again.sessionId).toBe(b.sessionId)
-    expect(again.cwd).toBe('/proj-a')
+    expect(again.cwd).toBe(projA)
+  })
+
+  it('绑定目录被删后 resolve 用当前 cwd 自愈(不再永久冻结死路径)', async () => {
+    const dead = mkdtempSync(join(tmpdir(), 'zai-wx-dead-'))
+    const alive = mkdtempSync(join(tmpdir(), 'zai-wx-alive-'))
+    const b = await map.resolveOrCreate(input, dead)
+    expect(b.cwd).toBe(dead)
+
+    rmSync(dead, { recursive: true, force: true })
+    const healed = await map.resolveOrCreate(input, alive)
+    expect(healed.sessionId).toBe(b.sessionId) // 同一会话,不换 id
+    expect(healed.cwd).toBe(alive)
+
+    // 自愈结果已落盘 —— 新实例(模拟重启)拿到的是新目录
+    const second = make()
+    const restored = await second.lookupBySessionId(b.sessionId)
+    expect(restored!.cwd).toBe(alive)
+  })
+
+  it('空串 cwd(历史数据)同样被补齐为当前 cwd', async () => {
+    const alive = mkdtempSync(join(tmpdir(), 'zai-wx-alive-'))
+    const b = await map.resolveOrCreate(input, '/stale')
+    ;(b as unknown as { cwd: string }).cwd = ''
+    const healed = await map.resolveOrCreate(input, alive)
+    expect(healed.cwd).toBe(alive)
+  })
+
+  it('目录变成同名文件(非目录)时也自愈', async () => {
+    const alive = mkdtempSync(join(tmpdir(), 'zai-wx-alive-'))
+    const asFile = join(mkdtempSync(join(tmpdir(), 'zai-wx-file-')), 'not-a-dir')
+    writeFileSync(asFile, 'x')
+    await map.resolveOrCreate(input, asFile)
+    const healed = await map.resolveOrCreate(input, alive)
+    expect(healed.cwd).toBe(alive)
+  })
+
+  it('轮转不继承死 cwd(/new 也能救回卡死的 Bash)', async () => {
+    const dead = mkdtempSync(join(tmpdir(), 'zai-wx-dead-'))
+    const alive = mkdtempSync(join(tmpdir(), 'zai-wx-alive-'))
+    const old = await map.resolveOrCreate(input, dead)
+    rmSync(dead, { recursive: true, force: true })
+
+    const rotated = await map.rotate(old.conversationKey, 'command:/new', alive)
+    expect(rotated!.fresh.cwd).toBe(alive)
+    // 目录仍有效时则沿用旧 cwd(冻结语义不变)
+    const keep = await map.rotate(old.conversationKey, 'command:/new', mkdtempSync(join(tmpdir(), 'zai-wx-other-')))
+    expect(keep!.fresh.cwd).toBe(alive)
   })
 
   it('dm 与 group 生成不同会话', async () => {

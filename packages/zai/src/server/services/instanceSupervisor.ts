@@ -76,14 +76,25 @@ export interface InstanceSupervisor {
   restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
   removeInstance: (id: string) => Promise<void>
   /**
-   * Patch definition fields exposed in the UI. Today: `lan` and `port`.
-   * `lan` is a boolean toggle; `port` follows the tri-state contract —
-   * `number` persists, `null` clears back to auto, `undefined` is a
-   * no-op. Other definition fields (cwd/name) are intentionally not
-   * patchable — they require a remove + recreate so we don't surprise
-   * the user with silent rewrites.
+   * Patch definition fields that can change after creation: `lan`, `port`
+   * and `cwd`. `lan` is a boolean toggle; `port` follows the tri-state
+   * contract — `number` persists, `null` clears back to auto, `undefined`
+   * is a no-op; `cwd` is a plain replacement (the caller validates that
+   * the directory exists — same contract as `createInstance`).
+   *
+   * `cwd` is patchable because the weixin panel treats the dedicated
+   * instance's working directory as a *saved setting* rather than a
+   * create-time argument: the instance is auto-provisioned and long-lived,
+   * so remove + recreate would drop the channel and hand the user a new
+   * instance id every time they edit the field. `startInstance` /
+   * `restartInstance` deliberately never rewrite `def.cwd` — only this
+   * explicit patch does.
+   *
+   * `name` stays non-patchable: renames are cosmetic and would have to
+   * re-run the duplicate-name check, which the definition layer does not
+   * model.
    */
-  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null; cwd?: string }) => Promise<InstanceSnapshot>
   shutdown: () => Promise<void>
 }
 
@@ -416,7 +427,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       stopInstance: async (id: string) => { ensureNotCurrent(id); return doStop(id) },
       restartInstance: async (id: string, opts?: { lan?: boolean; port?: number | null }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
       removeInstance: async (id: string) => doRemove(id),
-      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null }) {
+      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null; cwd?: string }) {
         ensureNotCurrent(id)
         const entry = getEntry(id)
         // Refuse unknown / no-op patches explicitly so a typo in the
@@ -430,6 +441,10 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
           // `number` sets a new pin (route already validated 1..65535).
           next.startPort = patch.port === null ? null : patch.port
         }
+        // Takes effect on the next `doStart` (it reads `entry.def.cwd` at
+        // spawn time). A running child keeps its old cwd until restarted —
+        // callers that need it live must stop/restart explicitly.
+        if (patch.cwd !== undefined) next.cwd = patch.cwd
         if (Object.keys(next).length === 0) throw new InstanceSupervisorError('INVALID_STATE', 'no patchable fields supplied')
         entry.def = { ...entry.def, ...next }
         await persist()

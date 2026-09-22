@@ -378,4 +378,50 @@ describe('weixin routes', () => {
     expect(res.body.recentInbound).toHaveLength(1)
     expect(res.body.recentInbound[0].text).toBe('你好')
   })
+
+  // ─── 专用实例编排参数保存 ──────────────────────────────────────
+
+  const dedicatedSnapshot = {
+    id: 'inst_wx', name: 'weixin-bot', state: 'running', port: 9199, startPort: 9199, pid: 1, cwd: '/Users/me', lastError: null,
+  }
+
+  it('PUT /api/weixin/settings 改端口/目录 → 重启专用实例(保存即生效)', async () => {
+    dedicated.find.mockReturnValue(dedicatedSnapshot)
+    const app = makeApp()
+    const res = await request(app)
+      .put('/api/weixin/settings')
+      .send({ instancePort: 9399, instanceCwd: '/Users/me/wx' })
+    expect(res.status).toBe(200)
+    expect(dedicated.restart).toHaveBeenCalled()
+    expect(res.body.dedicatedInstance).toMatchObject({ id: 'inst_wx' })
+  })
+
+  it('PUT /api/weixin/settings:工作目录非法 → 400 invalid_cwd(不能静默"已保存")', async () => {
+    dedicated.find.mockReturnValue(dedicatedSnapshot)
+    dedicated.restart.mockResolvedValue({
+      attempted: false,
+      reason: 'invalid_cwd',
+      instanceId: 'inst_wx',
+      detail: '/nope/xyz',
+    })
+    const app = makeApp()
+    const res = await request(app).put('/api/weixin/settings').send({ instanceCwd: '/nope/xyz' })
+    expect(res.status).toBe(400)
+    expect(res.body).toMatchObject({ error: 'invalid_cwd', reason: 'invalid_cwd', detail: '/nope/xyz' })
+  })
+
+  it('PUT /api/weixin/settings:专用实例重启失败 → 502 带 detail', async () => {
+    dedicated.find.mockReturnValue(dedicatedSnapshot)
+    dedicated.restart.mockResolvedValue({
+      attempted: false,
+      reason: 'failed',
+      instanceId: 'inst_wx',
+      detail: 'listen EADDRINUSE 9399',
+    })
+    const app = makeApp()
+    const res = await request(app).put('/api/weixin/settings').send({ instancePort: 9399 })
+    expect(res.status).toBe(502)
+    expect(res.body).toMatchObject({ detail: 'listen EADDRINUSE 9399' })
+    expect(res.body.error).toContain('failed')
+  })
 })

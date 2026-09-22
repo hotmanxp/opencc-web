@@ -19,13 +19,13 @@
  *   - 那个模块:跑在**专用实例**上,负责"把这个通道连起来"。
  *   两者都只在受管进程里生效。
  */
-import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isManagedChild } from '../../../cli/managedChild.js'
 import { WeixinBotSettingsSchema, type WeixinBotSettings } from '../../../shared/weixin.js'
 import { getInstanceSupervisor } from '../instanceSupervisor.js'
 import { readZaiSettings } from '../zaiSettingsStore.js'
 import { isWeixinChannelHost, DEFAULT_WEIXIN_INSTANCE_PORT, WEIXIN_CHANNEL_PROFILE } from './channelProfile.js'
+import { isValidDir } from './cwdValidity.js'
 import { weixinDiag } from './debug.js'
 import { WeixinOwnerLock } from './WeixinOwnerLock.js'
 
@@ -39,7 +39,10 @@ export interface DedicatedInstanceSnapshot {
   id: string
   name: string
   state: string
+  /** 运行端口(child 实际绑定的那个),未运行时为 null。 */
   port: number | null
+  /** 定义上固定的启动端口 —— 与 settings 对齐时比的是它,不是运行端口。 */
+  startPort: number | null
   pid: number | null
   cwd: string
   lastError: string | null
@@ -105,6 +108,7 @@ export function findDedicatedInstance(): DedicatedInstanceSnapshot | null {
       name: snap.name,
       state: snap.state,
       port: snap.port,
+      startPort: snap.startPort ?? null,
       pid: snap.pid,
       cwd: snap.cwd,
       lastError: snap.lastError?.message ?? null,
@@ -113,6 +117,33 @@ export function findDedicatedInstance(): DedicatedInstanceSnapshot | null {
     // instanceSupervisor 未初始化(instance child / 早期启动) → 视为"没有"。
     return null
   }
+}
+
+/**
+ * 把当前 settings 的编排参数(cwd / 端口)对齐到**已有实例定义**上。
+ *
+ * 为什么必须显式对齐:`InstanceSupervisor` 的 `def.cwd` / `def.startPort` 只在
+ * `createInstance` 那一刻写盘,`startInstance` / `restartInstance` 都不改写它们
+ * —— `doStart` 启动子进程时直接读 `entry.def.cwd`(instanceSupervisor.ts)。所以
+ * 面板改了工作目录/端口后即使重启专用实例,子进程仍然落在旧目录、绑旧端口上,
+ * 表现为「配置了工作目录但没生效」。这里在启动前把差异 patch 回定义。
+ *
+ * 只 patch 真正变化的字段:`updateInstance` 对空 patch 会抛 `INVALID_STATE`,而且
+ * 无变化时的写入会白白 persist + emit 一次。
+ *
+ * 比的是定义上的 `startPort` 而非运行态 `port` —— 后者在实例停止/自动扫描时是
+ * null,拿它对比会每次都判为"变了"。
+ */
+async function syncDedicatedDefinition(
+  supervisor: ReturnType<typeof getInstanceSupervisor>,
+  existing: { id: string; cwd: string; startPort?: number | null },
+  want: { cwd: string; port: number },
+): Promise<void> {
+  const patch: { cwd?: string; port?: number } = {}
+  if (existing.cwd !== want.cwd) patch.cwd = want.cwd
+  if ((existing.startPort ?? null) !== want.port) patch.port = want.port
+  if (Object.keys(patch).length === 0) return
+  await supervisor.updateInstance(existing.id, patch)
 }
 
 /**
@@ -146,7 +177,7 @@ export async function provisionDedicatedInstance(opts: { force: boolean }): Prom
     }
   }
 
-  if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
+  if (!isValidDir(cwd)) {
     return { attempted: false, reason: 'invalid_cwd', detail: cwd }
   }
 
@@ -163,8 +194,10 @@ export async function provisionDedicatedInstance(opts: { force: boolean }): Prom
       if (existing.state === 'running' || existing.state === 'starting') {
         return { attempted: false, reason: 'already_running', instanceId: existing.id }
       }
-      // 复用定义:端口按当前 settings 覆盖(用户改端口后重启即生效)。
-      const started = await supervisor.startInstance(existing.id, { port })
+      // 复用定义:先把 settings 里的 cwd / 端口写回定义(用户改完保存即可
+      // 通过后续启动生效),再按定义启动。
+      await syncDedicatedDefinition(supervisor, existing, { cwd, port })
+      const started = await supervisor.startInstance(existing.id)
       return { attempted: true, reason: 'started', instanceId: started.id }
     }
     const created = await supervisor.createInstance({
@@ -195,8 +228,10 @@ export async function maybeProvisionWeixinInstance(): Promise<ProvisionResult> {
         `[weixin.instance] ${result.reason} dedicated instance ${result.instanceId ?? ''} ` +
           `(channel now owned by an app=weixin instance)`,
       )
-    } else if (result.reason === 'failed') {
-      console.warn(`[weixin.instance] provisioning failed: ${result.detail ?? 'unknown error'}`)
+    } else if (result.reason === 'failed' || result.reason === 'invalid_cwd') {
+      // `invalid_cwd` 也走 warning:配置的工作目录不存在时专用实例根本起不来,
+      // 静默会让用户以为"机器人没反应"是网络问题。
+      console.warn(`[weixin.instance] provisioning ${result.reason}: ${result.detail ?? 'unknown error'}`)
     }
     return result
   } catch (err) {
@@ -214,12 +249,16 @@ export async function ensureDedicatedInstance(): Promise<ProvisionResult> {
 }
 
 /**
- * 重启专用实例,让它在启动时重新读 `accounts/<id>.json` 拿到最新凭据。
+ * 重启专用实例,让它在启动时重新读 `accounts/<id>.json` 拿到最新凭据,
+ * 并把 settings 里的编排参数(工作目录 / 端口)重新对齐到实例定义。
  *
- * 用在「扫码登录刚完成」这条路径上:QR 凭据由主实例写入 accounts/,而真正
- * 连通道的专用实例是另一个进程 —— 它只在启动时读一次凭据,所以必须重启
- * 才能用上新 token(否则表现为"扫码成功但收不到消息,要手动重启服务")。
- * 首次扫码时没有在途消息,重启的代价可以接受。
+ * 用在两条路径上:
+ *   1) 面板保存设置(`PUT /api/weixin/settings`)—— 这是「改完保存即生效」的
+ *      唯一实现点,靠上面的 `syncDedicatedDefinition` 把新 cwd / 端口写回定义,
+ *      否则重启只会用旧定义再起一遍(历史 bug:面板显示新目录、实例仍在旧目录);
+ *   2) 扫码登录刚完成:QR 凭据由主实例写入 accounts/,而真正连通道的专用实例
+ *      是另一个进程 —— 它只在启动时读一次凭据,所以必须重启才能用上新 token
+ *      (否则表现为"扫码成功但收不到消息,要手动重启服务")。
  *
  * 实例不存在时退化为常规拉起。
  */
@@ -233,7 +272,18 @@ export async function restartDedicatedInstance(): Promise<ProvisionResult> {
   }
   const existing = supervisor.getSnapshots().find((s) => s.app === WEIXIN_CHANNEL_PROFILE)
   if (!existing) return provisionDedicatedInstance({ force: true })
+
+  const wb = await readWeixinBotSettings()
+  const cwd = resolveDedicatedCwd(wb?.instanceCwd)
+  const port = wb?.instancePort ?? DEFAULT_WEIXIN_INSTANCE_PORT
+  // 目录不存在时**不**写进定义:宁可保留旧 cwd 让它继续跑,也不要让定义指向一个
+  // 起不来的目录(那会把正在收消息的实例打成 down)。错误如实回报给调用方。
+  if (!isValidDir(cwd)) {
+    return { attempted: false, reason: 'invalid_cwd', instanceId: existing.id, detail: cwd }
+  }
+
   try {
+    await syncDedicatedDefinition(supervisor, existing, { cwd, port })
     const snap =
       existing.state === 'running' || existing.state === 'starting'
         ? await supervisor.restartInstance(existing.id)

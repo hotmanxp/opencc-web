@@ -219,9 +219,21 @@ router.put('/settings', async (req: Request, res: Response) => {
     } else if (parsed.data.enabled === false) {
       await stopDedicatedInstance()
     } else if (findDedicatedInstance()) {
-      // 改的是通道行为参数 —— 专用实例只在启动时读 settings,重启才生效。
+      // 改的是编排参数(cwd / 端口)或通道行为参数 —— 专用实例只在启动时读
+      // settings,重启才生效(重启前会把 cwd / 端口对齐进实例定义)。
       // 实例不存在时不为了改配置凭空拉起一个(那是 enabled 开关的职责)。
-      await restartDedicatedInstance()
+      const result = await restartDedicatedInstance()
+      // 配置已落盘但专用实例没跟上时必须报错 —— 否则面板弹「已保存」而实例还
+      // 在旧目录/旧端口上跑,用户只能靠肉眼比对实例卡片才发现没生效。
+      // 不回收已写入的 settings:保留用户输入(他改的是路径拼写,回滚会丢掉)。
+      if (!result.attempted && (result.reason === 'invalid_cwd' || result.reason === 'failed')) {
+        res.status(result.reason === 'invalid_cwd' ? 400 : 502).json({
+          error: result.reason === 'invalid_cwd' ? 'invalid_cwd' : 'failed to restart the dedicated weixin instance',
+          detail: result.detail,
+          reason: result.reason,
+        })
+        return
+      }
     }
     res.json(await statusPayload())
   } catch (err) {

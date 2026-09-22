@@ -476,6 +476,24 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(fakeChildren).toHaveLength(2)
     expect(spawnArgs[1]![spawnArgs[1]!.indexOf('--port') + 1]).toBe('9201')
   })
+
+  // PATCH 改 def.cwd 后,下一次 start 在**新目录**里 spawn。
+  // 这是微信面板「工作目录保存后不生效」的底层契约(见 weixinDedicatedInstance)。
+  it('updateInstance({cwd}) persists, next restart spawns in the new cwd', async () => {
+    const { deps, fakeChildren, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9201 })
+    expect(spawnOptions[0]!.cwd).toBe('/tmp/x')
+    const patched = await getInstanceSupervisor().updateInstance(snap.id, { cwd: '/tmp/y' })
+    expect(patched.cwd).toBe('/tmp/y')
+    // 运行中的子进程保持旧 cwd,定义已改 —— cwd 在下一次 start 才生效。
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(spawnOptions[1]!.cwd).toBe('/tmp/y')
+  })
 })
 
 describe('instanceSupervisor (4b — heartbeat + shutdown)', () => {
