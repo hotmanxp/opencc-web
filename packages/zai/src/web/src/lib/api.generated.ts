@@ -19,6 +19,14 @@ export const api = {
       post: (body: _Map["POST /api/agent/sessions"]['request']) => request<_Map["POST /api/agent/sessions"]['response']>("POST", "/api/agent/sessions", body),
     },
   },
+  mcp: {
+    reconnect: {
+      post: (body: _Map["POST /api/mcp/reconnect"]['request']) => request<_Map["POST /api/mcp/reconnect"]['response']>("POST", "/api/mcp/reconnect", body),
+    },
+    status: {
+      get: () => request<_Map["GET /api/mcp/status"]['response']>("GET", "/api/mcp/status"),
+    },
+  },
   weixin: {
     setup: {
       cancel: {

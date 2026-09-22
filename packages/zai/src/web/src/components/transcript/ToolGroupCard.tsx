@@ -36,7 +36,7 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
     // 不再抢占 LLM 文字气泡的浅绿 (#f6ffed) 视觉.
     <Card
       size="small"
-      className="mb-2 mr-5 rounded-xl"
+      className="tool-group-card mb-2 mr-5 rounded-xl"
       style={{
         // 减去与 LLM 气泡相同的 marginRight(20), 让卡片实际渲染宽度
         // 与 #f6ffed 文字气泡一致, 而不是被 100% + 20px marginRight

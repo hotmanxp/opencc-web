@@ -11,6 +11,9 @@ export const STORAGE_KEYS = {
   // 2026-07-26+: 移动端常用指令 Drawer 的本地 prompt 片段持久化。
   // 独立命名空间避开既有 zai.splitPane.* / zai.app.* 前缀。
   quickPrompts: 'zai.quickPrompts.v1',
+  // 2026-09-22: 分屏 Bash 面板当前选中的终端 tab id。终端本身由服务端按
+  // sessionId 持有（GET /api/terminal/list 是恢复真相），这里只记"看哪个"。
+  terminalTab: 'zai.splitPane.terminalTab',
 } as const;
 
 // 宽度单位从 px 改成 vw (viewport width 百分比), 跟随窗口宽度变化, 窄屏

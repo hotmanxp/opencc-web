@@ -36,7 +36,8 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
-      "rolldown"
+      "rolldown",
+      "node-pty"
     ]
   }
 }

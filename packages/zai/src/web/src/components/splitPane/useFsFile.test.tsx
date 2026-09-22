@@ -121,6 +121,40 @@ describe('useFsFile', () => {
     expect(result.current.error).toBeNull();
   });
 
+  // 文档类(2026-09-21):docx/sheet/ppt/pdf 不再是 binary,preflight 必须放行
+  // —— 拦掉的话请求根本发不出去,预览区永远显示"不支持的文件类型",而它们
+  // 恰恰是本次新增的能力。
+  test.each(['report.docx', 'book.xlsx', 'deck.pptx', 'paper.pdf', 'old.doc', 'rows.csv'])(
+    'preflight lets %s through to /fs/file',
+    async (name) => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            ok: true,
+            kind: 'pdf',
+            path: `/repo/${name}`,
+            name,
+            size: 10,
+            mtime: 0,
+          }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const { result, rerender } = renderHook(
+        ({ cwd, path }: { cwd: string | null; path: string | null }) =>
+          useFsFile(cwd, path),
+        { initialProps: { cwd: '/repo' as string | null, path: null as string | null } },
+      );
+      rerender({ cwd: '/repo', path: name });
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.current.error).toBeNull();
+    },
+  );
+
   // Dotfiles (.npmrc / .gitignore / .env ...) bypass the extension
   // allow-list on the server (TEXT_EXTS does include '.gitignore' /
   // '.env', but not arbitrary dotfiles). Match the server behaviour:

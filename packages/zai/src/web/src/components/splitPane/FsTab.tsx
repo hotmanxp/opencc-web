@@ -11,6 +11,8 @@ import { FsSearchList } from './FsSearchList.js';
 import { FsContentSearchList } from './FsContentSearchList.js';
 import type { FsFile, FilePreviewPayload } from '../../../shared/fs.js';
 import { classifyKind } from '@shared/fileKind';
+import { isDocumentPreviewKind } from '../desktop/FilePreviewBody.js';
+import { DocumentPreview } from '../documentPreview/index.js';
 import { useAgentStore } from '../../store/useAgentStore.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
@@ -210,9 +212,12 @@ export function buildAbsPath(cwd: string | null, relPath: string): string {
 async function fileToPreviewPayload(f: File): Promise<FilePreviewPayload> {
   const kind = classifyKind(f.name);
   const base = { path: f.name, size: f.size, mtime: f.lastModified };
-  if (kind === 'binary') {
+  // 文档类(2026-09-21)在「系统拖入」这条路上拿不到绝对路径(浏览器不给
+  // File.path),而 DocumentPreview 取字节必须走 /api/fs/raw 的绝对路径 ——
+  // 所以退化成 binary 提示,而不是渲染一个必然 400 的文档预览。
+  if (kind === 'binary' || isDocumentPreviewKind(kind)) {
     const idx = f.name.lastIndexOf('.');
-    return { ...base, kind, ext: idx > 0 ? f.name.slice(idx).toLowerCase() : undefined };
+    return { ...base, kind: 'binary', ext: idx > 0 ? f.name.slice(idx).toLowerCase() : undefined };
   }
   if (kind === 'image') {
     const dataUrl = await new Promise<string>((res, rej) => {
@@ -338,6 +343,23 @@ function FilePreview({
   // toggle (driven by the Segmented control in the header).
   if (file.kind === 'html' && file.dataUrl) {
     return <HtmlPreview dataUrl={file.dataUrl} name={name} mode={htmlMode} />;
+  }
+
+  // 文档类(2026-09-21):/fs/file 只回了元数据({kind, path, size}),
+  // 字节由 DocumentPreview 自己走 /api/fs/raw。渲染器只实现一次 —— 与
+  // 对话抽屉 / 桌面预览共用 components/documentPreview。
+  //
+  // 注意:这个分支必须在**所有 hooks 之后**(与 image/html 分支同理),
+  // 提前 return 会破环 rules-of-hooks。
+  if (isDocumentPreviewKind(file.kind)) {
+    return (
+      // 用字面量而不是下面的 CONTAINER_CLASS:那个常量在 image/html 分支之后
+      // 才声明,在这里引用会踩 TDZ。overflow-hidden(不是 auto)—— 文档渲染器
+      // 各自管自己的滚动容器。
+      <div data-testid="fs-preview-document" className="flex-1 min-h-0 overflow-hidden rounded-md">
+        <DocumentPreview path={file.path ?? name ?? ''} kind={file.kind} />
+      </div>
+    );
   }
 
   const CONTAINER_CLASS = 'flex-1 min-h-0 overflow-auto rounded-md';
@@ -605,6 +627,9 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   // appear for unrelated file types.
   const showHtmlToggle =
     !!file.data && file.data.kind === 'html' && !!file.data.dataUrl;
+  // 当前文件是否文档类(docx/sheet/ppt/pdf/legacy-office)—— 决定预览区
+  // 是否套用文本预览的 p-3 + 等宽字体外框。
+  const activeIsDocument = !!file.data && isDocumentPreviewKind(file.data.kind);
 
   // Edit-mode state.
   const { save: saveFile, saving } = useFsWrite();
@@ -1022,7 +1047,13 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         ) : (
           <div
             data-testid="fs-preview"
-            className="h-full flex flex-col p-3 overflow-hidden font-mono text-xs"
+            className={
+              // 文档类由 DocxRenderer/SheetRenderer 等自带内边距与正文字体,
+              // 继承 fs-preview 的 p-3 + font-mono 会让表格/正文错位。
+              activeIsDocument
+                ? 'h-full flex flex-col overflow-hidden text-xs'
+                : 'h-full flex flex-col p-3 overflow-hidden font-mono text-xs'
+            }
           >
             {file.loading ? (
               <div className="text-center p-6">
@@ -1038,7 +1069,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 onSave={(newContent) => void handleSave(editingPath, newContent)}
                 onCancel={handleCancel}
               />
-            ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html') ? (
+            ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html' || isDocumentPreviewKind(file.data.kind)) ? (
               <FilePreviewMemo file={file.data} htmlMode={htmlMode} pendingLine={pendingLine} />
             ) : (
               <Empty description="没有内容" />

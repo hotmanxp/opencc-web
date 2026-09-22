@@ -20,6 +20,12 @@ export const OFFICE_MAIN_AGENT_NAME = 'office'
  * 注意:值是工具实例的真实 `name`(与类名不同,BashTool.name === 'Bash')。
  * WebSearch 与 Task v2(TaskCreate/TaskGet/TaskUpdate/TaskList)办公信息检索
  * 与任务管理需要;WebFetch 因抓取整页成本高且办公场景较少直接需求,不开放。
+ *
+ * MCP 工具(`mcp__<server>__<tool>`)**不在**该白名单里,而是在下方 tools 槽
+ * 显式放行所有 `mcp__*` 前缀(与 weixin-bot 同一约定,2026-09-22)。理由:
+ * MCP server 启不启动已在更上游决定(`isComputerUseEnabled()` 三道门 +
+ * `requiredMcpServers` / `disabledMcpServers` 等),白名单再写死 server 名会让
+ * "用户开了 Computer Use 但办公助手里看不到工具"这种隐形 bug 难定位。
  */
 const OFFICE_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
   'Read', // FileReadTool
@@ -95,5 +101,14 @@ export const officeMainAgent: MainAgentConfig = {
     'Office 办公助手 —— 文档、表格、邮件和日常办公任务,工具集精简',
   systemPrompt: (origin) => [OFFICE_SYSTEM_PROMPT, ...stripCodingSections(origin)],
   tools: (origin) =>
-    origin.filter((tool: Tool) => OFFICE_TOOL_ALLOWLIST.has(tool.name)),
+    origin.filter((tool: Tool) => {
+      const name = String(tool.name)
+      // 内置白名单(办公场景必需)
+      if (OFFICE_TOOL_ALLOWLIST.has(name)) return true
+      // MCP 工具全放行:防御性 gate 已在更上游判定(platform / settings /
+      // env / requiredMcpServers / disabledMcpServers / enterprise policy),
+      // 这里只放行,不二次过滤。
+      if (name.startsWith('mcp__')) return true
+      return false
+    }),
 }

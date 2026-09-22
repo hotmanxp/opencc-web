@@ -1,201 +1,234 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { AutoComplete, Input } from 'antd'
-import { useBashRepl } from '../../hooks/useBashRepl.js'
-import type { ReplEvent } from '../../../shared/repl.js'
-import { AnsiText } from '../toolRenderers/ansi.js'
+import { useState } from 'react'
+import { Button, Dropdown, Input, Spin } from 'antd'
+import { PlusIcon, TerminalIcon, XIcon } from 'lucide-react'
+import type { WebTerminalInfo } from '../../../../shared/terminal.js'
+import { useTerminalTabs } from '../../hooks/useTerminalTabs.js'
+import { TerminalView } from './TerminalView.js'
+
+/**
+ * 分屏 Bash 面板 = 多终端 tab 宿主。
+ *
+ * 2026-09-22 起从「输入框 + 输出流」的 REPL 换成持久 PTY 终端（xterm.js）：
+ * shell 状态（export / alias / 函数）与 CWD 跨命令保持，真 TTY 支持 vim/htop
+ * 这类全屏程序。命令历史 / 移动端快捷 Bash 仍走 /api/bash-repl（见 spec 的
+ * Non-goals）。参考实现：deepseek-harness 侧栏终端（terminal-browser +
+ * ui-sidebar-terminal）。
+ */
 
 interface BashTabProps {
   sessionId: string | null
   cwd: string | null
 }
 
-type ExitLike = { code: number | null; signal: string | null }
-
-function fmtExitColor(ev: ExitLike): string {
-  if (ev.signal) return 'var(--text-dim-45)'
-  if (ev.code === 0) return '#52c41a'
-  return '#f59e0b'
+function statusLabel(info: WebTerminalInfo | null): string {
+  if (!info) return ''
+  if (info.state === 'running') return '● running'
+  if (info.state === 'failed') return '● failed'
+  return `● exited (exit ${info.exitCode ?? '—'})`
 }
 
-function fmtExitLabel(ev: ExitLike): string {
-  if (ev.signal) return `── ${ev.signal} ──`
-  return `── exit ${ev.code} ──`
-}
-
-// 渲染行：把同一 execId 同 kind(stdout/stderr) 的相邻 SSE chunk 合并成一行,
-// 避免 ANSI 转义序列被切到两个 chunk 中间导致解析错乱 / 跨 chunk 颜色丢失。
-type Row =
-  | { kind: 'stream'; streamKind: 'stdout' | 'stderr'; execId: string; text: string }
-  | { kind: 'error'; execId: string; message: string }
-  | { kind: 'exit'; execId: string; code: number | null; signal: string | null }
-
-function coalesceEvents(events: ReplEvent[]): Row[] {
-  const rows: Row[] = []
-  for (const ev of events) {
-    if (ev.kind === 'stdout' || ev.kind === 'stderr') {
-      const last = rows[rows.length - 1]
-      if (last && last.kind === 'stream' && last.execId === ev.execId && last.streamKind === ev.kind) {
-        last.text += ev.chunk
-      } else {
-        rows.push({ kind: 'stream', streamKind: ev.kind, execId: ev.execId, text: ev.chunk })
-      }
-    } else if (ev.kind === 'error') {
-      rows.push({ kind: 'error', execId: ev.execId, message: ev.message })
-    } else if (ev.kind === 'exit') {
-      rows.push({ kind: 'exit', execId: ev.execId, code: ev.code, signal: ev.signal })
-    }
-  }
-  return rows
+function statusColor(info: WebTerminalInfo | null): string {
+  if (!info) return 'var(--text-dim-45)'
+  if (info.state === 'running') return '#52c41a'
+  if (info.state === 'failed') return '#ef4444'
+  return 'var(--text-dim-55)'
 }
 
 export function BashTab({ sessionId, cwd }: BashTabProps) {
-  const { events, busy, exec, abort, topCommands } = useBashRepl(sessionId, cwd)
-  const [input, setInput] = useState('')
-  const outputRef = useRef<HTMLDivElement>(null)
+  const tabs = useTerminalTabs(sessionId, cwd)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
 
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight
-    }
-  }, [events])
+  const active = tabs.terminals.find((t) => t.id === tabs.activeId) ?? null
+  const busy = !tabs.ready
 
-  async function handleSubmit(command?: string) {
-    const cmd = (command ?? input).trim()
-    if (!cmd || !sessionId) return
-    setInput('')
-    await exec(cmd)
+  function startRename(info: WebTerminalInfo): void {
+    setRenamingId(info.id)
+    setRenameDraft(info.title)
   }
 
-  // AutoComplete options:把 topCommands 渲染成 { value, label }。
-  // 用本地 state(input)做 prefix 前端过滤 — 避免每次按键都打 server。
-  // plan §3.4 / 风险 5。
-  const autoOptions = useMemo(() => {
-    const prefix = input.trim()
-    const filtered = prefix
-      ? topCommands.filter((e) => e.command.startsWith(prefix))
-      : topCommands
-    return filtered.map((e) => ({
-      value: e.command,
-      // label 显示命令 + 频次,让用户一眼看出高频命令
-      label: (
-        <div className="flex justify-between gap-3">
-          <span className="font-mono">{e.command}</span>
-          <span className="text-[11px]" style={{ color: 'var(--text-dim-45)' }}>×{e.count}</span>
-        </div>
-      ),
-    }))
-  }, [topCommands, input])
+  async function commitRename(): Promise<void> {
+    const id = renamingId
+    const title = renameDraft
+    setRenamingId(null)
+    if (id) await tabs.rename(id, title)
+  }
+
+  function renderNewButton(): React.ReactNode {
+    const label = (
+      <button
+        type="button"
+        data-testid="terminal-new"
+        title="新建终端"
+        aria-label="新建终端"
+        className="flex h-6 w-6 cursor-pointer items-center justify-center rounded border-0 bg-transparent"
+        style={{ color: 'var(--text-dim-55)' }}
+        onClick={tabs.shells.length > 1 ? undefined : () => void tabs.create()}
+      >
+        <PlusIcon size={14} />
+      </button>
+    )
+    // 本机装了多个 shell 才给选择菜单；只有一个时直接新建，少一次点击。
+    if (tabs.shells.length <= 1) return label
+    return (
+      <Dropdown
+        trigger={['click']}
+        menu={{
+          items: tabs.shells.map((shell) => ({
+            key: shell.path,
+            label: shell.name,
+            onClick: () => void tabs.create(shell.path),
+          })),
+        }}
+      >
+        {label}
+      </Dropdown>
+    )
+  }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col">
       <div
-        className="flex items-center justify-between py-1.5 px-3 text-xs"
-        style={{
-          borderBottom: '1px solid var(--border-light)',
-          color: 'var(--text-dim-55)',
-        }}
+        className="flex items-center gap-1 px-2 py-1 text-xs"
+        style={{ borderBottom: '1px solid var(--border-light)' }}
+        data-testid="terminal-tabstrip"
       >
-        <span>
-          Bash · <span data-testid="bash-cwd">{cwd ?? '(无 cwd)'}</span>
-        </span>
-        <span style={{ color: busy ? '#a78bfa' : '#52c41a' }}>
-          {busy ? '● running' : '● idle'}
-        </span>
-      </div>
-
-      <div
-        ref={outputRef}
-        data-testid="bash-output"
-        className="flex-1 min-h-0 overflow-auto p-3 text-xs"
-        style={{
-          fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
-          lineHeight: 1.55,
-          color: 'var(--text-dim-85)',
-        }}
-      >
-        {events.length === 0 && (
-          <div style={{ color: 'var(--ui-text-dim)' }}>
-            在下方输入 bash 命令，按 Enter 执行
-          </div>
-        )}
-        {coalesceEvents(events).map((row, i) => {
-          if (row.kind === 'stream') {
-            // stderr 行：未着色的纯文本继承红色；AnsiText 渲染的带色 span 用内联样式覆盖。
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {tabs.terminals.map((info) => {
+            const isActive = info.id === tabs.activeId
             return (
               <div
-                key={`${row.execId}-${row.streamKind}-${i}`}
-                className="whitespace-pre-wrap"
-                style={row.streamKind === 'stderr' ? { color: '#ef4444' } : undefined}
+                key={info.id}
+                role="tab"
+                aria-selected={isActive}
+                data-testid={`terminal-chip-${info.id}`}
+                className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded px-2 py-1"
+                style={{
+                  background: isActive ? 'var(--bg-card-hover)' : 'transparent',
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-dim-55)',
+                }}
+                onClick={() => tabs.setActive(info.id)}
+                onDoubleClick={() => startRename(info)}
+                title={`${info.shell.path}${info.state === 'running' ? '' : ' (已退出)'} — 双击改名`}
               >
-                <AnsiText text={row.text} />
+                <TerminalIcon size={12} />
+                {renamingId === info.id ? (
+                  <Input
+                    size="small"
+                    autoFocus
+                    value={renameDraft}
+                    data-testid="terminal-rename-input"
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onPressEnter={() => void commitRename()}
+                    onBlur={() => void commitRename()}
+                    style={{ width: 96 }}
+                  />
+                ) : (
+                  <span className="max-w-[120px] truncate">{info.title}</span>
+                )}
+                {info.state !== 'running' && (
+                  <span style={{ color: 'var(--text-dim-45)' }}>·</span>
+                )}
+                <button
+                  type="button"
+                  data-testid={`terminal-chip-close-${info.id}`}
+                  title="关闭终端（会结束该 shell 进程）"
+                  aria-label={`关闭 ${info.title}`}
+                  className="flex h-4 w-4 cursor-pointer items-center justify-center rounded border-0 bg-transparent p-0"
+                  style={{ color: 'var(--text-dim-45)' }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void tabs.close(info.id)
+                  }}
+                >
+                  <XIcon size={11} />
+                </button>
               </div>
             )
-          }
-          if (row.kind === 'error') {
-            return (
-              <div key={`${row.execId}-err-${i}`} className="font-semibold" style={{ color: '#ef4444' }}>
-                ✗ {row.message}
-              </div>
-            )
-          }
-          if (row.kind === 'exit') {
-            return (
-              <div key={`${row.execId}-exit-${i}`} style={{ color: fmtExitColor(row) }}>
-                {fmtExitLabel(row)}
-              </div>
-            )
-          }
-          return null
-        })}
+          })}
+          {renderNewButton()}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-3 pl-2 pr-1">
+          <span style={{ color: 'var(--text-dim-55)' }}>
+            <span data-testid="bash-cwd">{cwd ?? '(无 cwd)'}</span>
+          </span>
+          {active && (
+            <span data-testid="terminal-status" style={{ color: statusColor(active) }}>
+              {statusLabel(active)}
+            </span>
+          )}
+        </div>
       </div>
 
-      <div
-        className="flex gap-2 p-2"
-        style={{ borderTop: '1px solid var(--border-light)' }}
-      >
-        <AutoComplete
-          className="flex-1"
-          options={autoOptions}
-          value={input}
-          disabled={busy}
-          // 仅聚焦时展开(plan §3.4 / 风险 3)
-          openOnFocus
-          // 输入时实时过滤(本地,不打 server)
-          onSearch={(text) => setInput(text)}
-          // 点选下拉项 → 直接 exec(value),清空 input。
-          // AntD AutoComplete 会同时把 value 写到 input;handleSubmit 这里显式传 value 即可。
-          onSelect={(value) => {
-            void handleSubmit(value)
-          }}
-          onChange={(value) => setInput(value)}
-          // 自定义 popup 渲染 — 不传 defaultActiveFirstOption,避免 Enter 误选第一条
-          popupMatchSelectWidth={360}
-          data-testid="bash-autocomplete"
-        >
-          <Input
-            placeholder="输入 bash 命令，按 Enter 执行（Shift+Enter 换行）"
-            onPressEnter={(e) => {
-              if (e.shiftKey) return
-              e.preventDefault()
-              void handleSubmit()
-            }}
-            data-testid="bash-input"
-          />
-        </AutoComplete>
-        {busy && (
-          <button
-            type="button"
-            onClick={() => void abort()}
-            data-testid="bash-abort"
-            className="px-3 rounded-md bg-transparent text-[13px] cursor-pointer"
-            style={{
-              border: '1px solid #ff4d4f',
-              color: '#ff4d4f',
-            }}
-          >
-            终止
-          </button>
+      <div className="relative min-h-0 flex-1" data-testid="terminal-body">
+        {!sessionId && (
+          <div className="p-3 text-xs" style={{ color: 'var(--ui-text-dim)' }}>
+            先选择一个会话，再打开终端
+          </div>
         )}
+
+        {sessionId && tabs.environment && !tabs.environment.available && (
+          <div className="p-3 text-xs" data-testid="terminal-unavailable">
+            <div style={{ color: 'var(--error)' }}>
+              终端不可用：{tabs.environment.unavailableReason ?? 'node-pty 未就绪'}
+            </div>
+            {tabs.environment.hint && (
+              <div className="mt-1" style={{ color: 'var(--text-dim-55)' }}>
+                {tabs.environment.hint}
+              </div>
+            )}
+          </div>
+        )}
+
+        {sessionId && tabs.error && (
+          <div className="p-3 text-xs" data-testid="terminal-error">
+            <div style={{ color: 'var(--error)' }}>{tabs.error}</div>
+            {tabs.errorHint && (
+              <div className="mt-1" style={{ color: 'var(--text-dim-55)' }}>
+                {tabs.errorHint}
+              </div>
+            )}
+            <Button size="small" className="mt-2" onClick={tabs.retry} data-testid="terminal-retry">
+              重试
+            </Button>
+          </div>
+        )}
+
+        {sessionId && busy && !tabs.error && (
+          <div className="flex h-full items-center justify-center">
+            <Spin size="small" />
+          </div>
+        )}
+
+        {sessionId && tabs.ready && !tabs.error && tabs.terminals.length === 0 && (
+          <div
+            className="flex h-full flex-col items-center justify-center gap-2 text-xs"
+            style={{ color: 'var(--text-dim-55)' }}
+            data-testid="terminal-empty"
+          >
+            <span>还没有终端</span>
+            <Button size="small" onClick={() => void tabs.create()}>
+              新建终端
+            </Button>
+          </div>
+        )}
+
+        {sessionId &&
+          tabs.terminals.map((info) => (
+            <div key={info.id} className={info.id === tabs.activeId ? 'h-full' : 'hidden'}>
+              <TerminalView
+                sessionId={sessionId}
+                info={info}
+                visible={info.id === tabs.activeId}
+                maxCols={tabs.environment?.maxCols ?? 500}
+                maxRows={tabs.environment?.maxRows ?? 200}
+                scrollback={tabs.environment?.scrollback ?? 1000}
+                onInfo={tabs.applyInfo}
+              />
+            </div>
+          ))}
       </div>
     </div>
   )

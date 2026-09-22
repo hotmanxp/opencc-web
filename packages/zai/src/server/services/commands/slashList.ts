@@ -1,5 +1,5 @@
 import { getCommandRegistry } from '@zn-ai/zn-agent-core'
-import { listSkills } from '../agentRuntime.js'
+import { listSkills, getRuntime } from '../agentRuntime.js'
 
 export interface SlashItem {
   kind: 'command' | 'skill'
@@ -114,6 +114,35 @@ export async function slashList(
       displayName: display.displayName,
       pluginName: display.pluginName,
     })
+  }
+
+  // 2c. MCP prompt 命令。vendor 把 MCP server 的 prompt 注册成
+  // `mcp__<server>__<prompt>`(client.ts:2132),但从不进 CommandRegistry
+  // ——它们只活在 appState.mcp.commands 里,所以上面三段扫不到。这里从
+  // runtime.mcp.getStatus() 读活状态补上,否则用户既搜不到也没法补全。
+  // 选中后按 `type: 'prompt'` 插入 `/mcp__x__y ` 当普通 prompt 发出去
+  // (AgentInputBox.tsx:725),由引擎的 commands 解析(引擎侧已改为每 turn
+  // 从 appState 实时读,见 createOpenccRuntime-impl.ts)。
+  // `pluginName` 复用为 server 名 —— 前端就是拿它渲染 `(xxx) description`
+  // 前缀,显示成 `(codegraph) 构建依赖图` 正合语义,不用改前端类型。
+  try {
+    const mcpStatus = getRuntime().mcp?.getStatus?.()
+    for (const mc of mcpStatus?.commands ?? []) {
+      items.push({
+        kind: 'command',
+        name: mc.name,
+        description: mc.description,
+        type: 'prompt',
+        ...(mc.argNames && mc.argNames.length > 0
+          ? { argumentHint: mc.argNames.join(' ') }
+          : {}),
+        isBuiltIn: false,
+        displayName: mc.displayName,
+        pluginName: mc.serverName || 'MCP',
+      })
+    }
+  } catch {
+    // runtime 未 init(单测 / 启动早期)—— MCP 命令为空即可,不影响其他项。
   }
 
   // 3. skills (走 service 层 listSkills)

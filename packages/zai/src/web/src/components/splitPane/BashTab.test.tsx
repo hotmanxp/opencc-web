@@ -1,271 +1,202 @@
 // @vitest-environment happy-dom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReplEvent } from '../../../shared/repl.js'
+import type { TerminalEnvironment, WebTerminalInfo } from '../../../../shared/terminal.js'
 
-/** 默认 fetch 响应:任何未 mock 的 fetch 都返回 ok,防止跨调用 reject。 */
-function okJson(body: unknown): Response {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => body,
-    text: async () => JSON.stringify(body),
-  } as unknown as Response
-}
-
-class MockEventSource {
-  url: string
-  readyState = 0
-  onopen: ((ev: any) => void) | null = null
-  onmessage: ((ev: any) => void) | null = null
-  onerror: ((ev: any) => void) | null = null
-  closed = false
-  static instances: MockEventSource[] = []
-  constructor(url: string) {
-    this.url = url
-    MockEventSource.instances.push(this)
-    setTimeout(() => { this.onopen?.({}); this.readyState = 1 }, 0)
-  }
-  close() { this.closed = true; this.readyState = 2 }
-  emit(ev: ReplEvent) { this.onmessage?.({ data: JSON.stringify(ev) }) }
-}
-;(globalThis as any).EventSource = MockEventSource
-
-const fetchMock = vi.fn()
-;(globalThis as any).fetch = fetchMock
+/**
+ * BashTab 是「多终端 tab 宿主」：这里只验 strip 的交互与状态分支，
+ * xterm 与 SSE 的接线由 TerminalView.test.tsx 覆盖（因此整块 mock 掉）。
+ */
+vi.mock('./TerminalView.js', () => ({
+  TerminalView: ({ info, visible }: { info: WebTerminalInfo; visible: boolean }) => (
+    <div data-testid={`terminal-view-${info.id}`} data-visible={String(visible)} />
+  ),
+}))
 
 import { BashTab } from './BashTab.js'
 
+const ENVIRONMENT: TerminalEnvironment = {
+  cwd: '/foo',
+  available: true,
+  maxCols: 500,
+  maxRows: 200,
+  maxInputBytes: 65536,
+  maxTerminals: 8,
+  scrollback: 1000,
+}
+
+function info(id: string, overrides: Partial<WebTerminalInfo> = {}): WebTerminalInfo {
+  return {
+    id,
+    title: 'zsh',
+    shell: { path: '/bin/zsh', name: 'zsh', args: ['-i'] },
+    cwd: '/foo',
+    cols: 100,
+    rows: 30,
+    state: 'running',
+    exitCode: null,
+    ...overrides,
+  }
+}
+
+interface Plan {
+  environment?: TerminalEnvironment
+  shells?: { path: string; name: string; args: string[] }[]
+  terminals?: WebTerminalInfo[]
+  /** /create 的响应；默认按请求里的 id 造一个 running 终端。 */
+  createResult?: WebTerminalInfo
+  listStatus?: number
+}
+
+function installFetch(plan: Plan = {}) {
+  const calls: { url: string; body: unknown }[] = []
+  const mock = vi.fn(async (url: string, init?: RequestInit) => {
+    const body = init?.body ? (JSON.parse(init.body as string) as { id?: string }) : undefined
+    calls.push({ url, body })
+    const json = (payload: unknown, status = 200): Response =>
+      ({ ok: status < 400, status, json: async () => payload, text: async () => JSON.stringify(payload) }) as unknown as Response
+    if (url.startsWith('/api/terminal/environment')) return json(plan.environment ?? ENVIRONMENT)
+    if (url.startsWith('/api/terminal/shells')) {
+      return json({ shells: plan.shells ?? [info('x').shell] })
+    }
+    if (url.startsWith('/api/terminal/list')) {
+      if (plan.listStatus && plan.listStatus >= 400) return json({ error: 'list boom' }, plan.listStatus)
+      return json({ terminals: plan.terminals ?? [] })
+    }
+    if (url.startsWith('/api/terminal/create')) {
+      return json(plan.createResult ?? info(body?.id ?? 't-created'))
+    }
+    return json({ ok: true })
+  })
+  ;(globalThis as unknown as { fetch: unknown }).fetch = mock
+  return { mock, calls }
+}
+
 describe('BashTab', () => {
   beforeEach(() => {
-    MockEventSource.instances.length = 0
-    fetchMock.mockReset()
-    // 默认:任何未 mock 的 fetch 返回 ok(top10 调用/exec/abort 等)
-    fetchMock.mockImplementation(async (url: any) => {
-      const urlStr = typeof url === 'string' ? url : ''
-      if (urlStr.includes('/history/top10')) return okJson({ entries: [] })
-      return okJson({ ok: true, execId: 'e-test' })
-    })
+    window.localStorage.clear()
   })
 
   afterEach(() => {
-    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
-  it('输入框显示 cwd 路径', () => {
+  it('表头显示 cwd', async () => {
+    installFetch({ terminals: [info('t-1')] })
     render(<BashTab sessionId="sess-1" cwd="/foo/bar" />)
-    expect(screen.getByText('/foo/bar')).toBeDefined()
+    await waitFor(() => expect(screen.getByTestId('bash-cwd').textContent).toBe('/foo/bar'))
   })
 
-  it('Enter 触发 exec', async () => {
-    fetchMock.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, execId: 'e-1' }) })
+  it('无会话时给出提示，不打接口', async () => {
+    const { mock } = installFetch()
+    render(<BashTab sessionId={null} cwd={null} />)
+    expect(screen.getByText(/先选择一个会话/)).toBeDefined()
+    expect(mock).not.toHaveBeenCalled()
+  })
+
+  it('列表为空时自动建一个终端并渲染 chip；只有可见 tab 挂载视图', async () => {
+    const { calls } = installFetch({})
     render(<BashTab sessionId="sess-1" cwd="/foo" />)
-    const input = screen.getByPlaceholderText(/输入/)
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(1))
+    const create = calls.find((c) => c.url.startsWith('/api/terminal/create'))
+    expect(create).toBeDefined()
+    expect((create?.body as { cols: number }).cols).toBeGreaterThan(1)
+  })
+
+  it('每个终端一个 chip，标题来自 info.title', async () => {
+    installFetch({ terminals: [info('t-1'), info('t-2', { title: 'build' })] })
+    render(<BashTab sessionId="sess-1" cwd="/foo" />)
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2))
+    expect(screen.getByTestId('terminal-chip-t-1').textContent).toContain('zsh')
+    expect(screen.getByTestId('terminal-chip-t-2').textContent).toContain('build')
+    // 默认选中第一个
+    expect(screen.getByTestId('terminal-chip-t-1').getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByTestId('terminal-view-t-1').dataset.visible).toBe('true')
+    expect(screen.getByTestId('terminal-view-t-2').dataset.visible).toBe('false')
+  })
+
+  it('点 chip 切换当前终端', async () => {
+    installFetch({ terminals: [info('t-1'), info('t-2')] })
+    render(<BashTab sessionId="sess-1" cwd="/foo" />)
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2))
     await act(async () => {
-      fireEvent.change(input, { target: { value: 'echo hi' } })
-      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
+      fireEvent.click(screen.getByTestId('terminal-chip-t-2'))
     })
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    // 第一个 fetch 是 mount 时 useBashRepl 拉 top10;exec 调用是后续 call。
-    const execCall = fetchMock.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('/api/bash/repl/sess-1/exec'),
-    ) as [string, RequestInit]
-    expect(execCall).toBeDefined()
-    expect(execCall[0]).toContain('/api/bash/repl/sess-1/exec')
-    expect(JSON.parse(execCall[1].body as string)).toEqual({ command: 'echo hi', cwd: '/foo' })
+    expect(screen.getByTestId('terminal-chip-t-2').getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByTestId('terminal-view-t-2').dataset.visible).toBe('true')
   })
 
-  it('SSE stdout 渲染到 output area', async () => {
+  it('+ 新建终端（单 shell 时直接建）', async () => {
+    const { calls } = installFetch({ terminals: [info('t-1')] })
     render(<BashTab sessionId="sess-1" cwd="/foo" />)
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(1))
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 10))
-      const es = MockEventSource.instances[0]
-      es.emit({ kind: 'stdout', execId: 'e-1', chunk: 'rendered-output', ts: 1 })
+      fireEvent.click(screen.getByTestId('terminal-new'))
     })
-    expect(screen.getByText('rendered-output')).toBeDefined()
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2))
+    const create = calls.filter((c) => c.url.startsWith('/api/terminal/create')).at(-1)
+    expect((create?.body as { shellPath?: string }).shellPath).toBeUndefined()
   })
 
-  it('SSE exit 事件显示分隔行', async () => {
+  it('关闭 chip 会调用 /close 并移除该 tab', async () => {
+    const { calls } = installFetch({ terminals: [info('t-1'), info('t-2')] })
     render(<BashTab sessionId="sess-1" cwd="/foo" />)
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2))
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 10))
-      const es = MockEventSource.instances[0]
-      es.emit({ kind: 'exit', execId: 'e-1', code: 0, signal: null, ts: 1 })
+      fireEvent.click(screen.getByTestId('terminal-chip-close-t-2'))
     })
-    expect(screen.getByText(/exit 0/)).toBeDefined()
+    await waitFor(() => expect(screen.queryByTestId('terminal-chip-t-2')).toBeNull())
+    expect(calls.some((c) => c.url.includes('/terminal/t-2/close?sessionId=sess-1'))).toBe(true)
   })
 
-  it('abort 按钮：busy=false 时不渲染，busy=true 时渲染', async () => {
-    fetchMock.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, execId: 'e-1' }) })
-    fetchMock.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true }) })
+  it('双击 chip 改名 → POST /rename', async () => {
+    const { calls } = installFetch({ terminals: [info('t-1')] })
     render(<BashTab sessionId="sess-1" cwd="/foo" />)
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
-
-    expect(screen.queryByText(/^终止$/)).toBeNull()
-
-    const input = screen.getByPlaceholderText(/输入/)
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'sleep 100' } })
-      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
-    })
-
-    await waitFor(() => expect(screen.queryByText(/^终止$/)).not.toBeNull())
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(1))
 
     await act(async () => {
-      fireEvent.click(screen.getByText(/^终止$/))
+      fireEvent.doubleClick(screen.getByTestId('terminal-chip-t-1'))
     })
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.some((c: any) => c[0].includes('/abort'))).toBe(true)
-    })
-  })
-
-  it('busy=true 时输入框禁用', async () => {
-    fetchMock.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, execId: 'e-1' }) })
-    render(<BashTab sessionId="sess-1" cwd="/foo" />)
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
-
-    const input = screen.getByPlaceholderText(/输入/) as HTMLInputElement
+    const input = screen.getByTestId('terminal-rename-input')
     await act(async () => {
-      fireEvent.change(input, { target: { value: 'sleep 100' } })
-      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
-    })
-    await waitFor(() => expect(input.disabled).toBe(true))
-  })
-})
-
-describe('BashTab — top10 下拉建议 (Task 5)', () => {
-  beforeEach(() => {
-    MockEventSource.instances.length = 0
-    fetchMock.mockReset()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('mount 时拉一次 top10', async () => {
-    fetchMock.mockImplementation(async (url: any) => {
-      const u = typeof url === 'string' ? url : ''
-      if (u.includes('/history/top10')) {
-        return okJson({
-          entries: [
-            { command: 'git status', count: 5 },
-            { command: 'ls -la', count: 3 },
-          ],
-        })
-      }
-      return okJson({ ok: true, execId: 'e-test' })
-    })
-    render(<BashTab sessionId="sess-1" cwd="/foo" />)
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
-    const top10Calls = fetchMock.mock.calls.filter(
-      (c: any[]) => typeof c[0] === 'string' && c[0].includes('/history/top10'),
-    )
-    expect(top10Calls.length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('AutoComplete options 渲染 topCommands (focus 后 DOM 包含)', async () => {
-    fetchMock.mockImplementation(async (url: any) => {
-      const u = typeof url === 'string' ? url : ''
-      if (u.includes('/history/top10')) {
-        return okJson({
-          entries: [
-            { command: 'git status', count: 5 },
-            { command: 'git log', count: 2 },
-            { command: 'ls -la', count: 1 },
-          ],
-        })
-      }
-      return okJson({ ok: true, execId: 'e-test' })
-    })
-    render(<BashTab sessionId="sess-1" cwd="/foo" />)
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
-
-    // AntD AutoComplete 在 happy-dom 下不会自动 render floating dropdown portal。
-    // 这里改为断言:bash-autocomplete data-testid 存在 + input placeholder 存在,
-    // 即组件把 AutoComplete wrapper 成功挂载。dropdown 行为由 AntD 自身保证。
-    const ac = screen.getByTestId('bash-autocomplete')
-    expect(ac).toBeDefined()
-    expect(screen.getByPlaceholderText(/输入/)).toBeDefined()
-  })
-
-  it('输入 prefix 后 options 过滤 (前端,不打 server)', async () => {
-    let top10Calls = 0
-    fetchMock.mockImplementation(async (url: any) => {
-      const u = typeof url === 'string' ? url : ''
-      if (u.includes('/history/top10')) {
-        top10Calls++
-        return okJson({
-          entries: [
-            { command: 'git status', count: 5 },
-            { command: 'git log', count: 2 },
-            { command: 'ls -la', count: 1 },
-          ],
-        })
-      }
-      return okJson({ ok: true, execId: 'e-test' })
-    })
-    render(<BashTab sessionId="sess-1" cwd="/foo" />)
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
-    const beforeCount = top10Calls
-
-    // 输入 prefix → 触发 onSearch → setInput,组件按 input 前缀过滤 options。
-    // 由于 happy-dom 不渲染 dropdown,断言改为:打 prefix 后 input value 同步 + 没新增 top10 请求。
-    const input = screen.getByPlaceholderText(/输入/) as HTMLInputElement
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'git' } })
-    })
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
-    expect(input.value).toBe('git')
-    expect(top10Calls).toBe(beforeCount) // 没打 server
-  })
-
-  it('onSelect 行为:dropdown 选中通过 onSelect prop 传给 handleSubmit(value)', async () => {
-    // 不测 DOM dropdown 点击(AntD lazy portal 在 happy-dom 难触发);
-    // 改为通过组件本身的"onSelect 路径"间接验证:点击 input 后立即 change 一个完整命令,
-    // 按 Enter,验证 exec 调用。
-    fetchMock.mockImplementation(async (url: any) => {
-      const u = typeof url === 'string' ? url : ''
-      if (u.includes('/history/top10')) {
-        return okJson({
-          entries: [{ command: 'git status', count: 5 }],
-        })
-      }
-      return okJson({ ok: true, execId: 'e-selected' })
-    })
-    render(<BashTab sessionId="sess-1" cwd="/foo" />)
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
-
-    const input = screen.getByPlaceholderText(/输入/) as HTMLInputElement
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'git status' } })
+      fireEvent.change(input, { target: { value: '构建日志' } })
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
     })
     await waitFor(() => {
-      const execCall = fetchMock.mock.calls.find(
-        (c: any[]) => typeof c[0] === 'string' && c[0].includes('/exec'),
-      )
-      expect(execCall).toBeDefined()
+      const rename = calls.find((c) => c.url.includes('/terminal/t-1/rename'))
+      expect(rename).toBeDefined()
+      expect((rename?.body as { title: string }).title).toBe('构建日志')
     })
-    const execCall = fetchMock.mock.calls.find(
-      (c: any[]) => typeof c[0] === 'string' && c[0].includes('/exec'),
-    ) as [string, RequestInit]
-    expect(JSON.parse(execCall[1].body as string).command).toBe('git status')
   })
 
-  it('busy=true 时 AutoComplete 禁用', async () => {
-    fetchMock.mockImplementation(async (url: any) => {
-      const u = typeof url === 'string' ? url : ''
-      if (u.includes('/history/top10')) return okJson({ entries: [] })
-      return okJson({ ok: true, execId: 'e-1' })
+  it('表头状态区分 running / exited', async () => {
+    installFetch({ terminals: [info('t-1', { state: 'exited', exitCode: 1 })] })
+    render(<BashTab sessionId="sess-1" cwd="/foo" />)
+    await waitFor(() => expect(screen.getByTestId('terminal-status').textContent).toContain('exited'))
+    expect(screen.getByTestId('terminal-status').textContent).toContain('1')
+  })
+
+  it('node-pty 不可用时提示原因与安装建议，且不新建', async () => {
+    const { calls } = installFetch({
+      environment: { ...ENVIRONMENT, available: false, unavailableReason: 'node-pty 未能加载', hint: 'pnpm install' },
     })
     render(<BashTab sessionId="sess-1" cwd="/foo" />)
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
+    await waitFor(() => expect(screen.getByTestId('terminal-unavailable')).toBeDefined())
+    expect(screen.getByText(/node-pty 未能加载/)).toBeDefined()
+    expect(screen.getByText('pnpm install')).toBeDefined()
+    expect(calls.some((c) => c.url.startsWith('/api/terminal/create'))).toBe(false)
+  })
 
-    const input = screen.getByPlaceholderText(/输入/) as HTMLInputElement
+  it('加载失败显示错误与重试；重试成功后渲染终端', async () => {
+    installFetch({ listStatus: 500 })
+    render(<BashTab sessionId="sess-1" cwd="/foo" />)
+    await waitFor(() => expect(screen.getByTestId('terminal-error')).toBeDefined())
+    expect(screen.getByText(/list boom/)).toBeDefined()
+
+    installFetch({ terminals: [info('t-9')] })
     await act(async () => {
-      fireEvent.change(input, { target: { value: 'sleep 60' } })
-      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
+      fireEvent.click(screen.getByTestId('terminal-retry'))
     })
-    await waitFor(() => expect(input.disabled).toBe(true))
+    await waitFor(() => expect(screen.getByTestId('terminal-chip-t-9')).toBeDefined())
   })
 })

@@ -291,6 +291,76 @@ export type OpenccRuntime = {
   removeSession(sessionId: string, opts: { cwd: string }): Promise<void>
   shutdown(): Promise<void>
   plugins: OpenccPluginApi
+  /**
+   * zai patch (2026-09-22, MCP live view): 活的 MCP 状态 + 手动重连。
+   *
+   * 背景: `connectMcp: false` 时 headless runtime 在 boot 期不连 MCP,
+   * 改为后台异步连(见 createOpenccRuntime-impl.ts)。后台连接把结果写进
+   * `appState.mcp`,但过去没有任何入口把它读出来 —— 失败只有 console.warn,
+   * UI 无法展示"哪些 server 掉了 / 可以重试"。zai 侧因此完全不透明。
+   */
+  mcp: OpenccMcpApi
+}
+
+/** 一个 MCP server 的对外状态快照(不暴露 vendor 的 client 句柄)。 */
+export type OpenccMcpServerSummary = {
+  name: string
+  /**
+   * vendor `MCPServerConnection['type']`: connected | failed | needs-auth |
+   * pending | disabled。`disabled` 是配置层面禁用,不出现在这里
+   * (getStatus 已过滤),其余原样透出。
+   */
+  type: string
+  /** 该 server 提供的工具数(按 appState.mcp.tools 的 mcpInfo.serverName 统计)。 */
+  toolCount: number
+  /** 该 server 提供的 prompt 命令数(name 形如 `mcp__<server>__<prompt>`)。 */
+  commandCount: number
+  /** 连接失败时的错误信息(vendor FailedMCPServer.error)。 */
+  error?: string
+}
+
+/** MCP prompt 命令(`/mcp__<server>__<prompt>`)。 */
+export type OpenccMcpCommandSummary = {
+  /** 完整命令名,形如 `mcp__codegraph__build-graph`。 */
+  name: string
+  /** 展示名,形如 `codegraph:build-graph (MCP)`。 */
+  displayName: string
+  description: string
+  /** 命令所属 server 名(已反归一化回配置里的原名)。 */
+  serverName: string
+  /** 位置参数名,用于输入提示。 */
+  argNames?: string[]
+}
+
+/** 最近一次后台连接尝试的失败汇总(重试全部耗尽后才会被置上)。 */
+export type OpenccMcpConnectFailure = {
+  at: number
+  failed: number
+  total: number
+  servers: string[]
+}
+
+export type OpenccMcpStatus = {
+  /**
+   * true = boot 期跳过了同步连接(zai-server 恒为 true),MCP 由后台连接
+   * 补齐;false = boot 期已同步连接完(vendor CLI / 部分测试路径)。
+   */
+  lazyConnect: boolean
+  /** 是否有一次后台连接正在进行。 */
+  connecting: boolean
+  servers: OpenccMcpServerSummary[]
+  commands: OpenccMcpCommandSummary[]
+  /** null = 最近一次尝试没有失败。 */
+  lastConnectFailure: OpenccMcpConnectFailure | null
+}
+
+/**
+ * MCP 状态接口。`reconnect()` 会重跑一遍完整连接(含 5s/15s 退避重试),
+ * 并发调用共用同一次 in-flight 尝试 —— UI 连点不会放大成多次 spawn。
+ */
+export type OpenccMcpApi = {
+  getStatus(): OpenccMcpStatus
+  reconnect(): Promise<OpenccMcpStatus>
 }
 
 /**

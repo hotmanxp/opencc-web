@@ -26,6 +26,7 @@ import { WeixinBotSettingsSchema, type WeixinBotSettings } from '../../../shared
 import { getInstanceSupervisor } from '../instanceSupervisor.js'
 import { readZaiSettings } from '../zaiSettingsStore.js'
 import { isWeixinChannelHost, DEFAULT_WEIXIN_INSTANCE_PORT, WEIXIN_CHANNEL_PROFILE } from './channelProfile.js'
+import { weixinDiag } from './debug.js'
 import { WeixinOwnerLock } from './WeixinOwnerLock.js'
 
 /** 自动创建的专用实例名。用户手动建同名实例会撞 DUPLICATE_NAME —— 意图明确,可接受。 */
@@ -189,7 +190,8 @@ export async function maybeProvisionWeixinInstance(): Promise<ProvisionResult> {
   try {
     const result = await provisionDedicatedInstance({ force: false })
     if (result.attempted) {
-      console.log(
+      // 正常稳态(拉起 / 复用专用实例),默认静默,见 weixinDebugEnabled()。
+      weixinDiag(
         `[weixin.instance] ${result.reason} dedicated instance ${result.instanceId ?? ''} ` +
           `(channel now owned by an app=weixin instance)`,
       )

@@ -196,6 +196,20 @@ export type AppState = DeepImmutable<{
      * as a dependency; the value itself is not consumed.
      */
     pluginReconnectKey: number
+    /**
+     * zai patch (2026-09-22, MCP live view): headless runtime 的后台 MCP
+     * 连接状态。vendor TUI 走 useManageMCPConnections effect,读不到这两个
+     * 字段;zai 的 `runtime.mcp.getStatus()` / `/api/mcp/status` 读它们,
+     * 让"连接失败后整个进程再没有 MCP 工具"从 console.warn 变成用户可见。
+     */
+    connecting?: boolean
+    lastConnectFailure?: {
+      at: number
+      failed: number
+      total: number
+      /** 本轮以 `failed` 收尾的 server 名(按 appState 里的 client.name)。 */
+      servers: string[]
+    } | null
   }
   plugins: {
     enabled: LoadedPlugin[]

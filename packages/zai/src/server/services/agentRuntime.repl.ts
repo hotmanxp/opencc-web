@@ -78,9 +78,18 @@ export class ReplRuntime {
    */
   plugins: OpenccRuntime['plugins']
 
+  /**
+   * zai patch (2026-09-22, MCP live view): 与 plugins 同样的委托模式。
+   * `runtime.mcp.getStatus()` 被 /api/mcp/* 与 slashList(MCP prompt 命令)
+   * 读取;未注入 sharedRuntime(单测 / legacy 路径)时走 stub,返回空状态
+   * 而不是让路由 500。
+   */
+  mcp: OpenccRuntime['mcp']
+
   constructor(openccRuntime?: OpenccRuntime) {
     this.openccRuntime = openccRuntime
     this.plugins = openccRuntime?.plugins ?? createPluginStub()
+    this.mcp = openccRuntime?.mcp ?? createMcpStub()
   }
 
   private sessions = new Map<string, ReturnType<typeof createReplSession>>()
@@ -455,6 +464,29 @@ function createPluginStub(): OpenccRuntime['plugins'] {
       _source: string,
     ): Promise<OpenccMarketplaceActionResult> {
       return Promise.resolve({ success: false, message: UNSUPPORTED })
+    },
+  }
+}
+
+/**
+ * zai patch (2026-09-22, MCP live view): legacy/单测 fallback。
+ * 未注入 shared OpenccRuntime 时 `/api/mcp/status` 返回"空且惰性连接"的
+ * 状态而不是抛错;`reconnect()` 明确报不可用。
+ */
+function createMcpStub(): OpenccRuntime['mcp'] {
+  const UNSUPPORTED = 'repl runtime 未注入共享 OpenccRuntime(单元测试/legacy 路径)'
+  const status = () => ({
+    lazyConnect: true,
+    connecting: false,
+    servers: [],
+    commands: [],
+    lastConnectFailure: null,
+  })
+  return {
+    getStatus: status,
+    async reconnect() {
+      console.warn('[ReplRuntime] mcp.reconnect 未接入:', UNSUPPORTED)
+      return status()
     },
   }
 }

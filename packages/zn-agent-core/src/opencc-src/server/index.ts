@@ -34,6 +34,12 @@ export type {
   OpenccPluginReloadCounts,
   OpenccMarketplaceDto,
   OpenccMarketplaceActionResult,
+  // zai patch (2026-09-22, MCP live view): runtime.mcp 契约类型。
+  OpenccMcpApi,
+  OpenccMcpStatus,
+  OpenccMcpServerSummary,
+  OpenccMcpCommandSummary,
+  OpenccMcpConnectFailure,
 } from './serverTypes.js'
 
 export type {

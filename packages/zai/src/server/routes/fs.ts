@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request } from 'express';
-import { readdir, stat, readFile, rm, rmdir, mkdir, writeFile, access } from 'node:fs/promises';
+import { readdir, stat, readFile, rm, rmdir, mkdir, writeFile, access, open } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import type { Dirent } from 'node:fs';
 import { extname, basename, join, sep, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -12,7 +13,9 @@ import type {
   FsContentSearchEntry, FsContentSearchResult, FsUploadResult,
   FilePreviewPayload, FilePreviewError, FsResolveResult,
 } from '../../shared/fs.js';
-import { classifyKind, mimeFromExt } from '../../shared/fileKind.js';
+import {
+  classifyKind, DOCUMENT_MAX_BYTES, isDocumentKind, isPreviewableKind, mimeFromExt,
+} from '../../shared/fileKind.js';
 import { dirname as pathDirname, relative as pathRelative, resolve as pathResolve } from 'node:path';
 // 2026-09-11: 64 → 512。搜索框支持直接粘贴文件路径(含绝对路径),
 // macOS 下绝对路径很容易超过 64 字符被误拒。目录限定模式只做一次
@@ -408,7 +411,11 @@ fsRouter.get('/fs/file', async (req, res) => {
   const isDotfile = base.startsWith('.') && base !== '.' && base !== '..';
   const isImage = Object.prototype.hasOwnProperty.call(IMAGE_EXTS, ext);
   const isHtml = HTML_EXTS.has(ext);
-  if (!TEXT_EXTS.has(ext) && !isImage && !isHtml && !isDotfile) {
+  // 文档类(2026-09-21)走同一条元数据通道:分屏 FsTab 拿不到 kind 就会在
+  // preflight/服务端 415 处断掉,连「不支持」提示都显示不出来。
+  const previewKind = classifyKind(safe.abs);
+  const isDocument = isPreviewableKind(previewKind);
+  if (!TEXT_EXTS.has(ext) && !isImage && !isHtml && !isDotfile && !isDocument) {
     res.status(415).json({ ok: false, error: `不支持的文件类型：${ext || '(无扩展名)'}` } satisfies FsFile);
     return;
   }
@@ -426,6 +433,21 @@ fsRouter.get('/fs/file', async (req, res) => {
   }
   if (!info.isFile()) {
     res.status(400).json({ ok: false, error: '不是文件' } satisfies FsFile);
+    return;
+  }
+  if (isDocument) {
+    // 只回元数据:字节由前端走 /api/fs/raw,2 MB 的文本预览上限不适用
+    // (上限改由 /fs/raw 按 kind 判定)。
+    const body: FsFile = {
+      ok: true,
+      kind: previewKind,
+      path: safe.abs,
+      name: basename(safe.abs),
+      size: info.size,
+      mtime: info.mtime.toISOString(),
+      ext,
+    };
+    res.json(body);
     return;
   }
   if (info.size > MAX_FILE_BYTES) {
@@ -1039,6 +1061,22 @@ fsRouter.get('/fs/preview', async (req, res) => {
     res.status(400).json({ error: { code: 'EISDIR', message: '路径是目录' } } satisfies { error: FilePreviewError })
     return
   }
+  const kind = classifyKind(abs)
+  if (isDocumentKind(kind)) {
+    // 文档类(2026-09-21):只回元数据,字节由前端另走 GET /api/fs/raw。
+    // 必须放在 maxBytes 检查**之前** —— 1 MiB 的 PREVIEW_DEFAULT_MAX 是给
+    // 「要把内容塞进 JSON 响应」的 text/image/html 设的;文档不走这条通道,
+    // 在这里 413 会让 30 MB 的 docx 连预览窗口都打不开。真正的上限由
+    // /fs/raw 按 kind 判定(DOCUMENT_MAX_BYTES)。
+    const payload: FilePreviewPayload = {
+      kind,
+      size: info.size,
+      mtime: info.mtimeMs,
+      ext: extname(abs),
+    }
+    res.json(payload)
+    return
+  }
   if (info.size > maxBytes) {
     res.status(413).json({
       error: {
@@ -1049,7 +1087,6 @@ fsRouter.get('/fs/preview', async (req, res) => {
     } satisfies { error: FilePreviewError })
     return
   }
-  const kind = classifyKind(abs)
   if (kind === 'image') {
     const buf = await readFile(abs)
     const mime = mimeFromExt(abs) ?? 'application/octet-stream'
@@ -1082,6 +1119,125 @@ fsRouter.get('/fs/preview', async (req, res) => {
     ext: extname(abs),
   }
   res.json(payload)
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/fs/raw —— 文档类文件的**原始字节**通道(2026-09-21)
+//
+// 为什么不复用 /fs/preview:/fs/preview 的 maxBytes 被 clamp 在 1 MiB 且响应是
+// JSON + base64(33% 膨胀 + 主线程解码),而 JSZip / PDF.js 直接吃 ArrayBuffer。
+// 放宽 /fs/preview 会同时改变 image/html/text 的既有行为,回归面不可控。
+//
+// 权限模型与 /fs/preview 一致:zai 只监听 localhost,读任意本机路径等同本机
+// `cat`;真正的约束是下面三道 —— 扩展名白名单、按 kind 的字节上限、容器嗅探。
+// 前端 preflight 只是体验优化,不构成安全边界。
+// ---------------------------------------------------------------------------
+
+/** 服务端硬上限,不随请求放宽(各 kind 上限见 DOCUMENT_MAX_BYTES)。 */
+const RAW_MAX_BYTES = 64 * 1024 * 1024
+
+/** OLE 复合文档头 —— 旧版 .doc/.xls/.ppt 与**加密**的 OOXML(Agile encryption)都是它。 */
+const OLE_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])
+/** ZIP 本地文件头 —— OOXML(.docx/.xlsx/.pptx)的合法容器。 */
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04])
+const PDF_MAGIC = Buffer.from('%PDF-')
+
+type SniffedContainer = 'ole' | 'zip' | 'pdf' | 'other'
+
+function sniffContainer(head: Buffer): SniffedContainer {
+  if (head.length >= 8 && head.subarray(0, 8).equals(OLE_MAGIC)) return 'ole'
+  if (head.length >= 4 && head.subarray(0, 4).equals(ZIP_MAGIC)) return 'zip'
+  if (head.length >= 5 && head.subarray(0, 5).equals(PDF_MAGIC)) return 'pdf'
+  return 'other'
+}
+
+/** 读前 8 字节做容器判型;文件短于 8 字节时按实际长度判。 */
+async function readMagic(abs: string): Promise<Buffer> {
+  const fh = await open(abs, 'r')
+  try {
+    const head = Buffer.alloc(8)
+    const { bytesRead } = await fh.read(head, 0, 8, 0)
+    return head.subarray(0, bytesRead)
+  } finally {
+    await fh.close()
+  }
+}
+
+fsRouter.get('/fs/raw', async (req, res) => {
+  const raw = typeof req.query.path === 'string' ? req.query.path : ''
+  if (!raw) {
+    res.status(400).json({ error: { code: 'EBADREQ', message: 'path 必填' } } satisfies { error: FilePreviewError })
+    return
+  }
+  if (raw.includes('\x00')) {
+    res.status(400).json({ error: { code: 'EBADREQ', message: 'path 含 NUL 字符' } } satisfies { error: FilePreviewError })
+    return
+  }
+  const abs = pathResolve(raw)
+  const kind = classifyKind(abs)
+  if (!isDocumentKind(kind)) {
+    // 白名单同时保证 /fs/raw 不会退化成「任意文件下载口」。
+    res.status(415).json({
+      error: { code: 'EUNSUPPORTED', message: `该类型不走字节通道:${extname(abs) || '(无扩展名)'}` },
+    } satisfies { error: FilePreviewError })
+    return
+  }
+  let info
+  try {
+    info = await stat(abs)
+  } catch (err) {
+    mapStatError(res, err)
+    return
+  }
+  if (info.isDirectory()) {
+    res.status(400).json({ error: { code: 'EISDIR', message: '路径是目录' } } satisfies { error: FilePreviewError })
+    return
+  }
+  const limit = Math.min(DOCUMENT_MAX_BYTES[kind] ?? RAW_MAX_BYTES, RAW_MAX_BYTES)
+  if (info.size > limit) {
+    res.status(413).json({
+      error: {
+        code: 'ETOOBIG',
+        message: `文件 ${info.size} 字节,超过上限 ${limit}`,
+        meta: { size: info.size },
+      },
+    } satisfies { error: FilePreviewError })
+    return
+  }
+  // 容器前置嗅探:加密的 .docx/.xlsx 和旧版 .doc/.xls/.ppt 都是 OLE,
+  // 不拦就得让用户先下几十 MB 再在浏览器端报一个没头没尾的解析错误。
+  let container: SniffedContainer
+  try {
+    container = sniffContainer(await readMagic(abs))
+  } catch (err) {
+    mapStatError(res, err)
+    return
+  }
+  if (container === 'ole') {
+    res.status(415).json({
+      error: {
+        code: 'EENCRYPTED_OR_LEGACY',
+        message: '这是旧版二进制格式或受密码保护的文档,无法在浏览器内解析',
+        container: 'ole',
+      },
+    } satisfies { error: FilePreviewError })
+    return
+  }
+  res.setHeader('Content-Type', 'application/octet-stream')
+  res.setHeader('Content-Length', String(info.size))
+  res.setHeader('X-File-Size', String(info.size))
+  res.setHeader('X-File-Mtime', String(info.mtimeMs))
+  res.setHeader('Cache-Control', 'no-store')
+  // 流式下发,不 readFile 全量进内存。
+  const stream = createReadStream(abs)
+  stream.on('error', (err) => {
+    if (res.headersSent) {
+      res.destroy(err)
+      return
+    }
+    mapStatError(res, err)
+  })
+  stream.pipe(res)
 })
 
 function launchPlatformTool(

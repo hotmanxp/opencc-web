@@ -231,8 +231,11 @@ export function TaskDock({
         {isLite ? (
           // isLite (分屏展开 / 移动端) 模式: 只显示图标,省掉"后台任务"文本.
           // 视觉与 ModeStatusButton 在 compact 下的精简策略一致.
+          // 字号 16(而非 14): lucide 的 LayoutGrid 图形在 24 视口内有 ~25% 内缩,
+          // 14px 渲染出来只有 ~10px 的实际墨迹, 比左侧 mode(12px 满格图标)还小;
+          // 16px 让九宫格的实际尺寸与相邻 chip 的图标相当.
           <LayoutGridIcon
-            className="px-1 text-[14px] leading-none"
+            className="px-1 text-[16px] leading-none"
             aria-label="后台任务"
           />
         ) : (

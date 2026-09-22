@@ -29,6 +29,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Drawer, Modal, Select, Tag, message } from 'antd'
 import { WeixinBotPanel } from './WeixinBotPanel.js'
+// MCP 服务器状态 + 手动重连入口(与微信入口同级的底部小链接行)。
+import McpServersSection from './McpServersSection.js'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import { useInstanceStore } from '../store/useInstanceStore.js'
@@ -1410,6 +1412,10 @@ export default function SettingsDrawer() {
         </div>
       )}
       <SettingsList schema={schema} onClose={close} onChange={handleChange} />
+      {/* MCP 服务器状态入口:后台连接失败时这里会亮红 Tag,点开可看重连。
+          放在微信入口上方 —— 两者都是"底部弱化的运维入口",与常规设置项
+          分开;不受主实例门控(MCP 是每个进程自己的事,子实例同样要看)。 */}
+      <McpServersSection drawerOpen={open} />
       {/* 微信机器人入口:刻意放在设置列表最底部且弱化为单一小链接行,
           不与常规设置项争视觉权重。状态标签仅在 drawer 打开时拉一次。
           仅在主实例渲染(子进程不显示),见 weixinConfigVisible 的说明。 */}

@@ -7,6 +7,24 @@ import { FilePreviewDrawer } from '../../../../src/web/src/components/conversati
 import { useAgentStore } from '../../../../src/web/src/store/useAgentStore.js'
 import { useAppStore } from '../../../../src/web/src/store/useAppStore.js'
 
+// 文档预览(2026-09-21):对话入口(display_files / 消息里的 ↗ / DiffBlock …)全部
+// 收敛到 openFilePreview(path) → /fs/preview → FilePreviewBody → DocumentPreview。
+// 这里只对**四个重库渲染器** stub 掉 DocumentPreview(pdfjs-dist / xlsx /
+// docx-preview / pptx-preview 在 happy-dom 下跑不出有意义的结果);
+// legacy-office 走真实实现 —— 它只渲染 UnsupportedNotice,不加载任何库,
+// 正好可以端到端断言"文档类不在浏览器里渲染时给的是什么交代"。
+vi.mock('../../../../src/web/src/components/documentPreview/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../src/web/src/components/documentPreview/index.js')>()
+  const Real = actual.DocumentPreview
+  return {
+    ...actual,
+    DocumentPreview: ({ path, kind }: { path: string; kind: any }) =>
+      kind === 'legacy-office'
+        ? <Real path={path} kind={kind} />
+        : <div data-testid="document-preview-stub" data-path={path} data-kind={kind} />,
+  }
+})
+
 function mockFetch(payload: any) {
   return vi.spyOn(global, 'fetch').mockResolvedValue({
     ok: true,
@@ -72,6 +90,34 @@ describe('FilePreviewDrawer', () => {
     render(<FilePreviewDrawer />)
     expect(await screen.findByText(/不支持内联预览/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /打开目录/ })).toBeInTheDocument()
+  })
+
+  // 文档预览(2026-09-21):/fs/preview 现在对 .docx/.xlsx/.pptx/.pdf 返回
+  // 对应 kind + 元数据(不再 413/落 binary),抽屉据此外派 DocumentPreview。
+  it.each([
+    ['docx', '/docs/a.docx'],
+    ['sheet', '/docs/b.xlsx'],
+    ['ppt', '/docs/c.pptx'],
+    ['pdf', '/docs/d.pdf'],
+  ])('dispatches kind=%s to DocumentPreview with the absolute path', async (kind, path) => {
+    mockFetch({ kind, size: 2048, mtime: 0, ext: `.${kind}` })
+    useAgentStore.setState({ filePreviewPath: path })
+    render(<FilePreviewDrawer />)
+    const stub = await screen.findByTestId('document-preview-stub')
+    expect(stub.getAttribute('data-kind')).toBe(kind)
+    // 必须是绝对路径 —— DocumentPreview 拿它去 /api/fs/raw 取字节
+    expect(stub.getAttribute('data-path')).toBe(path)
+  })
+
+  it('legacy-office 在抽屉里给出旧版二进制说明 + 打开目录(整条链路不发字节请求)', async () => {
+    const fetchSpy = mockFetch({ kind: 'legacy-office', size: 512, mtime: 0, ext: '.doc' })
+    useAgentStore.setState({ filePreviewPath: '/docs/old.doc' })
+    render(<FilePreviewDrawer />)
+    expect(await screen.findByTestId('document-unsupported')).toBeInTheDocument()
+    expect(screen.getByText(/旧版二进制 Office 格式/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /打开目录/ })).toBeInTheDocument()
+    // 只打了 /fs/preview 一次元数据请求,/api/fs/raw 不该被碰
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/fs/raw')).length).toBe(0)
   })
 
   it('shows Alert with error message on 404', async () => {

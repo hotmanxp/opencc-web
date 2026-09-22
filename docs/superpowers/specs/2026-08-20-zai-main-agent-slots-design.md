@@ -122,6 +122,8 @@ BashTool, WebFetchTool, SkillTool, TodoWriteTool, AskUserQuestionTool
 移除开发向工具:`AgentTool / WorkflowTool / LSPTool / EnterPlanModeTool / ExitPlanModeTool / TaskCreateTool / TaskGetTool / TaskUpdateTool / TaskListTool / WebBrowserTool / EnterWorktreeTool / ExitWorktreeTool / PowerShellTool / ListMcpResourcesTool / ReadMcpResourceTool / VerifyPlanExecutionTool` 等。
 
 > 允许列表是白名单过滤而非黑名单,新工具默认不进 Office agent,避免工具池随 vendor 扩张而膨胀。
+>
+> **例外(2026-09-22)**:`mcp__<server>__<tool>` 前缀一律放行,不受白名单约束 —— MCP server 的启停已在上游由 `isComputerUseEnabled()` / `requiredMcpServers` / `disabledMcpServers` / 企业策略决定,白名单再写死 server 名会造成「用户开了 Computer Use 但工具不见」的隐形 bug。weixin-bot 与 task-intake 系列同此约定。内置的 `ListMcpResources` / `ReadMcpResource` 名字不带 `mcp__` 前缀,仍按白名单被剔除。
 
 ## 8. 设置 UI(Agent 选择)
 

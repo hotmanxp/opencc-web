@@ -26,6 +26,7 @@
  * 不会发送任何消息 —— 它们最多只跑到凭据探测那一步。
  */
 import { isManagedChild } from '../../../cli/managedChild.js'
+import { weixinDiag } from './debug.js'
 
 export type WeixinBootReason =
   | 'started'
@@ -58,7 +59,7 @@ export interface WeixinBootResult {
  */
 export async function maybeAutoStartWeixinBot(): Promise<WeixinBootResult> {
   if (!isManagedChild()) {
-    console.warn(
+    weixinDiag(
       '[weixin.boot] skipped: this process was not launched by a supervisor ' +
         '(ZAI_SUPERVISOR_PID missing). Weixin channel only runs under supervisor-managed processes.',
     )
@@ -81,13 +82,15 @@ export async function maybeAutoStartWeixinBot(): Promise<WeixinBootResult> {
               : state === 'unconfigured'
                 ? 'unconfigured'
                 : 'failed'
-    // `standby`(别的实例在跑通道)与 `dedicated_instance_required`(本进程是主
-    // 实例,通道归专用实例)都是设计上的正常稳态,每次启动都 warn 会把日志淹掉。
-    if (reason !== 'started' && reason !== 'standby' && reason !== 'dedicated_instance_required') {
-      console.warn(
-        `[weixin.boot] auto-start finished with state=${state}${manager.status().lastError ? ` lastError=${manager.status().lastError}` : ''}`,
-      )
-    }
+    // 启动日志默认静默(`ZAI_DEBUG=1` / `WEIXIN_DEBUG=1` 才输出):`unconfigured`
+    // (没配凭据)、`disabled`(用户关掉开关)、`standby` / `dedicated_instance_required`
+    // 都是设计上的正常稳态,每次启动都打会把日志淹掉 —— 2026-09-22 用户明确要求
+    // 取消这些打印。只有 `failed` 才值得在无 debug 时也留痕。
+    const bootLine = `[weixin.boot] auto-start finished with state=${state}${
+      manager.status().lastError ? ` lastError=${manager.status().lastError}` : ''
+    }`
+    if (reason === 'failed') console.warn(bootLine)
+    else if (reason !== 'started') weixinDiag(bootLine)
     return { attempted: true, reason, ...(manager.status().lastError ? { detail: manager.status().lastError } : {}) }
   } catch (err) {
     const detail = (err as Error).message

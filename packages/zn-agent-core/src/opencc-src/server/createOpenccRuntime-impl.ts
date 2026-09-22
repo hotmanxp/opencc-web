@@ -27,6 +27,7 @@ import {
   connectMcpWithRetry,
   type McpConnectAttemptResult,
 } from './mcpConnectRetry.js'
+import { buildMcpStatus as buildMcpStatusFromState } from './mcpStatus.js'
 import { assemblePluginList } from './pluginListAssembly.js'
 import {
   installPluginOp,
@@ -52,7 +53,7 @@ import { getUserConfigJson } from '../utils/userConfigJson.js'
 // esbuild 同步生成 local binding,避开 TDZ。
 import { getAgentRegistry } from './index.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
-import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult } from './serverTypes.js'
+import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult, OpenccMcpApi, OpenccMcpStatus, OpenccMcpConnectFailure } from './serverTypes.js'
 // zai patch (2026-09-12, plan cron-fire-to-prompt, fix断链1): v2 runtime
 // (sharedRuntime per-server 单例) 启动时挂载 cron 调度器。旧 v1 走
 // createReplSession 时 setupScheduledTasks 自然被 createReplSession:157
@@ -170,116 +171,191 @@ export async function createOpenccRuntimeImpl(options) {
   // boot 期单次连接抖动(实例堆重启 / 多实例同时起 / server 冷启动)以前
   // 会让整个进程生命周期都没有 MCP 工具 —— 运行期没有任何重试路径,连带
   // `computer-operator` 这类声明 requiredMcpServers 的 agent 永远不出现。
-  if (!ctx.config.connectMcp) {
-    // 上一轮以 `failed` 收尾的 server:重新连接前必须先清掉
-    // `connectToServer` 的 memoize(否则重试拿到的是缓存里的同一个失败对象,
-    // 根本不会重新 spawn —— 实测就是重试后依然 "1/3 failed" 且没有新进程)。
-    let retryCandidates: Array<{
-      name: string
-      config: Parameters<typeof clearServerCache>[1]
-    }> = []
-    const connectMcpOnce = async (): Promise<McpConnectAttemptResult> => {
-      for (const cand of retryCandidates) {
-        await clearServerCache(cand.name, cand.config)
+  // 上一轮以 `failed` 收尾的 server:重新连接前必须先清掉
+  // `connectToServer` 的 memoize(否则重试拿到的是缓存里的同一个失败对象,
+  // 根本不会重新 spawn —— 实测就是重试后依然 "1/3 failed" 且没有新进程)。
+  let retryCandidates: Array<{
+    name: string
+    config: Parameters<typeof clearServerCache>[1]
+  }> = []
+  const connectMcpOnce = async (): Promise<McpConnectAttemptResult> => {
+    for (const cand of retryCandidates) {
+      await clearServerCache(cand.name, cand.config)
+    }
+    retryCandidates = []
+    // zai patch (2026-08-29): 主 Agent mcp 插槽改为走 AgentRegistry。
+    // 启动期尚未有 session 绑定(zai-server initAgentRuntime 之后才
+    // registryAgent),此处按 options.mainAgent ?? 'default' 查 builtin
+    // agent 的 mcp 槽,直接 sync 调用(builtin agent 的 mcp 槽都是 sync;
+    // AgentSlotFn 允许 Promise,但启动期连接是 await pattern,此处走
+    // resolveAgent + 直接 fn 调 与原行为等价,绕开 async slot() 在
+    // 启动期不需要 sessionId 的边界场景)。
+    // MCP 连接是启动时一次性,槽切换需重启生效 —— 重试时重新解析一次
+    // 配置,让 boot 期间刚落盘的改动(如用户刚打开的 Computer Use)也能
+    // 被这一轮带上。
+    let mcpConfigs: Record<string, unknown> | undefined = undefined
+    {
+      const reg = getAgentRegistry()
+      const bootAgentName = options.mainAgent?.name ?? 'default'
+      const bootAgent = reg.resolveAgent(bootAgentName)
+      const mcpFn = bootAgent?.slots?.mcp
+      if (mcpFn) {
+        const all = await getAllMcpConfigs()
+        mcpConfigs = mcpFn(all.servers, '__startup__')
       }
-      retryCandidates = []
-      // zai patch (2026-08-29): 主 Agent mcp 插槽改为走 AgentRegistry。
-      // 启动期尚未有 session 绑定(zai-server initAgentRuntime 之后才
-      // registryAgent),此处按 options.mainAgent ?? 'default' 查 builtin
-      // agent 的 mcp 槽,直接 sync 调用(builtin agent 的 mcp 槽都是 sync;
-      // AgentSlotFn 允许 Promise,但启动期连接是 await pattern,此处走
-      // resolveAgent + 直接 fn 调 与原行为等价,绕开 async slot() 在
-      // 启动期不需要 sessionId 的边界场景)。
-      // MCP 连接是启动时一次性,槽切换需重启生效 —— 重试时重新解析一次
-      // 配置,让 boot 期间刚落盘的改动(如用户刚打开的 Computer Use)也能
-      // 被这一轮带上。
-      let mcpConfigs: Record<string, unknown> | undefined = undefined
-      {
-        const reg = getAgentRegistry()
-        const bootAgentName = options.mainAgent?.name ?? 'default'
-        const bootAgent = reg.resolveAgent(bootAgentName)
-        const mcpFn = bootAgent?.slots?.mcp
-        if (mcpFn) {
-          const all = await getAllMcpConfigs()
-          mcpConfigs = mcpFn(all.servers, '__startup__')
-        }
-      }
-      const seen = new Set<string>()
-      let total = 0
-      let failed = 0
-      await getMcpToolsCommandsAndResources(
-        ({ client, tools: mcpTools, commands: mcpCommands }) => {
-          // `disabled` 是配置层面禁用,不计入连接失败(也不触发重试)。
-          if (client.type !== 'disabled' && !seen.has(client.name)) {
-            seen.add(client.name)
-            total++
-            if (client.type === 'failed') {
-              failed++
-              if (client.config) {
-                retryCandidates.push({ name: client.name, config: client.config })
-              }
+    }
+    const seen = new Set<string>()
+    let total = 0
+    let failed = 0
+    await getMcpToolsCommandsAndResources(
+      ({ client, tools: mcpTools, commands: mcpCommands }) => {
+        // `disabled` 是配置层面禁用,不计入连接失败(也不触发重试)。
+        if (client.type !== 'disabled' && !seen.has(client.name)) {
+          seen.add(client.name)
+          total++
+          if (client.type === 'failed') {
+            failed++
+            if (client.config) {
+              retryCandidates.push({ name: client.name, config: client.config })
             }
           }
-          ctx.appState.setState(prev => {
-            const mcp =
-              prev.mcp ?? {
-                clients: [],
-                tools: [],
-                commands: [],
-                resources: {},
-                pluginReconnectKey: 0,
-              }
-            const mcpToolNames = new Set(mcpTools.map(t => t.name))
-            return {
-              ...prev,
-              mcp: {
-                ...mcp,
-                clients: [
-                  ...mcp.clients.filter(c => c.name !== client.name),
-                  client,
-                ],
-                tools: [
-                  ...mcp.tools.filter(t => !mcpToolNames.has(t.name)),
-                  ...mcpTools,
-                ],
-                commands: [
-                  ...mcp.commands.filter(
-                    c => !mcpCommands.some(nc => nc.name === c.name),
-                  ),
-                  ...mcpCommands,
-                ],
-                pluginReconnectKey: (mcp.pluginReconnectKey ?? 0) + 1,
-              },
-            }
-          })
-        },
-        mcpConfigs,
-      )
-      return { total, failed }
-    }
-    void connectMcpWithRetry(connectMcpOnce, {
-      onError: (err, attemptIndex) => {
-        console.warn(
-          `[openccRuntime] MCP connect attempt #${attemptIndex + 1} threw:`,
-          err,
-        )
-      },
-      onRetry: ({ attempt, failed, total, delayMs }) => {
-        console.warn(
-          `[openccRuntime] MCP connect incomplete (${failed}/${total} server(s) failed) — retry #${attempt} in ${delayMs}ms`,
-        )
-      },
-    })
-      .then(result => {
-        if (result.failed > 0) {
-          console.warn(
-            `[openccRuntime] MCP connect still incomplete after retries: ${result.failed}/${result.total} server(s) failed — MCP tools stay unavailable for this process until restart`,
-          )
         }
+        ctx.appState.setState(prev => {
+          const mcp =
+            prev.mcp ?? {
+              clients: [],
+              tools: [],
+              commands: [],
+              resources: {},
+              pluginReconnectKey: 0,
+            }
+          const mcpToolNames = new Set(mcpTools.map(t => t.name))
+          return {
+            ...prev,
+            mcp: {
+              ...mcp,
+              clients: [
+                ...mcp.clients.filter(c => c.name !== client.name),
+                client,
+              ],
+              tools: [
+                ...mcp.tools.filter(t => !mcpToolNames.has(t.name)),
+                ...mcpTools,
+              ],
+              commands: [
+                ...mcp.commands.filter(
+                  c => !mcpCommands.some(nc => nc.name === c.name),
+                ),
+                ...mcpCommands,
+              ],
+              pluginReconnectKey: (mcp.pluginReconnectKey ?? 0) + 1,
+            },
+          }
+        })
+      },
+      mcpConfigs,
+    )
+    return { total, failed }
+  }
+
+  // zai patch (2026-09-22, MCP live view): 连接状态镜像到 appState。
+  // 以前失败只有 console.warn —— 用户看到的是"agent 能聊但少了一批工具",
+  // 既不知道为什么、也没有补救入口。这里把 connecting / lastConnectFailure
+  // 写进 appState.mcp,runtime.mcp.getStatus() 与 /api/mcp/status 读它。
+  const setMcpConnectState = (patch: {
+    connecting?: boolean
+    lastConnectFailure?: OpenccMcpConnectFailure | null
+  }) => {
+    ctx.appState.setState(prev => {
+      const mcp =
+        prev.mcp ?? {
+          clients: [],
+          tools: [],
+          commands: [],
+          resources: {},
+          pluginReconnectKey: 0,
+        }
+      return { ...prev, mcp: { ...mcp, ...patch } }
+    })
+  }
+
+  const runMcpConnect = async (): Promise<McpConnectAttemptResult> => {
+    setMcpConnectState({ connecting: true })
+    try {
+      const result = await connectMcpWithRetry(connectMcpOnce, {
+        onError: (err, attemptIndex) => {
+          console.warn(
+            `[openccRuntime] MCP connect attempt #${attemptIndex + 1} threw:`,
+            err,
+          )
+        },
+        onRetry: ({ attempt, failed, total, delayMs }) => {
+          console.warn(
+            `[openccRuntime] MCP connect incomplete (${failed}/${total} server(s) failed) — retry #${attempt} in ${delayMs}ms`,
+          )
+        },
       })
-      .catch(err => {
-        console.warn('[openccRuntime] async MCP connect failed:', err)
+      if (result.failed > 0) {
+        const servers = (ctx.appState.getState().mcp?.clients ?? [])
+          .filter(c => c.type === 'failed')
+          .map(c => c.name)
+        console.warn(
+          `[openccRuntime] MCP connect still incomplete after retries: ${result.failed}/${result.total} server(s) failed — MCP tools stay unavailable for this process until restart (or a manual /api/mcp/reconnect)`,
+        )
+        setMcpConnectState({
+          lastConnectFailure: {
+            at: Date.now(),
+            failed: result.failed,
+            total: result.total,
+            servers,
+          },
+        })
+      } else {
+        setMcpConnectState({ lastConnectFailure: null })
+      }
+      return result
+    } catch (err) {
+      // connectMcpWithRetry 自身永不抛错;这里只是防御(未来若改成会抛)。
+      console.warn('[openccRuntime] async MCP connect failed:', err)
+      setMcpConnectState({
+        lastConnectFailure: { at: Date.now(), failed: 1, total: 0, servers: [] },
       })
+      return { total: 0, failed: 1 }
+    } finally {
+      setMcpConnectState({ connecting: false })
+    }
+  }
+
+  // in-flight 去重:UI 连点 / 多个 tab 同时点"重连"只会 spawn 一轮 server。
+  let mcpConnectInFlight: Promise<McpConnectAttemptResult> | null = null
+  const connectMcpNow = (): Promise<McpConnectAttemptResult> => {
+    if (mcpConnectInFlight) return mcpConnectInFlight
+    mcpConnectInFlight = runMcpConnect().finally(() => {
+      mcpConnectInFlight = null
+    })
+    return mcpConnectInFlight
+  }
+
+  if (!ctx.config.connectMcp) {
+    // boot 期不 await —— HTTP listener 立刻绑定,连接在后台补齐。
+    void connectMcpNow()
+  }
+
+  /**
+   * appState.mcp → 对外状态快照。映射逻辑走 ./mcpStatus.ts(纯函数,
+   * 单独单测),这里只负责把 appState 接进去。
+   */
+  const buildMcpStatus = (): OpenccMcpStatus =>
+    buildMcpStatusFromState(ctx.appState.getState().mcp, {
+      lazyConnect: !ctx.config.connectMcp,
+    })
+
+  const mcp: OpenccMcpApi = {
+    getStatus: buildMcpStatus,
+    async reconnect() {
+      await connectMcpNow()
+      return buildMcpStatus()
+    },
   }
 
   // zai patch (并发多会话): vendor QueryEngine 是单会话设计——`mutableMessages`
@@ -360,11 +436,30 @@ export async function createOpenccRuntimeImpl(options) {
     }
     const engineComputeTools = () =>
       resolveBoundSlot('tools', computeTools())
+    // zai patch (2026-09-22, MCP live view): commands / mcpClients 过去取
+    // `ctx.mcp.*` —— 那是 createHeadlessContextImpl 的 boot 期快照,而
+    // `connectMcp: false` 时它恒为空数组(后台连接只写 appState.mcp)。
+    // 后果不止"少几个命令":
+    //   1. `/mcp__<server>__<prompt>` 永远解析不出来,被当纯文本发给模型;
+    //   2. ListMcpResourcesTool / ReadMcpResourceTool 按 name 在
+    //      mcpClients 里查 server,永远报 `Server "X" not found`;
+    //   3. AgentTool 子代理的 system prompt 与 coordinatorMode 拿到的
+    //      MCP server 清单是空的。
+    // `QueryEngine.submitMessage` 每 turn 从 `this.config` 解构
+    // (QueryEngine.ts:251),所以这里用 getter 就能每 turn 重算 —— 与同处
+    // 已有的 `refreshTools` 是同一套机制,不需要改 vendor。
+    // mcpClients 只暴露 connected:failed/needs-auth 的 client 混进去会让
+    // vendor 的 "Available servers" 列表把连不上的 server 也算上。
+    const liveMcp = () => ctx.appState.getState().mcp
     return new QueryEngine({
       cwd,
       tools: engineComputeTools(),
-      commands: ctx.mcp.commands,
-      mcpClients: ctx.mcp.clients,
+      get commands() {
+        return liveMcp()?.commands ?? []
+      },
+      get mcpClients() {
+        return (liveMcp()?.clients ?? []).filter(c => c.type === 'connected')
+      },
       // zai patch (2026-08-09): includePartialMessages:true 让 vendor 把每条
       // SDK 流事件包成 stream_event envelope 透传出来 —— 否则 query.ts:847
       // 会吞掉所有 envelope,只 yield batched 的 assistant Message,导致
@@ -987,5 +1082,6 @@ let initialMessages: Message[] | undefined
       engines.clear()
     },
     plugins,
+    mcp,
   }
 }

@@ -2129,6 +2129,14 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
     // zai patch (2026-08-29, plan §3.5): unregistryAgent 释放
     // AgentRegistry.sessionBindings 该 sid 条目,避免内存泄漏。
     getAgentRegistry().unregistryAgent(req.params.id)
+    // 会话被删除 → 它名下的持久 PTY 终端也一并回收(否则会留下没人认领的
+    // shell 进程)。失败不影响删除本身:进程已在关闭路径上,只记日志。
+    try {
+      const { getTerminalService } = await import('../services/terminal/TerminalService.js')
+      await getTerminalService().disposeSession(req.params.id)
+    } catch (termErr) {
+      console.warn('[agent] dispose terminal sessions failed:', termErr)
+    }
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

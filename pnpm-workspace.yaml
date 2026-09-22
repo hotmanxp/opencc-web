@@ -2,5 +2,10 @@ packages:
   - 'packages/*'
 allowBuilds:
   sharp: true
+  # node-pty 是原生模块:它的 install 脚本 (scripts/prebuild.js) 需要跑一次,
+  # 才能确认/选用 tarball 里自带的 prebuilds/<platform>-<arch> 二进制。
+  # 拦住它 = 装出一个 load 不了的 pty.node,PTY 终端直接起不来。
+  node-pty: true
 onlyBuiltDependencies:
   - sharp
+  - node-pty

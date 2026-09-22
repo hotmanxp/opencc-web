@@ -78,6 +78,15 @@ export async function closeServer(): Promise<void> {
     console.warn('[runtimeLifecycle] weixinBot stop failed:', err);
   }
 
+  // 用户侧持久 PTY 终端 — 每个终端背后是一个活着的 shell 进程,不显式收掉
+  // 会在系统里留下一堆 zsh。见 services/terminal/PtySession.ts。
+  try {
+    const { getTerminalService } = await import('./terminal/TerminalService.js');
+    await getTerminalService().disposeAll();
+  } catch (err) {
+    console.warn('[runtimeLifecycle] terminalService disposeAll failed:', err);
+  }
+
   // zai patch (2026-08-29, plan §3.6): 清 AgentRegistry sessionBindings,
   // 释放 per-session agent 绑定。agents map 保留,下次 init 时 builtin
   // + loadUserAgents 是 idempotent 重入。

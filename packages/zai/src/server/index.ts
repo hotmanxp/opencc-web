@@ -26,9 +26,15 @@ import tasksRouter from './routes/tasks.js';
 import v2TasksRouter from './routes/v2Tasks.js';
 import sessionStateRouter from './routes/sessionState.js';
 import { slashRouter } from './routes/slash.js';
+// MCP 状态 + 手动重连(/api/mcp/status、/api/mcp/reconnect)。后台连接
+// 失败过去只有 console.warn,这两个端点让设置页能展示并重试。
+import { mcpRouter } from './routes/mcp.js';
 import bashTasksRouter from './routes/bashTasks.js';
 import bashReplRouter from './routes/bashRepl.js';
 import replHistoryRouter from './routes/replHistory.js';
+// 用户侧持久 PTY 终端（分屏 Bash 面板）。与 /api/bash/repl 并存：REPL 继续服务
+// 移动端快捷 Bash 与命令历史，PTY 只服务桌面分屏（见 routes/terminal.ts 头注）。
+import terminalRouter from './routes/terminal.js';
 import transcriptRouter from './routes/transcript.js';
 import instancesRouter from './routes/instances.js';
 import superTasksRouter from './routes/superTasks.js';
@@ -237,6 +243,12 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   app.use('/api', bashTasksRouter);
   app.use('/api', bashReplRouter);
   app.use('/api', replHistoryRouter);
+  // /api/terminal/* — 持久 PTY 终端（create/write/resize/rename/close/list/
+  // shells/environment + :id/events 的 SSE 输出流）。node-pty 装不上时
+  // create 返回 503，前端据此禁用分屏 Bash 面板。
+  app.use('/api', terminalRouter);
+  // /api/mcp/* — 活 MCP server 状态 + 手动重连(见 routes/mcp.ts 头注)。
+  app.use('/api', mcpRouter);
   // V2 TaskList 只读路由 — zai-web 进会话时 GET 一次把 server 端
   // TaskListStore (按 sessionId 隔离, 实际存储 ~/.zai/tasks/<sid>.json)
   // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).

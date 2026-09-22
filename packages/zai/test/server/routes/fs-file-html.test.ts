@@ -96,12 +96,25 @@ describe('GET /api/fs/file — HTML preview branch', () => {
     expect(res.body.content).toBeUndefined();
   });
 
-  it('returns 415 for non-text/image/html extensions (e.g. .pdf)', async () => {
+  it('returns 415 for extensions outside the preview allow-list (e.g. .zip)', async () => {
     // Sanity: the gate still rejects types we don't know how to preview.
-    writeFileSync(join(cwd, 'doc.pdf'), '%PDF-1.4', 'utf8');
-    const res = await request(app).get('/api/fs/file').query({ path: 'doc.pdf' });
+    // 2026-09-21:原来是拿 .pdf 当例子的 —— 文档预览上线后 .pdf/.docx/.xlsx/.pptx
+    // 都放行了(它们只回元数据,字节走 /api/fs/raw),改用真正不在白名单里的 .zip。
+    writeFileSync(join(cwd, 'archive.zip'), Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    const res = await request(app).get('/api/fs/file').query({ path: 'archive.zip' });
     expect(res.status).toBe(415);
     expect(res.body.ok).toBe(false);
+  });
+
+  it('serves document kinds as metadata only (no content, no 2 MB cap)', async () => {
+    // /fs/file 对文档类只回 { kind, path, size } —— 分屏 FsTab 靠它决定
+    // 渲染哪个预览分支,字节由 DocumentPreview 另走 /api/fs/raw。
+    writeFileSync(join(cwd, 'doc.pdf'), '%PDF-1.4', 'utf8');
+    const res = await request(app).get('/api/fs/file').query({ path: 'doc.pdf' });
+    expect(res.status).toBe(200);
+    expect(res.body.kind).toBe('pdf');
+    expect(res.body.content).toBeUndefined();
+    expect(res.body.dataUrl).toBeUndefined();
   });
 
   it('rejects .html path traversal attempts with 403', async () => {

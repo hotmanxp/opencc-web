@@ -6,6 +6,8 @@
  *   - image → <img src={dataUrl}>
  *   - html  → <iframe sandbox="allow-scripts" src={dataUrl}>
  *   - binary → Alert + 打开目录按钮
+ *   - docx/sheet/ppt/pdf/legacy-office → DocumentPreview(2026-09-21,字节由它
+ *     自己走 /api/fs/raw 拉;本组件只负责把 kind + path 转交)
  *
  * Desktop 视图(/desktop 双击文件)和 code 模型右侧 Drawer 都用同一个组件,
  * 避免两套实现各走各的路径导致体验不一致。
@@ -17,12 +19,19 @@ import React, { useEffect, useState } from "react"
 import { Alert, Button, Spin, Typography } from "antd"
 import { FolderOpenIcon } from "lucide-react";
 import { MarkdownText } from "../markdown/MarkdownText.js"
+import { DocumentPreview, isRenderableDocumentKind } from "../documentPreview/index.js"
 
-export type FilePreviewKind = 'text' | 'image' | 'html' | 'binary'
+// 本地类型副本是有意的(见下方 FilePreviewPayload 注释):既不要把 web 组件
+// 的依赖绑到 shared/fs.ts 的线上类型上,也不要只改一处导致两个 kind 集合漂移。
+// 与 shared/fileKind.ts 的 FilePreviewKind 保持一致。
+export type FilePreviewKind =
+  | 'text' | 'image' | 'html' | 'binary'
+  | 'docx' | 'sheet' | 'ppt' | 'pdf' | 'legacy-office'
 
 export type FilePreviewPayload = {
   kind: FilePreviewKind
-  /** 完整路径(用于 ext 推断 → MarkdownText/CodeBlock 分支 + 语言检测) */
+  /** 完整路径(用于 ext 推断 → MarkdownText/CodeBlock 分支 + 语言检测;
+   *  文档类 kind 同时是 /api/fs/raw 的取字节路径,必须是绝对路径) */
   path: string
   /** text/html mime(可选,image 必填) */
   mime?: string
@@ -224,7 +233,22 @@ export function FilePreviewBody({ payload }: { payload: FilePreviewPayload }) {
       return <BinaryPreview ext={payload.ext} path={payload.path} />
     case 'text':
       return payload.content != undefined ? <TextPreview path={payload.path} content={payload.content} /> : <Alert type="error" message="缺少文本内容" />
+    case 'docx':
+    case 'sheet':
+    case 'ppt':
+    case 'pdf':
+    case 'legacy-office':
+      // 文档类的字节不在 payload 里 —— DocumentPreview 自己按 path 走
+      // /api/fs/raw(见 components/documentPreview/index.tsx)。
+      return <DocumentPreview path={payload.path} kind={payload.kind} />
   }
+}
+
+/** 该 kind 是否由 DocumentPreview 渲染(供调用方提前切分支,如 FsTab 的布局类名)。 */
+export type DocumentPreviewKind = 'docx' | 'sheet' | 'ppt' | 'pdf' | 'legacy-office'
+
+export function isDocumentPreviewKind(kind: FilePreviewKind | undefined): kind is DocumentPreviewKind {
+  return kind === 'legacy-office' || (kind !== undefined && isRenderableDocumentKind(kind))
 }
 
 /**

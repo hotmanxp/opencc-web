@@ -75,7 +75,7 @@ export function CollapsedMessageBubble({
       <div className="flex justify-start mb-4 mr-5">
         <Card
           size="small"
-          className="w-full max-w-full rounded-xl relative"
+          className="msg-bubble-card w-full max-w-full rounded-xl relative"
         >
           <MessageCopyButton text={(m.text as string) || ''} variant="ai" />
           <Space align="start" size={8} className="w-full">
@@ -108,7 +108,7 @@ export function CollapsedMessageBubble({
       >
         <Card
           size="small"
-          className="rounded-xl relative"
+          className="msg-bubble-card rounded-xl relative"
           style={{
             maxWidth: expandUserBubble ? '100%' : '70%',
           }}
@@ -201,7 +201,7 @@ export function CollapsedMessageBubble({
   // 兜底: 未知文本类型 — 纯文本 + clamp, 至少不丢内容
   const text = (m.text as string) ?? (m.content as string) ?? ''
   return (
-    <Card size="small" className="mb-2 rounded-xl">
+    <Card size="small" className="msg-bubble-card mb-2 rounded-xl">
       <Paragraph
         ellipsis={{
           rows: CLAMP_LINES,

@@ -181,4 +181,47 @@ export interface RpcMethodMap {
     request: Record<string, never> | undefined
     response: { status: 'cancelled' }
   }
+
+  // ─── MCP — 活状态 + 手动重连 ─────────────────────────
+  // 后台连接失败后进程内不再有 MCP 工具;这两个端点让设置页展示并重试。
+  // 形状与 core 的 OpenccMcpStatus(serverTypes.ts)对齐。
+
+  /** GET /api/mcp/status — 各 MCP server 状态 + 最近失败汇总 */
+  'GET /api/mcp/status': {
+    request: undefined
+    response: McpStatusResponse
+  }
+
+  /** POST /api/mcp/reconnect — 重跑一遍连接(含 5s/15s 退避,最坏 ~20s) */
+  'POST /api/mcp/reconnect': {
+    request: Record<string, never> | undefined
+    response: McpStatusResponse
+  }
+}
+
+/** 见 core `opencc-src/server/serverTypes.ts` 的 OpenccMcpStatus。 */
+export type McpStatusResponse = {
+  lazyConnect: boolean
+  connecting: boolean
+  servers: Array<{
+    name: string
+    /** connected | failed | needs-auth | pending(disabled 已被服务端过滤掉) */
+    type: string
+    toolCount: number
+    commandCount: number
+    error?: string
+  }>
+  commands: Array<{
+    name: string
+    displayName: string
+    description: string
+    serverName: string
+    argNames?: string[]
+  }>
+  lastConnectFailure: {
+    at: number
+    failed: number
+    total: number
+    servers: string[]
+  } | null
 }

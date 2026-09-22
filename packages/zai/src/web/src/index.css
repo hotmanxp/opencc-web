@@ -35,6 +35,9 @@
      light 主题单独覆盖成主题橙, 见下方 :root[data-theme='light'] 块. */
   --thinking-accent: #8b5cf6;
   --thinking-bg: rgba(139, 92, 246, 0.10);
+  /* 非流式 "思考" pill 底色: dark 主题跟随 accent(紫), 与改动前一致;
+     light 主题覆写成淡灰(见下方 light 块)。文字两侧恒为白色. */
+  --thinking-pill-idle-bg: var(--thinking-accent);
   --tool-group-bg: rgba(139, 92, 246, 0.08);
   --tool-group-border: rgba(139, 92, 246, 0.40);
   --tool-group-header-bg: rgba(139, 92, 246, 0.18);
@@ -133,6 +136,12 @@
      可见轮廓. */
   --thinking-accent: #f97316;
   --thinking-bg: rgba(249, 115, 22, 0.04);
+  /* 浅色主题: 非流式(思考已结束/历史回放)的 "思考" pill 改淡灰底, 不再用主题
+     橙 —— 一屏多个已完成思考块时橙色胶囊过于抢眼, 且与"正在思考"的橙色撞色.
+     pill 文字恒为白色, 灰底取 slate-400/300 之间的 #afbccc (用户逐轮调浅后的
+     取值); 再浅白字会明显发虚, 需要白字可读就得往 #94a3b8 (slate-400) 收.
+     流式期间不受影响, 仍走 --thinking-accent 橙底白字. */
+  --thinking-pill-idle-bg: #afbccc;
   --tool-group-bg: rgba(249, 115, 22, 0.04);
   --tool-group-border: rgba(249, 115, 22, 0.30);
   --tool-group-header-bg: rgba(249, 115, 22, 0.08);
@@ -180,12 +189,52 @@
   background: rgba(255, 255, 255, 0.8) !important;
 }
 
-/* light 主题: 状态栏加一点背景色 */
-:root[data-theme='light'] [data-testid='config-status-bar'] {
-  background: #e2e8f0;
+/* light 主题: 整个输入框铺一层浅灰. .bottom-stack 有两个(分别包
+   AgentInputBox 与 ConfigStatusBar), 同色连成一整块 — 之前整块纯白,
+   跟白底 (--bg-body=#ffffff) 的 transcript 融成一片, 看不出输入区边界.
+   深色主题不加这一层 (深色下 --bg-body 本身够暗, 无需再分层).
+   注意: 弹窗 (NewSuperTaskModal / QuickCreateModal / MobileSupervisorDrawer)
+   给 .bottom-stack 传了 inline background, 优先级高于本规则, 那边不受影响. */
+:root[data-theme='light'] .bottom-stack {
+  background: #fdfefe;
 }
+/* 配置状态栏行并入上面那层灰: 不再单独铺底色, 透出 .bottom-stack 的浅灰. */
+:root[data-theme='light'] [data-testid='config-status-bar'] {
+  background: transparent;
+}
+/* 消息气泡卡片去描边. 全局 .ant-card 那条 1px 描边在浅色下是 20% 透明橙,
+   一屏气泡排下来满眼碎线; 浅色下气泡靠 --bg-card 浅灰底 + 圆角已经能和
+   --bg-body 白底对话区分层, 不需要再描一遍.
+   选择器带 .msg-bubble-card 标记类(MessageBubble / CollapsedMessageBubble
+   的 user/AI 文本气泡); 设置抽屉 / 资源页 / 表格等卡片保持原样, 工具汇总卡
+   见下方单独一条; 深色主题不动 — 深色下描边是气泡与背景的主要分界. */
+:root[data-theme='light'] .msg-bubble-card.ant-card {
+  border: none !important;
+}
+/* 工具调用汇总卡(ToolGroupCard)同款处理: 浅色下去掉外圈描边 + 头部与内容
+   之间的分隔线, 靠 --tool-group-bg / --tool-group-header-bg 的浅橙分层区分;
+   身份标识改由左侧 3px 主题橙竖条承担 (ToolGroupCard.tsx 里 inline 写了
+   borderLeft, 但一直被全局 .ant-card 的 `border: 1px solid !important` 压掉,
+   实际没显示过 — 这里用同优先级更高的选择器把它显式恢复).
+   注意 border 与 border-left 的顺序: border 先收口, border-left 后写才生效.
+   竖条用 45% 主题橙 — 实色 #f97316 卡片上太抢眼, 淡一档刚好压住身份又不
+   跟头部/内容的浅橙底打架; 要更淡就把 alpha 往下调(0.30 = --tool-group-border). */
+:root[data-theme='light'] .tool-group-card.ant-card {
+  border: none !important;
+  border-left: 3px solid rgba(249, 115, 22, 0.45) !important;
+}
+:root[data-theme='light'] .tool-group-card.ant-card .ant-card-head {
+  border-bottom: none !important;
+}
+/* 任务摘要行(有任务时才渲染)比输入区再深一档, 保留它的可点击条带感. */
 :root[data-theme='light'] [data-testid='bottom-status-trigger'] {
   background: #e2e8f0 !important;
+}
+/* light 主题: 左侧 Sider 的橙色右边线去掉. 浅色下工具栏(--bg-sidebar
+   #f8fafc)与内容区(--bg-body #ffffff)已有底色分层, 不需要再多一条 20% 橙线.
+   只改颜色不改宽度 — 1px 边框仍占位, Sider 宽度与图标位置分毫不动. */
+:root[data-theme='light'] .ant-layout-sider {
+  border-right-color: transparent !important;
 }
 :root[data-theme='light'] .ant-table-tbody > tr > td {
   border-bottom-color: rgba(15, 23, 42, 0.05) !important;

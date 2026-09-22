@@ -42,7 +42,7 @@ import { LS_KEYS, newStickyNote, newTodoItem, type DesktopShortcut, type StickyN
 import type { DesktopFsFile, DesktopOpen } from '../../../shared/desktopFs.js';
 import WallpaperUploadField from '../components/desktop/WallpaperUploadField.js';
 import { classifyKind } from '../../../shared/fileKind.js';
-import { FilePreviewBody, decodeDataUrlUtf8 } from '../components/desktop/FilePreviewBody.js';
+import { FilePreviewBody, decodeDataUrlUtf8, isDocumentPreviewKind, type FilePreviewKind } from '../components/desktop/FilePreviewBody.js';
 
 const PRESET_WALLPAPERS = ['preset:aurora', 'preset:ocean', 'preset:sunset'] as const;
 
@@ -167,7 +167,7 @@ const activeId = useMemo(
   const [preview, setPreview] = useState<Preview>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewData, setPreviewData] = useState<
-    | { kind: 'text' | 'image' | 'html' | 'binary'; path: string;
+    | { kind: FilePreviewKind; path: string;
         mime?: string; content?: string; dataUrl?: string;
         size: number; mtime: number; ext?: string }
     | { error: string }
@@ -410,6 +410,20 @@ const activeId = useMemo(
     }
     let cancelled = false;
     setPreviewLoading(true);
+    // 文档类(2026-09-21)不走 /desktop/fs/file:那个端点的语义是「图片/HTML
+    // 内联 dataUrl」,toMime 白名单对 Office 返回 undefined → 400。这里直接
+    // 构造 { kind, path } 交给 FilePreviewBody → DocumentPreview,
+    // 字节由它自己走 /api/fs/raw(带白名单 + 按格式的上限)。
+    if (isDocumentPreviewKind(classifyKind(preview.path))) {
+      setPreviewData({
+        kind: classifyKind(preview.path),
+        path: preview.path,
+        size: 0, // desktopFs 不返回 size/mtime;DocumentPreview 会自己展示真实大小
+        mtime: 0,
+      });
+      setPreviewLoading(false);
+      return () => { cancelled = true; };
+    }
     api
       .get<DesktopFsFile>(`/desktop/fs/file?path=${encodeURIComponent(preview.path)}`)
       .then((r) => {

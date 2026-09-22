@@ -118,7 +118,12 @@ queryLoop 每轮 turn 进入
 | `packages/zai/src/shared/repl.ts` | `TopCommandEntry` / `TopCommandsResponse`(全局 topN 历史接口契约) |
 | `packages/zai/src/web/src/lib/{bashReplApi,replHistoryApi}.ts` | exec/abort/SSE client fetch + topN 历史 fetch 包装 |
 | `packages/zai/src/web/src/hooks/useBashRepl.ts` | SSE 连接管理 + `topCommands` state + `refreshTopCommands()`(exec 后自动刷新) |
-| `packages/zai/src/web/src/components/splitPane/BashTab.tsx` | Bash REPL Tab + AntD `AutoComplete` 下拉 top10 建议(本地 prefix 过滤) |
+| `packages/zai/src/web/src/components/splitPane/BashTab.tsx` | 多终端 tab 宿主(chip + 关闭 + ＋/shell 菜单 + 双击改名)；2026-09-22 前是 Bash REPL Tab(输入框 + AutoComplete top10)，top10 建议与历史现在只服务移动端 `MobileQuickDrawer` |
+| `packages/zai/src/server/services/terminal/{PtySession,TerminalFollower,TerminalService,shells}.ts` | 用户侧持久 PTY 终端：`PtySession`(node-pty + `@xterm/headless` 屏幕累积 + `@xterm/addon-serialize` 快照 + follower 广播 + SIGTERM→1s→SIGKILL) / 单 follower 有界队列(超 2MiB 断开) / 每 sessionId 注册中心(create 幂等、closedIds、maxTerminals 8) / 默认 shell 解析与候选发现 |
+| `packages/zai/src/server/routes/terminal.ts` | `/api/terminal/{environment,shells,list,create}` + `/api/terminal/:id/{events(SSE),write,resize,rename,close}`；node-pty 装不上 → 503 + hint |
+| `packages/zai/src/shared/terminal.ts` | 终端契约：`TerminalFrame`(snapshot/output/state/error) / `WebTerminalInfo` / `TerminalEnvironment` / `TERMINAL_LIMITS` / 请求 zod schema |
+| `packages/zai/src/web/src/hooks/useTerminalTabs.ts` + `lib/terminalApi.ts` | 终端 tab 集合（服务端 `GET /list` 为唯一真相）+ REST/SSE client |
+| `packages/zai/src/web/src/components/splitPane/{TerminalView.tsx,terminalTheme.ts}` | xterm.js 视图（FitAddon 夹取尺寸 + rAF 合帧 + 仅可见 tab 开 SSE）/ 由 zai CSS 变量 + `data-theme` 派生 xterm 主题 |
 | `packages/zai/src/web/src/store/useAgentStore.ts` | Zustand store:`applyRuntimeEvent` / `applySessionEvent` / `applyPromptAsk` / `applyJobEvent` / `applySystemEvent` + `upsertToolCall` / `scheduleTaskListClearIfAllDone` 5s 自动清空 |
 | `packages/zai/src/web/src/store/useAppStore.ts` | 全局 UI state:`sidebarCollapsed` / `settingsDrawerOpen` / `settingsTheme` / `outputStyle` / `maxVisibleMessages`(默认 20,超过时折叠早期消息 + 顶部浮按钮还原) |
 | `packages/zai/src/web/src/lib/{api,v2TaskApi}.ts` + `hooks/useBackgroundTasks.ts` | 通用 fetch(`api.ts` 默认不带 `X-Zai-Token`)+ v2 task 拉取 + job dock 按 sessionId 切分 |
@@ -394,3 +399,21 @@ QR 登录后拿到的是 iLink bot identity(`...@im.bot`),不是普通微信账�
 - [x] 事件总线双向桥(weixin.inbound in, runtime.delta/done out)
 - [x] SSR/SSRF 防护 (CDN 白名单 + token 锁 mode 0600)
 - [x] 真实浏览器验收:启动 dev 实例,打开 Settings → 微信机器人 → 显示状态 (unconfigured)
+
+## 16. 分屏 Bash 面板:持久 PTY 终端(2026-09-22)
+
+**动机**:原实现每条命令 `spawn(sh -c <cmd>)`(`services/repl/ReplSession.ts`),命令之间没有会话状态 —— `export`/`alias`/函数/后台作业全丢,`cd` 靠前端回传 `cwd` 打补丁。改成 dsh 式持久 PTY 后 shell 状态与 CWD 天然保持,并支持 vim/htop 这类全屏程序。
+
+**分层**:`BashTab`(tab strip)→ `TerminalView`(xterm.js + FitAddon)→ `/api/terminal/*` → `TerminalService`(每 sessionId 一组)→ `PtySession`(node-pty;`@xterm/headless` 累积屏幕 + `@xterm/addon-serialize` 出重连快照)。
+
+**四条必须知道的约束**:
+1. **只有可见 tab 开 SSE** —— HTTP/1.1 同源并发连接有限(agent 流 + bash-tasks 流已占数条);切 tab 关旧开新,新连接首帧 `snapshot` 恢复整屏。
+2. **服务端是 tab 集合的唯一真相** —— 刷新后 `GET /api/terminal/list` 重建 tab 并重连同一批 PTY;localStorage 只记"当前看哪个"(`zai.splitPane.terminalTab`)。
+3. **卸载不杀进程** —— 收起分屏/切 tab/刷新都保留 shell,只有关 tab(`/close`)才 SIGTERM → 1s → SIGKILL。
+4. **进程回收三处接线** —— 关 tab / 删会话(`DELETE /api/agent/sessions/:id`)/ 进程退出(`runtimeLifecycle.closeServer` → `disposeAll`)。少任何一处都会留孤儿 zsh。
+
+**与 dsh 的有意差异**(不是遗漏):不移植就绪探测/`TerminalSanitizer`/OSC 133(那是给模型侧工具读输出用的);shell 起 `zsh -i` **读用户 rc**、**不**接管 PS1;PTY **透传完整 env**(不做 `ReplSession.filterEnv` 白名单);无 attachment 独占写控制与 retain 引用计数。完整清单见 spec 的 Non-goals。
+
+**测试**:`PtySession.test.ts`(真 PTY,断言状态与 CWD 跨命令保持 + close 真杀进程)、`TerminalService.test.ts`、`routes/terminal.test.ts`(含裸 http 读 SSE)、`useTerminalTabs.test.ts`、`TerminalView.test.tsx`、`BashTab.test.tsx`。
+
+**详设**:`docs/superpowers/specs/2026-09-22-zai-pty-terminal-design.md` / 计划与验收:`docs/superpowers/plans/2026-09-22-zai-pty-terminal.md`

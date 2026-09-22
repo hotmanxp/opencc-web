@@ -18,11 +18,16 @@ function extOf(basename: string): string {
 }
 
 // Pre-flight: match the server's allow-list (`packages/zai/src/server/
-// routes/fs.ts`, TEXT_EXTS / IMAGE_EXTS / HTML_EXTS / dotfile). When a
-// file is clearly outside the supported set (e.g. `.zip`, `.docx`,
+// routes/fs.ts`, TEXT_EXTS / IMAGE_EXTS / HTML_EXTS / dotfile + 文档类)。
+// When a file is clearly outside the supported set (e.g. `.zip`, `.exe`,
 // extension-less binaries), we surface "不支持的文件类型: xxx" in the
 // right-hand panel instead of round-tripping to /api/fs/file just to
 // receive a 415 + AntD notification.
+//
+// 2026-09-21:docx/sheet/ppt/pdf/legacy-office 不再落入 'binary',所以
+// 这里不需要为文档预览加特例 —— classifyKind 的扩展名表一变,preflight
+// 自动放行。它们走的是「/fs/file 只回元数据 → DocumentPreview 自己拉
+// /api/fs/raw」这条路,不能因为 2 MB 文本上限或被当成 binary 而拦死。
 function preflightUnsupported(path: string): string | null {
   const base = path.split('/').pop() ?? path;
   const isDotfile = base.startsWith('.') && base !== '.' && base !== '..';

@@ -21,6 +21,21 @@ vi.mock('./FsContextMenu.js', () => ({
     </div>
   )),
 }));
+// 文档预览渲染层(2026-09-21):FsTab 只负责「按 kind 分发」,真正的解析由
+// components/documentPreview 里的渲染器做。这里只 stub 掉 DocumentPreview
+// 组件本身(其余导出如 isRenderableDocumentKind 保持真实实现,FilePreviewBody
+// 的 isDocumentPreviewKind 依赖它),免得 FsTab 的单测把 pdfjs-dist / xlsx /
+// docx-preview 整个拉进来(happy-dom 下跑不出有意义的结果)。渲染器自己的
+// 分发契约在 test/web/components/documentPreview/ 覆盖。
+vi.mock('../documentPreview/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../documentPreview/index.js')>();
+  return {
+    ...actual,
+    DocumentPreview: ({ path, kind }: { path: string; kind: string }) => (
+      <div data-testid="document-preview-stub" data-path={path} data-kind={kind} />
+    ),
+  };
+});
 // TextEditor and the markdown SyntaxHighlighter chunks are dynamic
 // imports that happy-dom never resolves (vitest's module loader uses
 // a separate Promise machinery from Node's). We stub them so that
@@ -383,6 +398,72 @@ describe('FsTab', () => {
     fireEvent.click(screen.getByText('NOTES.markdown'));
     expect(screen.getByTestId('fs-preview-md')).toBeTruthy();
     expect(screen.getByRole('heading', { level: 2, name: 'Section' })).toBeTruthy();
+  });
+
+  it('renders document kinds through the shared DocumentPreview (absolute path)', () => {
+    // 2026-09-21:docx/xlsx/pptx/pdf 由 /fs/file 只回元数据({kind,path,size}),
+    // 渲染交给共享的 DocumentPreview —— 它拿到的必须是**绝对路径**,否则
+    // /api/fs/raw 取不到字节。这里同时守住「不再落到 fs-preview-text / 不支持」
+    // 这条回归线。
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'report.pdf', path: 'docs/report.pdf', type: 'file', size: 2048 },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        kind: 'pdf',
+        path: '/repo/docs/report.pdf',
+        name: 'report.pdf',
+        size: 2048,
+        mtime: '2026-09-21T00:00:00Z',
+        ext: '.pdf',
+      },
+      loading: false,
+      error: null,
+    });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('report.pdf'));
+    const doc = screen.getByTestId('document-preview-stub');
+    expect(doc.getAttribute('data-kind')).toBe('pdf');
+    expect(doc.getAttribute('data-path')).toBe('/repo/docs/report.pdf');
+    // 文档预览有自己的排版(表格/正文),不继承文本预览的等宽字体外框。
+    expect(screen.getByTestId('fs-preview').className).not.toContain('font-mono');
+  });
+
+  it('renders legacy-office through DocumentPreview too (让它在原地解释原因)', () => {
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [{ name: 'old.doc', path: 'old.doc', type: 'file', size: 512 }],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        kind: 'legacy-office',
+        path: '/repo/old.doc',
+        name: 'old.doc',
+        size: 512,
+        mtime: '2026-09-21T00:00:00Z',
+        ext: '.doc',
+      },
+      loading: false,
+      error: null,
+    });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('old.doc'));
+    expect(screen.getByTestId('document-preview-stub').getAttribute('data-kind')).toBe('legacy-office');
   });
 
   it('still renders .txt files via plain <pre> (regression guard)', () => {

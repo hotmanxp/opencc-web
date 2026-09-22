@@ -93,6 +93,12 @@ export const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }:
 
 const THINKING_ACCENT = "var(--thinking-accent, #8b5cf6)"; // CSS var preferred, hardcoded fallback for tests/storybook
 const THINKING_BG = "var(--thinking-bg, rgba(139, 92, 246, 0.10))"; // CSS var preferred, hardcoded fallback for tests/storybook
+// 非流式(历史回放 / 思考已结束)的 "思考" pill 底色。dark 主题下等同 accent
+// (紫), 与改动前一致; light 主题在 index.css 与 lightThemeVars 里覆写成淡灰
+// —— 浅色下一屏多个已完成思考块时橙色 pill 过于抢眼, 且与"正在思考"的橙色
+// 无法区分。流式期间仍走 THINKING_ACCENT, 保留"进行中"的橙色信号。
+// 文字固定白色(见 pill 上的 text-white), 浅色下的灰底需要够深才托得住白字。
+const THINKING_PILL_IDLE_BG = "var(--thinking-pill-idle-bg, #8b5cf6)";
 const THINKING_PREVIEW_MAX = 80;
 
 // 模块级计数器: 当前有几个 ThinkingBlock 处于 streaming 状态。
@@ -222,14 +228,16 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
             key: "thinking",
             label: (
               <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
-                {/* 紫色 pill: 仿 opencc userFacingNameBackgroundColor,
-                    把 "思考" 标签用主色背景包裹, 视觉权重高于纯文字标签. */}
+                {/* pill: 仿 opencc userFacingNameBackgroundColor,
+                    把 "思考" 标签用实底背景包裹, 视觉权重高于纯文字标签.
+                    底色分流: 流式中 = accent 橙, 非流式 = idle 底
+                    (dark 下同为 accent 紫, light 下为淡灰); 文字恒为白色. */}
                 <span
                   className={
                     (streaming ? "zai-thinking-pill-active " : "") +
                     "inline-flex items-center gap-0.5 px-1.5 py-px rounded-[10px] text-white text-[11px] font-semibold leading-[1.6] flex-shrink-0"
                   }
-                  style={{ background: THINKING_ACCENT }}
+                  style={{ background: streaming ? THINKING_ACCENT : THINKING_PILL_IDLE_BG }}
                 >
                   <LightbulbIcon
                     className={streaming ? "zai-thinking-bulb zai-thinking-bulb-active" : "zai-thinking-bulb"}
@@ -655,7 +663,7 @@ export const MessageBubble = React.memo(function MessageBubble({
       >
         <Card
           size="small"
-          className="bg-[var(--bg-card)] rounded-xl relative"
+          className="msg-bubble-card bg-[var(--bg-card)] rounded-xl relative"
           style={{
             // 移动端或分屏开启时, 对话区被压窄, 70% 显得局促; 撑满与 AI 气泡
             // 行为一致 (见上方 expandUserBubble 计算). 桌面端无分屏仍维持
@@ -750,7 +758,7 @@ export const MessageBubble = React.memo(function MessageBubble({
       <div className="flex justify-start mb-4">
         <Card
           size="small"
-          className="w-full max-w-full mr-5 bg-[var(--bg-card)] rounded-xl relative"
+          className="msg-bubble-card w-full max-w-full mr-5 bg-[var(--bg-card)] rounded-xl relative"
         >
           <MessageCopyButton text={text} variant="ai" />
           <Space align="start" size={8} className="w-full">
@@ -904,7 +912,7 @@ export const MessageBubble = React.memo(function MessageBubble({
       <div className="flex justify-start mb-4">
         <Card
           size="small"
-          className="w-full max-w-full mr-5 bg-[var(--bg-card)] rounded-xl"
+          className="msg-bubble-card w-full max-w-full mr-5 bg-[var(--bg-card)] rounded-xl"
         >
           <Space align="start" size={8}>
             <BotIcon style={{ color: "var(--accent-start)", fontSize: 18 }} />

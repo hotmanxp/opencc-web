@@ -30,8 +30,12 @@ export interface FsFile {
    *  utf8 `content`. 'image' returns base64 `dataUrl` + `mime` for
    *  binary image formats. 'html' is like 'image' but mime is text/html
    *  and the client renders via a sandboxed <iframe> instead of <img>;
-   *  `content` is omitted in the 'image' / 'html' cases. */
-  kind?: 'text' | 'image' | 'html';
+   *  `content` is omitted in the 'image' / 'html' cases.
+   *
+   *  文档类 kind('docx' | 'sheet' | 'ppt' | 'pdf' | 'legacy-office',
+   *  2026-09-21)只返回元数据 —— 字节由前端另走 GET /api/fs/raw,
+   *  避免 base64 膨胀与主线程解码。 */
+  kind?: 'text' | 'image' | 'html' | 'docx' | 'sheet' | 'ppt' | 'pdf' | 'legacy-office';
   path?: string;
   name?: string;
   size?: number;
@@ -41,6 +45,8 @@ export interface FsFile {
   mime?: string;
   /** Base64 data URL (set when kind === 'image' or 'html'). */
   dataUrl?: string;
+  /** 文档类 kind:扩展名前缀(eg. ".docx")。 */
+  ext?: string;
 }
 
 /**
@@ -152,11 +158,19 @@ export interface FilePreviewPayload {
 /**
  * /fs/preview 路由失败响应:HTTP status 携带语义,body 仅供前端展示。
  * `code` 与工具层 `display_files` 的 error.code 对齐,便于 UI 复用同一套 Tag 文案。
+ *
+ * 2026-09-21 追加(文档预览):
+ * - `EUNSUPPORTED`            — 扩展名不在 /fs/raw 白名单内(415)
+ * - `EENCRYPTED_OR_LEGACY`    — 容器嗅探命中 OLE,即加密 OOXML 或旧版二进制(415)
  */
 export interface FilePreviewError {
-  code: 'ENOENT' | 'EACCES' | 'EISDIR' | 'ETOOBIG' | 'EBADREQ' | 'EIO'
+  code:
+    | 'ENOENT' | 'EACCES' | 'EISDIR' | 'ETOOBIG' | 'EBADREQ' | 'EIO'
+    | 'EUNSUPPORTED' | 'EENCRYPTED_OR_LEGACY'
   message: string
   meta?: { size?: number }
+  /** 仅 EENCRYPTED_OR_LEGACY:嗅探到的容器('ole')。 */
+  container?: string
 }
 
 /**
