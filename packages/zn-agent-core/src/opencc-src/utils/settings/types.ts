@@ -1470,13 +1470,19 @@ export function getComputerUseSettings(): ComputerUseSettings {
 
 /**
  * Whether zai should auto-inject the cua-driver MCP server on this run.
- * True iff the user has enabled it in settings AND the current process
- * platform is in the allow-list AND the OPENCC_ENABLE_COMPUTER_USE env
- * gate is on (the env gate is the only way to bypass the build-time
- * disable; the schema field is hidden otherwise).
+ * True iff (the user has enabled it in settings OR the
+ * OPENCC_ENABLE_COMPUTER_USE env gate is on) AND the current process
+ * platform is in the allow-list. The env OR settings change (2026-09-22)
+ * lets ops turn the channel on for a single process without touching
+ * `~/.zai/settings.json`, while keeping the platform gate as a hard
+ * technical AND (executor is macOS-only via Swift).
  */
 export function isComputerUseEnabled(): boolean {
-  if (!isEnvTruthy(process.env.OPENCC_ENABLE_COMPUTER_USE)) return false
+  const envOn = isEnvTruthy(process.env.OPENCC_ENABLE_COMPUTER_USE)
   const s = getComputerUseSettings()
-  return s.enabled && s.platforms.includes(process.platform as 'darwin' | 'linux' | 'win32')
+  const userIntent = envOn || s.enabled
+  return (
+    userIntent &&
+    s.platforms.includes(process.platform as 'darwin' | 'linux' | 'win32')
+  )
 }

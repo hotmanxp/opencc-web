@@ -89,6 +89,28 @@ describe('weixin main agent (zai patch 2026-09-13)', () => {
     expect(once).toHaveLength(1)
   })
 
+  // OR-bridge 配套(2026-09-22):所有 mcp__* 工具都被放行,无论 server
+  // 名(cua-driver / 后续任意 MCP)。MCP 启不启动已经在更上游决定
+  // (isComputerUseEnabled / requiredMcpServers / disabledMcpServers),
+  // weixin 白名单不该二次过滤。
+  it('tools 槽:放行所有 mcp__* 工具(cua-driver 等 MCP server 可见)', () => {
+    const wx = getBuiltinMainAgents().find((a) => a.name === 'weixin-bot')!
+    const origin = [
+      ...fakeTools(),
+      // cua-driver MCP 工具(Computer Use)
+      { name: 'mcp__cua-driver__screenshot' },
+      { name: 'mcp__cua-driver__click' },
+      { name: 'mcp__cua-driver__type_text' },
+      // 假设的其它 MCP server(后续接入也走同一逻辑)
+      { name: 'mcp__some-other__do_thing' },
+    ] as never
+    const names = (wx.tools!(origin) as { name: string }[]).map((t) => t.name)
+    expect(names).toContain('mcp__cua-driver__screenshot')
+    expect(names).toContain('mcp__cua-driver__click')
+    expect(names).toContain('mcp__cua-driver__type_text')
+    expect(names).toContain('mcp__some-other__do_thing')
+  })
+
   it('systemPrompt:英文书写 + 身份前置 + 关键纪律段 + 剥离编码段', () => {
     const wx = getBuiltinMainAgents().find((a) => a.name === 'weixin-bot')!
     const origin = [

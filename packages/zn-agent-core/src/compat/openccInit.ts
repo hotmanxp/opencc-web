@@ -35,6 +35,11 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
+// Pulled from opencc vendor (same module utils/settings/types.ts re-exports
+// from). Used by applyZaiComputerUseEnableFromSettings() to honor the
+// OR-bridge semantics (env-only opt-in survives a settings-disabled cold start).
+import { isEnvTruthy } from '../opencc-src/utils/envUtils.js'
+
 // Imported via the package's main entry — the runtime `default` export
 // IS the single bundle (dist/opencc-core.mjs, see package.json
 // `exports`). All opencc vendor code is bundled into this one .mjs by
@@ -363,12 +368,17 @@ export function applyZaiComputerUseEnableFromSettings(): boolean {
       enabled = false
     }
   }
+  // OR-bridge (2026-09-22): env OR settings counts as user intent. Only
+  // forward-write env when settings.json asked for it. When settings.json
+  // does NOT have it enabled, we DO NOT delete a pre-existing env value
+  // — that lets ops flip the channel on for a single process via
+  // `OPENCC_ENABLE_COMPUTER_USE=1 zai start` without persisting to disk.
+  // Toggle-off via the SettingsDrawer PUT route still deletes env (in
+  // routes/agentSettings.ts), keeping the UI state and the env state in sync.
   if (enabled) {
     process.env.OPENCC_ENABLE_COMPUTER_USE = '1'
-  } else {
-    delete process.env.OPENCC_ENABLE_COMPUTER_USE
   }
-  return enabled
+  return enabled || isEnvTruthy(process.env.OPENCC_ENABLE_COMPUTER_USE)
 }
 
 // ----- entry point -----

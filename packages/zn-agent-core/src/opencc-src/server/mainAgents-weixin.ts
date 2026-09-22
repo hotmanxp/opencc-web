@@ -29,6 +29,13 @@ export const WEIXIN_MAIN_AGENT_NAME = 'weixin-bot'
  * 不含:DisplayFiles(无 Web UI)、WebFetch(公共 banned)、WebBrowser、
  * Workflow / Monitor / RemoteTrigger / Brief / SendUserFile 等界面向工具;
  * 也不含 AskUserQuestion(微信通道没有交互式选项卡片,保留只会误导模型)。
+ *
+ * MCP 工具(`mcp__<server>__<tool>`)**不在**该白名单里,而是在
+ * `tools` 槽的过滤逻辑里**显式放行**所有 `mcp__*` 前缀(见下方
+ * tools 槽)。理由:MCP server 启不启动已经在更上游决定了
+ * (`isComputerUseEnabled()` 三道门 + `requiredMcpServers` +
+ * `disabledMcpServers` 等),白名单再写死 server 名会让"用户开了
+ * Computer Use 但工具不见"这种隐形 bug 难定位。
  */
 const WEIXIN_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
   // ── 指派子 agent(本 agent 的核心能力)──
@@ -100,7 +107,18 @@ export const weixinMainAgent: MainAgentConfig = {
     'WeChat bot — delegation-first orchestrator: subagent dispatch, cron scheduling, markdown replies',
   systemPrompt: (origin) => [WEIXIN_SYSTEM_PROMPT, ...stripCodingSections(origin)],
   tools: (origin) => {
-    const pool = origin.filter((tool: Tool) => WEIXIN_TOOL_ALLOWLIST.has(String(tool.name)))
+    const pool = origin.filter((tool: Tool) => {
+      const name = String(tool.name)
+      // 内置白名单(指派 + 调度 + 文件/检索必需)
+      if (WEIXIN_TOOL_ALLOWLIST.has(name)) return true
+      // MCP 工具全放行(2026-09-22 OR-bridge 配套):Computer Use 走
+      // cua-driver(`mcp__cua-driver__*`),其它 MCP server 同理。
+      // 防御性 gate 已在更上游判定(platform / settings / env /
+      // requiredMcpServers / disabledMcpServers / enterprise policy),
+      // 这里只放行,不二次过滤。
+      if (name.startsWith('mcp__')) return true
+      return false
+    })
     // SendFileToUser 不在 vendor 基础工具池里(server-scoped 工具,
     // 同 displayFilesOpenccTool 的挂载方式)—— 显式补挂。
     if (!pool.some((t) => t.name === sendFileToUserTool.name)) {

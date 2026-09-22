@@ -18,6 +18,7 @@
  * @module
  */
 import type { ScopedMcpServerConfig } from './types.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import { getComputerUseSettings } from '../../utils/settings/types.js'
 
 /** MCP server name as it appears in the effective servers map and in `mcp__<name>__<tool>` tool names. */
@@ -52,7 +53,10 @@ export function getCuaDriverMcpServerConfig():
   | (ScopedMcpServerConfig & { type?: 'stdio' })
   | null {
   const s = getComputerUseSettings()
-  if (!s.enabled) return null
+  const envOn = isEnvTruthy(process.env.OPENCC_ENABLE_COMPUTER_USE)
+  // OR: env gate OR settings flag. Platform remains a hard AND (executor
+  // is macOS-only). Mirrors isComputerUseEnabled() in utils/settings/types.ts.
+  if (!(envOn || s.enabled)) return null
   if (!s.platforms.includes(process.platform as 'darwin' | 'linux' | 'win32')) {
     return null
   }

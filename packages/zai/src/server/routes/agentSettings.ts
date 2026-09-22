@@ -399,15 +399,18 @@ router.put(
  * PUT /api/agent/settings/computer-use — persist the web UI's
  * "启用 Computer Use (cua-driver)" toggle. Body is `{ value: boolean }`.
  *
- * Mirrors enable-dynamic-workflow's pattern:
- *   - zai controls whether the cua-driver MCP server gets injected.
- *   - The toggle writes the persisted flag AND mutates
- *     `process.env.OPENCC_ENABLE_COMPUTER_USE` so vendor's
- *     `isComputerUseEnabled()` returns true on the very next
- *     `getClaudeCodeMcpConfigs()` call. The MCP client re-spawns the
- *     cua-driver subprocess lazily; existing sessions pick up the new
- *     tool pool on their next query() call (the tool list is reassembled
- *     per query).
+ * Since the 2026-09-22 OR-bridge change, the SettingsDrawer toggle
+ * controls ONLY the persisted `settings.computerUse.enabled` flag.
+ * `process.env.OPENCC_ENABLE_COMPUTER_USE` is treated as an independent
+ * control surface (per-process ops switch) — toggling here will:
+ *   - on  (`raw === true`): write settings.json AND set env to '1'
+ *     (forward-bridge; lets the current process and any just-spawned
+ *     children see the change without restart).
+ *   - off (`raw === false`): write settings.json enabled=false ONLY.
+ *     We deliberately do NOT delete `OPENCC_ENABLE_COMPUTER_USE` —
+ *     the env var and settings.json are independent opt-ins per the
+ *     OR-bridge contract. Ops who set the env want the channel on for
+ *     this process regardless of what the UI toggles say.
  *
  * Platform gate: non-darwin rejects with 409 `requires_darwin`. The UI
  * also disables the row on non-darwin; this is the server-side
@@ -444,12 +447,17 @@ router.put('/agent/settings/computer-use', async (req: Request, res: Response) =
       // nested field, so this is a pure additive write.
       enableComputerUse: raw,
     })
-    // Bridge to vendor's runtime gate, same shape as the workflow PUT.
+    // OR-bridge (2026-09-22): only set env when toggle goes ON.
+    // Toggle OFF leaves any pre-existing OPENCC_ENABLE_COMPUTER_USE alone
+    // so ops can keep the channel on for this process via env-only.
     if (raw) {
       process.env.OPENCC_ENABLE_COMPUTER_USE = '1'
-    } else {
-      delete process.env.OPENCC_ENABLE_COMPUTER_USE
     }
+    // Toggle response reflects the *persisted* settings.json state, not
+    // the runtime gate. The runtime gate = env OR settings (see
+    // isComputerUseEnabled() in zn-agent-core); UI consumers who need the
+    // effective value should call resolveEnableComputerUse() or hit
+    // GET /api/agent/computer-use/status.
     res.json({ value: resolveEnableComputerUse(next) })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
