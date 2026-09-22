@@ -151,6 +151,17 @@ const _runtimeShape: OpenccRuntime = {
     addMarketplace: async () => ({ success: true, message: 'ok' }),
     reload: async () => ({ success: true, message: 'ok' }),
   },
+  // zai patch (2026-09-22): MCP live view surface — see serverTypes.ts
+  // OpenccRuntime.mcp / OpenccMcpApi. Bodies are never executed;
+  // the binding is a structural probe that locks the public type shape.
+  mcp: {
+    getStatus: () => {
+      throw new Error('compile-time shape only')
+    },
+    reconnect: async () => {
+      throw new Error('compile-time shape only')
+    },
+  },
 }
 void _runtimeShape
 

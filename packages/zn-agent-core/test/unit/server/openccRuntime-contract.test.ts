@@ -101,6 +101,17 @@ const _runtimeShape: OpenccRuntime = {
       throw new Error('compile-time shape only')
     },
   },
+  // zai patch (2026-09-22): MCP live view surface — see serverTypes.ts
+  // OpenccRuntime.mcp / OpenccMcpApi. The mock bodies are never executed;
+  // the binding is a structural probe that locks the public type shape.
+  mcp: {
+    getStatus: () => {
+      throw new Error('compile-time shape only')
+    },
+    reconnect: async () => {
+      throw new Error('compile-time shape only')
+    },
+  },
 }
 void _runtimeShape
 
