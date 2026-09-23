@@ -339,6 +339,47 @@ describe('weixinInboundBridge', () => {
     expect(sidNew).toMatch(/^sess-/)
   })
 
+  it('/restart:先发 ack,再触发 onRestart hook,不注入 agent', async () => {
+    const onRestart = vi.fn(() => true)
+    registerBuiltinWeixinCommands({ onRestart })
+    const h = makeHarness('open')
+    // 先发一条消息,确保有 session 绑定 —— /restart 应在该 session 上下文触发。
+    await h.bridge.deliver(dm('hello'))
+
+    await h.bridge.deliver(dm('/restart'))
+
+    // 不注入 agent —— restart 走自己的 hook,通道马上就要断。
+    expect(h.followup).toHaveBeenCalledTimes(1)
+    // ack 必须发出去,让用户在通道断开前看到 bot 响应。
+    expect(h.sent.some((s) => s.text.includes('正在重启微信通道'))).toBe(true)
+    // onRestart 用 user_action 触发,与 SettingsDrawer 的重启按钮同一 reason。
+    expect(onRestart).toHaveBeenCalledTimes(1)
+    expect(onRestart).toHaveBeenCalledWith('user_action')
+  })
+
+  it('/restart now:trailing args 不影响 dispatch,仍触发 onRestart', async () => {
+    const onRestart = vi.fn(() => true)
+    registerBuiltinWeixinCommands({ onRestart })
+    const h = makeHarness('open')
+
+    await h.bridge.deliver(dm('/restart now'))
+
+    expect(h.followup).toHaveBeenCalledTimes(0)
+    expect(onRestart).toHaveBeenCalledWith('user_action')
+  })
+
+  it('/restart:未注入 onRestart hook 时只发 ack,不抛错', async () => {
+    // 生产上 WeixinBotManager.start() 总会注入 hook;但裸注册(测试 / 早期启动)
+    // 不能因为缺 hook 就崩 —— ack 已发,留 warning 即可。
+    registerBuiltinWeixinCommands()
+    const h = makeHarness('open')
+
+    await h.bridge.deliver(dm('/restart'))
+
+    expect(h.followup).toHaveBeenCalledTimes(0)
+    expect(h.sent.some((s) => s.text.includes('正在重启微信通道'))).toBe(true)
+  })
+
   it('未注册的 / 开头消息原样穿透给 agent', async () => {
     registerBuiltinWeixinCommands()
     const h = makeHarness('open')

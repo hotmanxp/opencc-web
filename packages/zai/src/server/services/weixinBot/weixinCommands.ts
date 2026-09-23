@@ -11,8 +11,9 @@
  *   - handler 拿到的 ctx 已完成准入(gate),且带当前绑定。
  *
  * 现有指令:
- *   /new  立即轮转该对话到新 sess-uuid(上下文清零,旧会话归档并
- *         触发记忆沉淀;摘要将在新会话首条消息注入)。
+ *   /new      立即轮转该对话到新 sess-uuid(上下文清零,旧会话归档并
+ *             触发记忆沉淀;摘要将在新会话首条消息注入)。
+ *   /restart  重启当前 `app=weixin` 专用实例(channel 重连后继续可用)。
  */
 import type { WeixinSessionBinding } from '../../../shared/weixin.js'
 import type { WeixinSessionMap } from './WeixinSessionMap.js'
@@ -79,6 +80,14 @@ export interface WeixinCommandDeps {
   /** 预留:后续指令可能需要的注入点。记忆沉淀统一由 bridge 在
    * takeRotation 流程处理,/new 不自带钩子以免双触发。 */
   onRotated?: (args: { conversationKey: string; oldSessionId: string; cwd: string }) => void
+  /**
+   * `/restart` 触发的进程级重启 hook。生产由 `WeixinBotManager` 注入
+   * `runtimeLifecycle.sendRestart('user_action')` —— 该函数向 supervisor
+   * 发 IPC,supervisor 沿用当前 instance 定义(cwd / 端口已持久化)respawn
+   * 本进程,新进程 `weixinRuntimeBoot` 自动重连通道,无需重建实例定义。
+   * 测试注入 `vi.fn()` 即可断言调用,无需真实 supervisor IPC。
+   */
+  onRestart?: (reason: 'user_action') => boolean
 }
 
 /**
@@ -101,6 +110,33 @@ export function registerBuiltinWeixinCommands(deps: WeixinCommandDeps = {}): voi
         `已开启新会话。\n旧会话(${rotated.old.sessionId.slice(0, 12)}…)已归档,` +
           `上下文摘要将随后自动沉淀。\n长期记忆不受影响。`,
       )
+    },
+  })
+
+  registerWeixinCommand({
+    name: 'restart',
+    description: '重启微信专用实例:通道断开重连,几秒后恢复',
+    handle: async (ctx) => {
+      // 先回 ack —— 通道马上就要断,这是用户最后一次看到 bot 响应的机会。
+      await ctx.reply('正在重启微信通道...')
+      const restart = deps.onRestart
+      if (!restart) {
+        console.warn('[weixin.commands] /restart: no restart hook wired; ignoring')
+        return
+      }
+      try {
+        const ok = restart('user_action')
+        if (ok) {
+          console.warn('[weixin.commands] /restart: supervisor restart requested by user')
+        } else {
+          // sendRestart() 返回 false = 当前进程不是 supervisor 拉起的 child,
+          // IPC 通道不可用。这是预期(裸 dev / 直连),但 /restart 是 weixin-only
+          // 路径,跑到这里说明生产路径异常,留给面板 / 日志排查。
+          console.warn('[weixin.commands] /restart: supervisor IPC unavailable (not a managed child?)')
+        }
+      } catch (err) {
+        console.warn('[weixin.commands] /restart: restart hook threw:', err)
+      }
     },
   })
 }

@@ -41,6 +41,7 @@ import {
 } from './WeixinOwnerLock.js'
 import { weixinDiag } from './debug.js'
 import { getWeixinSessionMap } from './WeixinSessionMap.js'
+import { sendRestart } from '../runtimeLifecycle.js'
 // zai patch (2026-09-13, send-file):注入 SendFileToUser 工具的微信发送实现。
 import { setWeixinFileSender } from '@zn-ai/zn-agent-core'
 import { getWeixinPairingStore } from './WeixinPairingStore.js'
@@ -416,8 +417,12 @@ export class WeixinBotManager {
     getWeixinSessionMap().setRotationPolicy({
       ttlMs: s.sessionTtlHours > 0 ? s.sessionTtlHours * 3_600_000 : null,
     })
-    // 内置微信指令(/new 等)—— 重名覆盖,重复注册幂等。
-    registerBuiltinWeixinCommands()
+    // 内置微信指令(/new / /restart 等)—— 重名覆盖,重复注册幂等。
+    registerBuiltinWeixinCommands({
+      // /restart:向 supervisor 发 IPC,让本进程被 respawn。新进程沿用
+      // instance 定义的 cwd / 端口,weixinRuntimeBoot 启动时重连通道。
+      onRestart: (reason) => sendRestart(reason),
+    })
     // 兜底:缺 ilinkUserId 时从 accounts/<id>.json 补上 —— iLink getUpdates
     // 没有它不知道往哪个 WeChat user 路由,即使 session 活着 msgs 永远 0。
     if (!s.ilinkUserId) {
