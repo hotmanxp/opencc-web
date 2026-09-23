@@ -17,6 +17,7 @@ import quickstartRouter from './routes/quickstart.js';
 import execRouter from './routes/exec.js';
 import agentRouter from './routes/agent.js';
 import agentSettingsRouter from './routes/agentSettings.js';
+import sessionArchiveRouter from './routes/sessionArchive.js';
 import { pluginsRouter } from './routes/plugins.js';
 import { weixinRouter } from './routes/weixin.js';
 import answerRouter from './routes/answer.js';
@@ -235,6 +236,8 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   app.use('/api', execRouter);
   app.use('/api', agentRouter);
   app.use('/api', agentSettingsRouter);
+  // 会话归档 — 手动触发（设置页「立即归档」）。启动时那次在 initAgentRuntime。
+  app.use('/api', sessionArchiveRouter);
   app.use('/api/plugins', pluginsRouter);
   // Weixin (微信) 机器人 — 状态 + QR 登录 + 启停控制。详见
   // docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md B4。

@@ -16,11 +16,12 @@
  * (openccRuntime-transcript-persist.test.ts)各自独立。
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { TranscriptStore } from '../../../src/compat/runtime/legacyTranscriptStore.js'
+import { TranscriptStore, sanitizePath } from '../../../src/compat/runtime/legacyTranscriptStore.js'
 
 let dataDir: string
 
@@ -33,13 +34,14 @@ afterEach(() => {
 })
 
 /**
- * Mirror legacyTranscriptStore.sanitizePath (internal, not exported) for
- * raw-disk tests that bypass the store's public API. The store's
- * `append()` is a documented no-op (vendor QueryEngine 写盘),所以这里改
- * 用 fs 直接写 JSONL 到预期的 sanitize 路径,模拟"OpenccRuntime 启动
- * 之外的另一段代码"实际落盘 JSONL 的场景。
+ * 独立镜像实现,仅供 `directWriteJsonl` 这类"绕过 store 公共 API 直接 fs 落盘"
+ * 的用例使用 —— 刻意与下方 import 的真实 `sanitizePath`(现已从 core 导出)
+ * 解耦,这样 sanitize 编码本身若有 bug 也不会让读写路径自我印证。测试用到的
+ * cwd 都很短(≤200),镜像与真实实现输出一致。store 的 `append()` 是文档化的
+ * no-op(vendor QueryEngine 写盘),所以这里改用 fs 直接写 JSONL 到预期的
+ * sanitize 路径,模拟"OpenccRuntime 启动之外的另一段代码"实际落盘 JSONL 的场景。
  */
-function sanitizePath(cwd: string): string {
+function mirrorSanitizePath(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
@@ -49,7 +51,7 @@ function directWriteJsonl(
   sessionId: string,
   entries: unknown[],
 ): void {
-  const dir = join(dataDir, 'projects', sanitizePath(cwd))
+  const dir = join(dataDir, 'projects', mirrorSanitizePath(cwd))
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   const fp = join(dir, `${sessionId}.jsonl`)
   const body = entries.map((e) => JSON.stringify(e)).join('\n') + (entries.length ? '\n' : '')
@@ -361,5 +363,37 @@ describe('TranscriptStore.list — model/providerId rebuild from disk', () => {
     const sessions = await store.list({ cwd })
     const target = sessions.find((s) => s.sessionId === sessionId)
     expect(target?.model).toBe('live-model')
+  })
+})
+
+describe('sanitizePath (跨包导出)', () => {
+  it('非字母数字全部替换为 -', () => {
+    expect(sanitizePath('/Users/foo/code/bar')).toBe('-Users-foo-code-bar')
+    expect(sanitizePath('/private/tmp/zai-nongit-verify')).toBe(
+      '-private-tmp-zai-nongit-verify',
+    )
+  })
+
+  it('超长路径截断到 200 并追加 djb2 后缀，且同一输入稳定', () => {
+    const long = `/${'a'.repeat(400)}`
+    const a = sanitizePath(long)
+    const b = sanitizePath(long)
+    expect(a).toBe(b)
+    expect(a.length).toBeGreaterThan(200)
+    expect(a.startsWith(`-${'a'.repeat(199)}`)).toBe(true)
+  })
+
+  it('TranscriptStore 落盘目录 == <dataDir>/projects/<sanitizePath(cwd)>', async () => {
+    // 这条是给 zai 侧归档服务用的契约：归档目标目录必须用同一个编码，
+    // 否则归档到错误目录（表现为"归档不生效"而非数据损坏）。
+    const dir = await mkdtemp(join(tmpdir(), 'core-sanitize-'))
+    try {
+      const cwd = '/Users/foo/code/contract'
+      const store = new TranscriptStore(dir)
+      await store.create({ cwd, model: 'm' }, { cwd })
+      expect(existsSync(join(dir, 'projects', sanitizePath(cwd)))).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

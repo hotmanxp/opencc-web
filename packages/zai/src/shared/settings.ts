@@ -176,6 +176,42 @@ export interface ZaiSettings {
     platforms?: Array<'darwin' | 'linux' | 'win32'>
   }
   /**
+   * 自动记忆(auto-memory)治理开关 —— 与 vendor 的 `memory.*` 字段同 schema。
+   * 直接写 vendor 原生键,不做 zai 侧镜像:vendor 用同一份
+   * `~/.zai/settings.json` 作为 userSettings 源,所以这里写什么、vendor 就读什么。
+   *
+   * 三者构成三道独立的门(vendor 读取点:`opencc-src/memdir/paths.ts`、
+   * `opencc-src/utils/governancePolicy.ts`、`opencc-src/services/autoDream/config.ts`):
+   *   - `autoWrite` false → `isAutoMemoryEnabled()` 为 false:不注入记忆行为指令、
+   *     不读也不写 MEMORY.md。**默认 true**。
+   *   - `requireApprovalBeforeWrite` false → `isMemoryWriteApprovalRequired()` 为
+   *     false:主 agent 可静默写记忆,且 `isExtractModeActive()` 随之成立 →
+   *     turn 末的后台自动抽取开始运行。**默认 true**(fail-safe)。
+   *   - `autoDreamEnabled`(顶层字段,见下)单独控制夜间固化。
+   *
+   * 生效时机:**重启实例后**。vendor 的 settings 读取走进程内缓存
+   * (`getSettingsForSource` → `getCachedSettingsForSource`,仅显式
+   * `resetSettingsCache()` 才失效),zai 的 PUT 只写盘 —— 与既有的
+   * `openccCliDangerouslySkip` 同款:写盘即持久,重启即生效。
+   */
+  memory?: {
+    /** 关闭后整个记忆系统停用(不注入行为指令、不读写记忆文件)。默认 true。 */
+    autoWrite?: boolean
+    /** 关闭后主 agent 写记忆前必须获得用户同意,同时后台自动抽取停用。默认 true。 */
+    requireApprovalBeforeWrite?: boolean
+  }
+  /**
+   * 夜间记忆固化(consolidation)。vendor `isAutoDreamEnabled()` 直读本字段。
+   *
+   * 开启后,当"距上次固化 ≥ 24h"且"自上次以来有新活动的会话数 ≥ 5"时,
+   * 在 turn 末用后台 fork 把零散记忆合并进 topic 文件、并整理 MEMORY.md 索引。
+   * 还需 `memory.requireApprovalBeforeWrite === false` 才会真正运行
+   * (vendor `isGateOpen()` 同时要求免审批)。**默认 false**。
+   *
+   * 生效时机同上:重启实例后。
+   */
+  autoDreamEnabled?: boolean
+  /**
    * 是否启用 zai 自身版本自动升级检测。
    *
    * 默认 true — 启动时 `maybeAutoUpdate()`(services/updater.ts)在后台异步
@@ -262,6 +298,20 @@ export interface ZaiSettings {
    * 改动需重启 zai 生效(registration 在 initAgentRuntime 一次性完成)。
    */
   subagents?: Record<string, unknown>
+  /**
+   * 会话归档 —— 同一 cwd 下超出保留阈值的旧 transcript 会被移到
+   * `<ZAI_DATA_DIR>/archive/projects/<encoded-cwd>/`。仅服务启动时自动跑一次，
+   * 另有「立即归档」手动触发。详见
+   * docs/superpowers/specs/2026-09-23-zai-session-archive-design.md。
+   */
+  archive?: {
+    /**
+     * 保留最近 N 条会话；不在此列**且**早于 3 天的才归档。默认 20，clamp [1,1000]。
+     * 3 天窗口是模块常量（sessionArchive.ts 的 ARCHIVE_KEEP_DAYS），不可配。
+     * 改动写盘即持久，下次扫描（启动 / 手动）生效，不需要重启。
+     */
+    keepCount?: number
+  }
 }
 
 /**

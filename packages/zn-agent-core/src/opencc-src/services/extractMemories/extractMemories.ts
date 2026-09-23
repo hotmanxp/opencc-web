@@ -14,7 +14,7 @@
  */
 
 import { basename } from 'path'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { getIsRemoteMode, getSessionId } from '../../bootstrap/state.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import { ENTRYPOINT_NAME } from '../../memdir/memdir.js'
 import {
@@ -25,6 +25,7 @@ import {
   getAutoMemPath,
   isAutoMemoryEnabled,
   isAutoMemPath,
+  isExtractModeActive,
 } from '../../memdir/paths.js'
 import type { Tool } from '../../Tool.js'
 import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
@@ -276,24 +277,40 @@ type AppendSystemMessageFn = (
   msg: Exclude<SystemMessage, SystemLocalCommandMessage>,
 ) => void
 
-/** The active extractor function, set by initExtractMemories(). */
-let extractor:
-  | ((
-      context: REPLHookContext,
-      appendSystemMessage?: AppendSystemMessageFn,
-    ) => Promise<void>)
-  | null = null
+/** One extractor instance: its own cursor, overlap guard and pending context. */
+export type ExtractInstance = {
+  extract: (
+    context: REPLHookContext,
+    appendSystemMessage?: AppendSystemMessageFn,
+  ) => Promise<void>
+  drain: (timeoutMs?: number) => Promise<void>
+}
+
+/**
+ * zai patch (2026-09-23): per-session extractor instances, keyed by session id.
+ * See createExtractInstance() for why a single process-wide closure was wrong.
+ */
+const sessionInstances = new Map<string, ExtractInstance>()
+
+/** Instance used when no session id is resolvable (CLI / tests). */
+let defaultInstance: ExtractInstance | null = null
 
 /** The active drain function, set by initExtractMemories(). No-op until init. */
 let drainer: (timeoutMs?: number) => Promise<void> = async () => {}
 
 /**
- * Initialize the memory extraction system.
- * Creates a fresh closure that captures all mutable state (cursor position,
- * overlap guard, pending context). Call once at startup alongside
- * initConfidenceRating/initPromptCoaching, or per-test in beforeEach.
+ * Create a fresh extractor instance. All mutable state (cursor position,
+ * overlap guard, stashed trailing context) lives in this closure, so one
+ * instance is safely isolated from every other.
+ *
+ * zai patch (2026-09-23): upstream had exactly one process-wide closure.
+ * zai serves many sessions from a single process, so that shared state meant
+ * one session's turn advanced another session's cursor (a foreign UUID never
+ * matches, so the count falls back to the full history), and concurrent turns
+ * aborted each other's fork via the shared `inProgress` flag. Instances are
+ * now created per session.
  */
-export function initExtractMemories(): void {
+function createExtractInstance(): ExtractInstance {
   // --- Closure-scoped mutable state ---
 
   /** Every promise handed out by the extractor that hasn't settled yet.
@@ -575,10 +592,15 @@ export function initExtractMemories(): void {
       return
     }
 
-    if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_passport_quail', false)) {
-      if (process.env.USER_TYPE === 'ant' && !hasLoggedGateFailure) {
+    // zai patch (2026-09-23): upstream gated this on the GrowthBook rollout
+    // flag `tengu_passport_quail`. zai has no GrowthBook feed, so it read its
+    // default (`false`) and this returned early on every single turn. Use
+    // zai's own consent gate instead — see isExtractModeActive() in
+    // memdir/paths.ts.
+    if (!isExtractModeActive()) {
+      if (!hasLoggedGateFailure) {
         hasLoggedGateFailure = true
-        logEvent('tengu_extract_memories_gate_disabled', {})
+        logForDebugging('[extractMemories] gate disabled — skipping')
       }
       return
     }
@@ -612,10 +634,18 @@ export function initExtractMemories(): void {
       return
     }
 
-    await runExtraction({ context, appendSystemMessage })
+    // zai patch (2026-09-23): serialize writes to this memory directory so
+    // concurrent sessions in the same project cannot interleave their
+    // read-modify-write of MEMORY.md. See withMemoryDirLock().
+    await withMemoryDirLock(getAutoMemPath(), () =>
+      runExtraction({ context, appendSystemMessage }),
+    )
   }
 
-  extractor = async (context, appendSystemMessage) => {
+  const extract: ExtractInstance['extract'] = async (
+    context,
+    appendSystemMessage,
+  ) => {
     const p = executeExtractMemoriesImpl(context, appendSystemMessage)
     inFlightExtractions.add(p)
     try {
@@ -625,7 +655,7 @@ export function initExtractMemories(): void {
     }
   }
 
-  drainer = async (timeoutMs = 60_000) => {
+  const drain: ExtractInstance['drain'] = async (timeoutMs = 60_000) => {
     if (inFlightExtractions.size === 0) return
     await Promise.race([
       Promise.all(inFlightExtractions).catch(() => {}),
@@ -633,6 +663,81 @@ export function initExtractMemories(): void {
       new Promise<void>(r => setTimeout(r, timeoutMs).unref()),
     ])
   }
+
+  return { extract, drain }
+}
+
+/**
+ * Initialize the memory extraction system.
+ * Registers the default instance and arms the module-level entry points.
+ * Call once at startup, or per-test in beforeEach for a fresh closure.
+ */
+export function initExtractMemories(): ExtractInstance {
+  const instance = createExtractInstance()
+  defaultInstance = instance
+  sessionInstances.clear()
+  drainer = timeoutMs => drainAllInstances(timeoutMs)
+  return instance
+}
+
+/**
+ * zai patch (2026-09-23): resolve the extractor instance for a session,
+ * creating one on first use. Returns null when the system was never
+ * initialized, so callers stay no-ops exactly as before.
+ */
+function getExtractInstanceForSession(sessionId: string): ExtractInstance | null {
+  if (!defaultInstance) return null
+  let instance = sessionInstances.get(sessionId)
+  if (!instance) {
+    instance = createExtractInstance()
+    sessionInstances.set(sessionId, instance)
+  }
+  return instance
+}
+
+/** Await every session's in-flight extractions (best-effort, soft timeout). */
+async function drainAllInstances(timeoutMs = 60_000): Promise<void> {
+  const instances = [defaultInstance, ...sessionInstances.values()].filter(
+    (i): i is ExtractInstance => i !== null,
+  )
+  const unique = [...new Set(instances)]
+  await Promise.all(unique.map(i => i.drain(timeoutMs)))
+}
+
+// ============================================================================
+// Per-memory-directory write lock
+// ============================================================================
+
+/** Tail of the pending serial chain per memory directory. */
+const dirQueues = new Map<string, Promise<void>>()
+
+/**
+ * zai patch (2026-09-23): serialise extractions that write to the same memory
+ * directory.
+ *
+ * Per-session instances isolate each session's *cursor*, but sessions sharing
+ * a project also share one MEMORY.md, and the forked agent rewrites that file
+ * wholesale ("add a pointer line"). Upstream only guarded re-entry within a
+ * single conversation, so two zai sessions finishing a turn at the same time
+ * would interleave read-modify-write and silently drop index entries.
+ * Chaining on the directory key turns that race into a queue.
+ *
+ * `fn` runs regardless of the previous holder's outcome; the stored tail
+ * never rejects, so one failed extraction cannot poison the queue.
+ */
+function withMemoryDirLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const prev = dirQueues.get(dir) ?? Promise.resolve()
+  const result = prev.then(fn, fn)
+  const tail: Promise<void> = result.then(
+    () => {},
+    () => {},
+  )
+  dirQueues.set(dir, tail)
+  void tail.then(() => {
+    // Best-effort GC: only drop the entry if nothing queued behind us.
+    if (dirQueues.get(dir) === tail) dirQueues.delete(dir)
+  })
+  return result
 }
 
 // ============================================================================
@@ -648,7 +753,28 @@ export async function executeExtractMemories(
   context: REPLHookContext,
   appendSystemMessage?: AppendSystemMessageFn,
 ): Promise<void> {
-  await extractor?.(context, appendSystemMessage)
+  // zai patch (2026-09-23): lazily initialize on first use.
+  //
+  // Upstream only calls initExtractMemories() from the CLI entry points
+  // (main.tsx / REPL.tsx → utils/backgroundHousekeeping). zai's headless
+  // runtime never traverses those, so this module stayed uninitialized and
+  // the function was a permanent no-op even though handleStopHooks called it
+  // every turn. Self-initializing here keeps the CLI path unchanged (its own
+  // init already ran, so the guard is a no-op) and avoids inventing a new
+  // exported surface purely to wire this up.
+  if (!defaultInstance) {
+    initExtractMemories()
+  }
+
+  // Dispatch to the instance that owns this session. handleStopHooks runs
+  // inside the query's ALS scope, so getSessionId() yields the session whose
+  // turn just ended. Falls back to the default instance when no session id
+  // is resolvable (CLI / tests).
+  const sessionId = getSessionId()
+  const instance = sessionId
+    ? getExtractInstanceForSession(sessionId)
+    : defaultInstance
+  await instance?.extract(context, appendSystemMessage)
 }
 
 /**

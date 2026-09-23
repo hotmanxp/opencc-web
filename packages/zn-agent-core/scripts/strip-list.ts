@@ -39,9 +39,12 @@ export const STRIP_DIRS: string[] = [
   'services/PromptSuggestion',
   'services/MagicDocs',
   'services/wiki',
-  'services/extractMemories',
+  // zai patch (2026-09-23): 'services/extractMemories' + 'services/autoDream'
+  // 已移出剔除清单 —— auto-memory 回补需要真实实现。注意 STRIP_DIRS 只影响
+  // vendoring 时的拷贝与 vitest alias,不影响 esbuild bundle:两者在生产 bundle
+  // 里本来就在真实运行,只是从未被 init(见
+  // docs/superpowers/specs/2026-09-23-zai-auto-memory-multisession-design.md)。
   'services/goal',
-  'services/autoDream',
   'services/autoFix',
   'services/SessionMemory',
   'services/teamMemorySync',
@@ -54,7 +57,8 @@ export const STRIP_DIRS: string[] = [
   'remote',
   'upstreamproxy',
   'integrations',
-  'memdir',
+  // zai patch (2026-09-23): 'memdir' 已移出剔除清单 —— auto-memory 的记忆目录
+  // 解析与 prompt 组装是本次回补的核心,必须走真实实现。
   'outputStyles',
   'proactive',
   'keybindings',

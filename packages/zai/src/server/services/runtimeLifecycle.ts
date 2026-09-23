@@ -96,6 +96,16 @@ export async function closeServer(): Promise<void> {
     console.warn('[runtimeLifecycle] agentRegistry.clear failed:', err);
   }
 
+  // skill/command 目录 watcher —— vendor chokidar watcher 必须显式关,
+  // 否则进程退出前仍持有 fs watcher 句柄(vendor 侧 registerCleanup 是它自家
+  // 的 cleanup registry,zai 从不 run,只能在这里收)。
+  try {
+    const { stopSkillWatcher } = await import('./skillWatcher.js');
+    stopSkillWatcher();
+  } catch (err) {
+    console.warn('[runtimeLifecycle] stopSkillWatcher failed:', err);
+  }
+
   if (registeredServer) {
     const { server, forceCloseAllConnections } = registeredServer;
     await new Promise<void>((resolve) => {

@@ -1,17 +1,14 @@
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import { isAbsolute, join, normalize, sep } from 'path'
-import {
-  getIsNonInteractiveSession,
-  getProjectRoot,
-} from '../bootstrap/state.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { getMemoryCwd, getProjectRoot } from '../bootstrap/state.js'
 import {
   getClaudeConfigHomeDir,
   isEnvDefinedFalsy,
   isEnvTruthy,
 } from '../utils/envUtils.js'
 import { findCanonicalGitRoot } from '../utils/git.js'
+import { isMemoryWriteApprovalRequired } from '../utils/governancePolicy.js'
 import { sanitizePath } from '../utils/path.js'
 import { getEnabledSettingSources } from '../utils/settings/constants.js'
 import {
@@ -79,18 +76,18 @@ export function isAutoMemoryEnabled(): boolean {
  * skips that range (hasMemoryWritesSince in extractMemories.ts); when it
  * doesn't, the background agent catches anything missed.
  *
- * Callers must also gate on tengu_passport_quail — that check cannot
- * live inside this helper because feature() only tree-shakes when used
- * directly in an `if` condition.
+ * zai patch (2026-09-23): upstream gates this on the GrowthBook rollout
+ * flags `tengu_passport_quail` (+ `tengu_slate_thimble` for non-interactive
+ * sessions). zai has no GrowthBook feed, so both read their defaults —
+ * `false` — and turn-end extraction therefore never ran in zai. Gate on
+ * zai's own consent signal instead: a user who allows unapproved memory
+ * writes (`memory.requireApprovalBeforeWrite: false`) has already given the
+ * consent that background extraction needs. This mirrors autoDream's
+ * `isGateOpen()`, which carries the same `!isMemoryWriteApprovalRequired()`
+ * condition.
  */
 export function isExtractModeActive(): boolean {
-  if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_passport_quail', false)) {
-    return false
-  }
-  return (
-    !getIsNonInteractiveSession() ||
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_slate_thimble', false)
-  )
+  return isAutoMemoryEnabled() && !isMemoryWriteApprovalRequired()
 }
 
 /**
@@ -213,12 +210,32 @@ export function hasAutoMemPathOverride(): boolean {
 }
 
 /**
+ * zai patch (2026-09-23): the cwd that auto-memory is scoped to.
+ *
+ * Upstream resolves memory against `getProjectRoot()` — STATE-backed, set
+ * once at process start and deliberately never updated mid-session. zai
+ * serves many sessions from one process, so that made every session share a
+ * single memory directory and let a session whose cwd sits in a different
+ * repo read and write another project's memory.
+ *
+ * Read the ALS-provided session cwd instead (see SdkContext.memoryCwd),
+ * falling back to `getProjectRoot()` when no query context is active (CLI /
+ * test paths). Keying on the session cwd and then canonicalising it to its
+ * git root in getAutoMemBase() preserves the intended "one memory per
+ * project" semantics — only the *which project* part becomes per-session.
+ */
+export function resolveMemCwd(): string {
+  return getMemoryCwd() ?? getProjectRoot()
+}
+
+/**
  * Returns the canonical git repo root if available, otherwise falls back to
  * the stable project root. Uses findCanonicalGitRoot so all worktrees of the
  * same repo share one auto-memory directory (anthropics/claude-code#24382).
  */
 function getAutoMemBase(): string {
-  return findCanonicalGitRoot(getProjectRoot()) ?? getProjectRoot()
+  const cwd = resolveMemCwd()
+  return findCanonicalGitRoot(cwd) ?? cwd
 }
 
 /**
@@ -248,7 +265,10 @@ export const getAutoMemPath = memoize(
       join(projectsDir, sanitizePath(getAutoMemBase()), AUTO_MEM_DIRNAME) + sep
     ).normalize('NFC')
   },
-  () => getProjectRoot(),
+  // zai patch (2026-09-23): key on the resolving cwd rather than
+  // projectRoot — see resolveMemCwd(). One entry per distinct session cwd
+  // in the process, which is bounded by the number of live sessions.
+  () => resolveMemCwd(),
 )
 
 /**

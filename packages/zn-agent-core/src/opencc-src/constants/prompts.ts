@@ -61,6 +61,7 @@ import { SLEEP_TOOL_NAME } from '../tools/SleepTool/prompt.js'
 import { TICK_TAG } from './xml.js'
 import { logForDebugging } from '../utils/debug.js'
 import { loadMemoryPrompt } from '../memdir/memdir.js'
+import { resolveMemCwd } from '../memdir/paths.js'
 import { isUndercover } from '../utils/undercover.js'
 import { isMcpInstructionsDeltaEnabled } from '../utils/mcpInstructionsDelta.js'
 
@@ -590,7 +591,16 @@ Exception: when the user is describing a problem, asking a question, or thinking
 Before ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ('I'll…', 'let me know when…'), do that work now with tool calls. That includes retrying after errors and gathering missing information yourself. Do not stop because the context or session is long. End your turn only when the task is complete or you are blocked on input only the user can provide.
 Before running a command that changes system state (such as restarts, deletes, or config edits), check that the evidence actually supports that specific action. A signal that pattern-matches to a known failure may have a different cause.`
     }),
-    systemPromptSection('memory', () => loadMemoryPrompt()),
+    // zai patch (2026-09-23): the memory section text embeds the resolved
+    // memory directory, which is now per-session (see memdir/paths.ts
+    // resolveMemCwd) because zai serves many sessions from one process. The
+    // section cache is process-wide, so a plain 'memory' name would hand the
+    // first session's directory to every later session. Suffix the name with
+    // the resolving cwd — same idiom as `env_info_simple:${model}` below —
+    // so the cache key varies per session while the value stays cached
+    // across that session's turns. The suffix never reaches the model: only
+    // the computed text is emitted.
+    systemPromptSection(`memory:${resolveMemCwd()}`, () => loadMemoryPrompt()),
     systemPromptSection('ant_model_override', () =>
       getAntModelOverrideSection(),
     ),

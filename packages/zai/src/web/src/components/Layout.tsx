@@ -16,6 +16,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { useAgentStore } from '../store/useAgentStore';
 import { api } from '../lib/api';
+import { clampSettingNumber } from '../lib/settingsHydrate.js';
 import type { OutputStyle, Theme, WorkMode } from '../../shared/settings.js';
 import ZnLogo from './ZnLogo';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -47,7 +48,7 @@ const ALL_MENU_ITEMS = [
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setWorkMode, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setEnableComputerUse, setAutoUpdate, openSettingsDrawer } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setWorkMode, setMaxVisibleMessages, setArchiveKeepCount, setDefaultSplitScreen, setEnableDynamicWorkflow, setEnableComputerUse, setAutoUpdate, setMemoryAutoWrite, setMemoryRequireApproval, setAutoDreamEnabled, openSettingsDrawer } = useAppStore();
   // 顶层 zai 实例(独立启动 / 顶层 managed supervisor)显示"实例管理"菜单;
   // instance 子实例(被 instance manager 派生的子进程)不显示 — 它不能 spawn
   // 孙实例,给它看到这个入口只会跳到 404 页面迷惑用户。
@@ -144,7 +145,7 @@ export default function Layout() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<{ outputStyle?: OutputStyle; theme?: Theme; workMode?: WorkMode; maxVisibleMessages?: number; defaultSplitScreen?: boolean }>(
+      .get<{ outputStyle?: OutputStyle; theme?: Theme; workMode?: WorkMode; maxVisibleMessages?: number; archiveKeepCount?: number; defaultSplitScreen?: boolean }>(
         '/agent/settings',
       )
       .then((data) => {
@@ -181,6 +182,12 @@ export default function Layout() {
             Math.max(1, Math.min(1000, Math.floor(data.maxVisibleMessages))),
           )
         }
+        const archiveKeepCount = clampSettingNumber(data.archiveKeepCount, 1, 1000)
+        if (archiveKeepCount !== null) {
+          // 与服务端 PUT handler 同款 clamp —— 手编 settings.json 写出 0/负数
+          // 也不能让前端把值显示成非法的。
+          setArchiveKeepCount(archiveKeepCount)
+        }
         if (typeof data.defaultSplitScreen === 'boolean') {
           setDefaultSplitScreen(data.defaultSplitScreen)
         }
@@ -193,6 +200,17 @@ export default function Layout() {
         if (typeof data.autoUpdate === 'boolean') {
           setAutoUpdate(data.autoUpdate)
         }
+        // 自动记忆三件套 —— 与其它行同样的 hydrate-then-overwrite 语义:
+        // 冷启动先落到 store 默认值,GET 回来再对齐磁盘真值。
+        if (typeof data.memoryAutoWrite === 'boolean') {
+          setMemoryAutoWrite(data.memoryAutoWrite)
+        }
+        if (typeof data.memoryRequireApproval === 'boolean') {
+          setMemoryRequireApproval(data.memoryRequireApproval)
+        }
+        if (typeof data.autoDreamEnabled === 'boolean') {
+          setAutoDreamEnabled(data.autoDreamEnabled)
+        }
       })
       .catch(() => {
         // swallow — keep default
@@ -200,7 +218,7 @@ export default function Layout() {
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setWorkMode, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setEnableComputerUse, setAutoUpdate, setTranscriptCollapsed]);
+  }, [setOutputStyle, setWorkMode, setSettingsTheme, setMaxVisibleMessages, setArchiveKeepCount, setDefaultSplitScreen, setEnableDynamicWorkflow, setEnableComputerUse, setAutoUpdate, setMemoryAutoWrite, setMemoryRequireApproval, setAutoDreamEnabled, setTranscriptCollapsed]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,

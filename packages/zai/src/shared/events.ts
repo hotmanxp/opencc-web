@@ -175,6 +175,12 @@ const SystemEvent = z.discriminatedUnion('type', [
              level: z.enum(['info','warn','error']), message: z.string() }),
   z.object({ ...Base.shape, type: z.literal('branch.changed'),
              branch: z.string() }),
+  // skills.changed — zai 侧 skill watcher(services/skillWatcher.ts)检测到
+  // skill/command 目录变更后广播(vendor skillChangeDetector 已清缓存)。
+  // 故意不带 sessionId:skill 目录是机器级/项目级资源,每个打开的 tab 都该
+  // 重拉自己的 /api/slash。全局事件必须同步登记 eventBus.isGlobalEvent()
+  // 与前端 eventSource.ts 的 NAMED_EVENT_TYPES,漏一处即静默丢。
+  z.object({ ...Base.shape, type: z.literal('skills.changed') }),
   z.object({ ...Base.shape, type: z.literal('system.restarting'),
              reason: z.enum(['user_action','auto_recovery','update']),
              deadlineMs: z.number() }),

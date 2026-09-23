@@ -64,6 +64,19 @@ export {
   registerExtraReminderProvider,
   clearExtraReminderProviders,
 } from './opencc-src/utils/daemon/preApiCallReminders.js'
+// zai patch (2026-09-23): skill 目录热更新 —— vendor 的 chokidar watcher。
+//
+// vendor 只在交互式入口 `opencc-src/main.tsx:463` 初始化它(`!isBareMode()`),
+// 而 zai-server 走 headless 运行时(createOpenccRuntime),那条路径零引用 ——
+// 结果是 skill 目录变了没人清缓存:磁盘 skill 的新增/修改对模型侧
+// skill_listing(loadAllCommands/getSkillToolCommands 双重 memoize)不可见,
+// 只有重启或 /clear 才生效。zai-server 现在显式 initialize + subscribe
+// (见 zai `services/skillWatcher.ts`)。
+//
+// 类型面同 queryModelWithStreaming:vendor 模块无独立 d.ts,由
+// scripts/bundle-opencc.ts 的 DTS_PATH_REWRITE 镜像到 ./index.js,真实值由
+// esbuild 打进 opencc-core.mjs;src/index.ts 提供 declare-only 契约。
+export { skillChangeDetector } from './opencc-src/utils/skills/skillChangeDetector.js'
 export * from './index.js'
 
 // ---------------------------------------------------------------------------

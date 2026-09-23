@@ -211,3 +211,82 @@ describe('SettingsDrawer — 微信配置入口只在主实例显示', () => {
     expect(screen.getByTestId('settings-weixin-section')).toBeInTheDocument()
   })
 })
+
+describe('SettingsDrawer — 会话归档', () => {
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    useAppStore.setState({
+      settingsDrawerOpen: false,
+      archiveKeepCount: 20,
+    })
+  })
+
+  it('schema 渲染「会话归档」section 与保留数 number 行', () => {
+    // 不 stub 的话挂载期 GET(/api/agent/settings、/api/mcp/status 等)会打
+    // 真实连接,teardown 时 happy-dom 把未完成请求 abort 后倾倒到 stderr。
+    // /api/mcp/status 必须返回合法空状态:'{}' 会让 McpServersSection 在
+    // status.commands.length 处崩溃。
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url === '/api/mcp/status'
+          ? new Response(
+              JSON.stringify({
+                lazyConnect: false,
+                connecting: false,
+                servers: [],
+                commands: [],
+              }),
+              { status: 200 },
+            )
+          : new Response('{}', { status: 200 }),
+      ),
+    )
+    useAppStore.setState({ settingsDrawerOpen: true, archiveKeepCount: 35 })
+    render(<SettingsDrawer />)
+    // 断言用完整标题:section 名带刻意的「(立即生效)」后缀,
+    // 子串正则会同时命中祖先容器导致 getByText 多匹配报错。
+    expect(screen.getByText('会话归档 (立即生效)')).toBeInTheDocument()
+    expect(screen.getByText('保留会话数')).toBeInTheDocument()
+    expect(screen.getByText('35')).toBeInTheDocument()
+  })
+
+  it('渲染「立即归档」按钮,点击后 POST /api/agent/sessions/archive 并提示条数', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/agent/settings' && (!init || !init.method)) {
+        return new Response(JSON.stringify({}), { status: 200 })
+      }
+      if (url === '/api/agent/sessions/archive') {
+        return new Response(
+          JSON.stringify({ archived: ['a', 'b'], kept: 20, skipped: 0 }),
+          { status: 200 },
+        )
+      }
+      // GET /api/mcp/status(McpServersSection 挂载即拉)返回合法空状态;
+      // 返回 '{}' 会让组件在 status.commands.length 处崩溃,返回 5xx 会弹
+      // 全局 notification —— 两者都污染本用例。
+      if (url === '/api/mcp/status') {
+        return new Response(
+          JSON.stringify({
+            lazyConnect: false,
+            connecting: false,
+            servers: [],
+            commands: [],
+          }),
+          { status: 200 },
+        )
+      }
+      return new Response('{}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    useAppStore.setState({ settingsDrawerOpen: true, archiveKeepCount: 20 })
+    render(<SettingsDrawer />)
+    fireEvent.click(screen.getByTestId('settings-run-archive'))
+    await screen.findByText(/已归档 2 个会话/)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/agent/sessions/archive',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+})

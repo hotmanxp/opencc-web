@@ -2,8 +2,6 @@ import { join } from 'path'
 import { getFsImplementation } from '../utils/fsOperations.js'
 import { getAutoMemPath, isAutoMemoryEnabled } from './paths.js'
 
-import * as teamMemPaths from './teamMemPaths.js'
-
 import { getKairosActive, getOriginalCwd } from '../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -114,11 +112,12 @@ export function truncateEntrypointContent(raw: string): EntrypointTruncation {
   }
 }
 
-/* eslint-disable @typescript-eslint/no-require-imports */
-const teamMemPrompts = true
-  ? (require('./teamMemPrompts.js') as typeof import('./teamMemPrompts.js'))
-  : null
-/* eslint-enable @typescript-eslint/no-require-imports */
+// zai patch (2026-09-23): the module-level
+// `require('./teamMemPrompts.js')` that upstream used to lazily gate the
+// combined prompt was removed along with the combined branch — see
+// loadMemoryPrompt() below. It executed at import time, which vite-node
+// cannot resolve (CJS `require` with `.js` → `.ts` inference), and the
+// value it produced was unreachable once isTeamMemoryEnabled() went false.
 
 /**
  * Shared guidance text appended to each memory directory prompt line.
@@ -467,34 +466,11 @@ export async function loadMemoryPrompt(): Promise<string | null> {
       ? [coworkExtraGuidelines]
       : undefined
 
-  if (true) {
-    if (teamMemPaths!.isTeamMemoryEnabled()) {
-      const autoDir = getAutoMemPath()
-      const teamDir = teamMemPaths!.getTeamMemPath()
-      // Harness guarantees these directories exist so the model can write
-      // without checking. The prompt text reflects this ("already exists").
-      // Only creating teamDir is sufficient: getTeamMemPath() is defined as
-      // join(getAutoMemPath(), 'team'), so recursive mkdir of the team dir
-      // creates the auto dir as a side effect. If the team dir ever moves
-      // out from under the auto dir, add a second ensureMemoryDirExists call
-      // for autoDir here.
-      if (!isMemoryWriteApprovalRequired()) {
-        await ensureMemoryDirExists(teamDir)
-      }
-      logMemoryDirCounts(autoDir, {
-        memory_type:
-          'auto' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      logMemoryDirCounts(teamDir, {
-        memory_type:
-          'team' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      return teamMemPrompts!.buildCombinedMemoryPrompt(
-        extraGuidelines,
-        skipIndex,
-      )
-    }
-  }
+  // zai patch (2026-09-23): the combined auto+team branch was removed.
+  // isTeamMemoryEnabled() is hard-disabled for zai (see teamMemPaths.ts), so
+  // the branch could never be taken; keeping it meant importing the team
+  // paths module and the team prompt builder for a code path that is dead by
+  // construction. Prompt dispatch is now a single auto-only path.
 
   if (autoEnabled) {
     const autoDir = getAutoMemPath()

@@ -67,6 +67,11 @@ const NAMED_EVENT_TYPES = [
   'server.error',
   'toast',
   'branch.changed',
+  // skills.changed — skill/command 目录热更新(server services/skillWatcher.ts
+  // 起 vendor skillChangeDetector)。AgentInputBox 收到后重拉 /api/slash,
+  // 新装 skill 立即出现在 / 自动补全。与 shared/events.ts SystemEvent union
+  // 同步,漏登记即静默丢。
+  'skills.changed',
   // state.* — SSE state push
   'agent_task.changed',
   'bash_task.changed',

@@ -329,5 +329,14 @@ export async function executeAutoDream(
   context: REPLHookContext,
   appendSystemMessage?: AppendSystemMessageFn,
 ): Promise<void> {
+  // zai patch (2026-09-23): lazily initialize on first use — see the
+  // equivalent patch on executeExtractMemories(). Upstream's only init call
+  // site is backgroundHousekeeping (reached from the CLI entry points), which
+  // zai's headless runtime never traverses, so `runner` stayed null and this
+  // was a permanent no-op. The CLI path is unaffected: its init already ran,
+  // making this guard a no-op.
+  if (!runner) {
+    initAutoDream()
+  }
   await runner?.(context, appendSystemMessage)
 }

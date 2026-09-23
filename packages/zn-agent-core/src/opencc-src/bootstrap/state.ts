@@ -457,6 +457,16 @@ export type SdkContext = {
   cwd: string
   originalCwd: string
   parentSessionId?: SessionId
+  /**
+   * zai patch (2026-09-23): the *session-scoped* logical cwd, distinct from
+   * `cwd` — which for zai is the runtime-instance cwd shared by every
+   * session in the process. Only auto-memory path resolution reads this;
+   * see memdir/paths.ts resolveMemCwd(). Deliberately kept separate from
+   * `cwd`: folding a per-session cwd into `cwd` would also move Bash and
+   * file-operation semantics, a far larger blast radius than the memory
+   * directory needs.
+   */
+  memoryCwd?: string
 }
 
 import { AsyncLocalStorage } from 'async_hooks'
@@ -478,6 +488,15 @@ export function runWithSdkContext<T>(context: SdkContext, fn: () => T): T {
 
 function getSdkContext(): SdkContext | undefined {
   return sdkContextStorage.getStore()
+}
+
+/**
+ * zai patch (2026-09-23): session-scoped cwd for auto-memory resolution.
+ * Returns the ALS-provided value while a query is running (so concurrent
+ * sessions each see their own), else undefined so callers can fall back.
+ */
+export function getMemoryCwd(): string | undefined {
+  return getSdkContext()?.memoryCwd
 }
 
 export function getSessionId(): SessionId {

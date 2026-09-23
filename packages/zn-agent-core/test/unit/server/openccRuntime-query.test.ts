@@ -86,7 +86,7 @@ describe('createOpenccRuntime', { timeout: 30_000 }, () => {
     })
   }
 
-  it('exposes all eight methods', async () => {
+  it('exposes all eight methods (+ plugins / mcp)', async () => {
     const r = await runtime()
     expect(Object.keys(r).sort()).toEqual(
       [
@@ -95,12 +95,22 @@ describe('createOpenccRuntime', { timeout: 30_000 }, () => {
         'listSessions',
         'patchSession',
         'plugins',
+        // zai patch (2026-09-22, MCP live view): 活的 MCP 状态 + 手动重连。
+        // 后台连接结果过去只写 appState,外面完全看不到 —— 失败只剩
+        // console.warn,用户既不知情也无处重试。
+        'mcp',
         'query',
         'readTranscript',
         'removeSession',
         'shutdown',
       ].sort(),
     )
+    // 契约本身可用(空状态不得抛错)。
+    expect(r.mcp.getStatus()).toMatchObject({
+      servers: [],
+      commands: [],
+      lastConnectFailure: null,
+    })
     await r.shutdown()
   })
 

@@ -35,6 +35,7 @@ import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import { useInstanceStore } from '../store/useInstanceStore.js'
 import { requestRestart, requestStop } from '../lib/systemApi.js'
+import { archiveSessions } from '../lib/agentSessionApi.js'
 import type { OutputStyle, WorkMode } from '../../../shared/settings.js'
 
 export type SettingsValue = string | number | boolean
@@ -583,10 +584,14 @@ function buildStaticSchema(
   outputStyle: OutputStyle,
   workMode: WorkMode,
   maxVisibleMessages: number,
+  archiveKeepCount: number,
   defaultSplitScreen: boolean,
   enableDynamicWorkflow: boolean,
   enableComputerUse: boolean,
   autoUpdate: boolean,
+  memoryAutoWrite: boolean,
+  memoryRequireApproval: boolean,
+  autoDreamEnabled: boolean,
   mainAgent: string,
   agentOptions: EnumOption[],
 ): SettingsSchema {
@@ -810,6 +815,64 @@ function buildStaticSchema(
         },
       ],
     },
+    {
+      // 自动记忆(auto-memory)。三个开关直接对应 vendor 的三道独立门,写的是
+      // vendor 原生键(见 shared/settings.ts 的 `memory` 字段注释):
+      //   memory.autoWrite / memory.requireApprovalBeforeWrite / autoDreamEnabled
+      //
+      // 标题里带「重启后生效」是刻意的:vendor 的 settings 读取走进程内缓存
+      // (getSettingsForSource → getCachedSettingsForSource),zai 的 PUT 只写盘,
+      // 与既有 openccCliDangerouslySkip 同款。而 SettingsRow 的 boolean 变体没有
+      // hint 槽位,且这个列表是终端风格键盘导航(单行节奏),加多行 hint 会打乱
+      // 对齐,所以把时效信息放进 section 标题。
+      section: '自动记忆 (重启后生效)',
+      rows: [
+        {
+          // 总开关:关掉后不注入记忆行为指令、MEMORY.md 既不读也不写。
+          key: 'memoryAutoWrite',
+          label: '启用自动记忆',
+          kind: 'boolean',
+          value: memoryAutoWrite,
+        },
+        {
+          // 语义反转行:store / 磁盘 / API 都用 vendor 原义
+          // `memoryRequireApproval`(true = 写前需审批,更安全),而这一行
+          // 展示并控制的是"自动写入"(打开 = 免审批)。取值反的值只在两处:
+          // 本行的 value(见下方同步 effect)与保存分发处。
+          key: 'memoryRequireApproval',
+          label: '自动写入记忆 (跳过写前确认)',
+          kind: 'boolean',
+          value: !memoryRequireApproval,
+        },
+        {
+          // 夜间固化。光开这个不够 —— vendor isGateOpen() 还要求免审批,
+          // 且要满足"距上次 ≥24h + 活跃会话数 ≥5"。
+          key: 'autoDreamEnabled',
+          label: '夜间整理记忆 (autoDream)',
+          kind: 'boolean',
+          value: autoDreamEnabled,
+        },
+      ],
+    },
+    {
+      // 会话归档 —— 同一 cwd 下保留最近 N 条，且 3 天内修改过的一律保留；
+      // 其余在服务启动时（或手动点「立即归档」时）移入 ~/.zai/archive/。
+      // 标题里带「立即生效」是刻意的：归档扫描每次读盘，不需要重启
+      // （与上面「自动记忆 (重启后生效)」相反，别照抄那行的时效说明）。
+      // 3 天窗口是服务端常量，不暴露在这里 —— 缓存需求只要求数量阈值可配。
+      section: '会话归档 (立即生效)',
+      rows: [
+        {
+          key: 'archiveKeepCount',
+          label: '保留会话数',
+          kind: 'number',
+          value: archiveKeepCount,
+          min: 1,
+          max: 1000,
+          step: 1,
+        },
+      ],
+    },
   ]
 }
 
@@ -828,6 +891,8 @@ export default function SettingsDrawer() {
   const [weixinOpen, setWeixinOpen] = useState(false)
   // 微信通道状态(drawer 打开时拉一次,展示在 section 标题旁;面板内部有轮询)
   const [weixinState, setWeixinState] = useState<string | null>(null)
+  // 「立即归档」按钮的进行中标记 —— 防重复点击。
+  const [archiving, setArchiving] = useState(false)
 
   // 微信配置只在**主实例**(用户日常访问的那个 Web 服务进程)里显示,子进程一律不显示。
   //
@@ -878,6 +943,8 @@ export default function SettingsDrawer() {
   const setWorkMode = useAppStore((s) => s.setWorkMode)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
+  const archiveKeepCount = useAppStore((s) => s.archiveKeepCount)
+  const setArchiveKeepCount = useAppStore((s) => s.setArchiveKeepCount)
   const defaultSplitScreen = useAppStore((s) => s.defaultSplitScreen)
   const setDefaultSplitScreen = useAppStore((s) => s.setDefaultSplitScreen)
   const enableDynamicWorkflow = useAppStore((s) => s.enableDynamicWorkflow)
@@ -886,6 +953,12 @@ export default function SettingsDrawer() {
   const setEnableComputerUse = useAppStore((s) => s.setEnableComputerUse)
   const autoUpdate = useAppStore((s) => s.autoUpdate)
   const setAutoUpdate = useAppStore((s) => s.setAutoUpdate)
+  const memoryAutoWrite = useAppStore((s) => s.memoryAutoWrite)
+  const setMemoryAutoWrite = useAppStore((s) => s.setMemoryAutoWrite)
+  const memoryRequireApproval = useAppStore((s) => s.memoryRequireApproval)
+  const setMemoryRequireApproval = useAppStore((s) => s.setMemoryRequireApproval)
+  const autoDreamEnabled = useAppStore((s) => s.autoDreamEnabled)
+  const setAutoDreamEnabled = useAppStore((s) => s.setAutoDreamEnabled)
   // 切换 outputStyle 时同步把 transcriptCollapsed 重置为新默认 — 'compact' 切换到
   // 'default' 时立即展开,'default' 切到 'compact' 时立即折叠;避免用户得再点
   // 一次工具栏按钮才生效.
@@ -924,7 +997,7 @@ export default function SettingsDrawer() {
   ])
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, enableComputerUse, autoUpdate, mainAgent, agentOptions),
+    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, archiveKeepCount, defaultSplitScreen, enableDynamicWorkflow, enableComputerUse, autoUpdate, memoryAutoWrite, memoryRequireApproval, autoDreamEnabled, mainAgent, agentOptions),
   )
   // mount 时拉一次 GET /api/agent/settings → 填充 agentOptions + 当前 mainAgent。
   // destroyOnClose 每次打开都会重新挂载,列表保持新鲜(新增外置 agent 文件后
@@ -1019,6 +1092,22 @@ export default function SettingsDrawer() {
       })),
     )
   }, [maxVisibleMessages])
+  // 同步 store archiveKeepCount → schema.archiveKeepCount 行。
+  // 与 maxVisibleMessages 行同款：store 是 settings.json 持久化的真源，
+  // 这里单向把已持久化的值投影到 schema 渲染态。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'archiveKeepCount' && r.kind === 'number') {
+            return { ...r, value: archiveKeepCount }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [archiveKeepCount])
   // 同步 store defaultSplitScreen → schema.defaultSplitScreen 行;store 是
   // settings.json 持久化的真源,这里仅单向把已持久化的值投影到 schema 渲染态,
   // 跟 outputStyle / maxVisibleMessages 行的同步策略一致。
@@ -1068,6 +1157,29 @@ export default function SettingsDrawer() {
       })),
     )
   }, [autoUpdate])
+  // 同步 store 的三个自动记忆开关 → schema 行。与上面几组完全对称:store
+  // 是 settings.json 持久化真源,单向投影。
+  // 注意 memoryRequireApproval 行取**反值** —— 该行展示的是"自动写入"
+  // (打开 = 免审批),而 store 存的是 vendor 原义(requireApproval)。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'memoryAutoWrite' && r.kind === 'boolean') {
+            return { ...r, value: memoryAutoWrite }
+          }
+          if (r.key === 'memoryRequireApproval' && r.kind === 'boolean') {
+            return { ...r, value: !memoryRequireApproval }
+          }
+          if (r.key === 'autoDreamEnabled' && r.kind === 'boolean') {
+            return { ...r, value: autoDreamEnabled }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [memoryAutoWrite, memoryRequireApproval, autoDreamEnabled])
   // 同步 mainAgent → schema 行(本地 state,选择后 PUT 持久化)。
   useEffect(() => {
     setSchema((prev) =>
@@ -1194,6 +1306,21 @@ export default function SettingsDrawer() {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
       }
+      // 会话归档保留条数走 store + PUT settings.json 持久化路径（同
+      // maxVisibleMessages）：clamp 到 [1, 1000] 再写 store，server 端会再
+      // 做一次 floor + clamp 兜底。注意这里不需要重启 —— 归档扫描每次
+      // 「服务启动」或「立即归档」时读盘，写盘即生效。
+      if (key === 'archiveKeepCount' && typeof value === 'number') {
+        const clamped = Math.max(1, Math.min(1000, Math.floor(value)))
+        setArchiveKeepCount(clamped)
+        void fetch('/api/agent/settings/archive-keep-count', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: clamped }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
       // "默认启动分屏" 走 store + PUT settings.json 持久化路径 — 同上.
       // 注意:这只是一个"首次启动种子值",不会立即重新打开已经关闭的分屏;
       // 已 toggle 过 splitPane 的用户偏好永远胜出(见 SplitPane first-run seed).
@@ -1251,6 +1378,42 @@ export default function SettingsDrawer() {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
       }
+      // 自动记忆三件套 —— 与 autoUpdate 同结构:写 store 让 UI 立即翻牌,
+      // PUT settings.json 让**下次启动**生效(vendor 的 settings 读取走进程内
+      // 缓存,PUT 只写盘,所以这一组在 UI 上标注「重启后生效」)。
+      if (key === 'memoryAutoWrite' && typeof value === 'boolean') {
+        setMemoryAutoWrite(value)
+        void fetch('/api/agent/settings/memory-auto-write', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
+      // 语义反转行:行上的 value 是"自动写入"(免审批),磁盘与 API 用 vendor
+      // 原义 requireApprovalBeforeWrite,故取反后再持久化。
+      if (key === 'memoryRequireApproval' && typeof value === 'boolean') {
+        setMemoryRequireApproval(!value)
+        void fetch('/api/agent/settings/memory-require-approval', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: !value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
+      // 夜间固化 —— 同上,还需免审批 + 时间/会话门才会真正跑。
+      if (key === 'autoDreamEnabled' && typeof value === 'boolean') {
+        setAutoDreamEnabled(value)
+        void fetch('/api/agent/settings/auto-dream', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>
         prev.map((s) => ({
@@ -1271,7 +1434,7 @@ export default function SettingsDrawer() {
         })),
       )
     },
-    [setTheme, setOutputStyle, setWorkMode, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate],
+    [setTheme, setOutputStyle, setWorkMode, setTranscriptCollapsed, setMaxVisibleMessages, setArchiveKeepCount, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate, setMemoryAutoWrite, setMemoryRequireApproval, setAutoDreamEnabled],
   )
 
   // 整个"服务"section 仅在「instance 子实例」(instance manager 派生的子进程,
@@ -1412,6 +1575,39 @@ export default function SettingsDrawer() {
         </div>
       )}
       <SettingsList schema={schema} onClose={close} onChange={handleChange} />
+      {/* 手动触发一次归档。刻意不做 Modal.confirm —— 归档只是把文件移到
+          ~/.zai/archive/，可逆；这里用 confirm 的只有「服务」区块（重启会
+          中断对话）。文案必须写清「3 天」与两个触发时机，否则用户无法预期
+          它什么时候跑。 */}
+      <div
+        data-testid="settings-archive-section"
+        className="mt-4 pt-2 border-t border-[var(--border-subtle)]"
+      >
+        <div className="text-[11px] text-[var(--text-dim-45)] mb-2 leading-[1.6]">
+          保留最近 N 条，且 3 天内修改过的一律保留；其余在服务启动时移入
+          ~/.zai/archive/。也可立即触发一次。
+        </div>
+        <Button
+          size="small"
+          loading={archiving}
+          data-testid="settings-run-archive"
+          onClick={async () => {
+            setArchiving(true)
+            try {
+              const { archived } = await archiveSessions()
+              if (archived.length > 0) {
+                message.success(`已归档 ${archived.length} 个会话`)
+              } else {
+                message.info('没有需要归档的会话')
+              }
+            } finally {
+              setArchiving(false)
+            }
+          }}
+        >
+          立即归档
+        </Button>
+      </div>
       {/* MCP 服务器状态入口:后台连接失败时这里会亮红 Tag,点开可看重连。
           放在微信入口上方 —— 两者都是"底部弱化的运维入口",与常规设置项
           分开;不受主实例门控(MCP 是每个进程自己的事,子实例同样要看)。 */}

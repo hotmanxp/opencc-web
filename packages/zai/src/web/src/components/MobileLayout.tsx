@@ -5,6 +5,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import { api } from '../lib/api'
+import { clampSettingNumber } from '../lib/settingsHydrate.js'
 import SettingsDrawer from './SettingsDrawer'
 
 /**
@@ -24,8 +25,12 @@ export default function MobileLayout() {
   const setInstanceContext = useAppStore((s) => s.setInstanceContext)
   const setOutputStyle = useAppStore((s) => s.setOutputStyle)
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
+  const setArchiveKeepCount = useAppStore((s) => s.setArchiveKeepCount)
   const setEnableDynamicWorkflow = useAppStore((s) => s.setEnableDynamicWorkflow)
   const setEnableComputerUse = useAppStore((s) => s.setEnableComputerUse)
+  const setMemoryAutoWrite = useAppStore((s) => s.setMemoryAutoWrite)
+  const setMemoryRequireApproval = useAppStore((s) => s.setMemoryRequireApproval)
+  const setAutoDreamEnabled = useAppStore((s) => s.setAutoDreamEnabled)
   const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed)
 
   useEffect(() => {
@@ -72,6 +77,7 @@ export default function MobileLayout() {
       .get<{
         outputStyle?: 'default' | 'compact' | 'verbose'
         maxVisibleMessages?: number
+        archiveKeepCount?: number
         enableDynamicWorkflow?: boolean
         enableComputerUse?: boolean
       }>(
@@ -90,18 +96,32 @@ export default function MobileLayout() {
         if (typeof data.maxVisibleMessages === 'number') {
           setMaxVisibleMessages(Math.max(1, Math.min(1000, Math.floor(data.maxVisibleMessages))))
         }
+        const archiveKeepCount = clampSettingNumber(data.archiveKeepCount, 1, 1000)
+        if (archiveKeepCount !== null) {
+          setArchiveKeepCount(archiveKeepCount)
+        }
         if (typeof data.enableDynamicWorkflow === 'boolean') {
           setEnableDynamicWorkflow(data.enableDynamicWorkflow)
         }
         if (typeof data.enableComputerUse === 'boolean') {
           setEnableComputerUse(data.enableComputerUse)
         }
+        // 自动记忆三件套(移动端设置抽屉共用同一份 store,见 SettingsDrawer)
+        if (typeof data.memoryAutoWrite === 'boolean') {
+          setMemoryAutoWrite(data.memoryAutoWrite)
+        }
+        if (typeof data.memoryRequireApproval === 'boolean') {
+          setMemoryRequireApproval(data.memoryRequireApproval)
+        }
+        if (typeof data.autoDreamEnabled === 'boolean') {
+          setAutoDreamEnabled(data.autoDreamEnabled)
+        }
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setMaxVisibleMessages, setEnableDynamicWorkflow, setEnableComputerUse, setTranscriptCollapsed])
+  }, [setOutputStyle, setMaxVisibleMessages, setArchiveKeepCount, setEnableDynamicWorkflow, setEnableComputerUse, setMemoryAutoWrite, setMemoryRequireApproval, setAutoDreamEnabled, setTranscriptCollapsed])
 
   return (
     <div

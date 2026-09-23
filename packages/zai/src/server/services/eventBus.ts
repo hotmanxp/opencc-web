@@ -38,6 +38,10 @@ function isGlobalEvent(event: ServerEvent): boolean {
     case 'server.error':
     case 'toast':
     case 'branch.changed':
+    // skills.changed — skill 目录热更新(zai skillWatcher)。不带 sid,
+    // 每个 tab 都要重拉 /api/slash,否则只有触发变更的那个 tab 能看到
+    // 新装 skill。
+    case 'skills.changed':
     case 'session.created':
     case 'session.deleted':
     case 'session.renamed':

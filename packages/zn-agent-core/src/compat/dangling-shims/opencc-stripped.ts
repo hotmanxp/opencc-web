@@ -5,7 +5,11 @@
  * etc.).
  *
  * Most of these are runtime dead code in zai:
- *   - memdir:    opencc's memory directory system (zai has its own)
+ *   - memdir:    opencc's memory directory system. zai patch (2026-09-23):
+ *                'memdir' is NO LONGER in STRIPPED_DIRS — auto-memory is
+ *                backported for real, so the memdir exports below are
+ *                unreachable via the alias and kept only as a safety net
+ *                for any other stripped-dir transitive import.
  *   - coordinator: opencc's multi-agent coordinator (zai uses BackgroundRuntime)
  *   - state:     opencc's React-coupled AppState (zai has its own Zustand)
  *   - ink:       opencc's CLI TUI primitives (zai has React web UI)

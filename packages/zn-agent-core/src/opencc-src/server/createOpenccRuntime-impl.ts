@@ -4,6 +4,7 @@ import { createHeadlessContextImpl } from './createHeadlessContext-impl.js'
 import { createSessionFacadeImpl } from './sessionFacade-impl.js'
 import { runWithSdkContext, getSessionId, getOriginalCwd } from '../bootstrap/state.js'
 import { wrapTaskAwareSetState } from '../../compat/runtime/agentTaskBridge.js'
+import { CwdStore } from '../../compat/cwdStore.js'
 import { translateSdkToRuntime, type SdkEventMeta } from '../../compat/runtime/sdkEventAdapter.js'
 import { QueryEngine } from '../QueryEngine.js'
 // zai patch (sess-1787121363115-0zq3bo8a): engines miss 分支需要从磁盘
@@ -978,9 +979,19 @@ let initialMessages: Message[] | undefined
         // yield*, 已脱离 ALS context. 必须把每次 .next() 放进
         // runWithSdkContext 内驱动, 让 recordTranscript 等内部 await
         // 全程继承 context.
+        // zai patch (2026-09-23): 额外附带会话级逻辑 cwd 供 auto-memory 解析
+        // 记忆目录。`cwd`(instance 级、本进程所有会话共享)保持不变 —— 它同时
+        // 决定 Bash / 文件操作语义,改成 per-session 影响面过大;记忆目录因此
+        // 另走 memoryCwd 这条窄通道,见 memdir/paths.ts resolveMemCwd()。
         const sdkCtx =
           typeof input.sessionId === 'string' && input.sessionId
-            ? { sessionId: input.sessionId, sessionProjectDir: null, cwd, originalCwd: cwd }
+            ? {
+                sessionId: input.sessionId,
+                sessionProjectDir: null,
+                cwd,
+                originalCwd: cwd,
+                memoryCwd: CwdStore.get(input.sessionId) ?? cwd,
+              }
             : null
         // zai patch (2026-08-10): 接线 sdkEventAdapter。vendor
         // submitMessage() 产出 SDK Message(assistant / user / stream_event /

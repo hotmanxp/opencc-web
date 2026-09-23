@@ -41,6 +41,7 @@ import type { createOpenccRuntime as _factory } from '@zn-ai/zn-agent-core'
 type OpenccRuntime = Awaited<ReturnType<typeof _factory>>
 import { ReplRuntime } from './agentRuntime.repl.js'
 import { eventBus } from './eventBus.js'
+import { startSkillWatcher, stopSkillWatcher } from './skillWatcher.js'
 
 // zai patch (2026-08-30, plan P3.1-T1, fix round 2 review I1): the
 // shared OpenccRuntime singleton lives here as a module-level binding
@@ -671,6 +672,19 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     console.warn('[initAgentRuntime] subagent provider registration failed:', err)
   }
 
+  // zai patch (2026-09-23): 归档超出保留阈值的旧会话 transcript。
+  // 必须在 restoreAllSessions 之前 —— 否则 registry 会为已经移走的
+  // sessionId 留下 agent 绑定。只扫本实例 cwd 对应的 project 目录。
+  // 独立 try/catch：失败只 warn，绝不阻断启动，也不该被下面的
+  // agent-registry catch 误报成 'agent registry init failed'。
+  // 详见 docs/superpowers/specs/2026-09-23-zai-session-archive-design.md。
+  try {
+    const { sweepSessionArchive } = await import('./sessionArchive.js')
+    await sweepSessionArchive({ cwd })
+  } catch (err) {
+    console.warn('[initAgentRuntime] session archive sweep failed:', err)
+  }
+
   // zai patch (2026-08-29, plan §3.1): Agent 插件系统 registry 启动序列。
   // loadBuiltinAgents 先注册 default / office / agent-creator 三个
   // builtin;再 loadUserAgents 扫描 ~/.zai/main-agents/*.js 合并;
@@ -776,6 +790,8 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
 
   process.once('SIGTERM', () => stopMemoryWatcher())
   process.once('SIGINT', () => stopMemoryWatcher())
+  process.once('SIGTERM', () => stopSkillWatcher())
+  process.once('SIGINT', () => stopSkillWatcher())
 
   // 启动时一次性加载 commands registry(built-in + first user scan)。
   // 若启动时 dataDir 尚未就绪,context.cwd 兜底为 process.cwd()。
@@ -785,6 +801,24 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
 
   // AGENTS.md / .zai/rules hot-reload watcher
   startMemoryWatcher({ cwd })
+
+  // skill / command 目录 hot-reload watcher(2026-09-23):vendor
+  // skillChangeDetector 只在 vendor 交互式入口初始化,zai headless 运行时
+  // 从不触发它 —— 见 services/skillWatcher.ts 顶部说明。变更时 vendor 清
+  // 自己的 skill/command 缓存 + 重置模型侧 skill_listing,这里再补清 zai 侧
+  // compat plugin 缓存(DefaultPluginRuntime.cache 是 `??=` 永久缓存且全仓
+  // 无 clearCache 调用点)并广播 skills.changed 让前端重拉 /api/slash。
+  startSkillWatcher({
+    skillsDirs: resolveSkillsDirs(),
+    clearPluginCache: () => getPluginRuntime().clearCache(),
+    // 命令目录变更时重扫 user/plugin 命令(vendor watcher 同样覆盖
+    // ~/.agents/commands 与项目 .zai/commands)。initCommands 幂等,
+    // registerBuiltinCommands 内部有 initialized 守卫不会重复注册。
+    reloadCommands: () =>
+      import('./commands/registry.js').then(({ initCommands }) =>
+        initCommands({ cwd, dataDir: process.env.ZAI_DATA_DIR ?? '', sessionId: undefined }),
+      ),
+  })
 
   // External include warning (best-effort, never blocks init)
   void hasExternalIncludes(cwd).then((has: boolean) => {

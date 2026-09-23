@@ -139,6 +139,12 @@ interface AppState {
   maxVisibleMessages: number;
   setMaxVisibleMessages: (n: number) => void;
   /**
+   * 会话归档保留条数（同一 cwd 下保留最近 N 条，且 3 天内的一律保留）。
+   * 默认 20. Layout / MobileLayout mount effect 用 GET /api/agent/settings 覆写.
+   */
+  archiveKeepCount: number;
+  setArchiveKeepCount: (n: number) => void;
+  /**
    * 桌面端打开 Agent 页面时是否默认启动右侧分屏. 持久化到
    * ~/.zai/settings.json(settings.defaultSplitScreen),Layout mount effect
    * 用 GET /api/agent/settings hydrate. 仅在 localStorage 无显式覆盖时生效,
@@ -186,6 +192,34 @@ interface AppState {
   autoUpdate: boolean;
   setAutoUpdate: (v: boolean) => void;
   /**
+   * 自动记忆「启用」总开关(写入 vendor 原生键 `memory.autoWrite`)。
+   * 默认 true —— 记忆系统默认开启。关掉后系统提示词不再注入记忆行为指令,
+   * MEMORY.md 既不读也不写,后台自动抽取与固化一并停摆。
+   *
+   * 持久化到 ~/.zai/settings.json;SettingsDrawer toggle 后 PUT 写盘。
+   * **重启实例后生效** —— vendor 的 settings 读取走进程内缓存,zai 的 PUT
+   * 只写盘(与 openccCliDangerouslySkip 同款)。
+   */
+  memoryAutoWrite: boolean;
+  setMemoryAutoWrite: (v: boolean) => void;
+  /**
+   * 「写记忆是否仍需用户审批」(vendor `memory.requireApprovalBeforeWrite`)。
+   * 默认 true(fail-safe)。**注意这是 vendor 原义:true = 更安全。**
+   * SettingsDrawer 的「自动写入记忆」行显示的是它的**反值**(用户视角:
+   * 打开 = 免审批自动写),反转只在抽屉里做一次。
+   *
+   * 设为 false 同时放开:主 agent 静默写盘 + turn 末后台自动抽取。
+   */
+  memoryRequireApproval: boolean;
+  setMemoryRequireApproval: (v: boolean) => void;
+  /**
+   * 夜间记忆固化开关(vendor 顶层键 `autoDreamEnabled`)。默认 false。
+   * 光开这个不够 —— vendor `isGateOpen()` 还要求免审批,且要满足
+   * "距上次 ≥24h + 活跃会话数 ≥5"。
+   */
+  autoDreamEnabled: boolean;
+  setAutoDreamEnabled: (v: boolean) => void;
+  /**
    * zai 自身版本升级通道当前阶段。UpdateNotifier 监听状态:
    *   - 'checking' / 'installing' → 顶部 antd notification(轻量提示)
    *   - 'complete' → Modal.info「升级到 vX.Y.Z 完成,请重启 zai 以生效」
@@ -205,6 +239,15 @@ interface AppState {
   };
   applyAppUpdate: (event: Extract<ServerEvent, { type: `app.update.${string}` }>) => void;
   dismissAppUpdate: () => void;
+  /**
+   * skill 目录变更版本号 —— 服务端 skillWatcher 检测到 `~/.agents/skills` /
+   * 项目 `.zai/skills` 等目录变化时 emit `skills.changed`,这里自增。
+   * AgentInputBox 把它放进 /api/slash 拉取的 effect 依赖:变更后自动重拉,
+   * 新装 skill 无需手动刷新页面就能出现在 `/` 自动补全里(此前只在挂载时
+   * 拉一次)。
+   */
+  skillsRevision: number;
+  bumpSkillsRevision: () => void;
   /**
    * 是否移动端视口. 由 `useIsMobile()` hook 通过 matchMedia 维护, 任何组件
    * 直接读 store 即可, 无需 props 透传. 路由层 Layout/MobileLayout 也用
@@ -246,6 +289,7 @@ export const useAppStore = create<AppState>((set) => ({
   outputStyle: 'default',
   workMode: 'code',
   maxVisibleMessages: 20,
+  archiveKeepCount: 20,
   defaultSplitScreen: false,
   enableDynamicWorkflow: false,
   enableComputerUse: false,
@@ -253,7 +297,14 @@ export const useAppStore = create<AppState>((set) => ({
   // Layout mount effect GET /api/agent/settings 会重新 hydrate(用户
   // 在 SettingsDrawer 显式关掉后,重启就该是 false)。
   autoUpdate: true,
+  // 与服务端 resolver 默认值对齐:记忆系统默认开、免审批默认关、固化默认关。
+  // Layout / MobileLayout 的 mount effect 会用 GET /api/agent/settings 覆盖。
+  memoryAutoWrite: true,
+  memoryRequireApproval: true,
+  autoDreamEnabled: false,
   appUpdate: { status: 'idle' },
+  skillsRevision: 0,
+  bumpSkillsRevision: () => set((s) => ({ skillsRevision: s.skillsRevision + 1 })),
   setConnected: (v) => set({ connected: v }),
   setStreamState: (state, attempt) => set({ streamState: state, streamAttempt: attempt }),
   setInstanceContext: (ctx) => set({ instanceContext: ctx }),
@@ -384,10 +435,14 @@ export const useAppStore = create<AppState>((set) => ({
   setOutputStyle: (style) => set({ outputStyle: style }),
   setWorkMode: (workMode) => set({ workMode }),
   setMaxVisibleMessages: (n) => set({ maxVisibleMessages: n }),
+  setArchiveKeepCount: (n) => set({ archiveKeepCount: n }),
   setDefaultSplitScreen: (v) => set({ defaultSplitScreen: v }),
   setEnableDynamicWorkflow: (v) => set({ enableDynamicWorkflow: v }),
   setEnableComputerUse: (v) => set({ enableComputerUse: v }),
   setAutoUpdate: (v) => set({ autoUpdate: v }),
+  setMemoryAutoWrite: (v) => set({ memoryAutoWrite: v }),
+  setMemoryRequireApproval: (v) => set({ memoryRequireApproval: v }),
+  setAutoDreamEnabled: (v) => set({ autoDreamEnabled: v }),
   applyAppUpdate: (event) => set((state) => {
     // 同一 process 只走一轮 check → install → (complete|failed)。
     // 'checking' 来了清掉 dismissedKey(新一轮开始,允许再次弹窗);

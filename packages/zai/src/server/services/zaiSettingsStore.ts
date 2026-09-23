@@ -282,3 +282,47 @@ export function isValidOpenccCliDangerouslySkip(
 ): value is boolean {
   return typeof value === 'boolean'
 }
+
+/**
+ * 解析自动记忆总开关 `memory.autoWrite`。默认 true —— 记忆系统默认开启,
+ * 只有显式 false 才停用。与 vendor `isAutoMemoryEnabled()` 的语义对齐
+ * (那边是"任一 settings source 显式 false 即关")。
+ */
+export function resolveMemoryAutoWrite(settings: ZaiSettings): boolean {
+  return settings.memory?.autoWrite !== false
+}
+
+/** Validate a candidate memory.autoWrite value before persisting. */
+export function isValidMemoryAutoWrite(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}
+
+/**
+ * 解析"写记忆是否仍需用户逐次同意"(`memory.requireApprovalBeforeWrite`)。
+ * 默认 true —— fail-safe:不显式放弃审批就不允许静默写盘。
+ *
+ * 设为 false 会同时放开两件事(它们是同一个同意信号):
+ *   1. 主 agent 直接写记忆,不再逐次弹确认;
+ *   2. `isExtractModeActive()` 成立 → turn 末的后台自动抽取开始运行。
+ */
+export function resolveMemoryRequireApproval(settings: ZaiSettings): boolean {
+  return settings.memory?.requireApprovalBeforeWrite !== false
+}
+
+/** Validate a candidate memory.requireApprovalBeforeWrite value. */
+export function isValidMemoryRequireApproval(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}
+
+/**
+ * 解析夜间固化开关 `autoDreamEnabled`。默认 false —— 固化会 fork 一个后台
+ * agent 读写整个记忆目录,代价较高,必须显式开启。
+ */
+export function resolveAutoDreamEnabled(settings: ZaiSettings): boolean {
+  return settings.autoDreamEnabled === true
+}
+
+/** Validate a candidate autoDreamEnabled value before persisting. */
+export function isValidAutoDreamEnabled(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}

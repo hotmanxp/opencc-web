@@ -59,6 +59,8 @@ export * from './compat/plugins/index.js'
 // Re-export a no-op stub class for zai callers (route handlers,
 // test mocks) that still instantiate `new TranscriptStore(dataDir)`.
 export { TranscriptStore } from './compat/runtime/legacyTranscriptStore.js'
+// zai 侧会话归档服务用同一个路径编码（见该文件的 sanitizePath 注释）。
+export { sanitizePath } from './compat/runtime/legacyTranscriptStore.js'
 
 // Data directory helpers
 export { resolveDataDir } from './compat/data/dataDir.js'
@@ -66,6 +68,25 @@ export type { DataDirConfig } from './compat/data/dataDir.js'
 
 // Skills runtime (Batch 3a)
 export * from './compat/runtime/skills-index.js'
+
+// zai patch (2026-09-23): vendor skill/command 目录热更新 watcher 的 types
+// stub —— 与上面的 queryModelWithStreaming 同模式。
+//
+// 运行时真值是 esbuild bundle(dist/opencc-core.mjs)里 vendor
+// `opencc-src/utils/skills/skillChangeDetector.ts` 的实现,经 bundle-entry.ts
+// 显式 re-export 暴露;这里只给 zai 端 tsc 一个可用契约表面(主 tsconfig
+// exclude 了 src/opencc-src,直接引用会触发 TS6307)。bundle-entry.d.ts 的
+// re-export 目标由 scripts/bundle-opencc.ts 的 DTS_PATH_REWRITE 镜像到
+// ./index.js,所以本声明必须与 vendor 实现保持同名同形。
+//
+// vendor 语义: 监听 ~/.agents/skills、~/.agents/commands、项目 .zai/{skills,
+// commands}、--add-dir 的 .zai/skills;变更 1s 防抖后清 skill/command 缓存 +
+// 重置模型侧 skill_listing 去重,再 emit。
+export declare const skillChangeDetector: {
+  initialize(): Promise<void>
+  dispose(): Promise<void>
+  subscribe(listener: () => void): () => void
+}
 
 // Default tool registry (Phase 4): buildDefaultTools() returns the chat-path
 // tool set (Bash/Read/Edit/Write/AskUserQuestion/Skill) with stub call()

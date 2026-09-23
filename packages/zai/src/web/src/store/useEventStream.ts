@@ -163,6 +163,11 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     case 'branch.changed':
       useAppStore.getState().applySystemEvent(event)
       break
+    // skills.changed — skill 目录热更新,只自增版本号;AgentInputBox 用它当
+    // /api/slash 拉取的 effect 依赖,变更后重拉列表(无 toast,静默刷新)。
+    case 'skills.changed':
+      useAppStore.getState().bumpSkillsRevision()
+      break
     // state.* — 4 个独立 case 分别路由到 useAgentStore 上对应的 reducer
     // (Task 10). 不能合并 case 因为 reducer 入参 shape 各不相同
     // (applyCwdChanged 不需要 task, applyV2TaskChanged 需要 action 字段).

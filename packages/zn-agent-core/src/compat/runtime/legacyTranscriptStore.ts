@@ -34,7 +34,15 @@ function djb2Hash(str: string): number {
   }
   return hash
 }
-function sanitizePath(name: string): string {
+/**
+ * cwd → project 目录名。**导出给 zai 侧会话归档服务复用**
+ * （packages/zai/src/server/services/sessionArchive.ts）—— 归档目标目录必须
+ * 用与落盘完全相同的编码，否则归档到错误目录。不要再在别处内联第 4 份副本：
+ * 本仓库另两份同名函数阈值不同（compat/transcript/paths.ts 是 80、
+ * opencc-src/utils/sessionStoragePortable.ts 优先用 Bun.hash），复制错哪一份
+ * 都会静默错位。
+ */
+export function sanitizePath(name: string): string {
   const sanitized = name.replace(/[^a-zA-Z0-9]/g, '-')
   if (sanitized.length <= MAX_SANITIZED_LENGTH) {
     return sanitized

@@ -185,6 +185,12 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   // 暴露 compat 层 zaiEnqueue / zaiEnqueuePendingNotification wrapper。compat
   // 模块本身由 tsc 发射 dist/compat/messageQueueAdapter.d.ts,不需要重写。
   // 保留空条目(显式 no-op)以便未来若需要镜像到 ./index.js 时改这里。
+  //
+  // zai patch (2026-09-23): skill 目录热更新 watcher —— zai-server 启动时
+  // initialize + subscribe(见 services/skillWatcher.ts)。vendor 模块无独立
+  // d.ts,镜像到 ./index.js(src/index.ts 提供 declare-only 契约);运行时值
+  // 由 esbuild 打进 opencc-core.mjs。
+  './opencc-src/utils/skills/skillChangeDetector.js': './index.js',
 }
 
 /** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。

@@ -64,3 +64,36 @@ export async function deleteAgentSession(sessionId: string): Promise<void> {
     headers: { 'X-Zai-Token': token },
   })
 }
+
+/**
+ * 手动触发一次会话归档（本实例 cwd）。设置页「立即归档」按钮调它。
+ *
+ * 永不抛：后端该端点也不返 5xx，任何异常都归一成"零归档"，UI 只需提示用户
+ * 「没有需要归档的会话」，不必区分"失败"与"没什么可归档"。
+ */
+export async function archiveSessions(): Promise<{
+  archived: string[]
+  kept: number
+  skipped: number
+}> {
+  const token = localStorage.getItem('zai-token') || ''
+  try {
+    const res = await fetch('/api/agent/sessions/archive', {
+      method: 'POST',
+      headers: { 'X-Zai-Token': token },
+    })
+    if (!res.ok) return { archived: [], kept: 0, skipped: 0 }
+    const data = (await res.json()) as {
+      archived?: string[]
+      kept?: number
+      skipped?: number
+    }
+    return {
+      archived: Array.isArray(data.archived) ? data.archived : [],
+      kept: typeof data.kept === 'number' ? data.kept : 0,
+      skipped: typeof data.skipped === 'number' ? data.skipped : 0,
+    }
+  } catch {
+    return { archived: [], kept: 0, skipped: 0 }
+  }
+}

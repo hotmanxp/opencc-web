@@ -1,8 +1,7 @@
 import { lstat, realpath } from 'fs/promises'
 import { dirname, join, resolve, sep } from 'path'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getErrnoCode } from '../utils/errors.js'
-import { getAutoMemPath, isAutoMemoryEnabled } from './paths.js'
+import { getAutoMemPath } from './paths.js'
 
 /**
  * Error thrown when a path validation detects a traversal or injection attempt.
@@ -71,10 +70,21 @@ function sanitizePathKey(key: string): string {
  * disabled via env var or settings.
  */
 export function isTeamMemoryEnabled(): boolean {
-  if (!isAutoMemoryEnabled()) {
-    return false
-  }
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_herring_clock', true)
+  // zai patch (2026-09-23): team memory is hard-disabled in zai.
+  //
+  // Upstream gates this on the GrowthBook flag `tengu_herring_clock`, whose
+  // *default* is `true`. With no GrowthBook feed in zai the default wins, so
+  // the bundle injected the combined (auto+team) prompt and instructed the
+  // model to maintain `<autoMem>/team/MEMORY.md`. zai has no team-memory
+  // backend at all — teamMemorySync requires Anthropic OAuth plus a
+  // github.com remote plus a remote sync service — so that directory would
+  // be written but never shared or synced, i.e. pure model misdirection.
+  //
+  // Returning false is a single cut point: prompt dispatch
+  // (memdir.ts loadMemoryPrompt), claudemd's TeamMem content injection, and
+  // the sync watcher all gate on this function. The signature is kept
+  // unchanged to minimise upstream sync conflicts.
+  return false
 }
 
 /**

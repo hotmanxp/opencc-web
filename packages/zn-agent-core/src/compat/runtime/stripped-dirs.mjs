@@ -10,7 +10,11 @@ export const STRIPPED_DIRS = [
   'components', 'ink', 'screens', 'buddy', 'assistant', 'vim', 'voice',
   'cli', 'commands', 'state', 'migrations', '__tests__', 'test',
   'ssh', 'grpc', 'proto', 'remote', 'upstreamproxy', 'integrations',
-  'memdir', 'outputStyles', 'proactive', 'keybindings', 'moreright',
+  // zai patch (2026-09-23): 'memdir' removed — auto-memory's directory
+  // resolution and prompt assembly are the core of the backport, so vitest
+  // must exercise the real implementation. Its `src/memdir/...` specifiers
+  // now fall through to the generic OPENCC_SRC_DIR catch-all below.
+  'outputStyles', 'proactive', 'keybindings', 'moreright',
   'coordinator', 'native-ts', 'context', 'bridge',
   // tasks/* sub-paths
   'tasks/RemoteAgentTask', 'tasks/InProcessTeammateTask',
@@ -21,9 +25,11 @@ export const STRIPPED_DIRS = [
   'utils/doctorDiagnostic', 'utils/updateStrategy', 'utils/autoUpgrade',
   'utils/autoUpdaterRouting', 'utils/handleAutoUpdate', 'utils/cleanup',
   // services/* sub-paths
+  // zai patch (2026-09-23): 'services/extractMemories' + 'services/autoDream'
+  // removed — auto-memory's write half is wired into zai now.
   'services/voice', 'services/PromptSuggestion', 'services/MagicDocs',
-  'services/wiki', 'services/extractMemories', 'services/goal',
-  'services/autoDream', 'services/autoFix', 'services/SessionMemory',
+  'services/wiki', 'services/goal',
+  'services/autoFix', 'services/SessionMemory',
   'services/teamMemorySync', 'services/AgentSummary',
   'services/remoteManagedSettings', 'services/settingsSync',
   'services/github',

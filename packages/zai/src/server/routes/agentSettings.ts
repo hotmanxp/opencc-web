@@ -4,25 +4,32 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { resolveModel } from '../lib/resolveModel.js'
 import { resolveMainAgent } from '../services/mainAgents.js'
+import { resolveArchiveKeepCount, toArchiveKeepCount } from '../services/sessionArchive.js'
 import type { ModelEntry, OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import { profilesToModelEntries } from '../../shared/profileProjection.js'
 import {
+  isValidAutoDreamEnabled,
   isValidAutoUpdate,
   isValidDefaultSplitScreen,
   isValidEnableComputerUse,
   isValidEnableDynamicWorkflow,
+  isValidMemoryAutoWrite,
+  isValidMemoryRequireApproval,
   isValidOpenccCliDangerouslySkip,
   isValidOutputStyle,
   isValidTheme,
   isValidWorkMode,
   readZaiSettings,
+  resolveAutoDreamEnabled,
   resolveAutoUpdate,
   resolveDefaultSplitScreen,
   resolveEnableComputerUse,
   resolveEnableDynamicWorkflow,
+  resolveMemoryAutoWrite,
+  resolveMemoryRequireApproval,
   resolveOpenccCliDangerouslySkip,
   resolveOutputStyle,
   resolveTheme,
@@ -107,6 +114,13 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
     const enableDynamicWorkflow = resolveEnableDynamicWorkflow(settings)
     const enableComputerUse = resolveEnableComputerUse(settings)
     const autoUpdate = resolveAutoUpdate(settings)
+    // 自动记忆三件套。前两个是 vendor `memory.*` 的原生值;autoDreamEnabled
+    // 是顶层字段。SettingsDrawer 的三个 boolean 行直接订阅这三个派生值。
+    const memoryAutoWrite = resolveMemoryAutoWrite(settings)
+    const memoryRequireApproval = resolveMemoryRequireApproval(settings)
+    const autoDreamEnabled = resolveAutoDreamEnabled(settings)
+    // 会话归档保留条数（派生值，磁盘上可能是缺失 / 垃圾值）。
+    const archiveKeepCount = resolveArchiveKeepCount(settings)
     // zai patch (2026-08-20): 主 Agent —— 当前选择 + 可选列表(内置 + 外置
     // ~/.zai/main-agents/*.js 合并),供 SettingsDrawer 的 Agent 选择行渲染。
     const { agent: mainAgent, agents: mainAgents } = await resolveMainAgent(
@@ -125,6 +139,10 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       enableDynamicWorkflow,
       enableComputerUse,
       autoUpdate,
+      memoryAutoWrite,
+      memoryRequireApproval,
+      autoDreamEnabled,
+      archiveKeepCount,
       mainAgent: mainAgent.name,
       mainAgents: mainAgents.map((a) => ({
         name: a.name,
@@ -223,6 +241,38 @@ router.put(
     try {
       const next = await updateZaiSettings({ maxVisibleMessages: clamped })
       res.json({ value: next.maxVisibleMessages })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  },
+)
+
+/**
+ * PUT /api/agent/settings/archive-keep-count — 持久化「会话归档保留条数」。
+ * Body 是 `{ value: number }`，服务端 floor + clamp 到 [1, 1000]。
+ *
+ * 与 max-visible-messages 同款：宽容接受可转数字的字符串，非法 → 400，
+ * 返回持久化后的规范值让客户端回显。
+ *
+ * 生效时机：写盘即持久。归档扫描只在「服务启动」与「立即归档」时读配置，
+ * 所以不需要重启 —— 与 memory 三件套的"重启后生效"不同。
+ */
+router.put(
+  '/agent/settings/archive-keep-count',
+  async (req: Request, res: Response) => {
+    const raw = (req.body as { value?: unknown } | undefined)?.value
+    const clamped = toArchiveKeepCount(raw)
+    if (clamped === null) {
+      return res
+        .status(400)
+        .json({ error: `invalid archive.keepCount: ${String(raw)}` })
+    }
+    try {
+      const current = await readZaiSettings()
+      await updateZaiSettings({
+        archive: { ...(current.archive ?? {}), keepCount: clamped },
+      })
+      res.json({ value: clamped })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }
@@ -494,6 +544,106 @@ router.get('/agent/computer-use/status', async (_req: Request, res: Response) =>
       command,
       args: ['mcp'],
     })
+  }
+})
+
+// ============================================================================
+// 自动记忆(auto-memory)三件套
+// ============================================================================
+//
+// 三个开关直接写 vendor 的原生键位(vendor 用同一份 ~/.zai/settings.json 作为
+// userSettings 源),因此不做 zai 侧镜像字段 —— 写什么、vendor 就读什么:
+//   memory.autoWrite                ← 总开关
+//   memory.requireApprovalBeforeWrite ← 写记忆是否仍需审批
+//   autoDreamEnabled                ← 夜间固化
+//
+// 三者的时效:**重启实例后**。vendor settings 读取走进程内缓存
+// (getSettingsForSource → getCachedSettingsForSource),zai 的 PUT 只写盘。
+// 与既有 opencc-cli-dangerously-skip 同款语义,UI 在 section 标题标注。
+//
+// 嵌套写注意:updateZaiSettings 是浅合并({...settings, ...patch}),所以写
+// memory 块时必须先读出当前值再展开,否则会把同级字段抹掉(与 computer-use
+// route 处理 computerUse 的写法一致)。
+
+/**
+ * PUT /api/agent/settings/memory-auto-write — 持久化「启用自动记忆」总开关。
+ * Body 是 `{ value: boolean }` → `memory.autoWrite`。
+ *
+ * 关掉后 vendor `isAutoMemoryEnabled()` 返回 false:系统提示词不再注入记忆
+ * 行为指令,MEMORY.md 既不读也不写,后台抽取与固化一并停摆。
+ */
+router.put('/agent/settings/memory-auto-write', async (req: Request, res: Response) => {
+  const raw = (req.body as { value?: unknown } | undefined)?.value
+  if (!isValidMemoryAutoWrite(raw)) {
+    return res
+      .status(400)
+      .json({ error: `invalid memory.autoWrite: ${String(raw)}` })
+  }
+  try {
+    const current = await readZaiSettings()
+    const next = await updateZaiSettings({
+      memory: { ...(current.memory ?? {}), autoWrite: raw },
+    })
+    res.json({ value: resolveMemoryAutoWrite(next) })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+/**
+ * PUT /api/agent/settings/memory-require-approval — 持久化
+ * `memory.requireApprovalBeforeWrite`。Body 是 `{ value: boolean }`。
+ *
+ * 语义按 vendor 原义:**value = true 表示"写记忆仍需用户审批"**(更安全,
+ * 也是默认值)。SettingsDrawer 的「自动写入记忆」行展示的是它的反值 ——
+ * 用户打开该行 = "免审批" = 这里收到 `value: false`。反转只在抽屉那一处发生,
+ * 服务端与磁盘始终存 vendor 原义。
+ *
+ * 设为 false 会同时放开两件事(同一个同意信号):
+ *   1. 主 agent 可直接写记忆,不再逐次弹确认;
+ *   2. vendor `isExtractModeActive()` 成立 → turn 末后台自动抽取开始运行。
+ */
+router.put(
+  '/agent/settings/memory-require-approval',
+  async (req: Request, res: Response) => {
+    const raw = (req.body as { value?: unknown } | undefined)?.value
+    if (!isValidMemoryRequireApproval(raw)) {
+      return res.status(400).json({
+        error: `invalid memory.requireApprovalBeforeWrite: ${String(raw)}`,
+      })
+    }
+    try {
+      const current = await readZaiSettings()
+      const next = await updateZaiSettings({
+        memory: { ...(current.memory ?? {}), requireApprovalBeforeWrite: raw },
+      })
+      res.json({ value: resolveMemoryRequireApproval(next) })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  },
+)
+
+/**
+ * PUT /api/agent/settings/auto-dream — 持久化夜间记忆固化开关。
+ * Body 是 `{ value: boolean }` → 顶层 `autoDreamEnabled`。
+ *
+ * 注意:光打开本开关并不足以让固化运行,vendor `isGateOpen()` 还要求
+ * `memory.requireApprovalBeforeWrite === false`(免审批),以及
+ * "距上次 ≥24h + 活跃会话数 ≥5"的时间/会话门。
+ */
+router.put('/agent/settings/auto-dream', async (req: Request, res: Response) => {
+  const raw = (req.body as { value?: unknown } | undefined)?.value
+  if (!isValidAutoDreamEnabled(raw)) {
+    return res
+      .status(400)
+      .json({ error: `invalid autoDreamEnabled: ${String(raw)}` })
+  }
+  try {
+    const next = await updateZaiSettings({ autoDreamEnabled: raw })
+    res.json({ value: resolveAutoDreamEnabled(next) })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
   }
 })
 

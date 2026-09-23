@@ -406,8 +406,11 @@ export default React.memo(function AgentInputBox({
     }
   }, [status, pendingAsk]);
 
-  // slash items: 初次挂载 fetch
+  // slash items: 初次挂载 fetch;skillsRevision 变化(服务端 skillWatcher 检测到
+  // skill/command 目录变更并 emit skills.changed)时重拉 —— 否则装了新 skill
+  // 得手动刷新页面才看得到 `/` 自动补全项。
   const [slashItems, setSlashItems] = useState<SlashItem[]>([]);
+  const skillsRevision = useAppStore((s) => s.skillsRevision);
   useEffect(() => {
     fetch("/api/slash")
       .then((res) => res.json())
@@ -415,7 +418,7 @@ export default React.memo(function AgentInputBox({
         if (Array.isArray(data.items)) setSlashItems(data.items);
       })
       .catch(() => {});
-  }, []);
+  }, [skillsRevision]);
 
   // 命令高亮: 输入开头 `/<已知命令>` 时在输入框内把 token 染紫底,
   // 视觉与下方 slash 自动补全 dropdown 的 `/name` 紫色块对齐,
