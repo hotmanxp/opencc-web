@@ -118,7 +118,13 @@ export function registerBuiltinWeixinCommands(deps: WeixinCommandDeps = {}): voi
     description: '重启微信专用实例:通道断开重连,几秒后恢复',
     handle: async (ctx) => {
       // 先回 ack —— 通道马上就要断,这是用户最后一次看到 bot 响应的机会。
-      await ctx.reply('正在重启微信通道...')
+      // ack 兜底:通道断的时候 iLink 出站正好可能抛 —— ack 是 best-effort,
+      // 任何 reply 异常都不能阻塞 restart 触发,否则通道永远回不来。
+      try {
+        await ctx.reply('正在重启微信通道...')
+      } catch (err) {
+        console.warn('[weixin.commands] /restart: ack reply threw (continuing to restart):', err)
+      }
       const restart = deps.onRestart
       if (!restart) {
         console.warn('[weixin.commands] /restart: no restart hook wired; ignoring')

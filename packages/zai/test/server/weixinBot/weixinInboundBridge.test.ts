@@ -380,6 +380,40 @@ describe('weixinInboundBridge', () => {
     expect(h.sent.some((s) => s.text.includes('正在重启微信通道'))).toBe(true)
   })
 
+  it('/restart:ack reply 抛错时仍触发 onRestart(否则通道永远回不来)', async () => {
+    // 通道刚好要断时 iLink 出站可能抛 —— ack 是 best-effort,restart 必须照常触发。
+    const onRestart = vi.fn(() => true)
+    registerBuiltinWeixinCommands({ onRestart })
+    const cwd = mkdtempSync(join(tmpdir(), 'zai-wx-proj-'))
+    let currentCwd = cwd
+    const sessionMap = new WeixinSessionMap()
+    const pairing = new WeixinPairingStore()
+    const pending = new WeixinPendingStore()
+    harnesses.push({ sessionMap, pairing, pending })
+    const inbox = new SessionInbox()
+    const followup = vi.spyOn(inbox, 'followup')
+    const bridge = new WeixinInboundBridge({
+      sessionMap, pairing, pending,
+      inboxFor: () => inbox,
+      getCwd: () => currentCwd,
+      now: () => Date.now(),
+      log: () => { /* quiet */ },
+    })
+    bridge.configure({
+      accountId: 'acct',
+      dmPolicy: 'open',
+      groupPolicy: 'disabled',
+      allowFrom: [],
+      sendToChat: () => { throw new Error('iLink outbound dead exactly at restart time') },
+    })
+
+    await bridge.deliver(dm('/restart'))
+
+    expect(followup).toHaveBeenCalledTimes(0)
+    expect(onRestart).toHaveBeenCalledTimes(1)
+    expect(onRestart).toHaveBeenCalledWith('user_action')
+  })
+
   it('未注册的 / 开头消息原样穿透给 agent', async () => {
     registerBuiltinWeixinCommands()
     const h = makeHarness('open')
