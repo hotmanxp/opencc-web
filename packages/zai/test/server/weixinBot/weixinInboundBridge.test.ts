@@ -2,7 +2,7 @@
  * weixinInboundBridge 测试 —— P0 注入 / D2 车道语义 / P1 配对 / P2 重放 / P3 媒体。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CwdStore } from '@zn-ai/zn-agent-core'
@@ -13,6 +13,7 @@ import { WeixinPendingStore } from '../../../src/server/services/weixinBot/Weixi
 import { WeixinInboundBridge } from '../../../src/server/services/weixinBot/weixinInboundBridge.js'
 import { registerBuiltinWeixinCommands } from '../../../src/server/services/weixinBot/weixinCommands.js'
 import { resetWeixinMemoryForTests } from '../../../src/server/services/weixinBot/weixinMemory.js'
+import { resetWeixinPersonaForTests } from '../../../src/server/services/weixinBot/weixinPersona.js'
 import type { InternalWeixinMessage } from '../../../src/server/services/weixinBot/WeixinAdapter.js'
 import type { DmPolicy } from '../../../src/server/services/weixinBot/accessPolicy.js'
 
@@ -91,6 +92,10 @@ describe('weixinInboundBridge', () => {
   beforeEach(() => {
     // 每个用例独立数据目录(session map / pairing / pending 都持久化)
     process.env.ZAI_DATA_DIR = mkdtempSync(join(tmpdir(), 'zai-wx-bridge-'))
+    // 人格目录默认指向一个不存在的路径 —— 本文件聚焦注入链路本身,
+    // 不想让"开发机上恰好有人格文件"影响断言。需要人格的用例自行覆盖。
+    process.env.ZAI_WEIXIN_PERSONA_DIR = join(process.env.ZAI_DATA_DIR, 'no-persona')
+    resetWeixinPersonaForTests()
   })
 
   afterEach(async () => {
@@ -442,5 +447,31 @@ describe('weixinInboundBridge', () => {
     expect(sidNew).not.toBe(sidOld)
     // 无 transcript → 无记忆块,但消息正常注入
     expect(inboxMsg.content).toContain('触发轮转的消息')
+  })
+
+  it('人格块置顶注入:读人格文件并排在 <weixin-env> 之前', async () => {
+    const personaDir = join(process.env.ZAI_DATA_DIR as string, 'weixin', 'persona')
+    mkdirSync(personaDir, { recursive: true })
+    writeFileSync(join(personaDir, 'SOUL.md'), '干脆利落,话少活多。')
+    process.env.ZAI_WEIXIN_PERSONA_DIR = personaDir
+    resetWeixinPersonaForTests()
+
+    const h = makeHarness('open')
+    await h.bridge.deliver(dm('在吗'))
+
+    const [, inboxMsg] = h.followup.mock.calls[0] as [string, { content: string }]
+    expect(inboxMsg.content.startsWith('<identity-context>')).toBe(true)
+    expect(inboxMsg.content).toContain('干脆利落,话少活多。')
+    expect(inboxMsg.content.indexOf('<identity-context>')).toBeLessThan(
+      inboxMsg.content.indexOf('<weixin-env'),
+    )
+    expect(inboxMsg.content).toContain('<weixin-message')
+  })
+
+  it('无人格文件时不注入 <identity-context>', async () => {
+    const h = makeHarness('open')
+    await h.bridge.deliver(dm('在吗'))
+    const [, inboxMsg] = h.followup.mock.calls[0] as [string, { content: string }]
+    expect(inboxMsg.content).not.toContain('<identity-context>')
   })
 })

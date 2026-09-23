@@ -36,8 +36,13 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 | `~/.zai/settings.json` | 用户级 zai 设置(全局);**项目级** 走 `<cwd>/.zai/settings.json`,不要混 |
 | `~/.zai/tasks/` | 任务定义持久化 |
 | `~/.zai/plans/` | plan 文件持久化 |
+| `~/.zai/weixin/` | 微信机器人子系统:`accounts/`(QR 凭据)、`locks/`、`sync/`、`context-tokens/`、`media/`、`sessions.json`(conversationKey → sessionId)、`pairings.json`、`owner.json`、`inbox-pending/`(崩溃重放)、`memory/<hash>/`(会话记忆,见 `services/weixinBot/weixinMemory.ts`) |
+| `~/.zai/weixin/persona/` | **微信侧助手人格目录**,放 `SOUL.md` / `IDENTITY.md` / `USER.md`(三个都可选,缺失即不注入该段)。**唯一落点,无回退**;`ZAI_WEIXIN_PERSONA_DIR` 可整体覆盖该目录。详见 `services/weixinBot/weixinPersona.ts` |
 
 **关键陷阱**:
+- **微信人格只注入微信通道**:人格块由 `weixinInboundBridge` 渲染进每条入站消息(排在 `<weixin-env>` 之前),而该 bridge 只在 `app=weixin` 专用实例上收到消息 —— Web 端会话完全不经这条路径,主实例的 agent 人格/系统提示词不受影响。要改微信助手的语气,改人格文件即可,**不要**去动 agent 定义或系统提示词槽。
+- **人格目录唯一且不回退**:只有 `<ZAI_DATA_DIR>/weixin/persona/`(默认 `~/.zai/weixin/persona/`),`ZAI_WEIXIN_PERSONA_DIR` 是整体覆盖、无回退语义(指错就是无人格)。判定看的是"这个目录能否读出至少一个**非空**文件",全空/全是空白文件按无人格处理,不会注入空块。**2026-09-23 移除了对 `~/.workbuddy/` 的隐式回退** —— 跨应用偷偷读文件会让"我改了 SOUL.md 怎么没生效"极难定位;要复用 WorkBuddy 那套就显式 `cp` 过来。加载走 `mtime+size+ino` 签名缓存 —— 改完保存,下一条微信消息即生效,不用重启微信实例。
+- **人格文件是「模型可自改」的活文档**:`renderPersonaBlock()` 会在块里逐字给出每个文件的绝对路径 + 一段维护指引(只能改这三个文件、仅在用户明确要求调整语气/称呼时才改、含糊先问、单文件 8KB / 合计 20KB 上限、改后一句话告知用户、下一条消息生效无需重启),并明确 `USER.md` 与 `<weixin-memory>` 长期记忆文件的分工 —— 别把"用户要我记住的事实"写进 `USER.md`。模型改文件走通用 `Write`/`Edit`(默认 `permissions.defaultMode = 'bypassPermissions'`,`Write`/`Edit`/`Bash(*)` 都在 allow 里),没有 persona 专用工具。改这段指引时同步 `weixinPersona.test.ts` 里那条断言,别删了没人发现。
 - **plugin 改文件走 `~/.zai/plugins/cache/claude-plugins-official/<name>/<version>/`**,不要去 `~/.claude/plugins/cache/`(迁移后 zai 不读)。
 - **LSP/MCP 类 plugin**(typescript-lsp / pyright-lsp / context7 / chrome-devtools-mcp / ralph-loop / code-review)在 `~/.zai/plugins/cache/` 下有缓存但 zai 的 `/api/plugins` 不返回——要么缺 `.claude-plugin/plugin.json`、要么走 LSP/MCP 路径被静默排除。
 - **`~/.zai/zn-assets/`** 是 `paths.ts:7-17` 注释里描述的预期 layout,当前未部署,实际 `@zn-ai/plugin` 资源走 `~/.agents/skills`(见 `agentRuntime.ts:557` 注释「默认走 `~/.agents/skills`」)。

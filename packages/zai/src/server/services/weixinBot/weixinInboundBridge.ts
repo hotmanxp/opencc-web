@@ -39,6 +39,7 @@ import {
   recordRotationSummary,
   type WeixinMemorySnapshot,
 } from './weixinMemory.js'
+import { loadPersonaSnapshot, renderPersonaBlock, type WeixinPersonaSnapshot } from './weixinPersona.js'
 import type { DmPolicy, GroupPolicy } from './accessPolicy.js'
 import type { InternalWeixinMessage } from './WeixinAdapter.js'
 
@@ -122,9 +123,13 @@ function escapeAttr(s: string): string {
 }
 
 /**
- * 渲染给 LLM 的完整上下文:发送者头 + 原文本 + 媒体本地路径 + 记忆块。
+ * 渲染给 LLM 的完整上下文:人格块 + 环境头 + 记忆块 + 发送者头 + 原文本 + 媒体路径。
  * 注意这是**注入内容(cmd.prompt)**,不是 Web UI 可见文本 —— 后者走
  * `displayText`(用户原话)。
+ *
+ * persona 块(可选)置顶:它是整段上下文里优先级最高的框架("你是谁、在对谁
+ * 说话"),而 env 是每轮变化的动态值。固定内容在前、动态内容在后,也最省
+ * prompt 前缀缓存。见 weixinPersona.ts —— 该块只在微信通道出现,Web 端不受影响。
  *
  * memory 块(可选)采用冻结快照:会话存活期内内容不变(见 weixinMemory.ts),
  * 摘要带「仅供参考」前缀 —— 防止旧会话残留任务被误当活跃指令(hermes 同款设计)。
@@ -133,8 +138,13 @@ export function renderWeixinPrompt(
   msg: { chatType: 'dm' | 'group'; senderId: string; displayName?: string; text: string; mediaPaths: string[]; mediaTypes: string[] },
   readableMediaPaths: string[],
   memory?: WeixinMemorySnapshot,
+  persona?: WeixinPersonaSnapshot | null,
 ): string {
   const lines: string[] = []
+  if (persona) {
+    lines.push(renderPersonaBlock(persona))
+    lines.push('')
+  }
   // zai patch (2026-09-13, cron-clock):每条消息注入当前本地时间 —— 微信
   // prompt 没有时钟时模型会瞎猜"现在",导致"3 分钟后提醒"算出错误 cron
   // (实测错 5 小时)。消息级注入保证跨轮次/跨天都是新鲜时间。
@@ -329,8 +339,10 @@ export class WeixinInboundBridge {
       })
     }
     const memorySnapshot = await loadMemorySnapshot(key)
+    // 人格块:签名缓存命中时只是一次 stat,改动保存后下一条消息即生效。
+    const persona = await loadPersonaSnapshot()
 
-    const content = renderWeixinPrompt(msg, readableMedia, memorySnapshot)
+    const content = renderWeixinPrompt(msg, readableMedia, memorySnapshot, persona)
     const contentBlocks = await buildImageBlocks(msg.mediaPaths, msg.mediaTypes)
 
     const inboxMessage: InboxMessage = {
@@ -437,6 +449,8 @@ export class WeixinInboundBridge {
   async replayPending(): Promise<number> {
     let replayed = 0
     const items = await this.deps.pending.list()
+    // 重放与正常投递注入同一份人格,否则崩溃重启后前几条消息的人格会丢。
+    const persona = await loadPersonaSnapshot()
     for (const item of items) {
       if (await this.deps.pending.isProcessed(item.messageId)) {
         await this.deps.pending.remove(item.messageId)
@@ -465,6 +479,8 @@ export class WeixinInboundBridge {
             mediaTypes: item.mediaTypes,
           },
           media,
+          undefined,
+          persona,
         )
         const inboxMessage: InboxMessage = {
           id: `weixin-${item.messageId}`,
