@@ -21,7 +21,7 @@ function fakeTools(): { name: string }[] {
     { name: 'TaskList' },
     // 非白名单内置 — 剔除
     { name: 'WebFetch' },
-    { name: 'DisplayFiles' },
+    { name: 'PresentFile' },
     { name: 'Workflow' },
     { name: 'EnterWorktree' },
     { name: 'LSP' },
@@ -56,7 +56,7 @@ describe('office main agent tools 槽', () => {
     expect(names).toContain('Read')
     expect(names).toContain('WebSearch')
     expect(names).toContain('TaskCreate')
-    const dropped = ['WebFetch', 'DisplayFiles', 'Workflow', 'EnterWorktree', 'LSP']
+    const dropped = ['WebFetch', 'PresentFile', 'Workflow', 'EnterWorktree', 'LSP']
     for (const n of dropped) expect(names).not.toContain(n)
   })
 })

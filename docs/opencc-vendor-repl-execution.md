@@ -560,7 +560,7 @@ vendor `Message` 类型(`opencc-src/types/message.ts:81-120`)`type` 联合:
 | `createPrintRuntime`, `getPrintSessionContext`, `getPrintSessionKey`, `isPrintSessionMode`, `runWithPrintSession` | 值(`bundle-entry.ts:20-31`) | print 路径 headless runtime |
 | `getBuiltinMainAgents` | 值(`bundle-entry.ts:38`) | 内置主 agent 列表 |
 | `getAgentRegistry`, `resetAgentRegistryForTests`, `AgentRegistryImpl`, `AgentConfig`, `AgentSlotId`, `AgentSlotFn`, `AgentRegistry`, ... | 值/类型(`bundle-entry.ts:46-61`) | agent 插件系统 |
-| `takeDisplayFilesOutput` | 值(`bundle-entry.ts:65`) | display files 工具输出 |
+| `takePresentFileOutput` | 值(`bundle-entry.ts:65`) | present file 单文件展示工具输出 |
 | `registerExtraReminderProvider`, `clearExtraReminderProviders` | 值(`bundle-entry.ts:74-77`) | 每轮 API call 前的 inbox drain hook |
 | `runWithSdkContext`, `SdkContext` | 值/类型(`bundle-entry.ts:118-119`) | vendor AsyncLocalStorage 包装,`runtime.query` 绑 sessionId |
 | `apply`, `applyClaudeCodeProvider`, `applyDshProvider`, `applyOpencodeProvider` | 值(`bundle-entry.ts:268-276`) | subagent provider 注册 |

@@ -135,10 +135,15 @@ export function FilePreviewDrawer() {
       ) : error ? (
         <Alert type="error" message={error} />
       ) : !wire ? null : (() => {
-        // image 的 content 是 base64 字符串,FilePreviewBody 的 image 分支读 dataUrl 字段;
-        // 这里拼出 data: URL;text/html 直接传 content(UTF-8 字符串)
-        const dataUrl = wire.kind === 'image'
-          ? `data:${wire.mime ?? 'application/octet-stream'};base64,${wire.content ?? ''}`
+        // image 的字节走 /api/fs/raw(能看 > 1 MiB 的大图,也省一次 base64
+        // 解码);content 只在 ≤ 1 MiB 时由 /api/fs/preview 回带,dataUrl 保留
+        // 作为 desktop 调用方的回退。text / html 仍从 content 渲染。
+        const isImage = wire.kind === 'image'
+        const dataUrl = isImage && wire.content
+          ? `data:${wire.mime ?? 'application/octet-stream'};base64,${wire.content}`
+          : undefined
+        const rawUrl = isImage
+          ? `/api/fs/raw?path=${encodeURIComponent(path!)}`
           : undefined
         const payload: FilePreviewPayload = {
           kind: wire.kind,
@@ -146,6 +151,7 @@ export function FilePreviewDrawer() {
           mime: wire.mime,
           content: wire.content,
           dataUrl,
+          rawUrl,
           size: wire.size,
           mtime: wire.mtime,
           ext: wire.ext,

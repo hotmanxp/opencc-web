@@ -53,12 +53,16 @@ export function readTerminalTheme(): ITheme {
   const cs = getComputedStyle(document.documentElement)
   const get = (name: string, fallback: string): string => cs.getPropertyValue(name).trim() || fallback
   const light = document.documentElement.dataset.theme === 'light'
+  // 终端是全幅画布, 底色取页面底色 --bg-body 而非卡片级的 --bg-card:
+  // 卡片浅灰 (light 下 #f1f5f5) 铺满整块终端会明显发灰, 且那是卡片/气泡/
+  // 表格共用的变量, 终端不该跟着它走。
+  const bg = get('--bg-body', light ? '#ffffff' : '#0a0a0f')
   return {
     ...(light ? LIGHT_ANSI : DARK_ANSI),
-    background: get('--bg-card', light ? '#ffffff' : '#12121a'),
+    background: bg,
     foreground: get('--text-primary', light ? '#1f2937' : '#f8fafc'),
     cursor: get('--accent-start', '#f97316'),
-    cursorAccent: get('--bg-card', light ? '#ffffff' : '#12121a'),
+    cursorAccent: bg,
     selectionBackground: light ? 'rgba(249,115,22,0.22)' : 'rgba(249,115,22,0.32)',
   }
 }

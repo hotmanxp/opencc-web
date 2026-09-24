@@ -6,13 +6,15 @@ import { grepRenderer } from "./grep.js"
 import { readRenderer } from "./read.js"
 import { agentRenderer } from "./agent.js"
 import { diffRenderer } from "./diff.js"
-import { fileDisplayRenderer } from "./fileDisplay.js"
+import { presentFileRenderer } from "./presentFile.js"
 import { mcpRenderer, isMcpToolName } from "./mcp.js"
 
 const registry: Record<string, ToolRenderer> = {
   Agent: agentRenderer,
   Bash: bashRenderer,
-  DisplayFiles: fileDisplayRenderer,
+  // 只注册新名 —— 不保留旧名 DisplayFiles 别名(执行期裁决:不留兼容 shim;
+  // 历史 transcript 里的旧名消息走 genericRenderer)。
+  PresentFile: presentFileRenderer,
   // Edit / Write 走 DiffBlock 一体渲染 (整接管 renderFull), 不再各自写输入/输出.
   Edit: diffRenderer,
   Glob: globRenderer,

@@ -20,6 +20,7 @@ import { Alert, Button, Spin, Typography } from "antd"
 import { FolderOpenIcon } from "lucide-react";
 import { MarkdownText } from "../markdown/MarkdownText.js"
 import { DocumentPreview, isRenderableDocumentKind } from "../documentPreview/index.js"
+import { useCodeThemeMode } from "../../hooks/useCodeThemeMode.js"
 
 // 本地类型副本是有意的(见下方 FilePreviewPayload 注释):既不要把 web 组件
 // 的依赖绑到 shared/fs.ts 的线上类型上,也不要只改一处导致两个 kind 集合漂移。
@@ -37,15 +38,23 @@ export type FilePreviewPayload = {
   mime?: string
   /** text 模式:UTF-8 内容;html 模式:UTF-8 内容(可选) */
   content?: string
-  /** image 模式:base64 data URL;html 模式:也可传 data URL 替代 content */
+  /** image 模式:base64 data URL(desktop 调用方走这条) */
   dataUrl?: string
+  /** image 模式:原始字节通道 URL(`/api/fs/raw?path=…`)。与 dataUrl 二选一,
+   *  两者都有时优先用 rawUrl —— 大图不必经 base64 解码,也不会被 1 MiB 挡住。 */
+  rawUrl?: string
   size: number
   mtime: number | string
   /** binary 模式:扩展名前缀(eg. ".zip") */
   ext?: string
 }
 
+/** drawer = 右侧抽屉 / 浮窗(默认,沿用旧行为);inline = 对话流卡片内联。 */
+export type FilePreviewVariant = 'drawer' | 'inline'
+
 const PREVIEW_LINE_LIMIT = 200
+/** inline 变体的代码/Markdown 默认展示行数 —— 卡内要短,展开全部仍在卡内。 */
+const INLINE_LINE_LIMIT = 20
 
 function humanSize(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return ''
@@ -98,7 +107,7 @@ export function decodeDataUrlUtf8(dataUrl: string): string {
 
 // 模块级 promise cache:vite 把 syntaxHighlighter 编为独立 chunk,
 // 同一 chunk import() 第二次会命中浏览器缓存 + 模块级 promise 也跳过重复 fetch。
-let syntaxHighlighterPromise: Promise<{ SyntaxHighlighter: any; oneDark: any }> | null = null
+let syntaxHighlighterPromise: Promise<{ SyntaxHighlighter: any; oneDark: any; oneLight: any }> | null = null
 function loadSyntaxHighlighter() {
   if (!syntaxHighlighterPromise) {
     syntaxHighlighterPromise = import('../markdown/syntaxHighlighter.js')
@@ -106,7 +115,7 @@ function loadSyntaxHighlighter() {
   return syntaxHighlighterPromise
 }
 
-type Highlighter = { SyntaxHighlighter: any; oneDark: any }
+type Highlighter = { SyntaxHighlighter: any; oneDark: any; oneLight: any }
 
 function CodeBlock({
   lang,
@@ -117,11 +126,17 @@ function CodeBlock({
   content: string
   loading?: React.ReactNode
 }) {
+  // token 配色按 <html data-theme> 切 —— 恒用 oneDark 时浅色主题不仅
+  // 「浅底 + 浅色 token」糊成一片,oneDark 的 `text-shadow: 0 1px rgba(0,0,0,.3)`
+  // 还会被并进 <pre> 行内样式、被所有 token 继承,白底上就是字形重影。
+  const themeMode = useCodeThemeMode()
   const [hl, setHl] = useState<Highlighter | null>(null)
   useEffect(() => {
     let cancelled = false
     loadSyntaxHighlighter().then((mod) => {
-      if (!cancelled) setHl({ SyntaxHighlighter: mod.SyntaxHighlighter, oneDark: mod.oneDark })
+      if (!cancelled) {
+        setHl({ SyntaxHighlighter: mod.SyntaxHighlighter, oneDark: mod.oneDark, oneLight: mod.oneLight })
+      }
     })
     return () => {
       cancelled = true
@@ -135,48 +150,76 @@ function CodeBlock({
     )
   }
   return (
-    <hl.SyntaxHighlighter language={lang} style={hl.oneDark} customStyle={{ fontSize: 12 }}>
+    <hl.SyntaxHighlighter
+      language={lang}
+      style={themeMode === 'light' ? hl.oneLight : hl.oneDark}
+      customStyle={{ fontSize: 12 }}
+    >
       {content}
     </hl.SyntaxHighlighter>
   )
 }
 
-function TextPreview({ path, content }: { path: string; content: string }) {
+function TextPreview({ path, content, lineLimit, inline }: { path: string; content: string; lineLimit: number; inline: boolean }) {
   const ext = path.toLowerCase().split('.').pop() ?? ''
   const isMd = ext === 'md' || ext === 'markdown'
-  const { head, truncated } = truncateLines(content, PREVIEW_LINE_LIMIT)
+  const { head, truncated } = truncateLines(content, lineLimit)
   const [expanded, setExpanded] = useState(false)
   const display = !truncated || expanded ? content : head
-  if (isMd) {
-    return (
-      <div data-testid="preview-markdown">
-        <MarkdownText text={display} />
-        {truncated && !expanded && <Button type="link" onClick={() => setExpanded(true)}>展开全部</Button>}
-      </div>
-    )
-  }
-  return (
+  // inline(对话卡片)的展开按钮文案携带总行数(spec §6.4);drawer 保持原文案。
+  const expandLabel = inline ? `展开全部(${content.split('\n').length} 行)` : '展开全部'
+  const body = isMd ? (
+    <div data-testid="preview-markdown">
+      <MarkdownText text={display} />
+      {truncated && !expanded && <Button type="link" onClick={() => setExpanded(true)}>{expandLabel}</Button>}
+    </div>
+  ) : (
     <div data-testid="preview-code">
       <CodeBlock lang={detectLanguage(path)} content={display} loading={<pre data-testid="code-loading" className="whitespace-pre text-xs p-3 bg-[#282c34] text-[#abb2bf]">{display}</pre>} />
-      {truncated && !expanded && <Button type="link" onClick={() => setExpanded(true)}>展开全部</Button>}
+      {truncated && !expanded && <Button type="link" onClick={() => setExpanded(true)}>{expandLabel}</Button>}
     </div>
   )
+  // inline 变体:展开全部后内容仍封顶在卡内(max-h + 内部滚动,spec §6.4);
+  // drawer 不加这层包裹,渲染保持字节级不变。
+  if (!inline) return body
+  return <div className="max-h-[320px] md:max-h-[420px] overflow-auto">{body}</div>
 }
 
-function ImagePreview({ dataUrl, path }: { dataUrl: string; path: string }) {
+function ImagePreview({
+  dataUrl,
+  rawUrl,
+  path,
+  inline,
+}: {
+  dataUrl?: string
+  rawUrl?: string
+  path: string
+  inline: boolean
+}) {
+  const [failed, setFailed] = useState(false)
   const name = path.split(/[\\/]/).pop() ?? path
+  const src = rawUrl ?? dataUrl
+  if (!src) return <Alert type="error" message="缺少图片数据" />
+  if (failed) {
+    return <Alert data-testid="preview-image-error" type="error" message="图片加载失败" />
+  }
   return (
     <div data-testid="preview-image" className="flex justify-center">
       <img
-        src={dataUrl}
+        src={src}
         alt={name}
-        className="max-w-full max-h-[70vh] object-contain"
+        onError={() => setFailed(true)}
+        className={
+          inline
+            ? 'max-w-full max-h-[320px] md:max-h-[420px] object-contain rounded'
+            : 'max-w-full max-h-[70vh] object-contain'
+        }
       />
     </div>
   )
 }
 
-function HtmlPreview({ dataUrl, content }: { dataUrl?: string; content?: string }) {
+function HtmlPreview({ dataUrl, content, inline }: { dataUrl?: string; content?: string; inline: boolean }) {
   // 服务端 /fs/preview 返回 html 时 content 是 utf-8 字符串,
   // desktopFs 的 dataUrl 是 base64(text/html)。两种都接受。
   const src = dataUrl
@@ -190,7 +233,7 @@ function HtmlPreview({ dataUrl, content }: { dataUrl?: string; content?: string 
       // origin,不给 allow-same-origin,无法访问宿主页面)。与 FsTab 预览一致。
       sandbox="allow-scripts"
       title="html-preview"
-      className="w-full h-full min-h-[320px] border-0"
+      className={inline ? 'w-full h-[320px] md:h-[420px] border-0' : 'w-full h-full min-h-[320px] border-0'}
     />
   )
 }
@@ -220,19 +263,39 @@ function BinaryPreview({ ext, path }: { ext?: string; path: string }) {
   )
 }
 
-export function FilePreviewBody({ payload }: { payload: FilePreviewPayload }) {
-  const sizeLabel = humanSize(payload.size)
+export function FilePreviewBody({
+  payload,
+  variant = 'drawer',
+}: {
+  payload: FilePreviewPayload
+  variant?: FilePreviewVariant
+}) {
+  const inline = variant === 'inline'
   switch (payload.kind) {
     case 'image':
-      return payload.dataUrl
-        ? <ImagePreview dataUrl={payload.dataUrl} path={payload.path} />
-        : <Alert type="error" message="缺少图片数据" />
+      return (
+        <ImagePreview
+          dataUrl={payload.dataUrl}
+          rawUrl={payload.rawUrl}
+          path={payload.path}
+          inline={inline}
+        />
+      )
     case 'html':
-      return <HtmlPreview dataUrl={payload.dataUrl} content={payload.content} />
+      return <HtmlPreview dataUrl={payload.dataUrl} content={payload.content} inline={inline} />
     case 'binary':
       return <BinaryPreview ext={payload.ext} path={payload.path} />
     case 'text':
-      return payload.content != undefined ? <TextPreview path={payload.path} content={payload.content} /> : <Alert type="error" message="缺少文本内容" />
+      return payload.content != undefined
+        ? (
+          <TextPreview
+            path={payload.path}
+            content={payload.content}
+            lineLimit={inline ? INLINE_LINE_LIMIT : PREVIEW_LINE_LIMIT}
+            inline={inline}
+          />
+        )
+        : <Alert type="error" message="缺少文本内容" />
     case 'docx':
     case 'sheet':
     case 'ppt':

@@ -341,13 +341,13 @@ describe('builtin agents (core)', () => {
 // =====================================================================
 
 describe('AgentRegistry.slot() 派发(plan §6.1)', () => {
-  it('default.tools 经 slot 派发 append DisplayFiles 工具', async () => {
+  it('default.tools 经 slot 派发 append PresentFile 工具', async () => {
     const r = getAgentRegistry()
     r.loadBuiltinAgents()
     r.registryAgent('s-default', 'default')
     const tools = await r.slot<unknown[]>([], 'tools', 's-default')
     expect(tools.map((t) => (t as { name: string }).name)).toContain(
-      'DisplayFiles',
+      'PresentFile',
     )
   })
 

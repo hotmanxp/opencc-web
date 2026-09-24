@@ -5,15 +5,23 @@ import { render, screen } from "@testing-library/react"
 import { MessageListView } from "./MessageListView.js"
 import type { AgentMessage } from "../../store/useAgentStore.js"
 
-// MessageListView 只从 useAgentStore 读 transcriptCollapsed —— mock 掉,
-// 让测试分别驱动 expanded (false) / collapsed (true) 两条渲染路径.
+// MessageListView 从 useAgentStore 读 transcriptCollapsed 与 status —— mock 掉,
+// 让测试分别驱动 expanded (false) / collapsed (true) 两条渲染路径与产物块结算。
 const collapsed = vi.hoisted(() => ({ value: false }))
+const status = vi.hoisted(() => ({ value: "idle" as string }))
 vi.mock("../../store/useAgentStore.js", () => ({
-  useAgentStore: <T,>(selector: (s: { transcriptCollapsed: boolean }) => T): T =>
-    selector({ transcriptCollapsed: collapsed.value }),
-  useAgentStoreOrCtx: <T,>(selector: (s: { transcriptCollapsed: boolean }) => T): T =>
-    selector({ transcriptCollapsed: collapsed.value }),
+  useAgentStore: <T,>(
+    selector: (s: { transcriptCollapsed: boolean; status: string }) => T,
+  ): T => selector({ transcriptCollapsed: collapsed.value, status: status.value }),
+  useAgentStoreOrCtx: <T,>(
+    selector: (s: { transcriptCollapsed: boolean; status: string }) => T,
+  ): T => selector({ transcriptCollapsed: collapsed.value, status: status.value }),
 }))
+
+beforeEach(() => {
+  collapsed.value = false
+  status.value = "idle"
+})
 
 function toolMsg(
   type: string,
@@ -118,25 +126,23 @@ describe("MessageListView — Agent 工具卡过滤", () => {
 })
 
 describe("MessageListView — skipOuterGroup 路由", () => {
-  // fileDisplayRenderer.skipOuterGroup=true → collapsed 视图下跳过
+  // presentFileRenderer.skipOuterGroup=true → collapsed 视图下跳过
   // ToolGroupCard 外壳, 直接渲染 MessageBubble 列表. Bash 等未标记的
   // 工具继续走 ToolGroupCard. 混合 / pending / error 状态回退带壳.
 
-  function displayFilesDone(toolUseId: string): AgentMessage {
+  function presentFileDone(toolUseId: string): AgentMessage {
     return toolMsg(
       "tool_use:done",
       toolUseId,
-      "DisplayFiles",
-      { paths: ["/a.ts", "/b.png"] },
+      "PresentFile",
+      { path: "/a.ts" },
       JSON.stringify({
         content: [
           {
             type: "json",
             json: {
-              files: [
-                { path: "/a.ts", name: "a.ts", size: 100, mtime: 0, kind: "text" },
-                { path: "/b.png", name: "b.png", size: 200, mtime: 0, kind: "image" },
-              ],
+              file: { path: "/a.ts", name: "a.ts", size: 100, mtime: 0, kind: "text" },
+              caption: "刚生成的产物",
             },
           },
         ],
@@ -144,21 +150,15 @@ describe("MessageListView — skipOuterGroup 路由", () => {
     )
   }
 
-  test("collapsed: DisplayFiles toolGroup 跳过 ToolGroupCard 外壳, 直接渲染 FileCard 列表", () => {
+  test("collapsed: PresentFile toolGroup 跳过 ToolGroupCard 外壳, 直接渲染文件卡", () => {
     collapsed.value = true
-    const { container } = render(
-      <MessageListView
-        messages={[displayFilesDone("tu-df-1")]}
-      />,
-    )
+    const { container } = render(<MessageListView messages={[presentFileDone("tu-pf-1")]} />)
     // ToolGroupCard 的 ant-card-head 不出现 → 外壳已跳过
     expect(container.querySelector(".ant-card-head")).not.toBeInTheDocument()
     expect(screen.queryByText(/个工具调用/)).not.toBeInTheDocument()
-    // FileCard 列表 (data-testid="file-display-list") 出现
-    expect(screen.getByTestId("file-display-list")).toBeInTheDocument()
-    // FileCard 内容
+    // 文件卡渲染
+    expect(screen.getByTestId("present-file-card")).toBeInTheDocument()
     expect(screen.getByText("a.ts")).toBeInTheDocument()
-    expect(screen.getByText("b.png")).toBeInTheDocument()
   })
 
   test("collapsed: Bash 工具仍渲染 ToolGroupCard (未标记 skipOuterGroup)", () => {
@@ -176,36 +176,101 @@ describe("MessageListView — skipOuterGroup 路由", () => {
     expect(screen.getByText(/·\s*Bash/)).toBeInTheDocument()
   })
 
-  test("collapsed: DisplayFiles + Bash 混合 toolGroup 整组回退到 ToolGroupCard", () => {
-    // 已知限制: deriveTranscriptNodes 不按 skipOuterGroup 切分 groupBuf,
-    // 所以 Bash + DisplayFiles 混合时 every 判定为 false, 整组带壳.
+  test("collapsed: PresentFile + Bash 混合 toolGroup 被拆成「组卡 + 文件卡」", () => {
     collapsed.value = true
     const { container } = render(
       <MessageListView
         messages={[
           toolMsg("tool_use:start", "tu-bash-1", "Bash", { command: "ls" }),
           toolMsg("tool_use:done", "tu-bash-1", "Bash", undefined, "ok"),
-          displayFilesDone("tu-df-1"),
+          presentFileDone("tu-pf-1"),
         ]}
       />,
     )
+    // Bash 仍进组卡(start+done 两条 message → 2 entries),文件卡独立内联;
+    // 计数是 2 而非 3,证明 PresentFile 已被摘出组卡。
     expect(container.querySelector(".ant-card-head")).toBeInTheDocument()
-    expect(screen.getByText(/3 个工具调用/)).toBeInTheDocument()
+    expect(screen.getByText(/2 个工具调用/)).toBeInTheDocument()
+    expect(screen.getByTestId("present-file-card")).toBeInTheDocument()
   })
 
-  test("collapsed: pending DisplayFiles 仍渲染 ToolGroupCard (状态优先)", () => {
+  test("collapsed: pending PresentFile 仍渲染 ToolGroupCard (状态优先)", () => {
     // pending / error / invalid / denied 状态保留外壳, 让用户看到
     // 「工具调用中…」或红色「N 个失败」Tag 状态提示.
     collapsed.value = true
     const { container } = render(
       <MessageListView
-        messages={[
-          toolMsg("tool_use:start", "tu-df-1", "DisplayFiles", { paths: ["/a.ts"] }),
-        ]}
+        messages={[toolMsg("tool_use:start", "tu-pf-1", "PresentFile", { path: "/a.ts" })]}
       />,
     )
     expect(container.querySelector(".ant-card-head")).toBeInTheDocument()
     expect(screen.getByText(/个工具调用/)).toBeInTheDocument()
+    expect(screen.queryByTestId("present-file-card")).toBeNull()
+  })
+})
+
+// ── 本轮产物块 ────────────────────────────────────────────────────────────
+// 语料:两轮对话,各自改过文件。产物块锚定在每轮最后一条消息之后。
+function artifactMessages(): AgentMessage[] {
+  return [
+    { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "first" },
+    toolMsg("tool_use:start", "tu-w1", "Write", { file_path: "/abs/one.ts" }),
+    toolMsg("tool_use:done", "tu-w1", "Write", undefined, "File created successfully"),
+    { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "done1" },
+    { eventId: "u2", sessionId: "sess-1", ts: 3, turnIndex: 1, type: "user.text", text: "second" },
+    toolMsg("tool_use:start", "tu-e1", "Edit", { file_path: "/abs/two.ts" }),
+    toolMsg("tool_use:done", "tu-e1", "Edit", undefined, "ok"),
+    { eventId: "a2", sessionId: "sess-1", ts: 4, turnIndex: 1, type: "assistant.text", text: "done2" },
+  ]
+}
+
+describe("MessageListView — 本轮产物块", () => {
+  test("expanded 视图:每轮末尾各渲染一个产物块", () => {
+    collapsed.value = false
+    status.value = "idle"
+    render(<MessageListView messages={artifactMessages()} />)
+    expect(screen.getAllByTestId("turn-artifacts-block")).toHaveLength(2)
+    expect(screen.getByText("one.ts")).toBeInTheDocument()
+    expect(screen.getByText("two.ts")).toBeInTheDocument()
+  })
+
+  test("collapsed 视图:同样插入两个产物块", () => {
+    collapsed.value = true
+    status.value = "idle"
+    render(<MessageListView messages={artifactMessages()} />)
+    expect(screen.getAllByTestId("turn-artifacts-block")).toHaveLength(2)
+  })
+
+  test("流式中的最后一轮不出产物块,已结束的上一轮仍有", () => {
+    collapsed.value = false
+    status.value = "streaming"
+    render(
+      <MessageListView
+        messages={[
+          { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "first" },
+          toolMsg("tool_use:start", "tu-w1", "Write", { file_path: "/abs/one.ts" }),
+          { eventId: "u2", sessionId: "sess-1", ts: 2, turnIndex: 1, type: "user.text", text: "second" },
+          toolMsg("tool_use:start", "tu-e1", "Edit", { file_path: "/abs/two.ts" }),
+        ]}
+      />,
+    )
+    expect(screen.getAllByTestId("turn-artifacts-block")).toHaveLength(1)
+    expect(screen.getByText("one.ts")).toBeInTheDocument()
+    expect(screen.queryByText("two.ts")).not.toBeInTheDocument()
+  })
+
+  test("无文件改动的轮次不渲染产物块", () => {
+    collapsed.value = false
+    status.value = "idle"
+    render(
+      <MessageListView
+        messages={[
+          { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" },
+          { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "hello back" },
+        ]}
+      />,
+    )
+    expect(screen.queryByTestId("turn-artifacts-block")).not.toBeInTheDocument()
   })
 })
 

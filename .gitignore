@@ -47,7 +47,6 @@ Thumbs.db
 # Agent working directory (auto-generated)
 .agent_working_dir/
 .CONTEXT.md
-.workbuddy/
 
 # Worktrees (git worktree isolation)
 .worktrees/

@@ -92,6 +92,18 @@ export const DOCUMENT_MAX_BYTES: Readonly<Record<string, number>> = {
   pdf: 50 * 1024 * 1024,
 }
 
+/**
+ * 图片内联 / 字节通道上限(byte)。前端内联 preflight 与 /api/fs/raw 共用同一份
+ * —— 与 DOCUMENT_MAX_BYTES 同样的「一处定义、两侧引用」原则,避免漂移。
+ */
+export const IMAGE_MAX_BYTES = 10 * 1024 * 1024
+
+/**
+ * text / html 走 /api/fs/preview(JSON + base64)时的默认上限(byte)。
+ * 前端内联 preflight 用它决定「要不要拉内容」,服务端用它做 413 判定。
+ */
+export const PREVIEW_TEXT_MAX_BYTES = 1_048_576
+
 export const IMAGE_EXTS: Readonly<Record<string, string>> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',

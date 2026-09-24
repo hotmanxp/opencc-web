@@ -78,7 +78,10 @@ describe('upstream 2.1.252 sync — Intro wIt() three-state', () => {
   })
 
   it('Intro still has the default "with software engineering tasks" branch', () => {
-    expect(src).toContain('with software engineering tasks.')
+    // Each branch is a standalone upstream sentence — no shared template.
+    expect(src).toContain(
+      'You are an interactive agent that helps users with software engineering tasks.',
+    )
   })
 })
 

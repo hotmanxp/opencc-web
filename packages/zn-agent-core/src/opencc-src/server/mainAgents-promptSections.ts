@@ -65,8 +65,9 @@ export const INTAKE_QUICK_RESEARCHER_SECTION: string[] = [
 /**
  * 编码专属段落的稳定前缀(与 constants/prompts.ts 的 section 拼接对齐):
  *   - intro: getSimpleIntroSection —— "You are an interactive agent that
- *     helps users with software engineering tasks" + CYBER_RISK_INSTRUCTION
- *     + programming URL 政策;身份框架由各 agent 自己的前置段替代
+ *     helps users with software engineering tasks" + programming URL 政策;
+ *     身份框架由各 agent 自己的前置段替代(2.1.280 起 CYBER_RISK_INSTRUCTION
+ *     已不再注入 intro)
  *   - doingTasks: getSimpleDoingTasksSection("# Doing tasks") —— 软件工程
  *     任务导向、代码风格、反向兼容 hacks 等编码规程
  *   - codegraph: codegraphSection("# CodeGraph") —— CodeGraph 代码库探索

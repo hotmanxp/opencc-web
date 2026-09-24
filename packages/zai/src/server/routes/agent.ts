@@ -39,7 +39,7 @@ import {
   appendAssistantMessageV2,
   appendToolUse,
   appendToolResult,
-  takeDisplayFilesOutput,
+  takePresentFileOutput,
   getAgentRegistry,
   type UserFacingPermissionMode,
 } from "@zn-ai/zn-agent-core";
@@ -612,15 +612,15 @@ export async function* translateRuntimeEvents(
         // 会因为 `{}` 是 truthy 而把已有 input 覆盖成空对象, ToolCallBlock
         // 折叠态预览丢失. 让 input 保持 undefined, 客户端走 prev.input 回退.
         const input = (ev.input !== undefined && ev.input !== null) ? (ev.input as unknown) : undefined;
-        // DisplayFiles 前端展示通道:LLM 消息历史里的 tool_result content 是
+        // PresentFile 前端展示通道:LLM 消息历史里的 tool_result content 是
         // 'done'(工具 mapToolResultToToolResultBlockParam 省上下文),但前端
-        // fileDisplayRenderer 渲染文件卡片靠 SSE output 里的 wrapper JSON ——
+        // presentFileRenderer 渲染文件卡片靠 SSE output 里的 wrapper JSON ——
         // 两者源自同一份 content,不能两全。zai-agent-core 把 wrapper 按
-        // toolUseId 暂存,takeDisplayFilesOutput 取出即删;命中就替换 output,
+        // toolUseId 暂存,takePresentFileOutput 取出即删;命中就替换 output,
         // 无暂存(异常路径)回退到 content 原值。
         let toolOutput = (ev.output as unknown) ?? "";
-        if (toolName === "DisplayFiles") {
-          const wrapped = takeDisplayFilesOutput(id);
+        if (toolName === "PresentFile") {
+          const wrapped = takePresentFileOutput(id);
           if (typeof wrapped === "string") {
             toolOutput = wrapped;
           }

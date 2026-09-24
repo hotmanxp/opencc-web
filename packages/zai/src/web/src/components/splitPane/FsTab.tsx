@@ -18,6 +18,7 @@ import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
 import { FsContextMenu } from './FsContextMenu.js';
 import { useFsWrite } from './useFsWrite.js';
+import { useCodeThemeMode } from '../../hooks/useCodeThemeMode.js';
 
 // TextEditor: dynamic-imported CodeMirror; we keep a module-scoped
 // cache rather than React.lazy + Suspense so FsTab tests don't need
@@ -251,23 +252,32 @@ function FilePreview({
 }): JSX.Element {
   const { name } = file;
   const content = file.content ?? '';
+  // 语法 token 配色按 <html data-theme> 在 oneDark / oneLight 之间切 —— 见
+  // hooks/useCodeThemeMode.ts。以前这里恒用 oneDark:浅色主题下不仅「浅底 +
+  // 浅色 token」糊成一片,oneDark 主题对象里的 `text-shadow: 0 1px rgba(0,0,0,.3)`
+  // 还会被 react-syntax-highlighter 并进 <pre> 的行内样式并被所有 token 继承,
+  // 在白底上就是每个字形下方一道深色重影(暗底上不可见,所以只在浅色主题暴露)。
+  const themeMode = useCodeThemeMode();
   // We use a state-driven async pattern instead of React.lazy +
   // <Suspense> because (a) Suspense + lazy in happy-dom test env
   // doesn't resolve, leaving the fallback forever and tripping our
   // FsTab tests, and (b) it lets us cache the SyntaxHighlighter
   // component once across renders, avoiding reimport on every file
-  // click. HLC carries both the component and the oneDark style
-  // sheet as separate fields, populated from the same module.
+  // click. HLC carries both the component and the two theme style
+  // sheets as separate fields, populated from the same module.
   const [hl, setHl] = useState<{
     SyntaxHighlighter: React.ComponentType<any>;
     oneDark: Record<string, React.CSSProperties>;
+    oneLight: Record<string, React.CSSProperties>;
   } | null>(null);
   const lang = name ? extToLanguage(name) : null;
   useEffect(() => {
     if (!lang || hl) return;
     let cancelled = false;
     import('../markdown/syntaxHighlighter.js').then((m) => {
-      if (!cancelled) setHl({ SyntaxHighlighter: m.SyntaxHighlighter, oneDark: m.oneDark });
+      if (!cancelled) {
+        setHl({ SyntaxHighlighter: m.SyntaxHighlighter, oneDark: m.oneDark, oneLight: m.oneLight });
+      }
     });
     return () => {
       cancelled = true;
@@ -401,12 +411,12 @@ function FilePreview({
         </div>
       );
     }
-    const { SyntaxHighlighter, oneDark } = hl;
+    const { SyntaxHighlighter, oneDark, oneLight } = hl;
     return (
       <div ref={pendingRef} data-testid="fs-preview-code" className={CONTAINER_CLASS}>
         <SyntaxHighlighter
           language={lang}
-          style={oneDark}
+          style={themeMode === 'light' ? oneLight : oneDark}
           customStyle={{
             margin: 0,
             // Right padding bumped to 44px so the floating line-number

@@ -5,7 +5,7 @@
  *   1. **指派型** —— 主会话只做拆解/派发/汇总,重活用 Agent 工具派给
  *      子 agent(general-purpose / Explore / Plan / code-reviewer),
  *      避免主会话上下文被长工具输出迅速撑满(微信会话是长期固定 session)。
- *   2. **无 Web UI** —— DisplayFiles 这类卡片展示工具不进工具池;
+ *   2. **无 Web UI** —— PresentFile 这类卡片展示工具不进工具池;
  *      文件类产出用 SendFileToUser 直接经微信推送(写盘 + 回路径兜底)。
  *   3. **定时任务** —— CronCreate/CronDelete/CronList 全量开放,提示词
  *      强调"用户表达周期性/延迟性意图时主动落 cron"。
@@ -26,7 +26,7 @@ export const WEIXIN_MAIN_AGENT_NAME = 'weixin-bot'
 /**
  * 微信机器人工具白名单 —— 指派 + 调度 + 文件/检索必需,其余全砍。
  * 注意:值是工具实例的真实 `name`(BashTool.name === 'Bash')。
- * 不含:DisplayFiles(无 Web UI)、WebFetch(公共 banned)、WebBrowser、
+ * 不含:PresentFile(无 Web UI)、WebFetch(公共 banned)、WebBrowser、
  * Workflow / Monitor / RemoteTrigger / Brief / SendUserFile 等界面向工具;
  * 也不含 AskUserQuestion(微信通道没有交互式选项卡片,保留只会误导模型)。
  *
@@ -120,7 +120,7 @@ export const weixinMainAgent: MainAgentConfig = {
       return false
     })
     // SendFileToUser 不在 vendor 基础工具池里(server-scoped 工具,
-    // 同 displayFilesOpenccTool 的挂载方式)—— 显式补挂。
+    // 同 presentFileOpenccTool 的挂载方式)—— 显式补挂。
     if (!pool.some((t) => t.name === sendFileToUserTool.name)) {
       pool.push(sendFileToUserTool)
     }

@@ -92,6 +92,16 @@
      :root[data-theme='light'] 里覆写为 var(--accent-start) (主题橙). */
   --cmd-token-color: #a78bfa;
 
+  /* markdown 代码块底色/描边. dark 固定 oneDark 的 #282c34(与语法高亮
+     主题自带底色一致, 极深灰在暗底上仍是"提亮"的一层);light 走浅灰 +
+     描边 —— 浅色下消息气泡卡本身就是 --bg-card 浅灰, 只靠底色分不出
+     代码块, 需要边框收口(对齐 GitHub 浅色代码块的做法)。
+     border 恒为 1px(暗色用 transparent)避免切主题时几何跳动。
+     语法 token 配色(oneDark/oneLight)由 JS 按 <html data-theme> 切换,
+     颜色改这里, 见 markdown/MarkdownText.tsx 的 useCodeThemeMode。 */
+  --code-bg: #282c34;
+  --code-border: transparent;
+
 }
 
 :root { color-scheme: light dark; }
@@ -182,6 +192,11 @@
   /* 浅色主题下命令/Skill 名称用主题橙,与全局 accent identity 一致 —
      深色主题下仍是紫色 (见 :root --cmd-token-color 默认值). */
   --cmd-token-color: var(--accent-start);
+
+  /* markdown 代码块: 浅灰底 + 淡描边(浅色气泡/白底预览都靠边框收口)。
+     取值对齐 GitHub 浅色代码块 #f6f8fa, 描边 slate-900 10%。 */
+  --code-bg: #f6f8fa;
+  --code-border: rgba(15, 23, 42, 0.10);
 }
 
 /* light 主题下, 半透明 header 需要更亮一些 */

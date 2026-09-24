@@ -143,6 +143,28 @@ describe('MarkdownText (kind="text" 渲染器)', () => {
     expect(container.querySelector('code')).toBeTruthy()
   })
 
+  test('无语言标注的围栏块走 <pre> 并原样保留每一行', () => {
+    // 回归(2026-09-24):行内 code 与无 lang 围栏 code 的 props 相同,
+    // 靠 pre 的 InFencedCode context 区分。此前无 lang 围栏块落进行内
+    // <code> 分支,空白折叠 —— 靠缩进对齐的 ASCII 图会压成一行。
+    const diagram = [
+      '输入框 ──POST /agent/prompt──▶ Express 路由',
+      '                          │',
+      '                          ▼  (async)',
+    ].join('\n')
+    const { container } = render(<MarkdownText text={'```\n' + diagram + '\n```'} />)
+    const pre = container.querySelector('pre')
+    expect(pre).toBeTruthy()
+    expect(pre?.textContent).toBe(diagram)
+    expect(container.querySelector('p code')).toBeNull()
+  })
+
+  test('行内 code 不套 <pre>', () => {
+    const { container } = render(<MarkdownText text="用 `useMemo` 包一下" />)
+    expect(container.querySelector('pre')).toBeNull()
+    expect(container.querySelector('p code')?.textContent).toBe('useMemo')
+  })
+
   test('列表渲染为 <ul><li>', () => {
     const { container } = render(<MarkdownText text={'- a\n- b'} />)
     expect(container.querySelector('ul')).toBeTruthy()

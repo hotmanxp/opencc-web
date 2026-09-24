@@ -755,6 +755,18 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Preferred language for OpenCC responses and voice dictation (e.g., "japanese", "spanish")',
         ),
+      viewMode: z
+        .enum(['default', 'focus'])
+        .optional()
+        .describe(
+          'View mode. "focus" tells the model the user only sees its final message, so it stops narrating between tool calls',
+        ),
+      leanSystemPrompt: z
+        .boolean()
+        .optional()
+        .describe(
+          'Replace the six static system prompt sections with the condensed "# Harness" prompt (upstream claude-code 2.1.280 lean prompt path)',
+        ),
       skipWebFetchPreflight: z
         .boolean()
         .optional()

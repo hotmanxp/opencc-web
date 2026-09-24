@@ -15,11 +15,11 @@ describe('WebFetch banned on restricted intranet (2026-09-03)', () => {
     expect(names).toEqual(['Read', 'Bash', 'WebSearch', 'CliAgent'])
   })
 
-  it('default tools slot strips WebFetch but keeps DisplayFiles', () => {
+  it('default tools slot strips WebFetch but keeps PresentFile', () => {
     const def = getBuiltinMainAgents().find((a) => a.name === 'default')!
     const names = def.tools!(pool(NET_POOL)).map((t) => String(t.name))
     expect(names).not.toContain('WebFetch')
-    expect(names).toContain('DisplayFiles')
+    expect(names).toContain('PresentFile')
     expect(names).toContain('WebSearch')
   })
 

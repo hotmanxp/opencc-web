@@ -31,8 +31,8 @@ import {
   type MermaidTheme,
 } from "./mermaidRenderer.js";
 
-// 复用 syntax highlighter 的占位样式常量,保持 layout 一致(MarkdownText.tsx:17-19)
-const CODE_BG_FALLBACK = "#282c34";
+// 占位/降级源码块的底色走主题变量(见 index.css --code-bg),
+// 与 MarkdownText 的代码块同底色;切主题无需重渲。
 const CODE_FONT_FAMILY =
   "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
 
@@ -401,9 +401,9 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
           Mermaid 渲染失败 · 点击查看源码
         </summary>
         <pre
-          className="mt-2 text-xs overflow-auto"
+          className="mt-2 text-xs overflow-auto border border-[var(--code-border)]"
           style={{
-            background: CODE_BG_FALLBACK,
+            background: "var(--code-bg)",
             color: "var(--text-dim-85)",
             fontFamily: CODE_FONT_FAMILY,
             padding: "12px 14px",
@@ -423,9 +423,9 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   return (
     <pre
       data-testid="mermaid-block-loading"
-      className="my-[6px_0_10px_0] py-3 px-[14px] rounded-md text-xs leading-[1.55] overflow-auto"
+      className="my-[6px_0_10px_0] py-3 px-[14px] rounded-md text-xs leading-[1.55] overflow-auto border border-[var(--code-border)]"
       style={{
-        background: CODE_BG_FALLBACK,
+        background: "var(--code-bg)",
         color: "var(--text-dim-85)",
         fontFamily: CODE_FONT_FAMILY,
       }}

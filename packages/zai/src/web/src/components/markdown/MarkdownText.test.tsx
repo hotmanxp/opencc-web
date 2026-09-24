@@ -53,6 +53,152 @@ describe("MarkdownText", () => {
   });
 });
 
+describe("MarkdownText fenced blocks keep whitespace", () => {
+  // 回归(2026-09-24):无语言标注的围栏块 ``` 必须走块级 <pre>。此前
+  // CodeBlock 靠 `language-` class 判分支,无标注块落进行内 code 分支,
+  // 行内 <code> 折叠空白 —— README 里那段靠多空格 + 盒线字符对齐的
+  // ASCII 数据流图(zai 预览 = MarkdownText)被压成一行紫色文字。
+  // 行内 code 与无 lang 围栏 code 的 props 完全相同,只有 InFencedCode
+  // context 能区分。
+  const DIAGRAM = [
+    "输入框 ──POST /agent/prompt──▶ Express 路由",
+    "                                │",
+    "                                ▼  (async)",
+    "                  DefaultAgentRuntime.run({ ... })",
+    "                  ┌──────────────────────────┐",
+    "                  │ modelStream              │",
+    "                  └──────────────────────────┘",
+  ].join("\n");
+
+  it("无语言标注的围栏块用 <pre> 原样保留每一行", () => {
+    const { container } = render(<MarkdownText text={"```\n" + DIAGRAM + "\n```"} />);
+    const pre = container.querySelector("pre");
+    expect(pre).toBeTruthy();
+    expect(pre?.textContent).toBe(DIAGRAM);
+    // 不能落进行内 code 分支 —— 那个分支渲染的 <code> 带紫色 inline 样式
+    // 且处于 <p> 内,空白折叠的根源
+    expect(container.querySelector("p code")).toBeNull();
+    expect(container.querySelector("code")?.className).not.toContain("#a78bfa");
+  });
+
+  it("有语言标注的围栏块也走块级 <pre>,不落进 <p>", () => {
+    const { container } = render(<MarkdownText text={"```ts\nconst a = 1\n```"} />);
+    expect(container.querySelector("pre")).toBeTruthy();
+    expect(container.querySelector("p")).toBeNull();
+  });
+
+  it("行内 code 仍走行内分支(不套 <pre>)", () => {
+    const { container } = render(<MarkdownText text="见 `const a = 1` 这行" />);
+    expect(container.querySelector("pre")).toBeNull();
+    const code = container.querySelector("p code");
+    expect(code).toBeTruthy();
+    expect(code?.textContent).toBe("const a = 1");
+  });
+});
+
+describe("MarkdownText 代码块复制", () => {
+  // happy-dom 把 navigator.clipboard 设为 getter-only,用 defineProperty 替换
+  function stubClipboard(writeText: ReturnType<typeof vi.fn>) {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("围栏块右上角常驻复制按钮,点击写入原始源码", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    stubClipboard(writeText);
+    const { container } = render(<MarkdownText text={"```\nconst x = 1;\n```"} />);
+
+    const btn = container.querySelector(
+      '[data-testid="code-block-copy"]',
+    ) as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.getAttribute("aria-label")).toBe("复制代码");
+
+    fireEvent.click(btn);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("const x = 1;"));
+  });
+
+  it("复制成功 → 绿勾 + 「已复制」胶囊,1.5s 后收回", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    stubClipboard(writeText);
+    const { container } = render(<MarkdownText text={"```\nfoo()\n```"} />);
+    expect(container.querySelector('[data-testid="code-block-copied"]')).toBeNull();
+
+    fireEvent.click(container.querySelector('[data-testid="code-block-copy"]')!);
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="code-block-copied"]')).toBeTruthy(),
+    );
+    // 按钮同时切绿勾(aria-label 跟着变)
+    expect(
+      container.querySelector('[data-testid="code-block-copy"]')?.getAttribute("aria-label"),
+    ).toBe("已复制");
+
+    // 提示 1.5s 后自动收回。这里不掺假定时器 —— 定时器是在 setCopied(true)
+    // 那一帧用真实 timer 排的,再切 useFakeTimers 也管不到它。
+    await waitFor(
+      () => expect(container.querySelector('[data-testid="code-block-copied"]')).toBeNull(),
+      { timeout: 2500 },
+    );
+  });
+
+  it("复制失败 → message.warning,不显示「已复制」", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    stubClipboard(writeText);
+    // 剪贴板 API 被拒后 copyToClipboard 会退到 execCommand 兜底,这里显式
+    // 让它也失败,确保走的是失败分支(不依赖 happy-dom 有没有实现它)
+    const doc = document as unknown as { execCommand?: unknown };
+    const original = doc.execCommand;
+    Object.defineProperty(document, "execCommand", {
+      value: () => false,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const { container } = render(<MarkdownText text={"```\nfoo()\n```"} />);
+      fireEvent.click(container.querySelector('[data-testid="code-block-copy"]')!);
+      await waitFor(() =>
+        expect(document.querySelector(".ant-message-warning")).toBeTruthy(),
+      );
+      expect(container.querySelector('[data-testid="code-block-copied"]')).toBeNull();
+    } finally {
+      Object.defineProperty(document, "execCommand", {
+        value: original,
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+
+  it("有语言标注的高亮块同样带复制按钮", async () => {
+    const { container } = render(<MarkdownText text={"```ts\nconst a = 1\n```"} />);
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="code-block-copy"]')).toBeTruthy(),
+    );
+    expect(container.querySelector('[data-testid="code-block"]')).toBeTruthy();
+  });
+
+  it("行内 code 不出现复制按钮", () => {
+    const { container } = render(<MarkdownText text="用 `useMemo` 包一下" />);
+    expect(container.querySelector('[data-testid="code-block-copy"]')).toBeNull();
+  });
+
+  it("mermaid 块走自己的工具栏,不叠加代码块复制按钮", () => {
+    const { container } = render(<MarkdownText text={"```mermaid\nflowchart TD\nA-->B\n```"} />);
+    // mermaid 有独立的「⋯ → 复制源码」菜单,这里不该再出现代码块复制按钮
+    expect(container.querySelector('[data-testid="code-block-copy"]')).toBeNull();
+    expect(container.querySelector('[data-testid="code-block"]')).toBeNull();
+    // 确认确实路由进了 MermaidBlock(loading 占位或渲染完成的卡片)
+    expect(container.querySelector('[data-testid^="mermaid-block"]')).toBeTruthy();
+  });
+});
+
 describe("MarkdownText math", () => {
   it("renders a $$...$$ block as a KaTeX display formula", () => {
     // $$ 必须独占行才是 display math(remark-math 的规则),单行

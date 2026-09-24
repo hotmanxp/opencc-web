@@ -14,7 +14,8 @@ import type {
   FilePreviewPayload, FilePreviewError, FsResolveResult,
 } from '../../shared/fs.js';
 import {
-  classifyKind, DOCUMENT_MAX_BYTES, isDocumentKind, isPreviewableKind, mimeFromExt,
+  classifyKind, DOCUMENT_MAX_BYTES, IMAGE_MAX_BYTES, isDocumentKind, isPreviewableKind, mimeFromExt,
+  PREVIEW_TEXT_MAX_BYTES,
 } from '../../shared/fileKind.js';
 import { dirname as pathDirname, relative as pathRelative, resolve as pathResolve } from 'node:path';
 // 2026-09-11: 64 → 512。搜索框支持直接粘贴文件路径(含绝对路径),
@@ -1011,7 +1012,7 @@ const PLATFORM_COMMANDS = platformCommands();
 // 1 MiB hard cap; matches spec §2 '范围与约束'.
 // maxBytes query is clamped into [1024, 1 MiB] so a malicious LLM can't
 // bypass via maxBytes=0 or maxBytes=999999999.
-const PREVIEW_DEFAULT_MAX = 1_048_576
+const PREVIEW_DEFAULT_MAX = PREVIEW_TEXT_MAX_BYTES
 
 function clampInt(raw: unknown, lo: number, hi: number, fallback: number): number {
   const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN
@@ -1062,8 +1063,11 @@ fsRouter.get('/fs/preview', async (req, res) => {
     return
   }
   const kind = classifyKind(abs)
-  if (isDocumentKind(kind)) {
-    // 文档类(2026-09-21):只回元数据,字节由前端另走 GET /api/fs/raw。
+  if (isPreviewableKind(kind)) {
+    // 文档类(2026-09-21)+ legacy-office(2026-09-24 修正):只回元数据,字节由
+    // 前端另走 GET /api/fs/raw。用 isPreviewableKind 而非 isDocumentKind ——
+    // .doc/.ppt/.rtf/.odt/.odp 也属于「客户端知道怎么解释失败原因」的文档,
+    // 落到下面的 binary 分支会让抽屉文案与卡片「点 ↗ 查看详情」自相矛盾。
     // 必须放在 maxBytes 检查**之前** —— 1 MiB 的 PREVIEW_DEFAULT_MAX 是给
     // 「要把内容塞进 JSON 响应」的 text/image/html 设的;文档不走这条通道,
     // 在这里 413 会让 30 MB 的 docx 连预览窗口都打不开。真正的上限由
@@ -1077,19 +1081,22 @@ fsRouter.get('/fs/preview', async (req, res) => {
     res.json(payload)
     return
   }
-  if (info.size > maxBytes) {
-    res.status(413).json({
-      error: {
-        code: 'ETOOBIG',
-        message: `文件 ${info.size} 字节,超过 ${maxBytes}`,
-        meta: { size: info.size },
-      },
-    } satisfies { error: FilePreviewError })
-    return
-  }
   if (kind === 'image') {
-    const buf = await readFile(abs)
+    // 图片走「有内容就给 base64、超限只给元数据」——与文档类同一先例。
+    // 前端的大图渲染走 /api/fs/raw 字节流(见 2026-09-24 PresentFile 设计),
+    // 这里 413 只会让抽屉拿不到 size/mime 去渲染标题。
     const mime = mimeFromExt(abs) ?? 'application/octet-stream'
+    if (info.size > maxBytes) {
+      const payload: FilePreviewPayload = {
+        kind,
+        mime,
+        size: info.size,
+        mtime: info.mtimeMs,
+      }
+      res.json(payload)
+      return
+    }
+    const buf = await readFile(abs)
     const payload: FilePreviewPayload = {
       kind,
       mime,
@@ -1098,6 +1105,16 @@ fsRouter.get('/fs/preview', async (req, res) => {
       mtime: info.mtimeMs,
     }
     res.json(payload)
+    return
+  }
+  if (info.size > maxBytes) {
+    res.status(413).json({
+      error: {
+        code: 'ETOOBIG',
+        message: `文件 ${info.size} 字节,超过 ${maxBytes}`,
+        meta: { size: info.size },
+      },
+    } satisfies { error: FilePreviewError })
     return
   }
   if (kind === 'html' || kind === 'text') {
@@ -1175,7 +1192,7 @@ fsRouter.get('/fs/raw', async (req, res) => {
   }
   const abs = pathResolve(raw)
   const kind = classifyKind(abs)
-  if (!isDocumentKind(kind)) {
+  if (!isDocumentKind(kind) && kind !== 'image') {
     // 白名单同时保证 /fs/raw 不会退化成「任意文件下载口」。
     res.status(415).json({
       error: { code: 'EUNSUPPORTED', message: `该类型不走字节通道:${extname(abs) || '(无扩展名)'}` },
@@ -1193,7 +1210,11 @@ fsRouter.get('/fs/raw', async (req, res) => {
     res.status(400).json({ error: { code: 'EISDIR', message: '路径是目录' } } satisfies { error: FilePreviewError })
     return
   }
-  const limit = Math.min(DOCUMENT_MAX_BYTES[kind] ?? RAW_MAX_BYTES, RAW_MAX_BYTES)
+  const isImage = kind === 'image'
+  const limit = Math.min(
+    isImage ? IMAGE_MAX_BYTES : (DOCUMENT_MAX_BYTES[kind] ?? RAW_MAX_BYTES),
+    RAW_MAX_BYTES,
+  )
   if (info.size > limit) {
     res.status(413).json({
       error: {
@@ -1204,26 +1225,35 @@ fsRouter.get('/fs/raw', async (req, res) => {
     } satisfies { error: FilePreviewError })
     return
   }
-  // 容器前置嗅探:加密的 .docx/.xlsx 和旧版 .doc/.xls/.ppt 都是 OLE,
-  // 不拦就得让用户先下几十 MB 再在浏览器端报一个没头没尾的解析错误。
-  let container: SniffedContainer
-  try {
-    container = sniffContainer(await readMagic(abs))
-  } catch (err) {
-    mapStatError(res, err)
-    return
+  if (!isImage) {
+    // 容器前置嗅探:加密的 .docx/.xlsx 和旧版 .doc/.xls/.ppt 都是 OLE,
+    // 不拦就得让用户先下几十 MB 再在浏览器端报一个没头没尾的解析错误。
+    let container: SniffedContainer
+    try {
+      container = sniffContainer(await readMagic(abs))
+    } catch (err) {
+      mapStatError(res, err)
+      return
+    }
+    if (container === 'ole') {
+      res.status(415).json({
+        error: {
+          code: 'EENCRYPTED_OR_LEGACY',
+          message: '这是旧版二进制格式或受密码保护的文档,无法在浏览器内解析',
+          container: 'ole',
+        },
+      } satisfies { error: FilePreviewError })
+      return
+    }
   }
-  if (container === 'ole') {
-    res.status(415).json({
-      error: {
-        code: 'EENCRYPTED_OR_LEGACY',
-        message: '这是旧版二进制格式或受密码保护的文档,无法在浏览器内解析',
-        container: 'ole',
-      },
-    } satisfies { error: FilePreviewError })
-    return
+  res.setHeader('Content-Type', isImage ? (mimeFromExt(abs) ?? 'application/octet-stream') : 'application/octet-stream')
+  if (isImage) {
+    // 图片(尤其 .svg)可能被用户直接开在地址栏:SVG 内嵌脚本会以应用
+    // origin 执行。nosniff 阻止 MIME 混淆,CSP sandbox 把文档隔离到
+    // unique origin,脚本无法再访问本机 API(2026-09-24 加固)。
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Content-Security-Policy', 'sandbox')
   }
-  res.setHeader('Content-Type', 'application/octet-stream')
   res.setHeader('Content-Length', String(info.size))
   res.setHeader('X-File-Size', String(info.size))
   res.setHeader('X-File-Mtime', String(info.mtimeMs))

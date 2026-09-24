@@ -48,10 +48,10 @@ export type {
   AgentNotBoundError,
   BuiltinAgentsLoadError,
 } from './opencc-src/server/index.js'
-// zai patch:DisplayFiles 前端展示通道 —— wrapper JSON 按 toolUseId 暂存,
+// zai patch:PresentFile 前端展示通道 —— wrapper JSON 按 toolUseId 暂存,
 // zai server 转发 runtime.tool_result 时从主入口取出(见
 // routes/agent.ts translateRuntimeEvents 的 tool_use:done case)。
-export { takeDisplayFilesOutput } from './opencc-src/server/displayFilesOpencc.js'
+export { takePresentFileOutput } from './opencc-src/server/presentFileOpencc.js'
 // zai patch (2026-08-09): Task 2/3 公共 API 也走 bundle — createHeadlessContext /
 // createSessionFacade 必须从同一 bundle 拿到,才能与 createOpenccRuntime
 // 共享 module 实例(STATE / commandQueue / bashTracker)。

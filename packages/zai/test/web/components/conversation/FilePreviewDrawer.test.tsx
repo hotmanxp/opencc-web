@@ -52,7 +52,7 @@ describe('FilePreviewDrawer', () => {
     expect(await screen.findByText(/const x = 1/)).toBeInTheDocument()
   })
 
-  it('renders image via <img> with data URL', async () => {
+  it('renders image via <img> pointing at the /api/fs/raw byte channel', async () => {
     mockFetch({ kind: 'image', mime: 'image/png', content: 'AAAA', size: 3, mtime: 0 })
     useAgentStore.setState({ filePreviewPath: '/a.png' })
     render(<FilePreviewDrawer />)
@@ -61,7 +61,18 @@ describe('FilePreviewDrawer', () => {
     // Query by alt text instead, which is unique to the actual <img>.
     const img = await screen.findByAltText('a.png')
     expect(img.tagName.toLowerCase()).toBe('img')
-    expect(img.getAttribute('src') ?? '').toMatch(/^data:image\/png;base64,AAAA$/)
+    expect(img.getAttribute('src')).toBe('/api/fs/raw?path=%2Fa.png')
+  })
+
+  it('renders a >1 MiB image from metadata-only preview payload', async () => {
+    // Task 3 之后 /api/fs/preview 对超限图片返回元数据(无 content),
+    // 抽屉仍要能显示图片 —— 靠 /api/fs/raw 字节通道。
+    mockFetch({ kind: 'image', mime: 'image/png', size: 2 * 1024 * 1024, mtime: 0 })
+    useAgentStore.setState({ filePreviewPath: '/huge.png' })
+    render(<FilePreviewDrawer />)
+    const img = await screen.findByAltText('huge.png')
+    expect(img.getAttribute('src')).toBe('/api/fs/raw?path=%2Fhuge.png')
+    expect(screen.getByText(/2.00 MB/)).toBeInTheDocument()
   })
 
   it('renders html via <iframe> with sandbox="allow-scripts"', async () => {

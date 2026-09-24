@@ -5,7 +5,13 @@ import { render, screen, fireEvent, waitFor, act, within } from '@testing-librar
 beforeEach(() => {
   // 清掉拖动宽度 / lock 状态, 避免测试间 localStorage 泄漏导致初始值非默认.
   localStorage.clear();
+  seenThemes.length = 0;
+  delete document.documentElement.dataset.theme;
 });
+
+// 记录每次 SyntaxHighlighter 收到的 style(具体是哪个主题对象)。vi.hoisted
+// 保证数组在 vi.mock 工厂(提升到 import 之前)执行时已存在。
+const seenThemes = vi.hoisted(() => [] as unknown[]);
 
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
@@ -71,11 +77,14 @@ vi.mock('../markdown/syntaxHighlighter.js', () => ({
     children,
     showLineNumbers,
     lineProps,
+    style,
   }: {
     children?: unknown;
     showLineNumbers?: boolean;
     lineProps?: (n: number) => Record<string, string>;
+    style?: unknown;
   }) => {
+    seenThemes.push(style);
     const text = typeof children === 'string' ? children : String(children ?? '');
     const lines = text.split('\n');
     // Drop the trailing empty line that .split('\n') adds for trailing
@@ -112,7 +121,8 @@ vi.mock('../markdown/syntaxHighlighter.js', () => ({
       </pre>
     );
   },
-  oneDark: {},
+  oneDark: { __theme: 'dark' },
+  oneLight: { __theme: 'light' },
 }));
 // Make dynamic imports resolve during tests. vi.mock intercepts the
 // happy-dom doesn't progress microtasks synchronously during fireEvent,
@@ -325,6 +335,48 @@ describe('FsTab', () => {
       // unmounts when the highlighted branch takes over.
       expect(codeBlock.querySelector('[data-testid="fs-preview-code-fallback"]')).toBeNull();
     });
+  });
+
+  it('picks oneLight / oneDark for the code preview from <html data-theme>', async () => {
+    // 回归(2026-09-24):此前这里恒传 oneDark。浅色主题下不仅是「浅底 +
+    // 浅色 token」糊成一片 —— oneDark 主题对象自带
+    // `text-shadow: 0 1px rgba(0,0,0,.3)`,会被 react-syntax-highlighter
+    // 并进 <pre> 的行内样式并被所有 token 继承,白底上就是每个字形下方
+    // 一道深色重影(暗底上不可见,所以只在浅色主题暴露)。
+    // 这里守住「选中了哪个主题对象」这一层;真实配色/重影需浏览器验收。
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [{ name: 'foo.ts', path: 'foo.ts', type: 'file', size: 42 }],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        path: '/repo/foo.ts',
+        name: 'foo.ts',
+        size: 42,
+        mtime: '2026-07-21T00:00:00Z',
+        content: 'export const x: number = 1;',
+      },
+      loading: false,
+      error: null,
+    });
+
+    document.documentElement.dataset.theme = 'light';
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('foo.ts'));
+    await waitFor(() => expect(seenThemes.length).toBeGreaterThan(0));
+    expect(seenThemes.at(-1)).toEqual({ __theme: 'light' });
+
+    // 切到暗色主题:同一份文件,应改用 oneDark。
+    act(() => {
+      document.documentElement.dataset.theme = 'dark';
+    });
+    await waitFor(() => expect(seenThemes.at(-1)).toEqual({ __theme: 'dark' }));
   });
 
   it('renders .md files via MarkdownText (fs-preview-md test-id)', () => {

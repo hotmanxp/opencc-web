@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { getBuiltinMainAgents, WEIXIN_MAIN_AGENT_NAME } from '../../src/opencc-src/server/mainAgents.js'
 import { setWeixinFileSender, getWeixinFileSender } from '../../src/opencc-src/server/sendFileToUser.js'
 
-/** 构造一个覆盖各家族的假工具池(DisplayFiles/WebFetch/Workflow 等应被剔除)。 */
+/** 构造一个覆盖各家族的假工具池(PresentFile/WebFetch/Workflow 等应被剔除)。 */
 function fakeTools(): { name: string }[] {
   return [
     // 指派家族 — 保留
@@ -28,7 +28,7 @@ function fakeTools(): { name: string }[] {
     { name: 'TaskUpdate' },
     { name: 'TaskList' },
     // Web UI / 界面向 / banned — 剔除
-    { name: 'DisplayFiles' },
+    { name: 'PresentFile' },
     { name: 'WebFetch' },
     { name: 'WebBrowser' },
     { name: 'Workflow' },
@@ -50,12 +50,12 @@ describe('weixin main agent (zai patch 2026-09-13)', () => {
     expect(wx!.tools).toBeTypeOf('function')
   })
 
-  it('tools 槽:白名单过滤 — DisplayFiles/WebFetch 等界面向工具全部剔除', () => {
+  it('tools 槽:白名单过滤 — PresentFile/WebFetch 等界面向工具全部剔除', () => {
     const wx = getBuiltinMainAgents().find((a) => a.name === 'weixin-bot')!
     const filtered = wx.tools!(fakeTools() as never)
     const names = filtered.map((t) => (t as { name: string }).name)
     // 剔除
-    expect(names).not.toContain('DisplayFiles')
+    expect(names).not.toContain('PresentFile')
     expect(names).not.toContain('WebFetch')
     expect(names).not.toContain('WebBrowser')
     expect(names).not.toContain('Workflow')

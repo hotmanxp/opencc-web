@@ -6,7 +6,6 @@ import { FileReadTool } from '../FileReadTool/FileReadTool.js'
 import { FileWriteTool } from '../FileWriteTool/FileWriteTool.js'
 import { GlobTool } from '../GlobTool/GlobTool.js'
 import { GrepTool } from '../GrepTool/GrepTool.js'
-import { NotebookEditTool } from '../NotebookEditTool/NotebookEditTool.js'
 
 let _primitiveTools: readonly Tool[] | undefined
 
@@ -24,6 +23,9 @@ let _primitiveTools: readonly Tool[] | undefined
  *
  * Referenced directly rather than via getAllBaseTools() because that
  * excludes Glob/Grep when hasEmbeddedSearchTools() is true.
+ *
+ * NotebookEdit is intentionally absent — it is no longer registered in
+ * getAllBaseTools() either, so it must not be reachable via REPL.
  */
 export function getReplPrimitiveTools(): readonly Tool[] {
   return (_primitiveTools ??= [
@@ -33,7 +35,6 @@ export function getReplPrimitiveTools(): readonly Tool[] {
     GlobTool,
     GrepTool,
     BashTool,
-    NotebookEditTool,
     AgentTool,
   ])
 }

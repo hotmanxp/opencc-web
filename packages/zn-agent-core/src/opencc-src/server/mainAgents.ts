@@ -33,7 +33,7 @@ import { taskFactoryMainAgent } from './mainAgents-taskFactory.js'
 import { taskIntakeMainAgent } from './mainAgents-taskIntake.js'
 import { taskIntakeQuickMainAgent } from './mainAgents-taskIntakeQuick.js'
 import { weixinMainAgent, WEIXIN_MAIN_AGENT_NAME } from './mainAgents-weixin.js'
-import { displayFilesOpenccTool } from './displayFilesOpencc.js'
+import { presentFileOpenccTool } from './presentFileOpencc.js'
 import { filterBannedTools } from './mainAgents-toolFilters.js'
 
 // agent-creator 域的公共符号(ValidateMainAgent 工具 + 校验函数)定义在
@@ -81,9 +81,9 @@ export interface MainAgentConfig {
 }
 
 /** 内置 agents。default 不改 systemPrompt / mcp,仅通过 tools 槽挂入
- *  displayFilesOpenccTool(把一组本地路径以卡片列表渲染进对话)。
+ *  presentFileOpenccTool(把单个本地文件以卡片渲染进对话)。
  *  office / agent-creator 不挂 —— 它们面向文档/agent 创作场景,
- *  display_files 跟场景无关。 */
+ *  PresentFile 跟场景无关。 */
 export function getBuiltinMainAgents(): MainAgentConfig[] {
   return [
     {
@@ -91,13 +91,13 @@ export function getBuiltinMainAgents(): MainAgentConfig[] {
       description: '系统默认 —— 代码编写、程序处理',
       tools: (origin: Tool[]) => {
         // origin 已是 vendor 内置 + MCP + 权限过滤后的最终池。
-        // 先剔除内网不可用工具(WebFetch),再 append DisplayFiles;
+        // 先剔除内网不可用工具(WebFetch),再 append PresentFile;
         // append 前查重(若 origin 已有同名,跳过;防御);即时生效。
         const pool = filterBannedTools(origin)
-        if (pool.some((t) => t.name === displayFilesOpenccTool.name)) {
+        if (pool.some((t) => t.name === presentFileOpenccTool.name)) {
           return pool
         }
-        return [...pool, displayFilesOpenccTool]
+        return [...pool, presentFileOpenccTool]
       },
     },
     officeMainAgent,
@@ -109,7 +109,7 @@ export function getBuiltinMainAgents(): MainAgentConfig[] {
     taskIntakeQuickMainAgent,
     // zai patch (2026-09-13, weixin-bot):微信通道专用 —— 指派型调度助手。
     // 微信会话是长期固定 session,主上下文靠「子 agent 派发」保命;
-    // 无 Web UI(DisplayFiles 不挂);cron 三件套全量开放。
+    // 无 Web UI(PresentFile 不挂);cron 三件套全量开放。
     weixinMainAgent,
   ]
 }

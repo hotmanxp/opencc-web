@@ -153,7 +153,7 @@ pnpm release:major
 | 类型化 RPC client stub | `docs/superpowers/specs/2026-08-16-rpc-type-safe-client-stubs.md` |
 | 命令生命周期事件埋点 | `docs/superpowers/specs/2026-08-16-command-lifecycle-events.md` |
 | Session inbox 机制 | `docs/superpowers/specs/2026-08-17-zai-session-inbox-mechanism-design.md` |
-| Display files 工具 | `docs/superpowers/specs/2026-08-20-display-files-tool-design.md` |
+| PresentFile 单文件展示工具 | `docs/superpowers/specs/2026-09-24-zai-present-file-design.md` |
 | Main agent slots | `docs/superpowers/specs/2026-08-20-zai-main-agent-slots-design.md` |
 | Subagent claude-code provider | `docs/superpowers/specs/2026-08-21-zai-subagent-claude-code-provider-design.md` |
 | Subagent codex provider | `docs/superpowers/specs/2026-08-21-zai-subagent-codex-provider-design.md` |

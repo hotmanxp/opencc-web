@@ -136,6 +136,52 @@ describe('GET /api/fs/raw', () => {
       .query({ path: p, maxBytes: 999_999_999 });
     expect(res.status).toBe(413);
   });
+
+  it('streams image bytes with the right Content-Type for .png', async () => {
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+      'base64',
+    );
+    const p = join(cwd, 'pixel.png');
+    writeFileSync(p, png);
+    const res = await request(app)
+      .get('/api/fs/raw')
+      .query({ path: p })
+      .buffer(true)
+      .parse(binaryParser as never);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('image/png');
+    expect(Buffer.compare(res.body as Buffer, png)).toBe(0);
+  });
+
+  it('serves .svg as image/svg+xml', async () => {
+    const p = join(cwd, 'icon.svg');
+    writeFileSync(p, '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    const res = await request(app).get('/api/fs/raw').query({ path: p });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('image/svg+xml');
+    // SVG 直接在地址栏打开会以应用 origin 执行内嵌脚本 —— 图片响应必须
+    // nosniff + CSP sandbox,把文档隔离到 unique origin(2026-09-24 加固)。
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['content-security-policy']).toBe('sandbox');
+  });
+
+  it('returns 413 for an image above IMAGE_MAX_BYTES (10 MiB)', async () => {
+    const p = join(cwd, 'huge.png');
+    writeFileSync(p, Buffer.alloc(0));
+    truncateSync(p, 10 * 1024 * 1024 + 1);
+    const res = await request(app).get('/api/fs/raw').query({ path: p });
+    expect(res.status).toBe(413);
+    expect(res.body.error.code).toBe('ETOOBIG');
+  });
+
+  it('still refuses non-image, non-document extensions with 415', async () => {
+    const p = join(cwd, 'blob.zip');
+    writeFileSync(p, 'PK');
+    const res = await request(app).get('/api/fs/raw').query({ path: p });
+    expect(res.status).toBe(415);
+    expect(res.body.error.code).toBe('EUNSUPPORTED');
+  });
 });
 
 describe('/fs/preview + /fs/file 文档类放行', () => {

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 // KaTeX 样式 + 与主 MarkdownText 共用的插件链(数学公式)
 import 'katex/dist/katex.min.css'
@@ -17,10 +17,15 @@ const SyntaxHighlighterLazy = lazy(() =>
     default: m.SyntaxHighlighter,
   })),
 )
-async function loadOneDark(): Promise<Record<string, React.CSSProperties>> {
-  const m = await import('./markdown/syntaxHighlighter.js')
-  return m.oneDark
+type CodeThemes = {
+  oneDark: Record<string, React.CSSProperties>
+  oneLight: Record<string, React.CSSProperties>
 }
+async function loadCodeThemes(): Promise<CodeThemes> {
+  const m = await import('./markdown/syntaxHighlighter.js')
+  return { oneDark: m.oneDark, oneLight: m.oneLight }
+}
+
 import {
   CircleCheckIcon,
   CircleXIcon,
@@ -35,6 +40,7 @@ import {
   type SseFrame,
 } from '../lib/taskApi.js'
 import { useAgentStore } from '../store/useAgentStore.js'
+import { useCodeThemeMode } from '../hooks/useCodeThemeMode.js'
 
 interface ToolCallEntry {
   toolUseId: string
@@ -69,11 +75,21 @@ function formatDuration(ms: number): string {
   return `${m}m${rs}s`
 }
 
-const CODE_BG = 'var(--bg-card)'
+// 代码块底色/描边走主题变量(见 index.css --code-bg / --code-border),
+// 与主 MarkdownText 的代码块同底色;纯 CSS,切主题无需重渲。
 const CODE_PRE_CLASS =
-  'my-1.5 px-3.5 py-3 rounded-md text-[12px] leading-[1.55] bg-[var(--bg-card)] text-[var(--text-primary)] font-mono overflow-auto whitespace-pre-wrap break-words'
+  'my-1.5 px-3.5 py-3 rounded-md text-[12px] leading-[1.55] bg-[var(--code-bg)] border border-[var(--code-border)] text-[var(--text-dim-85)] font-mono overflow-auto whitespace-pre-wrap break-words'
 const CODE_FONT_FAMILY =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+
+/**
+ * 标记「这段 <code> 处于围栏代码块内」。与 markdown/MarkdownText.tsx 的
+ * InFencedCode 同款:react-markdown 给行内 code 和「无语言标注的围栏 code」
+ * 的 props 完全一样(都没有 language- class),只有 pre 提供的 context 能区分。
+ * 少了它,无 lang 的围栏块会落进行内 <code> 分支 —— 空白被折叠,
+ * 靠缩进对齐的 ASCII 图会压成一行。
+ */
+const InFencedCode = createContext(false)
 
 const markdownComponents = {
   p: ({ children }: any) => <p className="mb-2">{children}</p>,
@@ -87,14 +103,21 @@ const markdownComponents = {
   // 块级公式容器 —— 与主 MarkdownText 共用同一个 MathBlock。
   'math-block': ({ children }: any) => <MathBlock>{children}</MathBlock>,
   code: ({ className, children }: any) => {
+    const inFenced = useContext(InFencedCode)
+    if (!inFenced) {
+      return <code className="bg-transparent text-[var(--accent-start)] px-1.5 py-px rounded font-medium font-mono text-[0.9em]">{children}</code>
+    }
+    const code = String(children).replace(/\n$/, '')
     const match = /language-(\w+)/.exec(className || '')
-    if (!match) return <code className="bg-transparent text-[var(--accent-start)] px-1.5 py-px rounded font-medium font-mono text-[0.9em]">{children}</code>
+    // 无语言标注的围栏块没有高亮可做,但必须走块级 <pre> 保留空白。
+    if (!match) return <pre className={CODE_PRE_CLASS}><code>{code}</code></pre>
     // Lazy: SyntaxHighlighter pulls in prism once per session. Until then
     // show the raw text inside the same padding/background so the user
     // doesn't see a layout jump.
-    return <LazyCode lang={match[1]} code={String(children).replace(/\n$/, '')} />
+    return <LazyCode lang={match[1]} code={code} />
   },
-  pre: ({ children }: any) => <>{children}</>,
+  // 透明渲染,只负责给内部 <code> 打上「在围栏块里」的标记(见 InFencedCode)
+  pre: ({ children }: any) => <InFencedCode.Provider value={true}>{children}</InFencedCode.Provider>,
   table: ({ children }: any) => <table className="border-collapse my-1 text-[13px] w-full">{children}</table>,
   thead: ({ children }: any) => <thead className="bg-[var(--bg-card-hover)]">{children}</thead>,
   tbody: ({ children }: any) => <tbody>{children}</tbody>,
@@ -107,23 +130,26 @@ const markdownComponents = {
 }
 
 /**
- * `<LazyCode>` wraps the lazy SyntaxHighlighter so a single shared
- * oneDark instance is loaded exactly once per session. While the chunk
- * is in flight the user sees an unhighlighted <pre> with the same
- * padding/background so layout doesn't jump on arrival.
+ * `<LazyCode>` wraps the lazy SyntaxHighlighter so the shared oneDark /
+ * oneLight pair is loaded exactly once per session. While the chunk is in
+ * flight the user sees an unhighlighted <pre> with the same padding /
+ * background so layout doesn't jump on arrival. 配色按当前主题二选一。
  */
 function LazyCode({ lang, code }: { lang: string; code: string }) {
-  const [oneDark, setOneDark] = useState<Record<string, React.CSSProperties> | null>(null)
+  const [themes, setThemes] = useState<CodeThemes | null>(null)
+  // token 配色按 <html data-theme> 切:恒用 oneDark 时浅色主题不仅「浅底 +
+  // 浅色 token」糊成一片,oneDark 的 text-shadow 在白底上还会变成字形重影。
+  const themeMode = useCodeThemeMode()
   useEffect(() => {
     let cancelled = false
-    loadOneDark().then((d) => {
-      if (!cancelled) setOneDark(d)
+    loadCodeThemes().then((t) => {
+      if (!cancelled) setThemes(t)
     })
     return () => {
       cancelled = true
     }
   }, [])
-  if (!oneDark) {
+  if (!themes) {
     return (
       <pre className={CODE_PRE_CLASS}>
         <code>{code}</code>
@@ -138,8 +164,17 @@ function LazyCode({ lang, code }: { lang: string; code: string }) {
     }>
       <SyntaxHighlighterLazy
         language={lang}
-        style={oneDark}
-        customStyle={{ margin: '6px 0 10px 0', padding: '12px 14px', borderRadius: 6, fontSize: 12, lineHeight: 1.55, background: CODE_BG }}
+        style={themeMode === 'light' ? themes.oneLight : themes.oneDark}
+        customStyle={{
+          margin: '6px 0 10px 0',
+          padding: '12px 14px',
+          borderRadius: 6,
+          fontSize: 12,
+          lineHeight: 1.55,
+          background: 'var(--code-bg)',
+          border: '1px solid var(--code-border)',
+          color: 'var(--text-dim-85)',
+        }}
         codeTagProps={{ style: { fontFamily: CODE_FONT_FAMILY } }}
         wrapLongLines={false}
         showLineNumbers={false}

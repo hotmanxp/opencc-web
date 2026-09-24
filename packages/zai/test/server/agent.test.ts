@@ -37,10 +37,10 @@ let runtimeToolEvents: Array<Record<string, unknown>> = [
   { type: 'message_start' },
   { type: 'message_stop' },
 ]
-// DisplayFiles 前端展示通道:mock takeDisplayFilesOutput,让 translateRuntimeEvents
+// PresentFile 前端展示通道:mock takePresentFileOutput,让 translateRuntimeEvents
 // 的恢复分支可独立测试(真实 bundle 里 wrapper 由工具 mapToolResult 闭包写入,
 // 测试进程无法预填,用 mock 隔离)。
-let mockTakeDisplayFilesOutput: (id: string) => string | undefined = () => undefined
+let mockTakePresentFileOutput: (id: string) => string | undefined = () => undefined
 vi.mock('../../src/server/services/agentRuntime.js', () => ({
   getRuntime: () => ({
     // Task 5: routes/agent.ts now invokes OpenccRuntime.query(input)
@@ -109,8 +109,8 @@ vi.mock('@zn-ai/zn-agent-core', async (importOriginal) => {
     // permissionMode.ts:6 启动时用 EXTERNAL_PERMISSION_MODES 构造 VALID_MODES set,
     // mock 必须提供. 真实值见 zai-agent-core 导出 (5 个 user-facing mode).
     EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
-    // 覆盖成可控 mock,见 mockTakeDisplayFilesOutput 注释.
-    takeDisplayFilesOutput: (id: string) => mockTakeDisplayFilesOutput(id),
+    // 覆盖成可控 mock,见 mockTakePresentFileOutput 注释.
+    takePresentFileOutput: (id: string) => mockTakePresentFileOutput(id),
   }
 })
 
@@ -122,7 +122,7 @@ beforeEach(() => {
   vi.mocked(readFileSync).mockReset()
   __resetSessionRateLimitsForTests()
   mockTranscriptMainAgent = 'default'
-  mockTakeDisplayFilesOutput = () => undefined
+  mockTakePresentFileOutput = () => undefined
 })
 
 function startApp(): Promise<{ url: string; close: () => void }> {
@@ -545,21 +545,21 @@ describe('translateRuntimeEvents — tool_use:error 携带 toolUseId', () => {
   })
 })
 
-describe('translateRuntimeEvents — DisplayFiles wrapper 恢复 (前端展示通道)', () => {
-  it('tool_use:done 名字为 DisplayFiles 时, output 换成暂存的 wrapper', async () => {
-    const wrapper = '{"content":[{"type":"json","json":{"files":[{"path":"/a.ts"}]}}]}'
-    mockTakeDisplayFilesOutput = (id: string) =>
+describe('translateRuntimeEvents — PresentFile wrapper 恢复 (前端展示通道)', () => {
+  it('tool_use:done 名字为 PresentFile 时, output 换成暂存的 wrapper', async () => {
+    const wrapper = '{"content":[{"type":"json","json":{"file":{"path":"/a.ts"}}}]}'
+    mockTakePresentFileOutput = (id: string) =>
       id === 'tu_df_1' ? wrapper : undefined
     runtimeToolEvents = [
       { type: 'message_start' },
       {
         type: 'content_block_start',
-        content_block: { type: 'tool_use', id: 'tu_df_1', name: 'DisplayFiles' },
+        content_block: { type: 'tool_use', id: 'tu_df_1', name: 'PresentFile' },
       },
       { type: 'content_block_stop' },
       // LLM 消息历史 content 是 'done'(工具省上下文),但 SSE output 应恢复
-      // wrapper, 前端 fileDisplayRenderer 才有数据渲染文件卡片.
-      { type: 'tool_use:done', id: 'tu_df_1', name: 'DisplayFiles', output: 'done' },
+      // wrapper, 前端 presentFileRenderer 才有数据渲染文件卡片.
+      { type: 'tool_use:done', id: 'tu_df_1', name: 'PresentFile', output: 'done' },
       { type: 'message_stop' },
     ]
     const { eventBus } = await import('../../src/server/services/eventBus.js')
@@ -596,8 +596,8 @@ describe('translateRuntimeEvents — DisplayFiles wrapper 恢复 (前端展示�
     }
   })
 
-  it('非 DisplayFiles 工具或暂存缺失时 output 保持 content 原值', async () => {
-    mockTakeDisplayFilesOutput = () => 'should-not-be-used'
+  it('非 PresentFile 工具或暂存缺失时 output 保持 content 原值', async () => {
+    mockTakePresentFileOutput = () => 'should-not-be-used'
     runtimeToolEvents = [
       { type: 'message_start' },
       {

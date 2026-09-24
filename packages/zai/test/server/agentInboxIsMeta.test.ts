@@ -69,7 +69,7 @@ vi.mock('@zn-ai/zn-agent-core', async (importOriginal) => {
   return {
     ...actual,
     EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
-    takeDisplayFilesOutput: () => undefined,
+    takePresentFileOutput: () => undefined,
   }
 })
 

@@ -2,7 +2,7 @@
 // Pure mechanical extraction of MessageBubble (formerly inlined at Agent.tsx)
 // plus the small helpers (markdownComponents, MarkdownText, StreamingMarkdown,
 // ThinkingBlock, ToolCallBlock, ToolStatus/ToolUsePill/TOOL_PILL_COLORS,
-// PendingAttachment type, CODE_BG / CODE_FONT_FAMILY) that MessageBubble
+// PendingAttachment type, CODE_FONT_FAMILY) that MessageBubble
 // reaches via module-scope references in the original file.
 //
 // Task 3 of docs/superpowers/plans/2026-07-20-zai-transcript-collapse.md.
@@ -36,9 +36,9 @@ import { useExpandUserBubble } from "./useExpandUserBubble.js";
 
 const { Text } = Typography;
 
-// 代码块使用 oneDark 主题作为底色, 深灰(#282c34) 与浅色气泡形成稳定对比,
-// 避免原来 var(--text-dim-35) 在浅气泡上对比度过低的问题. CODE_BG 现在只在
-// components/markdown/MarkdownText.tsx 里使用, 此处只保留 CODE_FONT_FAMILY
+// 代码块底色/配色已收口到 components/markdown/MarkdownText.tsx(底色走
+// index.css 的 --code-bg / --code-border,语法配色按 <html data-theme> 在
+// oneDark / oneLight 间切). 此处只保留 CODE_FONT_FAMILY
 // 给 ToolUsePill / ToolCallBlock 的等宽 stack trace fallback 用.
 const CODE_FONT_FAMILY =
   "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";

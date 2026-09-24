@@ -1,7 +1,7 @@
 // Server tests for GET /api/fs/preview — FilePreviewPayload endpoint.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
@@ -104,6 +104,18 @@ describe('GET /api/fs/preview', () => {
     expect(res.body.size).toBe(4);
   });
 
+  it('returns legacy-office metadata (not binary) for .doc — no 413 on the text cap path', async () => {
+    // 卡片文案「点 ↗ 查看详情」要求抽屉能拿到 legacy-office 元数据;
+    // 落到 binary 会让抽屉说「不支持内联预览」,前后矛盾(spec §6.6)。
+    const p = join(cwd, 'old.doc');
+    writeFileSync(p, Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 1, 2, 3, 4]));
+    const res = await request(app).get('/api/fs/preview').query({ path: p });
+    expect(res.status).toBe(200);
+    expect(res.body.kind).toBe('legacy-office');
+    expect(res.body.content).toBeUndefined();
+    expect(res.body.ext).toBe('.doc');
+  });
+
   it('returns 400 for missing path query', async () => {
     const res = await request(app).get('/api/fs/preview');
     expect(res.status).toBe(400);
@@ -133,6 +145,18 @@ describe('GET /api/fs/preview', () => {
     expect(res.status).toBe(413);
     expect(res.body.error.code).toBe('ETOOBIG');
     expect(res.body.error.meta.size).toBe(1024 * 1024 + 100);
+  });
+
+  it('returns image metadata (no content, no 413) when the image exceeds the cap', async () => {
+    const p = join(cwd, 'big.png');
+    writeFileSync(p, Buffer.alloc(0));
+    truncateSync(p, 1024 * 1024 + 1);
+    const res = await request(app).get('/api/fs/preview').query({ path: p });
+    expect(res.status).toBe(200);
+    expect(res.body.kind).toBe('image');
+    expect(res.body.mime).toBe('image/png');
+    expect(res.body.content).toBeUndefined();
+    expect(res.body.size).toBe(1024 * 1024 + 1);
   });
 
   it('accepts smaller maxBytes query and applies it', async () => {
