@@ -756,6 +756,24 @@ export const WebSearchTool = buildTool({
     // runSearch handles fallback semantics based on WEB_SEARCH_PROVIDER mode:
     //   - "auto": tries each provider, falls through on failure
     //   - specific mode: runs one provider, throws on failure
+    // --- MiniMax native path (server-side web_search_20250305) ---
+    // Activated by IS_HOME_NETWORK=1 / true / yes / on (with no explicit
+    // WEB_SEARCH_PROVIDER), or by WEB_SEARCH_PROVIDER=minimax. Bypasses the
+    // Chat Completions path below because MiniMax speaks the Anthropic
+    // /v1/messages protocol, not OpenAI-compatible enable_search.
+    if (getProviderMode() === 'minimax') {
+      const providerOutput = await runSearch(
+        {
+          query: input.query,
+          allowed_domains: input.allowed_domains,
+          blocked_domains: input.blocked_domains,
+        },
+        context.abortController.signal,
+      )
+      return {
+        data: formatProviderOutput(providerOutput, input.query),
+      }
+    }
     // --- Chat Completions API search path (DashScope / OpenAI-compatible) ---
     if (isChatCompletionsWebSearchEnabled()) {
       const chatData = await runChatCompletionsWebSearch(
