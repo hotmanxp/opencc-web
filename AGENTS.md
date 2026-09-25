@@ -13,6 +13,7 @@
 | zai 前端 | React + Zustand + AntD + Vite | 18.3 / 4.5 / 5.22 / 8.1 |
 | zai 服务端 | Express + SSE | ^4.21 |
 | zn-agent-core vendor | opencc 0.20.0(Bun 兼容(un-stripped)) | — |
+| 桌面端 | Electron + electron-builder + tsdown | 44 / 26.15 / 0.23 |
 | 测试 | Vitest | ^4.1 |
 
 ## 目录
@@ -21,6 +22,7 @@
 |------|------|
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
 | `packages/zn-agent-core/` | `src/compat/`(verbatim 移植的 zai 兼容垫片)+ `src/opencc-src/`(opencc 0.20.0 拷贝,Bun 兼容(un-stripped));`scripts/bundle-opencc.ts` 把 `src/bundle-entry.ts` 编成单一 `dist/opencc-core.mjs`(esbuild bundle)。**运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出**(2026-08-16 起废除全部 subpath);`dist/bundle-entry.d.ts` 由 `bundle-opencc.ts` 机械生成,与 bundle 同步 |
+| `apps/desktop/` | Electron 桌面壳:窗口 + `zai start` 子进程生命周期 + electron-builder 打包。**不是第二个前端** —— 它加载已构建的 zai Web 产物(`http://127.0.0.1:<port>`),不 import zai、不加 preload。详见 [`apps/desktop/README.md`](apps/desktop/README.md) |
 | `docs/` | 设计/参考/操作指南;`docs/superpowers/specs/` 是各特性 spec,`docs/superpowers/plans/` 是实施计划 |
 | `examples/` `scripts/` | 示例 / 仓库脚本 |
 
@@ -73,6 +75,8 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 - **端口使用(必查)**:启动 `zai dev` / `zai start` 或任何本地服务前,先 `lsof -i :<port>` 确认端口空闲再起。显式 `--port` / `--api-port` 被占用必须报错退出(EADDRINUSE,dev.ts/start.ts 已实现),**禁止**静默递增换端口——多个实例静默换端口共享同一 API key 是请求风暴根因(见 `docs/superpowers/plans/` 请求风暴修复)。只有未显式指定端口时才允许自动扫描(`ports.ts resolveServerPort`)。开发中如需多实例,用不同 `--port` 显式指定空闲端口。
 - **微信通道归属:只有 `app=weixin` 的专用实例跑通道**:主实例(用户日常访问的 Web 服务)**不再自己跑微信通道** —— 它启动时按 `settings.weixinBot.enabled` 检查机器级 owner 锁,无锁则拉起一个 `app=weixin` 的受管子实例独占通道(默认端口 9199、cwd 默认用户主目录,均在微信面板可配)。判定锚点 `isWeixinChannelHost()`(`src/server/services/weixinBot/channelProfile.ts:36-37`,`process.env.ZAI_APP === WEIXIN_CHANNEL_PROFILE`,`WEIXIN_CHANNEL_PROFILE = 'weixin'`);编排逻辑 `src/server/services/weixinBot/weixinDedicatedInstance.ts`(端口/目录/锁检查/拉起),通道启动 `src/server/services/weixinBot/weixinRuntimeBoot.ts`(受管 + weixin 双门禁),`src/server/services/weixinBot/WeixinBotManager.ts:90` 注释里还有一道同样的 profile 门禁兜底。**Why 必须同进程**:入站注入走进程内 `getSessionInbox().followup()`、出站镜像订阅进程内 `eventBus`,所以"收发消息"与"跑 agent turn"不能拆到两个进程 —— 专用实例必须是一个完整 zai 进程,不能是轻量转发进程。**已知副作用**:专用实例的会话只出现在它自己的 Web UI(默认 9199),主实例看不到(无跨实例会话聚合);重启主实例会连带停掉专用实例(`shutdownInstanceSupervisor`)再重新拉起;改了端口/cwd/dmPolicy 等需重启专用实例才生效(面板的保存动作会自动重启它)。**微信配置入口只在主实例显示(2026-09-13)**:设置页底部的「微信机器人」入口按 `instanceContext.instanceId == null` 门控(`SettingsDrawer.tsx:853` 的 `weixinConfigVisible`)——受管子进程(app=weixin 专用实例 / task-factory / 用户自定义实例)不渲染该入口,避免在子实例上重复配置。**判据不能用 `isManagedChild`**(代码注释 832-846 行显式反驳:主实例在某些 supervisor 启动路径下 `isManagedChild` 也是 true,会让主实例误关微信入口);`instanceId` 由 `instanceSupervisor.ts:305` 只给 spawn 出来的实例注入,与下方 `showServiceSection` 的 `isManagedChild && instanceId != null` 互补。`instanceContext` 未 hydrate 时按主实例处理(显示),裸 `zai dev` 行为不变。前端门控只影响可见性,`/api/weixin/*` 路由本身对子实例**不**做拦截(专用实例自己要调这些接口连通道)。
 - **分屏 Bash 面板 = 持久 PTY 终端(2026-09-22 起)**:桌面分屏的 `Bash` tab 走 `/api/terminal/*` + `node-pty`(每个 tab 一个长期存活的交互式 shell,状态与 CWD 天然保持),而 `/api/bash-repl`(每条命令一次 `sh -c`)现在只服务移动端快捷 Bash 与命令历史 —— 两者并存是有意为之。**三条不能踩的约束**:(1) `node-pty` 是原生模块,必须留在 `pnpm-workspace.yaml` 的 `allowBuilds` 与根 `package.json` 的 `pnpm.onlyBuiltDependencies` 里,否则装出 load 不了的 `pty.node`;装不上时 `/api/terminal/environment` 返回 `available:false` + `hint`,面板显式报错而不是退回 REPL。(2) **只有可见 tab 开 SSE** —— HTTP/1.1 同源并发连接有限(agent 流 + bash-tasks 流已占数条),切 tab 关旧开新,新连接首帧 `snapshot` 恢复整屏。(3) **PTY 进程必须显式回收**:关 tab(`/close`)、删会话(`DELETE /api/agent/sessions/:id` → `disposeSession`)、进程退出(`runtimeLifecycle.closeServer` → `disposeAll`)三处缺一会留孤儿 zsh。设计与差异(不接管 PS1、读用户 rc、透传完整 env、无 retain/attachment 控制)见 `docs/superpowers/specs/2026-09-22-zai-pty-terminal-design.md`。
+- **桌面端(`apps/desktop`)不 import zai,也不加 preload**:壳只做三件事 —— 窗口、`zai start` 子进程生命周期、两者之间的交接。窗口直接加载 `http://127.0.0.1:<port>`(zai 本就监听 loopback、自带 web 产物、路由无鉴权),所以既不需要自定义特权协议,也不需要向渲染进程暴露桥。子进程用 `ELECTRON_RUN_AS_NODE=1` 跑 Electron 自带的 Node,不额外打包 Node 运行时;`ZAI_NO_MANAGED=1` 避免再套一层 supervisor。**改壳之前先读 [`apps/desktop/README.md`](apps/desktop/README.md)**,里面记着 native 模块 ABI、签名、平台支持等已知限制。打包目标只有 `mac-arm64` / `mac-x64` / `win-x64`;`packages/*` 是被 zai 依赖的库,`apps/*` 是独立应用产物,两者不混放。
+- **`packages/zai` 的 `dependencies` 只放服务端运行时真正 import 的包,纯前端包一律放 `devDependencies`**:前端由 Vite 打成自包含产物(`dist/web`,已验证不含任何裸模块说明符),桌面端再用 `pnpm deploy --prod` 打运行时树 —— 把 `@codemirror/*`、`lucide-react`、`pdfjs-dist`、`echarts`、`xlsx`、`react-markdown` 这类只在 `src/web` 里出现的包写进 `dependencies`,会原样进桌面安装包。2026-09-25 按此口径把 35 个包从 `dependencies` 挪到 `devDependencies`(21 个 `@codemirror/*`、`pdfjs-dist`、`xlsx`、`katex`、`lucide-react`、`react-markdown`、`react-syntax-highlighter`、`rehype-katex`、`remark-gfm`、`remark-math`、`docx-preview`、`pptx-preview`、`dompurify`、`beautiful-mermaid`,外加 zai 自己没用到的 `sharp`),运行时树 **357MB → 110MB**。判据:该包在 `src/{server,cli,shared}` 中(排除 `*.test.ts`)是否有 import;新增依赖时按此自查。注意 `sharp` 仍会经由 `@zn-ai/zn-agent-core` 进树,不能真的没有。
 - **小步可逆**:实现细节见 `docs/DEVELOPMENT_REFERENCE.md`;设计/取舍见 `docs/superpowers/specs/` 与对应 `plans/`。
 - **测试粒度:功能改动后只跑相关单元测试**:`pnpm -r test` 全量跑 zai + zn-agent-core 全部 190+ 测试文件 / 1400+ 用例,冷启动 ~30s+ 解析 + 数十秒执行,日常反馈太慢。功能改动后只跑**直接受影响**的测试文件(以及它们的依赖文件若有连锁影响),用路径过滤:
   ```bash
@@ -122,6 +126,13 @@ pnpm --filter @zn-ai/zn-agent-core exec tsc -b --watch
 
 # 真实浏览器验收(强制项)
 /ego-browser                  # 通过 skill 调 ego-browser 驱动 zai Web UI
+
+# 桌面端(apps/desktop)—— 不跑单测,靠构建 + 启动 + 打包验证
+pnpm run build:desktop        # tsc + tsdown,产出 lib/main.js
+pnpm run dev:desktop          # 构建 workspace + 壳,启动未打包 Electron
+pnpm run check:desktop        # 只校验打包配置,不构建
+pnpm run package:desktop:mac:arm64      # 打包(需在 macOS 上;:dir 只出 .app)
+pnpm run package:desktop:win:x64        # 需在 Windows x64 上
 ```
 
 ## 发布流程

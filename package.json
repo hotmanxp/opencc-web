@@ -4,16 +4,25 @@
   "description": "AI Agent 配置资源库 - Nova CLI 的 agent 配置、命令定义、技能模块及发布工具",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "build": "pnpm --filter @zn-ai/zn-agent-core run build && pnpm --filter @zn-ai/zai run build",
     "build:core": "pnpm --filter @zn-ai/zn-agent-core run build",
     "build:zai": "pnpm --filter @zn-ai/zai run build",
     "build:web": "pnpm --filter @zn-ai/zai run build:web",
+    "build:desktop": "pnpm --filter @zn-ai/desktop run build",
     "clean": "pnpm -r run clean",
-    "dev": "pnpm -r run dev",
+    "dev": "pnpm -r --filter '!@zn-ai/desktop' run dev",
     "dev:web": "pnpm --filter @zn-ai/zai run dev",
+    "dev:desktop": "pnpm --filter @zn-ai/desktop run dev",
+    "start:desktop": "pnpm --filter @zn-ai/desktop run start",
+    "package:desktop:mac:arm64": "pnpm --filter @zn-ai/desktop run package:mac:arm64",
+    "package:desktop:mac:x64": "pnpm --filter @zn-ai/desktop run package:mac:x64",
+    "package:desktop:win:x64": "pnpm --filter @zn-ai/desktop run package:win:x64",
+    "package:desktop:dir": "pnpm --filter @zn-ai/desktop run package:dir",
+    "check:desktop": "pnpm --filter @zn-ai/desktop run check:package",
     "test": "pnpm -r run test",
     "test:watch": "pnpm -r --parallel run test",
     "release:patch": "node scripts/release.mjs patch",
@@ -37,7 +46,9 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "rolldown",
-      "node-pty"
+      "node-pty",
+      "sharp",
+      "electron"
     ]
   }
 }

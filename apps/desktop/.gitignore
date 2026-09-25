@@ -1,0 +1,5 @@
+# Compiled main bundle (lib/types/ is the tsc intermediate).
+lib/
+
+# Per-target packaging scratch: deployed zai runtime, Electron downloads, artifacts.
+.desktop-build/

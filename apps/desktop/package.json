@@ -1,0 +1,35 @@
+{
+  "name": "@zn-ai/desktop",
+  "description": "Electron desktop shell for the zai web application",
+  "version": "0.12.0",
+  "private": true,
+  "license": "MIT",
+  "author": "ZN-AI Team",
+  "type": "module",
+  "main": "lib/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && pnpm run bundle",
+    "bundle": "tsdown",
+    "dev": "node scripts/dev.mjs",
+    "start": "node scripts/dev.mjs --skip-build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
+    "package": "node scripts/package-target.mjs",
+    "check:package": "node scripts/package-target.mjs --check",
+    "package:dir": "node scripts/package-target.mjs --dir",
+    "package:mac:arm64": "node scripts/package-target.mjs mac-arm64",
+    "package:mac:arm64:dir": "node scripts/package-target.mjs mac-arm64 --dir",
+    "package:mac:x64": "node scripts/package-target.mjs mac-x64",
+    "package:mac:x64:dir": "node scripts/package-target.mjs mac-x64 --dir",
+    "package:win:x64": "node scripts/package-target.mjs win-x64",
+    "package:win:x64:dir": "node scripts/package-target.mjs win-x64 --dir",
+    "clean": "rm -rf lib .desktop-build tsconfig.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
+    "tsdown": "^0.23.0",
+    "typescript": "^5.6.0"
+  }
+}

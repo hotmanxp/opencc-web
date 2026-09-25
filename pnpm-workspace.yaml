@@ -1,5 +1,9 @@
 packages:
   - 'packages/*'
+  # Electron 桌面壳(见 apps/desktop)。放在 apps/ 而非 packages/,与
+  # packages/ 下的库(会被 zai 依赖)区分开:桌面壳是独立应用产物,不被
+  # 任何 workspace 包 import。
+  - 'apps/*'
 allowBuilds:
   sharp: true
   # node-pty 是原生模块:它的 install 脚本 (scripts/prebuild.js) 需要跑一次,
