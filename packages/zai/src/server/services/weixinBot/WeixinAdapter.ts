@@ -535,9 +535,15 @@ export class WeixinAdapter {
 
   private _extractText(items: ILinkItemT[]): string {
     const parts: string[] = []
-    for (const item of items as unknown as Array<{ type: number; text_item?: { text?: string } }>) {
+    for (const item of items as unknown as Array<{ type: number; text_item?: { text?: string }; voice_item?: { text?: string } }>) {
       if (item.type === ITEM_TEXT) {
         const t = (item.text_item?.text ?? '').trim()
+        if (t) parts.push(t)
+      } else if (item.type === ITEM_VOICE) {
+        // iLink 入站语音通常带文字转写(voice_item.text)。
+        // _collectMedia 检测到 text 就 return 不下载音频,但此字段需要并入 msg.text,
+        // 否则纯语音消息会被 `if (!text && mediaPaths.length === 0) return` 静默吞掉。
+        const t = (item.voice_item?.text ?? '').trim()
         if (t) parts.push(t)
       }
     }
