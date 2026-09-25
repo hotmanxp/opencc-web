@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../../lib/api.js';
+import { gitApi } from '../../lib/gitApi.js';
 import type { GitStatus } from '../../../../shared/git.js';
 
+/**
+ * Thin wrapper that polls `gitApi.status(cwd)` every 5s. Used by
+ * MobileQuickDrawer for the mobile Git tab — kept as a separate hook so the
+ * review panel (GitReviewPanel) doesn't pull in this polling behaviour.
+ *
+ * If you find yourself wanting mode-aware payloads or richer two-letter
+ * status, switch the consumer to `useGitReview` instead — that's the
+ * unified replacement covering all review modes.
+ */
 export interface UseGitStatusResult {
   data: GitStatus | null;
   loading: boolean;
@@ -9,7 +18,7 @@ export interface UseGitStatusResult {
   refetch: () => void;
 }
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 5_000;
 
 export function useGitStatus(cwd: string | null | undefined): UseGitStatusResult {
   const [data, setData] = useState<GitStatus | null>(null);
@@ -27,8 +36,8 @@ export function useGitStatus(cwd: string | null | undefined): UseGitStatusResult
     const seq = ++seqRef.current;
     setLoading(true);
     setError(null);
-    api
-      .get<GitStatus>('/git/status')
+    gitApi
+      .status(cwd)
       .then((res) => {
         if (seqRef.current !== seq) return; // stale
         setData(res);

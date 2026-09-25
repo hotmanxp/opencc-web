@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tabs } from 'antd';
-import { GitTab } from './GitTab.js';
+import { GitReviewPanel } from './GitReviewPanel.js';
 import { FsTab } from './FsTab.js';
 import { BashTab } from './BashTab.js';
 import { useAgentStore } from '../../store/useAgentStore.js';
@@ -58,7 +58,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
   const tabItems = [
     { key: 'fs', label: 'Files', children: <FsTab cwd={cwd} /> },
     ...(isGit
-      ? [{ key: 'git', label: 'Git', children: <GitTab cwd={cwd} /> }]
+      ? [{ key: 'git', label: 'Git', children: <GitReviewPanel cwd={cwd} /> }]
       : []),
     { key: 'bash', label: 'Bash', children: <BashTab sessionId={activeSessionId} cwd={cwd} /> },
   ];

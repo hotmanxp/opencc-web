@@ -1,13 +1,47 @@
+/**
+ * Git review panel routes — single endpoint with action dispatch.
+ *
+ * Mount: `app.use('/api', gitRouter)` (see index.ts). Final path:
+ * `POST /api/git` with body `{ action, cwd, ...actionParams }`.
+ *
+ * Response shape is intentionally loose: every action returns
+ * `{ ok: boolean, error?: string, ...actionSpecificFields }` so legacy
+ * callers (BranchSelector, MobileQuickDrawer → gitApi.{revertFile,
+ * listBranches, switchBranch}) keep working without reshaping.
+ *
+ * All git work goes through `gitService` — see `services/gitService.ts`.
+ * The service owns spawn/cache/parsing; the route layer is a thin
+ * dispatcher that converts HTTP into service calls and translates
+ * `GitCommandError` into `{ ok: false, error }` envelopes.
+ */
 import { Router, type IRouter, type Request } from 'express';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { unlink } from 'node:fs/promises';
+import { relative, resolve } from 'node:path';
+import {
+  GitCommandError,
+  branches as svcBranches,
+  checkout as svcCheckout,
+  cherryPick as svcCherryPick,
+  commit as svcCommit,
+  commitDiff as svcCommitDiff,
+  currentBranch as svcCurrentBranch,
+  diff as svcDiff,
+  discard as svcDiscard,
+  isRepo as svcIsRepo,
+  log as svcLog,
+  repoRoot as svcRepoRoot,
+  repoRoots as svcRepoRoots,
+  resolveWorktree as svcResolveWorktree,
+  stage as svcStage,
+  status as svcStatus,
+  unstage as svcUnstage,
+  worktrees as svcWorktrees,
+} from '../services/gitService.js';
 import { resolveSafePath } from '../utils/safePath.js';
-import { relative } from 'node:path';
-import type { GitDiff, GitRevertResult, GitStatus, GitStatusChar, GitStatusFile } from '../../shared/git.js';
 
-const execFileAsync = promisify(execFile);
-
-const MAX_DIFF_BYTES = 2 * 1024 * 1024; // 2 MB
+// ────────────────────────────────────────────────────────────────────────────
+// Instance context (cwd injected per-instance, identical to other routes).
+// ────────────────────────────────────────────────────────────────────────────
 
 interface InstanceContextShape {
   cwd: string;
@@ -18,201 +52,338 @@ function ctx(req: Request): InstanceContextShape {
   return req.app.locals.instanceContext as InstanceContextShape;
 }
 
-async function resolveGitRoot(cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
-    cwd,
-    timeout: 3000,
-  });
-  return stdout.trim();
+interface RawBody {
+  action?: unknown;
+  cwd?: unknown;
+  // common action params (loose typing — action handlers narrow them)
+  path?: unknown;
+  selected?: unknown;
+  staged?: unknown;
+  message?: unknown;
+  hash?: unknown;
+  branch?: unknown;
+  requested?: unknown;
+  count?: unknown;
+  skip?: unknown;
+  // Allow arbitrary additional keys so helpers like `body[field]` compile
+  // without forcing every handler to widen the type manually.
+  [key: string]: unknown;
 }
 
-function mapStatus(staged: string, unstaged: string): { status: GitStatusChar; staged: boolean } {
-  // Prefer the unstaged column when non-space (modified-in-workdir is what
-  // users want to see). Fall back to the staged column.
-  if (unstaged === '?') return { status: '??', staged: false };
-  if (unstaged !== ' ') return { status: unstaged as GitStatusChar, staged: staged !== ' ' };
-  if (staged !== ' ') return { status: staged as GitStatusChar, staged: true };
-  // Shouldn't happen for porcelain output, but fall back to M.
-  return { status: 'M', staged: false };
+/** Body field expected as string. Returns the string or sets `error` and
+ *  yields control via a tuple-style return. */
+function requireString(body: RawBody, field: string): string | { error: string } {
+  const value = body[field];
+  if (typeof value !== 'string' || value === '') {
+    return { error: `缺少 ${field} 参数` };
+  }
+  return value;
 }
+
+function optionalString(body: RawBody, field: string): string | undefined {
+  const value = body[field];
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+function optionalNumber(body: RawBody, field: string): number | undefined {
+  const value = body[field];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value !== '' && !Number.isNaN(Number(value))) {
+    return Number(value);
+  }
+  return undefined;
+}
+
+function optionalBool(body: RawBody, field: string): boolean | undefined {
+  const value = body[field];
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
+
+/** Translate a service error into a JSON envelope. Known GitCommandError
+ *  codes bubble up; anything else is wrapped as `internal-error`. */
+function envelope<T extends Record<string, unknown>>(
+  ok: true,
+  payload: T,
+): { ok: true } & T;
+function envelope(ok: false, error: string): { ok: false; error: string };
+function envelope(ok: boolean, arg: string | Record<string, unknown>) {
+  if (ok) return { ok: true, ...(arg as Record<string, unknown>) };
+  return { ok: false, error: arg as string };
+}
+
+/** Wrap a service call so any `GitCommandError` (or generic throw) becomes
+ *  `{ ok: false, error }` rather than a 500. */
+async function safe<T>(run: () => Promise<T>, onOk: (value: T) => Record<string, unknown>) {
+  try {
+    const result = await run();
+    return envelope(true, onOk(result));
+  } catch (error) {
+    const message =
+      error instanceof GitCommandError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    return envelope(false, message);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Per-path security helper
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Resolve `rel` inside the session's git root, rejecting any path that
+ *  escapes. Caller passes the `gitRoot` from `repoRoot()`; this helper
+ *  wraps `resolveSafePath` with the git-root prefix. */
+function resolveGitPath(
+  gitRoot: string,
+  rel: string,
+): { ok: true; rel: string } | { ok: false; error: string } {
+  const safe = resolveSafePath(gitRoot, rel);
+  if (!safe.ok) return safe;
+  const gitPath = relative(gitRoot, safe.abs);
+  // Belt-and-braces: resolveSafePath returns ok for paths INSIDE root,
+  // but `relative` on the root itself returns '' — treat that as a
+  // valid "the repo itself" selector.
+  if (gitPath.startsWith('..')) {
+    return { ok: false, error: 'path 不在 Git 仓库内' };
+  }
+  return { ok: true, rel: gitPath };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Route
+// ────────────────────────────────────────────────────────────────────────────
 
 export const gitRouter: IRouter = Router();
 
-gitRouter.get('/git/status', async (req, res) => {
-  const { cwd } = ctx(req);
-  try {
-    await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, timeout: 3000 });
-  } catch {
-    const body: GitStatus = { ok: false, error: 'not a git repository' };
-    res.json(body);
-    return;
-  }
-  try {
-    const [statusOut, branchOut] = await Promise.all([
-      // `-u normal` is the documented default untracked-file mode, but
-      // the brief's two-arg form (`-u`, `normal`) makes git consume
-      // `normal` as a pathspec on git 2.37 (macOS CLT) and return empty
-      // output. Use the single-arg `-unormal` form recommended in
-      // `git status --help` so behavior matches the spec's intent.
-      execFileAsync('git', ['status', '--porcelain=v1', '-unormal'], { cwd, timeout: 5000 }),
-      execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, timeout: 3000 }).catch(() => ({ stdout: '' })),
-    ]);
-    const files: GitStatusFile[] = statusOut.stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        // porcelain v1: "<XY> <path>" where XY is two chars and path starts at col 3
-        const staged = line[0] ?? ' ';
-        const unstaged = line[1] ?? ' ';
-        const path = line.slice(3);
-        const mapped = mapStatus(staged, unstaged);
-        return { path, status: mapped.status, staged: mapped.staged };
-      });
-    const body: GitStatus = {
-      ok: true,
-      branch: branchOut.stdout.trim() || null,
-      files,
-    };
-    res.json(body);
-  } catch (err) {
-    const body: GitStatus = { ok: false, error: `git status 失败: ${err instanceof Error ? err.message : String(err)}` };
-    res.json(body);
-  }
-});
+gitRouter.post('/git', async (req, res) => {
+  const body = (req.body ?? {}) as RawBody;
+  const action = typeof body.action === 'string' ? body.action : '';
 
-gitRouter.get('/git/diff', async (req, res) => {
-  const { cwd } = ctx(req);
-  const rel = typeof req.query.path === 'string' ? req.query.path : '';
-  if (!rel) {
-    const body: GitDiff = { ok: false, error: '缺少 path 参数' };
-    res.status(400).json(body);
-    return;
-  }
+  // `cwd` override (e.g. resolveWorktree can return a different checkout).
+  // For actions like `resolve-worktree` itself, `cwd` is still required so
+  // we know which repo's worktree list to consult.
+  const cwdRaw = optionalString(body, 'cwd');
+  const cwd = cwdRaw ?? ctx(req).cwd;
 
-  let gitRoot: string;
-  try {
-    gitRoot = await resolveGitRoot(cwd);
-  } catch {
-    const body: GitDiff = { ok: false, error: 'not a git repository' };
-    res.json(body);
-    return;
-  }
+  switch (action) {
+    case 'is-repo': {
+      const ok = await svcIsRepo(cwd).catch(() => false);
+      res.json(envelope(true, { isRepo: ok }));
+      return;
+    }
 
-  // `git status` paths are relative to the repository root even when Git is
-  // invoked from a nested cwd. Resolve and run pathspec commands from that
-  // same root so the selected status entry keeps one consistent meaning.
-  const safe = resolveSafePath(gitRoot, rel);
-  if (!safe.ok) {
-    const body: GitDiff = { ok: false, error: safe.error };
-    res.json(body);
-    return;
-  }
-  const gitPath = relative(gitRoot, safe.abs);
-  if (gitPath.startsWith('..') || gitPath === '') {
-    const body: GitDiff = { ok: false, error: 'path 不在 Git 仓库内' };
-    res.json(body);
-    return;
-  }
-  // Decide whether the file is untracked.
-  // doesn't have to pre-classify.
-  let isUntracked = false;
-  try {
-    const { stdout } = await execFileAsync(
-      'git',
-      // `-unormal` (single-arg) keeps parity with the status endpoint;
-      // the brief's two-arg form (`-u`, `normal`) is parsed as a pathspec
-      // on git 2.37 (macOS CLT). `-- <rel>` narrows the search to that path.
-      ['status', '--porcelain=v1', '-unormal', '--', safe.abs],
-      { cwd: gitRoot, timeout: 3000 },
-    );
-    isUntracked = stdout.trimStart().startsWith('??');
-  } catch {
-    isUntracked = false;
-  }
-
-  let diff = '';
-  try {
-    if (isUntracked) {
-      // `git diff --no-index` exits 1 when the files differ, which we treat
-      // as success (the diff is the desired output).
-      const result = await execFileAsync(
-        'git',
-        ['diff', '--no-color', '--no-index', '--', '/dev/null', safe.abs],
-        { cwd: gitRoot, timeout: 5000, maxBuffer: MAX_DIFF_BYTES * 2 },
-      ).catch((err: NodeJS.ErrnoException & { stdout?: string; stderr?: string }) => ({
-        stdout: err.stdout ?? '',
-        stderr: err.stderr ?? '',
-      }));
-      // `git diff --no-index` emits two header lines ("diff --git ..." and
-      // "new file mode ...") before the unified-diff hunk header. Strip
-      // them so the unified format is consistent with the tracked branch.
-      diff = result.stdout.replace(/^diff --git.*\nnew file mode.*\n/m, '');
-    } else {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['diff', '--no-color', 'HEAD', '--', safe.abs],
-        { cwd: gitRoot, timeout: 5000, maxBuffer: MAX_DIFF_BYTES * 2 },
+    case 'status': {
+      const selected = optionalString(body, 'selected');
+      const value = await safe(
+        () => svcStatus(cwd, selected),
+        (result) => ({
+          branch: result.branch ?? null,
+          entries: result.entries,
+          truncated: result.truncated ?? false,
+          root: result.root ?? null,
+          repositories: result.repositories ?? [],
+        }),
       );
-      diff = stdout;
+      res.json(value);
+      return;
     }
-  } catch (err) {
-    const body: GitDiff = { ok: false, error: `git diff 失败: ${err instanceof Error ? err.message : String(err)}` };
-    res.json(body);
-    return;
-  }
 
-  if (diff.length > MAX_DIFF_BYTES) {
-    const mb = (diff.length / 1024 / 1024).toFixed(2);
-    const body: GitDiff = { ok: false, error: `diff 过大 (${mb} MB > 2 MB)，暂不支持预览` };
-    res.json(body);
-    return;
-  }
-
-  const body: GitDiff = { ok: true, diff, isUntracked };
-  res.json(body);
-});
-
-gitRouter.post('/git/revert', async (req, res) => {
-  const { cwd } = ctx(req);
-  const rel = typeof req.body?.path === 'string' ? req.body.path : '';
-  if (!rel) {
-    const body: GitRevertResult = { ok: false, error: '缺少 path 参数' };
-    res.status(400).json(body);
-    return;
-  }
-  const safe = resolveSafePath(cwd, rel);
-  if (!safe.ok) {
-    const body: GitRevertResult = { ok: false, error: safe.error };
-    res.json(body);
-    return;
-  }
-  // Check if the file is untracked (not committed yet)
-  let isUntracked = false;
-  try {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['status', '--porcelain=v1', '-unormal', '--', safe.abs],
-      { cwd, timeout: 3000 },
-    );
-    isUntracked = stdout.trimStart().startsWith('??');
-  } catch {
-    isUntracked = false;
-  }
-  try {
-    if (isUntracked) {
-      // Untracked file: remove it
-      const fs = await import('node:fs');
-      fs.unlinkSync(safe.abs);
-    } else {
-      // Tracked file: restore to HEAD
-      await execFileAsync('git', ['checkout', '--', safe.abs], { cwd, timeout: 5000 });
+    case 'diff': {
+      const pathField = requireString(body, 'path');
+      if (typeof pathField !== 'string') {
+        res.status(400).json(envelope(false, pathField.error));
+        return;
+      }
+      const selected = optionalString(body, 'selected');
+      const staged = optionalBool(body, 'staged') ?? false;
+      const value = await safe(async () => {
+        const root = await svcRepoRoot(cwd, selected);
+        const resolved = resolveGitPath(root, pathField);
+        if (!resolved.ok) throw new GitCommandError(resolved.error, 'bad-path', 'diff');
+        const text = await svcDiff(cwd, resolved.rel, staged, selected);
+        return { diff: text, isUntracked: false };
+      }, ({ diff, isUntracked }) => ({ diff, isUntracked }));
+      res.json(value);
+      return;
     }
-    const body: GitRevertResult = { ok: true, isUntracked };
-    res.json(body);
-  } catch (err) {
-    const body: GitRevertResult = { ok: false, error: `撤销失败: ${err instanceof Error ? err.message : String(err)}` };
-    res.json(body);
+
+    case 'stage': {
+      const pathField = requireString(body, 'path');
+      if (typeof pathField !== 'string') {
+        res.status(400).json(envelope(false, pathField.error));
+        return;
+      }
+      const selected = optionalString(body, 'selected');
+      const value = await safe(async () => {
+        const root = await svcRepoRoot(cwd, selected);
+        const resolved = resolveGitPath(root, pathField);
+        if (!resolved.ok) throw new GitCommandError(resolved.error, 'bad-path', 'add');
+        await svcStage(cwd, resolved.rel, selected);
+        return {};
+      }, () => ({}));
+      res.json(value);
+      return;
+    }
+
+    case 'unstage': {
+      const pathField = requireString(body, 'path');
+      if (typeof pathField !== 'string') {
+        res.status(400).json(envelope(false, pathField.error));
+        return;
+      }
+      const selected = optionalString(body, 'selected');
+      const value = await safe(async () => {
+        const root = await svcRepoRoot(cwd, selected);
+        const resolved = resolveGitPath(root, pathField);
+        if (!resolved.ok) throw new GitCommandError(resolved.error, 'bad-path', 'reset');
+        await svcUnstage(cwd, resolved.rel, selected);
+        return {};
+      }, () => ({}));
+      res.json(value);
+      return;
+    }
+
+    case 'revert': {
+      // Matches the legacy semantics: untracked → unlink; tracked → checkout --.
+      const pathField = requireString(body, 'path');
+      if (typeof pathField !== 'string') {
+        res.status(400).json(envelope(false, pathField.error));
+        return;
+      }
+      const selected = optionalString(body, 'selected');
+      const value = await safe(async () => {
+        const root = await svcRepoRoot(cwd, selected);
+        const resolved = resolveGitPath(root, pathField);
+        if (!resolved.ok) throw new GitCommandError(resolved.error, 'bad-path', 'revert');
+        const status = await svcStatus(cwd, selected);
+        const entry = status.entries.find((e) => e.path === resolved.rel);
+        const isUntracked = entry?.xy === '??';
+        if (isUntracked) {
+          const safe = resolveSafePath(root, resolved.rel);
+          if (!safe.ok) throw new GitCommandError(safe.error, 'bad-path', 'unlink');
+          await unlink(safe.abs);
+        } else {
+          await svcDiscard(cwd, resolved.rel, selected);
+        }
+        return { isUntracked };
+      }, ({ isUntracked }) => ({ isUntracked }));
+      res.json(value);
+      return;
+    }
+
+    case 'commit': {
+      const message = requireString(body, 'message');
+      if (typeof message !== 'string') {
+        res.status(400).json(envelope(false, message.error));
+        return;
+      }
+      const selected = optionalString(body, 'selected');
+      const value = await safe(async () => {
+        await svcCommit(cwd, message, selected);
+        const branch = await svcCurrentBranch(cwd).catch(() => null);
+        return { branch };
+      }, ({ branch }) => ({ branch: branch ?? null }));
+      res.json(value);
+      return;
+    }
+
+    case 'log': {
+      const count = optionalNumber(body, 'count') ?? 30;
+      const skip = optionalNumber(body, 'skip') ?? 0;
+      const selected = optionalString(body, 'selected');
+      const value = await safe(
+        () => svcLog(cwd, count, skip, selected),
+        (entries) => ({ entries }),
+      );
+      res.json(value);
+      return;
+    }
+
+    case 'commit-diff': {
+      const hash = requireString(body, 'hash');
+      if (typeof hash !== 'string') {
+        res.status(400).json(envelope(false, hash.error));
+        return;
+      }
+      const selected = optionalString(body, 'selected');
+      const value = await safe(
+        () => svcCommitDiff(cwd, hash, selected),
+        (diff) => ({ diff }),
+      );
+      res.json(value);
+      return;
+    }
+
+    case 'branches': {
+      const selected = optionalString(body, 'selected');
+      const value = await safe(
+        () => svcBranches(cwd, selected),
+        (branches) => ({ branches }),
+      );
+      res.json(value);
+      return;
+    }
+
+    case 'checkout': {
+      const branch = requireString(body, 'branch');
+      if (typeof branch !== 'string') {
+        res.status(400).json(envelope(false, branch.error));
+        return;
+      }
+      const value = await safe(async () => {
+        const result = await svcCheckout(cwd, branch);
+        return { branch: result };
+      }, ({ branch: name }) => ({ branch: name ?? null }));
+      res.json(value);
+      return;
+    }
+
+    case 'worktrees': {
+      const value = await safe(
+        () => svcWorktrees(cwd),
+        (worktrees) => ({ worktrees }),
+      );
+      res.json(value);
+      return;
+    }
+
+    case 'resolve-worktree': {
+      const requested = requireString(body, 'requested');
+      if (typeof requested !== 'string') {
+        res.status(400).json(envelope(false, requested.error));
+        return;
+      }
+      const value = await safe(async () => {
+        // First check that cwd is a repo at all — otherwise resolveWorktree
+        // would falsely return cwd itself for "not in a worktree".
+        const repos = await svcRepoRoots(cwd).catch(() => [] as string[]);
+        if (repos.length === 0) {
+          throw new GitCommandError('not a git repository', 'not-repo', 'rev-parse');
+        }
+        const path = await svcResolveWorktree(cwd, requested);
+        return { path };
+      }, ({ path }) => ({ path }));
+      res.json(value);
+      return;
+    }
+
+    default: {
+      res.status(400).json(envelope(false, `未知 action: ${action || '(empty)'}`));
+    }
   }
 });
 
 export default gitRouter;
+
+// Re-export resolve helpers so tests can probe the same surface.
+export { resolveGitPath };
+// Keep the path helper around for callers that need a fully-resolved cwd
+// (e.g. tests asserting that `relative` produces a clean relative path).
+export function resolveCwd(req: Request): string {
+  return resolve(ctx(req).cwd);
+}
