@@ -68,18 +68,7 @@ import {
 // on GrowthBook initialization. Values may be stale but are updated in background.
 
 import { errorMessage, getErrnoCode } from '../../utils/errors.js'
-import {
-  getDynamicConfig_CACHED_MAY_BE_STALE,
-  getFeatureValue_CACHED_MAY_BE_STALE,
-} from '../analytics/growthbook.js'
-
-/**
- * Check if session memory feature is enabled.
- * Uses cached gate value - returns immediately without blocking.
- */
-function isSessionMemoryGateEnabled(): boolean {
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_session_memory', false)
-}
+import { getDynamicConfig_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 
 /**
  * Get session memory config from cache.
@@ -267,9 +256,6 @@ const initSessionMemoryConfigIfNeeded = memoize((): void => {
 /**
  * Session memory post-sampling hook that extracts and updates session notes
  */
-// Track if we've logged the gate check failure this session (to avoid spam)
-let hasLoggedGateFailure = false
-
 const extractSessionMemory = sequential(async function (
   context: REPLHookContext,
 ): Promise<void> {
@@ -278,16 +264,6 @@ const extractSessionMemory = sequential(async function (
   // Only run session memory on main REPL thread
   if (querySource !== 'repl_main_thread') {
     // Don't log this - it's expected for subagents, teammates, etc.
-    return
-  }
-
-  // Check gate lazily when hook runs (cached, non-blocking)
-  if (!isSessionMemoryGateEnabled()) {
-    // Log gate failure once per session (internal-only)
-    if (process.env.USER_TYPE === 'ant' && !hasLoggedGateFailure) {
-      hasLoggedGateFailure = true
-      logEvent('tengu_session_memory_gate_disabled', {})
-    }
     return
   }
 
