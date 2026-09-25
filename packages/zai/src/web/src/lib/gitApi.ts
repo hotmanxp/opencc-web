@@ -1,193 +1,259 @@
+/**
+ * Git API client — thin wrapper over `POST /api/git` (single-endpoint with
+ * action dispatch). All public methods preserve the legacy signatures that
+ * BranchSelector, MobileQuickDrawer, and the review panel rely on so the
+ * downstream consumers don't need to change alongside this rewrite.
+ */
 import { api } from './api.js';
-import type { SseEvent } from '../../../shared/types.js';
 import type {
-  GitBranchesResult,
   GitBranch,
+  GitBranchesResult,
+  GitBranchEntry,
+  GitLogEntry,
   GitRevertResult,
+  GitStatus,
+  GitStatusEntry,
+  GitStatusResult,
   GitSwitchResult,
+  GitWorktree,
 } from '../../../shared/git.js';
 
-/**
- * /exec 走 SSE 协议: 每个 event 是 `data: {...}\n\n`. 这里提取所有 stdout
- * 行(返回时拼成单字符串)并跟踪 exit code. 与 Dashboard.tsx 的
- * runNpmConfigSet 模式一致 — 把那个示例搬过来扩成可复用 helper.
- *
- * 该函数不消费网络层以外的依赖, 既给 gitApi.listBranches / switchBranch
- * 用, 也可被其他 /exec 调用复用 (e.g. npm run、yarn install).
- */
-async function runExecAndCollect(opts: {
-  cmd: string;
-  args: string[];
-  cwd: string;
-  timeout?: number;
-}): Promise<{ code: number; stdout: string; stderr: string; errorMessage?: string }> {
-  const res = await fetch('/api/exec', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(opts),
-  });
-  if (!res.ok || !res.body) {
-    const body = await res.text().catch(() => res.statusText);
-    throw new Error(`HTTP ${res.status}: ${body}`);
+/** Internal: post a body and unwrap the `{ ok, ...data }` envelope into
+ *  a discriminated `{ ok: true } | { ok: false, error }` union. */
+async function post<T>(body: Record<string, unknown>): Promise<{
+  ok: boolean;
+  data?: T;
+  error?: string;
+}> {
+  try {
+    const res = await api.post<{ ok: boolean; error?: string } & Record<string, unknown>>(
+      '/git',
+      body,
+    );
+    if (res.ok) return { ok: true, data: res as T };
+    return { ok: false, error: res.error ?? '未知错误' };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  const stdoutLines: string[] = [];
-  const stderrLines: string[] = [];
-  let code = -1;
-  let errorMessage: string | undefined;
-
-  while (true) {
-    const { done, value: chunk } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(chunk, { stream: true });
-    let idx;
-    while ((idx = buffer.indexOf('\n\n')) >= 0) {
-      const block = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
-      const dataLine = block.split('\n').find((l) => l.startsWith('data: '));
-      if (!dataLine) continue;
-      try {
-        const ev = JSON.parse(dataLine.slice(6)) as SseEvent;
-        if (ev.type === 'stdout' && ev.line !== undefined) stdoutLines.push(ev.line);
-        else if (ev.type === 'stderr' && ev.line !== undefined) stderrLines.push(ev.line);
-        else if (ev.type === 'exit') code = ev.code ?? -1;
-        else if (ev.type === 'error' && ev.message) errorMessage = ev.message;
-        else if (ev.type === 'start') {
-          /* 忽略命令起始事件; 诊断 UI 不需要 */
-        }
-      } catch {
-        /* 中途解析失败忽略, 已收集的内容继续 */
-      }
-    }
-  }
-
-  return {
-    code,
-    stdout: stdoutLines.join('\n'),
-    stderr: stderrLines.join('\n'),
-    ...(errorMessage !== undefined ? { errorMessage } : {}),
-  };
-}
-
-/**
- * 解析 `git for-each-ref` 输出.
- *
- * 命令格式:
- *   git for-each-ref --format='%(HEAD)%00%(refname:short)%00%(objecttype)' refs/heads refs/remotes
- *
- * 每行三列 (tab 分隔), 由 %00 注入避免 refname 中的特殊字符干扰:
- *   - "*" 表示当前 HEAD 所在分支
- *   - " " 表示其他
- *   - 第三列 objecttype 用于本地/远程区分 ("commit" 表示本地 branch;
- *     远程 ref 我们用 refs/remotes 路径, 自行推断 isRemote)
- */
-function parseBranchLines(stdout: string): GitBranch[] {
-  const lines = stdout.split('\n').filter(Boolean);
-  const out: GitBranch[] = [];
-  for (const line of lines) {
-    const [head, refname, _type] = line.split('\0');
-    if (!refname) continue;
-    // refs/remotes/origin/main -> name "origin/main", isRemote:true
-    // refs/heads/main          -> name "main",         isRemote:false
-    if (refname.startsWith('refs/remotes/')) {
-      out.push({
-        name: refname.slice('refs/remotes/'.length),
-        isCurrent: head === '*',
-        isRemote: true,
-      });
-    } else if (refname.startsWith('refs/heads/')) {
-      out.push({
-        name: refname.slice('refs/heads/'.length),
-        isCurrent: head === '*',
-        isRemote: false,
-      });
-    }
-  }
-  return out;
 }
 
 export const gitApi = {
-  revertFile: (path: string): Promise<GitRevertResult> =>
-    api.post<GitRevertResult>('/git/revert', { path }),
-
-  /**
-   * 列当前 cwd 下的所有分支 (本地 + 远程).
-   * 调用通用 /exec (`git` 已在白名单), 不走 git.ts 专属 endpoint —
-   * 保持"通用命令执行接口"原则, 分支列表只是其中一个用例.
-   */
-  listBranches: async (cwd: string): Promise<GitBranchesResult> => {
-    try {
-      const { code, stdout, stderr, errorMessage } = await runExecAndCollect({
-        cmd: 'git',
-        args: [
-          'for-each-ref',
-          // %00 = NUL, 作为 %HEAD / refname:short / 占位列分隔符.
-          '--format=%(HEAD)%00%(refname)%00%(objecttype)',
-          'refs/heads',
-          'refs/remotes',
-        ],
-        cwd,
-        timeout: 5000,
-      });
-      // exit 128 + "fatal: not a git repository" — cwd 不在仓库内.
-      if (code !== 0) {
-        const errText =
-          (stderr.trim().split('\n')[0] ?? '').trim() ||
-          errorMessage ||
-          `git exit ${code}`;
-        return { ok: false, error: errText };
-      }
-      const branches = parseBranchLines(stdout);
-      // 当前 HEAD 可能在 detached state (e.g. 用户检出 commit).
-      // 此时 refname 会出现 "HEAD" 条目, 过滤掉避免 UI 显示噪音.
-      const filtered = branches.filter((b) => b.name !== 'HEAD');
-      return { ok: true, branches: filtered };
-    } catch (err) {
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
+  /** Single-file revert (untracked → unlink, tracked → checkout). */
+  revertFile: async (path: string): Promise<GitRevertResult> => {
+    const res = await post<{ isUntracked: boolean }>({
+      action: 'revert',
+      path,
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, isUntracked: res.data?.isUntracked ?? false };
   },
 
-  /**
-   * 切换分支. 走 /exec 跑 `git checkout <name>`. 服务端不需要额外 endpoint —
-   * 切换成功后, 已有的 startBranchChecker (10s 间隔) 会检测到新分支并 emit
-   * `branch.changed` 事件, 前端 store 自动更新. 用户想立刻看到新分支名
-   * 的话, 切完后 refetch `/api/system` / 等下一次 SSE 推送.
-   */
-  switchBranch: async (cwd: string, name: string): Promise<GitSwitchResult> => {
-    try {
-      const { code, stdout, stderr } = await runExecAndCollect({
-        cmd: 'git',
-        args: ['checkout', name],
-        cwd,
-        timeout: 10_000,
-      });
-      if (code === 0) {
-        // `git checkout` 成功时 stdout 形如 "Switched to branch 'main'" 或
-        // "Switched to a new branch 'feature/x'" / "Your branch is up to
-        // date...". 取引号里的分支名作为回执 — 跨分支名含特殊字符时
-        // 仍稳定.
-        const match = stdout.match(/Switched to (?:a new )?branch ['"]([^'"]+)['"]/);
-        return {
-          ok: true,
-          branch: match?.[1] ?? name,
-        };
-      }
-      const errLine = stderr.trim().split('\n').find((l) => l.trim()) ?? '';
-      return {
-        ok: false,
-        error: errLine || `git checkout exit ${code}`,
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
+  /** List all branches (local + remote) for `cwd`. */
+  listBranches: async (cwd: string): Promise<GitBranchesResult> => {
+    const res = await post<{
+      branches: Array<{
+        name: string;
+        current: boolean;
+        isRemote: boolean;
+        upstream?: string;
+        ahead?: number;
+        behind?: number;
+      }>;
+    }>({ action: 'branches', cwd });
+    if (!res.ok) return { ok: false, error: res.error };
+    // Adapt the richer `GitBranchEntry` to the legacy `GitBranch` shape
+    // that BranchSelector still consumes (name / isCurrent / isRemote).
+    const branches: GitBranch[] = (res.data?.branches ?? []).map((b) => ({
+      name: b.name,
+      isCurrent: b.current,
+      isRemote: b.isRemote,
+    }));
+    // Detached state: refname can be the literal "HEAD" — filter it so the
+    // selector doesn't show a misleading entry. (Server side already filters
+    // HEAD out for legacy endpoints; keep this defensive belt here too.)
+    const filtered = branches.filter((b) => b.name !== 'HEAD');
+    return { ok: true, branches: filtered };
+  },
+
+  /** Rich branch list (with ahead/behind) — for `GitReviewPanel` branches tab. */
+  listBranchesRich: async (
+    cwd: string,
+  ): Promise<{
+    ok: boolean;
+    branches: GitBranchEntry[];
+    error?: string;
+  }> => {
+    const res = await post<{ branches: GitBranchEntry[] }>({ action: 'branches', cwd });
+    if (!res.ok) return { ok: false, branches: [], error: res.error };
+    const branches = (res.data?.branches ?? []).filter((b) => b.name !== 'HEAD');
+    return { ok: true, branches };
+  },
+
+  /** Rich status snapshot (with two-letter `xy` + truncated flag) — for the
+   *  new review panel. The legacy `status()` method collapses to the
+   *  one-letter `GitStatusChar` and is preserved for old consumers. */
+  fetchStatusRich: async (
+    cwd: string,
+  ): Promise<{
+    entries: GitStatusEntry[];
+    truncated: boolean;
+    branch: string | null;
+    repositories: string[];
+  }> => {
+    const res = await post<{
+      branch: string | null;
+      entries: GitStatusEntry[];
+      truncated: boolean;
+      root: string | null;
+      repositories: string[];
+    }>({ action: 'status', cwd });
+    if (!res.ok) {
+      return { entries: [], truncated: false, branch: null, repositories: [] };
     }
+    return {
+      entries: res.data?.entries ?? [],
+      truncated: res.data?.truncated ?? false,
+      branch: res.data?.branch ?? null,
+      repositories: res.data?.repositories ?? [],
+    };
+  },
+
+  /** Switch to an existing branch. */
+  switchBranch: async (cwd: string, name: string): Promise<GitSwitchResult> => {
+    const res = await post<{ branch: string | null }>({
+      action: 'checkout',
+      cwd,
+      branch: name,
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, branch: res.data?.branch ?? name };
+  },
+
+  /** Probe whether `cwd` is inside any git worktree. */
+  isRepo: async (cwd: string): Promise<boolean> => {
+    const res = await post<{ isRepo: boolean }>({ action: 'is-repo', cwd });
+    return res.ok ? (res.data?.isRepo ?? false) : false;
+  },
+
+  /** Full status snapshot (legacy `GitStatus` shape — for any remaining
+   *  consumer that needs the `files` list directly). New code should use
+   *  `useGitReview` which exposes the richer `GitStatusEntry` rows. */
+  status: async (cwd: string): Promise<GitStatus> => {
+    const res = await post<GitStatusResult>({ action: 'status', cwd });
+    if (!res.ok) return { ok: false, error: res.error };
+    const files = (res.data?.entries ?? []).map((e) => ({
+      // Collapse the two-letter `xy` to a single status char compatible with
+      // `GitStatusChar`. Prefer unstaged (worktree column), fall back to staged.
+      path: e.path,
+      status: xyToStatusChar(e.xy),
+      staged: e.staged,
+    }));
+    return {
+      ok: true,
+      branch: res.data?.branch ?? null,
+      files,
+    };
+  },
+
+  /** Diff for one path. `staged:true` reads from the index. */
+  diff: async (
+    cwd: string,
+    path: string,
+    options?: { staged?: boolean },
+  ): Promise<{ ok: boolean; diff?: string; isUntracked?: boolean; error?: string }> => {
+    const res = await post<{ diff: string; isUntracked: boolean }>({
+      action: 'diff',
+      cwd,
+      path,
+      staged: options?.staged ?? false,
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+    return {
+      ok: true,
+      diff: res.data?.diff ?? '',
+      isUntracked: res.data?.isUntracked ?? false,
+    };
+  },
+
+  /** Stage a path. */
+  stage: async (cwd: string, path: string): Promise<{ ok: boolean; error?: string }> => {
+    const res = await post({ action: 'stage', cwd, path });
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
+  },
+
+  /** Unstage a path. */
+  unstage: async (cwd: string, path: string): Promise<{ ok: boolean; error?: string }> => {
+    const res = await post({ action: 'unstage', cwd, path });
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
+  },
+
+  /** Commit the staged changes with a message. */
+  commit: async (
+    cwd: string,
+    message: string,
+  ): Promise<{ ok: boolean; branch?: string | null; error?: string }> => {
+    const res = await post<{ branch: string | null }>({ action: 'commit', cwd, message });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, branch: res.data?.branch ?? null };
+  },
+
+  /** List worktrees for `cwd`'s repo. */
+  worktrees: async (cwd: string): Promise<{ ok: boolean; worktrees?: GitWorktree[]; error?: string }> => {
+    const res = await post<{ worktrees: GitWorktree[] }>({ action: 'worktrees', cwd });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, worktrees: res.data?.worktrees ?? [] };
+  },
+
+  /** Resolve a worktree path against the authoritative list (anti-escape). */
+  resolveWorktree: async (
+    cwd: string,
+    requested: string,
+  ): Promise<{ ok: boolean; path?: string; error?: string }> => {
+    const res = await post<{ path: string }>({ action: 'resolve-worktree', cwd, requested });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, path: res.data?.path };
+  },
+
+  /** Commit log (paginated). */
+  log: async (
+    cwd: string,
+    options?: { count?: number; skip?: number },
+  ): Promise<{ ok: boolean; entries?: import('../../../shared/git.js').GitLogEntry[]; error?: string }> => {
+    const res = await post<{ entries: import('../../../shared/git.js').GitLogEntry[] }>({
+      action: 'log',
+      cwd,
+      count: options?.count,
+      skip: options?.skip,
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, entries: res.data?.entries ?? [] };
+  },
+
+  /** Diff for a single commit hash. */
+  commitDiff: async (
+    cwd: string,
+    hash: string,
+  ): Promise<{ ok: boolean; diff?: string; error?: string }> => {
+    const res = await post<{ diff: string }>({ action: 'commit-diff', cwd, hash });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, diff: res.data?.diff ?? '' };
   },
 };
+
+/** Collapse a porcelain v1 `XY` pair to the single status char the legacy UI
+ *  consumes. Unstaged column takes priority (matches route/git.ts mapStatus). */
+function xyToStatusChar(xy: string): 'M' | 'A' | 'D' | '??' {
+  const unstaged = xy[1] ?? ' ';
+  const staged = xy[0] ?? ' ';
+  if (unstaged === '?') return '??';
+  if (unstaged !== ' ') {
+    if (unstaged === 'M') return 'M';
+    if (unstaged === 'A') return 'A';
+    if (unstaged === 'D') return 'D';
+    return 'M';
+  }
+  if (staged === 'M') return 'M';
+  if (staged === 'A') return 'A';
+  if (staged === 'D') return 'D';
+  return 'M';
+}
