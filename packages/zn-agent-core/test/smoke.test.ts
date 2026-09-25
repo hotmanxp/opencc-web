@@ -21,8 +21,10 @@ const pkgPath = join(__dirname, '..', 'package.json')
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version: string }
 
 describe('zn-agent-core smoke', () => {
-  it('package version matches expected', () => {
-    expect(pkg.version).toBe('0.7.0')
+  // 断言 semver 形状而非精确值:release.mjs 每次发版只 lockstep 改各包
+  // package.json,不会同步这里的字面量 —— 写死具体版本会在下次发版后立刻失败。
+  it('package version is a semver string', () => {
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/)
   })
   it('compat/permissions exports EXTERNAL_PERMISSION_MODES', () => {
     expect(EXTERNAL_PERMISSION_MODES).toBeDefined()
