@@ -272,12 +272,19 @@ async function fileEditCall(
 /**
  * 把 AskUserQuestion 的答复格式化成给模型的 tool_result 字符串。
  *
- * 模型看到的就是这段文本 (extractToolOutput 把它塞进 tool_result.content),
- * 之后会进 context 当成 user feedback 用. 单 question 直接打 `q? -> a`,
- * 多 question 每行一条 (opencc 同时支持 1-4 questions).
+ * **必须与 vendor `AskUserQuestionTool.tsx` 的
+ * `mapToolResultToToolResultBlockParam` 逐字对齐** —— 模型是按那个契约
+ * 训练的:它靠 `User has answered your questions: "q"="a". ...` 这层框架
+ * 判定"用户确实答了这题"。
+ *
+ * zai shim 早期自造的是裸行 `q? -> a`:没有框架,问题文本本身以 `?` 结尾
+ * 时还会打出 `??`。自由文本答案(Other / 自定义输入)不在 options 里,
+ * 配上这行残缺文本,模型会读成"格式坏掉 / 工具拒收了这个答案",于是回头
+ * 告诉用户「工具只接受预设选项,不能自由输入」—— 用户实际看到的就成了
+ * "工具调用错误"。改用 vendor 格式后,自由文本同样是合法的 `"q"="a"`。
  *
  * answer 值可能是 string (单选), array (多选, opencc 用 `, ` 拼),
- * 或任意 JSON. 统一序列化: 单选走 `q? -> label`, 复选走 `q? -> [a, b]`.
+ * 或任意 JSON。
  */
 function formatAskAnswer(
   input: z.infer<typeof AskUserQuestionInput>,
@@ -285,15 +292,16 @@ function formatAskAnswer(
 ): string {
   const render = (raw: unknown): string => {
     if (typeof raw === 'string') return raw
-    if (Array.isArray(raw)) return `[${raw.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ')}]`
+    if (Array.isArray(raw)) return raw.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ')
     if (raw == null) return '(no answer)'
     return JSON.stringify(raw)
   }
-  const lines: string[] = []
+  const parts: string[] = []
   for (const q of input.questions) {
-    lines.push(`${q.question}? -> ${render(answers[q.question])}`)
+    parts.push(`"${q.question}"="${render(answers[q.question])}"`)
   }
-  return lines.length > 0 ? lines.join('\n') : JSON.stringify(answers)
+  const answersText = parts.length > 0 ? parts.join(', ') : JSON.stringify(answers)
+  return `User has answered your questions: ${answersText}. You can now continue with the user's answers in mind.`
 }
 
 async function askUserQuestionCall(
