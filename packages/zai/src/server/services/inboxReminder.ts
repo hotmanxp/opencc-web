@@ -117,15 +117,37 @@ function renderUserMessageBlock(msg: InboxMessage): string {
     platform ? `platform="${escapeAttr(platform)}"` : '',
     chatType ? `chat-type="${escapeAttr(chatType)}"` : '',
   ].filter(Boolean).join(' ')
-  return (
-    `<user-message${attrs ? ' ' + attrs : ''}>\n` +
-    'The user sent you this message and is waiting for a reply.\n' +
-    'Address it in this turn:\n' +
-    '\n' +
-    truncateForReminder(msg.content) +
-    '\n' +
-    '</user-message>'
-  )
+
+  const lines = [
+    `<user-message${attrs ? ' ' + attrs : ''}>`,
+    'The user sent you this message and is waiting for a reply.',
+    'Address it in this turn:',
+    '',
+  ]
+
+  // zai patch (2026-09-26, weixin-busy-truncation fix): `content` is the FULL
+  // renderWeixinPrompt payload — persona + <weixin-env> clock (~187 chars) +
+  // <weixin-memory> + <weixin-message> tag (~80 chars) + the user's text. The
+  // text lands past ~270 chars, i.e. beyond any small head-only budget, so an
+  // inbound WeChat message could reach the model with its actual words cut
+  // off (live: model answered "没看到内容,消息好像没发出来"). Lead with
+  // `displayText` (the user's own words — always set on weixin messages) so
+  // the text is guaranteed visible, then keep the full content underneath for
+  // the context displayText does NOT carry: the env clock (cron anchors),
+  // weixin-memory, and media paths — a busy-path image message only records
+  // its path in `content`, so dropping it would leave the model unable to
+  // Read the attachment.
+  const displayText = typeof msg.displayText === 'string' ? msg.displayText.trim() : ''
+  if (displayText.length > 0 && msg.content !== displayText) {
+    lines.push(truncateForReminder(displayText))
+    lines.push('')
+    lines.push('[full message context]')
+    lines.push(truncateForReminder(msg.content))
+  } else {
+    lines.push(truncateForReminder(msg.content))
+  }
+  lines.push('</user-message>')
+  return lines.join('\n')
 }
 
 function escapeAttr(s: string): string {
@@ -279,15 +301,27 @@ export function renderParsedTaskNotification(p: ParsedTaskNotification): string 
 
 /**
  * Bound a long content field so the reminder block stays small.
- * 200 chars mirrors the LLM-attention budget for one bullet; we add
- * an ellipsis when truncated.
+ *
+ * zai patch (2026-09-26, weixin-busy-truncation fix): raised 200 → 10_000 and
+ * switched head-only to head+tail. The old 200-char budget was sized for a
+ * single ASCII bullet, but `renderUserMessageBlock` feeds it a whole
+ * renderWeixinPrompt payload; the fixed clock header alone is ~187 chars, so
+ * an inbound WeChat message's text sat past the cut and reached the model as
+ * nothing. Head+tail mirrors the vendor rationale in
+ * `opencc-src/components/messages/UserPromptMessage.tsx:27-29`: the meaningful
+ * line often lives at the END of a long blob.
  */
-const REMINDER_CONTENT_MAX = 200
+const REMINDER_CONTENT_MAX = 10_000
+const REMINDER_TRUNCATE_HEAD = 2_500
+const REMINDER_TRUNCATE_TAIL = 2_500
 
 function truncateForReminder(content: string): string {
   const collapsed = collapseWhitespace(content)
   if (collapsed.length <= REMINDER_CONTENT_MAX) return collapsed
-  return collapsed.slice(0, REMINDER_CONTENT_MAX) + '...'
+  const head = collapsed.slice(0, REMINDER_TRUNCATE_HEAD)
+  const tail = collapsed.slice(-REMINDER_TRUNCATE_TAIL)
+  const omitted = collapsed.length - head.length - tail.length
+  return `${head} ... [${omitted} chars omitted] ... ${tail}`
 }
 
 /** Collapse internal whitespace runs into single spaces and trim. */
