@@ -53,7 +53,7 @@ function buildAnthropicInputSchema(zodSchema: Parameters<typeof zodToJsonSchema>
 export interface ClaudeProviderProfile {
   id: string
   name: string
-  provider: 'anthropic' | 'openai' | string
+  provider: 'anthropic' | 'openai' | 'workbuddy' | string
   baseUrl: string
   model: string
   apiKey?: string
@@ -147,6 +147,55 @@ function credentialFingerprint(value: string): string {
 }
 
 /**
+ * zai patch: WorkBuddy credential shape (mirrors routes/voice.ts:
+ * WorkBuddyAsrCredential). Returned by fetchWorkBuddyCredential().
+ */
+interface WorkBuddyCredential {
+  accessToken: string
+  uid: string
+  nickname: string
+  expiresAt: number | null
+}
+
+/**
+ * zai patch: read WorkBuddy access token + uid from the local desktop
+ * app's auth file via our own `/api/voice/getASRToken` endpoint.
+ *
+ * The WorkBuddy access token is short-lived (3 days) and rotates on
+ * refresh — the desktop app keeps the auth file fresh, so we always
+ * re-read instead of caching. Network is loopback (unix socket or
+ * localhost:7715); failure means WorkBuddy isn't logged in.
+ */
+async function fetchWorkBuddyCredential(): Promise<WorkBuddyCredential | null> {
+  const port = Number(process.env.ZAI_PORT ?? 7715)
+  const host = process.env.ZAI_HOST ?? '127.0.0.1'
+  try {
+    const res = await fetch(`http://${host}:${port}/api/voice/getASRToken`, {
+      signal: AbortSignal.timeout(2000),
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as {
+      ok?: boolean
+      accessToken?: unknown
+      uid?: unknown
+      nickname?: unknown
+      expiresAt?: unknown
+    }
+    if (!data.ok || typeof data.accessToken !== 'string' || typeof data.uid !== 'string') {
+      return null
+    }
+    return {
+      accessToken: data.accessToken,
+      uid: data.uid,
+      nickname: typeof data.nickname === 'string' ? data.nickname : '',
+      expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Pick the right provider profile (if any) for the requested model.
  * Returns { baseURL, apiKey } from ~/.zai.json's providerProfiles when the
  * model is hosted by a non-Anthropic profile (e.g. zhiniao-* on the Wizard AI
@@ -234,7 +283,7 @@ async function getAnthropicClientForModel(
   // Anthropic SDK. Cast to `Anthropic` is safe because the OpenAI client
   // duck-types the surface area modelCaller's for-await loop touches
   // (messages.create(...) → async iterable of RawMessageStreamEvent shape).
-  if (profile?.provider === 'openai') {
+  if (profile?.provider === 'openai' || profile?.provider === 'workbuddy') {
     // Lazy dynamic import keeps openaiClient out of the Anthropic-only
     // default load path. vitest's vi.mock('.../openaiClient.js') intercepts
     // dynamic imports too, so this is mockable in tests.
@@ -249,17 +298,53 @@ async function getAnthropicClientForModel(
       transport: 'fetch → POST {baseURL}/chat/completions (NOT Anthropic SDK)',
     })
     const mod = await import('./openaiClient.js')
+
+    // zai patch: WorkBuddy's copilot.tencent.com gateway requires Bearer
+    // (accessToken) + X-User-Id + X-Source. The token rotates on a 3-day
+    // cadence (refresh-token one-shot) so we re-fetch it each call instead
+    // of caching. The cached-client shortcut below is skipped by stamping
+    // a unique cache key.
+    let wbExtra: { apiKey: string; customHeaders: Record<string, string> } | null = null
+    if (profile.provider === 'workbuddy') {
+      const cred = await fetchWorkBuddyCredential()
+      if (!cred) {
+        throw new Error(
+          'WorkBuddy provider requires a local WorkBuddy desktop login. ' +
+          'No readable credential at /api/voice/getASRToken.',
+        )
+      }
+      wbExtra = {
+        apiKey: cred.accessToken,
+        customHeaders: {
+          'X-User-Id': cred.uid,
+          'X-Source': 'workbuddy-desktop',
+        },
+      }
+      logHttp(
+        `[zai.modelCaller] client.workbuddy uid=${cred.uid} baseURL=${profile.baseUrl} model=${model ?? ''}`,
+        'debug',
+      )
+    }
+
+    // WorkBuddy's copilot.tencent.com gateway is case-sensitive on model
+    // names ("GLM-5.3-Flash" → 404, "glm-5.3-flash" → 200). Mobile UI shows
+    // CapitalCase labels; force lowercase before forwarding for workbuddy.
+    const effectiveModel = wbExtra ? (model ?? '').toLowerCase() : (model ?? '')
+
     logHttp(
-      `[zai.modelCaller] client.openai profile=${profile.id} baseURL=${profile.baseUrl} model=${model ?? ''}`,
+      `[zai.modelCaller] client.openai profile=${profile.id} baseURL=${profile.baseUrl} model=${effectiveModel}`,
       'debug',
     )
     _client = new mod.OpenAIClient({
       baseURL,
-      apiKey,
-      model: model ?? '',
+      apiKey: wbExtra?.apiKey ?? apiKey,
+      model: effectiveModel,
       extraParams: profile.extraParams,
+      customHeaders: wbExtra?.customHeaders,
     }) as unknown as Anthropic
-    _clientKey = cacheKey
+    // WorkBuddy tokens rotate; bypass the cached-client shortcut by keying
+    // off the current epoch millisecond so each call rebuilds.
+    _clientKey = wbExtra ? `workbuddy::${Date.now()}` : cacheKey
     return { client: _client, profile }
   }
 
