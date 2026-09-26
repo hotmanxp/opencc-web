@@ -68,3 +68,6 @@ var/
 docs/superpowers/plans/screenshots
 docs/superpowers/verification
 CONTEXT.md
+
+# vitest 4 在 config-copy 模式下自动生成的 child config 副本
+**/vitest.config.ts.timestamp-*.mjs
