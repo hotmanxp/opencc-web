@@ -336,16 +336,32 @@ export class RuntimeRegistry {
   }
 
   /**
-   * Session-scoped capabilities, in the same `ProtocolCapabilitySet`
+   * The capability set for one session, in the same `ProtocolCapabilitySet`
    * shape. `session.capabilities` must answer with THIS shape, not a
    * flat `{session_send_message: true}` map: the server validates it as
    * ProtocolCapabilitySet and — more importantly — uses it to decide
-   * whether `session.send_message` is admitted at all.
+   * whether an action is admitted at all.
+   *
+   * The response must carry the FULL inherited set, runtime-scope entries
+   * included. `session_run.py::_require_session_capability` runs
+   * `derive_session_effective_capabilities` over exactly what we return
+   * and refuses the action when an id is missing
+   * (`SessionRunConflictError: session capability is unavailable`).
+   * That derivation only consults the four group keys
+   * (runtime, scope, sessionId, runtimeId) — so filtering the response
+   * down to `scope === 'session'` silently drops
+   * `session.interaction.approval` (declared runtime-scope), the notice
+   * card renders with its options and 提交 button greyed out, and a
+   * response would be rejected server-side even if the client allowed it.
+   *
+   * Session-scope entries are stamped with `sessionId` because
+   * `SessionCapabilityIndex.__init__` drops session-scope capabilities
+   * whose `sessionId` is not this session's.
    */
   capabilitiesForSession(sessionId: string): RuntimeCapability[] {
-    return this.capabilitiesFor(this.anyMapping())
-      .filter((c) => c.scope === 'session')
-      .map((c) => ({ ...c, sessionId }));
+    return this.capabilitiesFor(this.anyMapping()).map((c) =>
+      c.scope === 'session' ? { ...c, sessionId } : c,
+    );
   }
 
   private anyMapping(): RuntimeMapping {

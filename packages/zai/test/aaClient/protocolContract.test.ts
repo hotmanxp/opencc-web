@@ -86,6 +86,32 @@ describe('capability projection', () => {
   });
 });
 
+describe('session.capabilities admission', () => {
+  it('returns the full inherited set, not just the session-scope entries', () => {
+    // session_run.py::_require_session_capability derives the effective set
+    // from exactly this response and refuses any action whose id is missing.
+    // Answering with session-scope entries only dropped
+    // session.interaction.approval, which left the notice card's options and
+    // 提交 button disabled and would have the server reject the response.
+    const { conn } = fakeConn();
+    const registry = new RuntimeRegistry(conn as never);
+    const caps = registry.capabilitiesForSession('sess-aa-1');
+    const byId = new Map(caps.map((c) => [c.capabilityId, c]));
+
+    for (const id of [
+      'session.send_message',
+      'session.interaction.approval',
+      'notice.input_request',
+    ]) {
+      expect(byId.has(id), `session.capabilities must advertise ${id}`).toBe(true);
+    }
+    // Session-scope entries must be stamped, or the server's index drops them.
+    for (const cap of caps) {
+      if (cap.scope === 'session') expect(cap.sessionId).toBe('sess-aa-1');
+    }
+  });
+});
+
 describe('runtime.done', () => {
   it('finalises open streams from every turnIndex, not just the last one', async () => {
     // zai's turnIndex counts model messages within a user turn, and the
