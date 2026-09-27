@@ -657,22 +657,55 @@ export class ReverseDispatch {
    * If users routinely run 50+ children, add an index in T11.
    */
   private async resolveChildPort(aaSessionId: string): Promise<number> {
-    const mappings = this.registry.listAll();
+    // Cross-port aware. AA's sessionId is globally unique, but zai's
+    // session-map files persist across child-port reassignments (port
+    // number changes when zai restarts) — so a session that was created
+    // on port 9424 yesterday might now live on a fresh port 9432.
+    //
+    // Resolution strategy:
+    //   1. Find the port whose session-map-{oldport}.json contains
+    //      this aaSessionId (cross-port scan, returns the OLD port
+    //      where the mapping was originally written).
+    //   2. Return the LIVE port if any (the child process that's
+    //      actually running and owns the transcript files). The live
+    //      port is whichever runtime registry entry is currently
+    //      running — typically there's only one, but if there were
+    //      multiple, we'd need to forward-probe each. For the single-
+    //      child deployment model we currently use, picking the first
+    //      live port that answers health is enough.
+    //   3. If no live port exists at all (child is fully down), return
+    //      the dead port so the caller sees a 503 (vs. silent miss).
     const sessionMap = getSessionMap();
     if (!sessionMap) {
       throw new AaServerError('session map not initialized', 503, null);
     }
-    for (const mapping of mappings) {
-      const list = await sessionMap.listForPort(mapping.port);
-      for (const entry of list) {
-        if (entry.aaSessionId === aaSessionId) return mapping.port;
+    const livePorts = this.registry.listAll().map((m) => m.port);
+    if (livePorts.length === 0) {
+      throw new AaServerError('no live child instances', 503, null);
+    }
+
+    // Find the OLD port (where the mapping was written).
+    const allPorts = await sessionMap.allKnownPorts();
+    let ownerPort: number | null = null;
+    for (const port of allPorts) {
+      const list = await sessionMap.listForPort(port);
+      if (list.some((e) => e.aaSessionId === aaSessionId)) {
+        ownerPort = port;
+        break;
       }
     }
-    throw new AaServerError(
-      `no child owns AA session ${aaSessionId}`,
-      404,
-      null,
-    );
+    if (ownerPort === null) {
+      throw new AaServerError(
+        `no child owns AA session ${aaSessionId}`,
+        404,
+        null,
+      );
+    }
+    // Prefer the live port that matches the owner (happy path),
+    // otherwise any live port — transcripts are shared on disk so any
+    // child can serve the read.
+    if (livePorts.includes(ownerPort)) return ownerPort;
+    return livePorts[0];
   }
 
   /**

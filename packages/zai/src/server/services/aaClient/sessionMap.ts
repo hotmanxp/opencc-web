@@ -28,12 +28,13 @@
  *   - proper-lockfile not needed: in-process chain is sufficient because
  *     session creation is single-threaded (per-session lane in agentRuntime).
  */
-import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, unlink, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import {
   aaSessionMapPath,
+  aaSessionMapDir,
   ensureAaDir,
 } from '../paths.js';
 
@@ -104,19 +105,66 @@ export class SessionMap {
     this.loaded.add(port);
   }
 
-  /** Lookup the AA sessionId for a given zai session within a child port. */
+  /** Lookup the AA sessionId for a given zai session within a child port.
+   *
+   * Cross-port aware: scans the given port's file first (fast path), then
+   * falls back to scanning other ports' files. This matters because zai's
+   * child port can change across restarts (port reassigned by the OS), but
+   * session-map-{port}.json files persist — so a session that was created
+   * on port 9424 yesterday needs to be reachable from port 9430 today.
+   * zai sessionIds are globally unique (carry a `sess-` prefix + uuid), so
+   * cross-port collisions aren't a concern for read-only lookups. Writes
+   * (put/delete) still go to the explicit port. */
   async getAaSessionId(port: number, zaiSessionId: string): Promise<string | null> {
     await this.ensureLoaded(port);
-    const map = this.cache.get(port)!;
-    return map[zaiSessionId]?.aaSessionId ?? null;
+    const local = this.cache.get(port)![zaiSessionId]?.aaSessionId;
+    if (local) return local;
+    return this.scanOtherPorts((m) => m.zaiSessionId === zaiSessionId ? m.aaSessionId : null);
   }
 
-  /** Reverse lookup: find the zai session id from an AA session id (scanned). */
+  /** Reverse lookup: find the zai session id from an AA session id.
+   *
+   * Cross-port aware (see getAaSessionId for rationale). Scans the local
+   * port first, then every other loaded port's map. */
   async getZaiSessionId(port: number, aaSessionId: string): Promise<string | null> {
     await this.ensureLoaded(port);
-    const map = this.cache.get(port)!;
-    for (const [zaiSid, m] of Object.entries(map)) {
+    const localMap = this.cache.get(port)!;
+    for (const [zaiSid, m] of Object.entries(localMap)) {
       if (m.aaSessionId === aaSessionId) return zaiSid;
+    }
+    for (const [otherPort, otherMap] of this.cache.entries()) {
+      if (otherPort === port) continue;
+      for (const [zaiSid, m] of Object.entries(otherMap)) {
+        if (m.aaSessionId === aaSessionId) return zaiSid;
+      }
+    }
+    return null;
+  }
+
+  /** Helper: lazy-load and scan every port file other than `skip` looking
+   * for the first matching entry. Returns null on miss. */
+  private async scanOtherPorts(
+    pick: (m: import('./sessionMap.js').SessionMapping) => string | null,
+  ): Promise<string | null> {
+    // Walk every port file present on disk (cheap — each is a few KB).
+    const dir = aaSessionMapDir();
+    let entries: string[];
+    try {
+      entries = await readdir(dir);
+    } catch {
+      return null;
+    }
+    for (const name of entries) {
+      const match = name.match(/^session-map-(\d+)\.json$/);
+      if (!match) continue;
+      const otherPort = Number(match[1]);
+      await this.ensureLoaded(otherPort);
+      const otherMap = this.cache.get(otherPort);
+      if (!otherMap) continue;
+      for (const m of Object.values(otherMap)) {
+        const result = pick(m);
+        if (result) return result;
+      }
     }
     return null;
   }
@@ -145,6 +193,28 @@ export class SessionMap {
   async listForPort(port: number): Promise<SessionMapping[]> {
     await this.ensureLoaded(port);
     return Object.values(this.cache.get(port)!);
+  }
+
+  /** Return every port that has a session-map-{port}.json on disk.
+   * Used by `resolveChildPort` to scan beyond the live registry when
+   * the AA session was created on a now-defunct child (port reassigned
+   * after zai restart). Eagerly loads each file so the next read is fast. */
+  async allKnownPorts(): Promise<number[]> {
+    let entries: string[];
+    try {
+      entries = await readdir(aaSessionMapDir());
+    } catch {
+      return [];
+    }
+    const ports: number[] = [];
+    for (const name of entries) {
+      const match = name.match(/^session-map-(\d+)\.json$/);
+      if (!match) continue;
+      const port = Number(match[1]);
+      await this.ensureLoaded(port);
+      ports.push(port);
+    }
+    return ports;
   }
 
   /**

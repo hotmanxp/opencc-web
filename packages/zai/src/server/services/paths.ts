@@ -72,6 +72,9 @@ export function aaRuntimeMapPath(): string {
 export function aaSessionMapPath(childPort: number): string {
   return join(aaDir(), `session-map-${childPort}.json`);
 }
+export function aaSessionMapDir(): string {
+  return aaDir();
+}
 export function aaOutboxPath(childPort: number): string {
   return join(aaDir(), `outbox-${childPort}.jsonl`);
 }
