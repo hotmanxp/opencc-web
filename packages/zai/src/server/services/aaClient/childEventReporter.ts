@@ -22,6 +22,9 @@ import { isAaEnabled } from './index.js';
 
 const ROOT_URL = process.env.ZAI_AA_PARENT_URL ?? '';
 
+/** Per-attempt ceiling — a hung root must not pin the reporter forever. */
+const FORWARD_TIMEOUT_MS = 5_000;
+
 export class ChildEventReporter {
   private installed = false;
 
@@ -94,26 +97,38 @@ export class ChildEventReporter {
     };
     if (token) headers['X-Zai-Token'] = token;
 
-    let response: Response;
-    try {
-      response = await fetch(`${ROOT_URL}/api/internal/child-event`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          childPort: port,
-          type: event.type,
-          payload: stripInternalEnvelope(event),
-          emittedAt: new Date().toISOString(),
-        }),
-      });
-    } catch (err) {
-      // Network error — root may be down. Swallow; events aren't critical.
-      console.warn('[aa.childReporter] POST failed:', (err as Error).message);
-      return;
+    const body = JSON.stringify({
+      childPort: port,
+      type: event.type,
+      payload: stripInternalEnvelope(event),
+      emittedAt: new Date().toISOString(),
+    });
+
+    // Retry, because a dropped event is not always harmless. Losing
+    // `runtime.delta` costs a streaming update, but losing `runtime.done`
+    // leaves the AA session in `running` forever: the server never clears
+    // its active run, the client keeps "正在处理" and refuses the next
+    // message, and nothing re-sends the terminal event. A single failed
+    // POST used to be swallowed with only a warn — and since a supervised
+    // child runs detached, that warn lands in the child's own stdout, not
+    // in the root log, so the loss was invisible from the outside.
+    let lastFailure = 'unknown';
+    for (const delayMs of [0, 250, 1000]) {
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+      try {
+        const response = await fetch(`${ROOT_URL}/api/internal/child-event`, {
+          method: 'POST',
+          headers,
+          body,
+          signal: AbortSignal.timeout(FORWARD_TIMEOUT_MS),
+        });
+        if (response.ok) return;
+        lastFailure = `root returned ${response.status}`;
+      } catch (err) {
+        lastFailure = (err as Error).message;
+      }
     }
-    if (!response.ok) {
-      console.warn('[aa.childReporter] root returned', response.status);
-    }
+    console.warn('[aa.childReporter] forward failed after retries:', event.type, lastFailure);
   }
 }
 
