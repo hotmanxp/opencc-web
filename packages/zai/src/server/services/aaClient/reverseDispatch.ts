@@ -628,6 +628,16 @@ export class ReverseDispatch {
       if (!raw || typeof raw !== 'object') continue;
       const p = raw as AaProviderProfile;
       const caps = p.capabilities ?? {};
+      // A model the user configured but that has no `capabilities` entry
+      // (capabilities is hand-maintained metadata, so a newly added model
+      // is routinely missing — e.g. MiniMax-M3.1-Flash-Preview and
+      // M3.2-Flash-Preview) would otherwise get an empty reasoningItems
+      // list and render as a picker with no options. Providers are set up
+      // per model family, so when the rest of the profile declares
+      // reasoning support, treat the unlisted model the same way.
+      const profileSupportsReasoning = Object.values(caps).some(
+        (c) => c?.supportsReasoning === true,
+      );
       for (const modelId of profileModelIds(p)) {
         // Keyed by selectionId, not modelId: two custom providers can
         // legitimately offer the same model name, and collapsing them on
@@ -636,7 +646,7 @@ export class ReverseDispatch {
         if (seen.has(selectionId)) continue;
         seen.add(selectionId);
         const cap = caps[modelId];
-        const supportsReasoning = cap?.supportsReasoning === true;
+        const supportsReasoning = cap ? cap.supportsReasoning === true : profileSupportsReasoning;
         models.push({
           id: selectionId,
           selectionId,

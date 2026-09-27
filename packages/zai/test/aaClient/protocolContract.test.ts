@@ -408,9 +408,16 @@ describe('model catalog', () => {
     expect(ids).toContain('provider_mm::M3.2-Flash-Preview');
     // …and one model name offered by two providers stays two entries.
     expect(ids.filter((i) => i.endsWith('::MiniMax-M3'))).toHaveLength(2);
-    // Reasoning is offered only where the capability says so.
+    // A model with no capabilities entry inherits the profile's reasoning
+    // support, so a newly added model (MiniMax-M3.1-Flash-Preview) isn't
+    // stuck with an empty reasoningItems list.
     const dsFlash = models.find((m) => m.selectionId === 'provider_ds::deepseek-flash');
-    expect(dsFlash?.metadata.supportsReasoning).toBe(false);
+    expect(dsFlash?.metadata.supportsReasoning).toBe(true);
+    // qwen3.6-plus has no capabilities entry in this fixture either.
+    const dsConfigured = models.find(
+      (m) => m.selectionId === 'provider_ds::deepseek-flash',
+    );
+    expect((dsConfigured?.reasoningItems as unknown[])?.length).toBeGreaterThan(0);
 
     // Reasoning selectionIds must be scoped to their model. AA's client
     // sends the picked reasoning item in the MODEL scope
