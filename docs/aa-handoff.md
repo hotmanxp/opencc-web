@@ -605,3 +605,79 @@ env -u ZAI_INSTANCE_ID -u ZAI_SUPERVISOR_PID -u ZAI_PORT -u ZAI_TOKEN \
 按端口分文件,旧端口的映射就"失联"了(已用跨端口扫描兜住,见 §12.2)。
 调试时**别反复重启** —— 每重启一次端口就变一次,任何已经打开的 AA Web 页面
 拿到的都是过期状态。之前有一整轮排查是在跟这个幻影打架。
+
+---
+
+## 15. 第二轮契约修复(2026-09-27 晚 ~ 09-28 凌晨,读 AA 源码而非猜)
+
+§13 的契约表是**从 AA Web 的 JS bundle 反推**的,方向错了好几处。下面 7 条
+是直接读 `server/agent_server/**` 与 `android/**` 源码得到的,每条都对应一个
+"客户端表现异常但服务端不报错"的症状。**先读服务端白名单和官方参考实现,
+再动手** —— §16 记了为什么。
+
+| # | 症状 | 真实契约 | 位置 |
+|---|------|---------|------|
+| 1 | 回复冻结在空气泡 | connector→server 只收 `timeline.itemUpsert`;发 `item_created/updated` 不落库 → `updatedSeq` 不分配 → 客户端 `incomingTimelineItemCanReplace` 判 `undefined >= undefined` 为 false,首推后所有流式更新被拒 | `services/connector_notifications.py:750` |
+| 2 | 卡片选项与「提交」全灰 | `session.capabilities` 响应被过滤成只剩 session scope 三项,丢掉 runtime scope 的 `session.interaction.approval`;服务端 `read_session_capability_facts` 拿这份响应做准入 → `SessionRunConflictError` | `services/effective_capabilities.py`、`services/session_run.py::_require_session_capability` |
+| 3 | 提交后卡片里冒出 zod 报错 JSON | handler 按真实形状实现,`install()` 入口却仍用一张臆造的 `{toolUseId, decision}` schema parse;AA 从不下发这两个字段 | `api/sessions.py::respond_interaction` |
+| 4 | 目录标题显示 `~/~/code` | `displayRemotePath` 把不以 `/` 开头的路径渲染成 `"$root/$path"`,回显 `~/code` 就多一层。**但不能改成 root 相对** —— 选择器把返回值直接当已解析工作目录(`result.path` → `homePath`),`.` 会让目录不可选。只能回绝对路径 | `android/feature/files/RemoteFileNavigation.kt:112`、`ui/screens/home/NewSessionScreen.kt:453` |
+| 5 | 同一目录在工作目录列表裂成两条 | `/tmp` → `/private/tmp` 符号链接;选择器给用户点的写法,child 回报 `process.cwd()` 给真实路径,两种都存进 sessionMap。写入前 `realpath` 归一 | — |
+| 6 | 模型没收到图片 | `session.send_message` 的附件只带元数据 + `downloadUrl`,字节要 connector 用 bearer token 自己去取;而子进程 `pushAction` 的 `SendMessagePayloadSchema` 没有 `attachments` 字段,zod 默认 strip 直接丢掉 | `api/connector_ingress.py:449` |
+| 7 | 自定义 provider 的模型看不见 | `capabilities` 只是每模型元数据,用户配的模型写在 profile 的 `model` 字段(逗号分隔)。只枚举 `capabilities` 会漏掉全部"配了但没进能力表"的模型;`findProviderIdForModel` 同样只查 `capabilities` → 选中时算不出 `providerId` | `~/.zai.json` 的 `providerProfiles` |
+
+**回归锁**:`packages/zai/test/aaClient/protocolContract.test.ts` 逐条覆盖,
+每条都验证过"换回旧写法会红"。样式类改动不适用这条(见 AGENTS.md)。
+
+### 15.1 模型切换:已生效,但模型自报身份是旧值(仅记录,未修)
+
+在 AA 里改模型后,会话 meta 与后续 assistant 消息的 `model` 字段都已是新值
+(`MiniMax-M3.1-Flash-Preview`,`providerId` 也带上了),**实际调用确实换了**。
+但模型回答"我的系统身份标注为 MiniMax-M3" —— 它引用的是系统提示词里那行
+身份文案,那行在会话创建时定死,不会随 `PATCH /api/agent/sessions/:id` 刷新。
+
+判断依据(下次排查直接用,别再猜):
+
+```bash
+TOK=$(grep -o 'start token: [a-f0-9]*' /tmp/zai-aa.log | tail -1 | awk '{print $3}')
+curl -s -H "X-Zai-Token: $TOK" \
+  "http://127.0.0.1:9451/api/agent/sessions/sess-sess_XXXX" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin)['transcript']; \
+      print(d.get('meta',{}).get('model'), d.get('meta',{}).get('providerId'))"
+```
+
+`meta.model` 是权威值。**注意 `meta.model` 对不代表调用对了**:`modelCaller`
+的诊断行(`[zai.modelCaller] call model=… providerId=…`)是 `logHttp(..., 'debug')`,
+默认不输出,想看要开 debug 日志级别。
+
+要修的话是改 zai 自身的身份文案注入(不是 AA 适配层),本轮决定先不动。
+
+### 15.2 已知死代码:`portForRuntime` 里的 startInstance 兜底
+
+`f34ae402` 加的"端口没人监听就 `supervisor.startInstance`"在当前拓扑下
+**注定失败**:AA 的 RPC 跑在受管子进程里,`getInstanceSupervisor()` 报
+`instanceSupervisor not initialized`(supervisor 只存在于父进程 root)。
+它只会打 warn,拉不起实例。想自愈得设计一条 child→root 的"请 root 拉起实例"
+通路,属于新工作。
+
+### 15.3 harness 的进程拓扑(与 AGENTS.md 记的不完全一致)
+
+`pnpm start --aa --port 9398` 起来的是**两级**:`bun run dist/cli/index.js start`
+(root,不监听端口)+ 它 spawn 的 `zai[zai]:9398 … --managed-child`(持 9398 端口、
+持 AA WS 连接、持 runtime registry)。**AA 侧的 RPC 全部由这个 child 应答。**
+
+"AA Test Project" 实例(9451)本该由 root 的 supervisor 拉起,但
+`instances.json.statuses` 为空时它不会自动起。本轮是照
+`instanceSupervisor.ts::doStart` 的 spawn 配方手工拉起的,关键是:
+
+```bash
+ZAI_INSTANCE_ID=inst_24da77a7 ZAI_SUPERVISOR_PID=<root pid> \
+ZAI_AA_PARENT_URL=http://127.0.0.1:9398 ZAI_AA_PARENT_PORT=9398 \
+ZAI_DATA_DIR=/tmp/zai-aa-test ZAI_TOKEN=<token> \
+cd /Users/ethan/code/opencc-web && nohup bun \
+  /Users/ethan/code/opencc-web/packages/zai/dist/cli/index.js start \
+  --managed-child --port 9451 --no-open --aa >>/tmp/zai-aa.log 2>&1 &
+```
+
+`ZAI_AA_PARENT_URL` 指向**持 AA 连接的 9398**,不是 child 自己,否则事件会
+绕回自己的 Express(那里没有 registry)。手工拉起的进程 PPID=1,是已知
+harness 产物,不是故障。
