@@ -140,6 +140,21 @@ export class ReverseDispatch {
       // defines.
       return { runtimeTypes: this.runtimeDescriptors() };
     });
+    this.conn.onRequest('runtime.start', async (params) => {
+      // AA calls this when user activates a runtime instance via the
+      // web/mobile "Start" action. zai doesn't have separate per-runtime
+      // processes — the zai process IS the runtime. So we just acknowledge
+      // the start by reporting the runtime as "started" and tracking it
+      // in our local registry so subsequent RPCs (session.create, etc.)
+      // can find the runtime instance.
+      //
+      // Real session routing is handled by sessionMap (T5). runtime.start
+      // is just the activation handshake.
+      return this.handleRuntimeStart(params);
+    });
+    this.conn.onRequest('runtime.stop', async (params) => {
+      return this.handleRuntimeStop(params);
+    });
     this.conn.onRequest('session.send_message', async (params) => {
       const p = SendMessageParamsSchema.parse(params);
       return this.handleSendMessage(p);
@@ -159,6 +174,41 @@ export class ReverseDispatch {
   }
 
   // ─── Handlers ────────────────────────────────────────────────────────
+
+  private async handleRuntimeStart(params: unknown): Promise<unknown> {
+    // AA's WS layer flattens RuntimeStartParams before sending over WS:
+    //   { runtime: 'codex', runtimeId: 'rti_...', name, config, configRevision }
+    const p = (params ?? {}) as { runtimeId?: string };
+    const runtimeId = p?.runtimeId;
+    if (!runtimeId) {
+      throw new AaServerError('runtime.start: missing runtimeId', 400, null);
+    }
+    const port = this.portFromRuntime(runtimeId);
+    if (port !== null) {
+      console.log(`[aa.reverseDispatch] runtime.start: ${runtimeId} (port=${port})`);
+    }
+    return { runtimeId, status: 'started' };
+  }
+
+  private async handleRuntimeStop(params: unknown): Promise<unknown> {
+    // Same flat shape as runtime.start.
+    const p = (params ?? {}) as { runtimeId?: string };
+    const runtimeId = p?.runtimeId;
+    if (!runtimeId) {
+      throw new AaServerError('runtime.stop: missing runtimeId', 400, null);
+    }
+    return { runtimeId, status: 'stopped' };
+  }
+
+  private portFromRuntime(runtimeId: string): number | null {
+    const { getRuntimeRegistry } = require('./runtimeRegistry.js') as typeof import('./runtimeRegistry.js');
+    const reg = getRuntimeRegistry();
+    if (!reg) return null;
+    for (const m of reg.listAll()) {
+      if (m.runtimeId === runtimeId) return m.port;
+    }
+    return null;
+  }
 
   private async handleSendMessage(p: z.infer<typeof SendMessageParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
