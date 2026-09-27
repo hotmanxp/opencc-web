@@ -470,14 +470,45 @@ export class ReverseDispatch {
   private async portForRuntime(runtimeId: string | undefined): Promise<number | null> {
     if (runtimeId) {
       const port = await this.portFromRuntime(runtimeId);
-      if (port !== null) return port;
+      // Probe the listener even on a direct hit. The registry survives
+      // restarts (runtime-map.json on disk), so a mapping can name a port
+      // whose child is long gone — and a dead port reads as "no models"
+      // (`模型: 不可用`) rather than as an error.
+      if (port !== null && (await this.isPortListening(port))) return port;
     }
     // Fall back to the single live child.
     const mappings = this.registry.listAll();
     for (const m of [...mappings].reverse()) {
       if (m.port > 0 && (await this.isPortListening(m.port))) return m.port;
     }
+    // Nothing is listening: bring the instance back before answering, so
+    // the model picker isn't permanently empty. Same self-heal the 微信
+    // channel does via `supervisor.startInstance`.
+    await this.ensureSomeInstanceRunning();
+    for (const m of [...mappings].reverse()) {
+      if (m.port > 0 && (await this.isPortListening(m.port))) return m.port;
+    }
     return null;
+  }
+
+  /**
+   * Start a registered instance if none is live. Best-effort: a failure
+   * here just means the caller keeps reporting an empty catalogue, which
+   * is the behaviour we had before.
+   */
+  private async ensureSomeInstanceRunning(): Promise<void> {
+    const mapping = [...this.registry.listAll()].reverse().find((m) => m.instanceId);
+    if (!mapping) return;
+    try {
+      const { getInstanceSupervisor } = await import('../instanceSupervisor.js');
+      await getInstanceSupervisor().startInstance(mapping.instanceId);
+    } catch (err) {
+      console.warn(
+        '[aa.reverseDispatch] could not start instance',
+        mapping.instanceId,
+        (err as Error).message,
+      );
+    }
   }
 
   /** Read zai's configured provider profiles and project them onto AA's
