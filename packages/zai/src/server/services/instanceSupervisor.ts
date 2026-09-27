@@ -295,6 +295,12 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         //     （其余进程一律不碰通道，见 weixinDedicatedInstance.ts）。
         // 值域已在 `routes/instances.ts` 收窄；这里原样透传。
         if (entry.def.app) args.push('--app', entry.def.app)
+        // `--aa` 透传到 child:root 启用了 AA(从 process.env.ZAI_AA_ENABLED
+        // 读)时,child 也启 AA,这样 child 端 isAaEnabled() 返回 true,
+        // 才会向 root POST 事件(T4.5 childEventGateway)。
+        // root 不启用 → child 也不启用,事件全本地化,跟现状一致。
+        // 详见 docs/2026-09-27-zai-aa-integration.md §架构总览。
+        if (process.env.ZAI_AA_ENABLED === '1') args.push('--aa')
         // 进程标题:让 ps / top / macOS Activity Monitor 在 spawn 后立即
         // 显示 `zai[name]:port` 而不是 `node .../bin/zai.js`。`argv0` 改
         // `argv[0]`(Linux ps/macOS ps 列都从 argv[0] 起始读);`ZAI_PROCESS_TITLE`

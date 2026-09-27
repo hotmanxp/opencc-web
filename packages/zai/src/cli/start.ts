@@ -29,6 +29,13 @@ interface StartOptions {
    */
   app?: string;
   /**
+   * `--aa` — opt-in Agents Anywhere 桥。已在 `cli/index.ts` 落到
+   * `process.env.ZAI_AA_ENABLED`。受管子进程通过 env 继承(下面 childArgs
+   * 也显式加 `--aa` 作为 fallback,确保 commander 把 flag 也传给 child)。
+   * 详见 docs/2026-09-27-zai-aa-integration.md。
+   */
+  aa?: boolean;
+  /**
    * Force the managed/supervisor code path. When `undefined`, the decision
    * is taken from `process.env.ZAI_NO_MANAGED` (managed by default; set
    * `ZAI_NO_MANAGED=1` to opt out for tests or single-shot runs).
@@ -72,6 +79,10 @@ export async function runStart(options: StartOptions): Promise<void> {
     if (options.port) childArgs.push('--port', options.port)
     if (options.lan) childArgs.push('--lan')
     if (options.sdk) childArgs.push('--sdk')
+    // `--aa` 透传到 child:root 启用了 AA 时,child 也启用 AA,
+    // 这样 child 端 isAaEnabled() 返回 true,会向 root POST 事件。
+    // 详见 docs/2026-09-27-zai-aa-integration.md。
+    if (options.aa) childArgs.push('--aa')
     // Always pass --no-open to the child so it does not double-open the
     // browser — the user's `--open` request was already handled by the
     // supervisor's direct invocation, and we don't want a second tab.

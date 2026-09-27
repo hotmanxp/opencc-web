@@ -1,0 +1,186 @@
+/**
+ * AA v2 protocol frame schemas (JSON-RPC 2.0 style).
+ *
+ * AA uses three frame types on its /api/v2/connector/ws WebSocket:
+ *   - Request     : `{ type: 'request',     id, method, params }`         client → server (or server → client for AA → zai RPC)
+ *   - Response    : `{ type: 'response',    id, ok, result?, error? }`    reply to a Request
+ *   - Notification: `{ type: 'notification',       method, params }`       one-way, no id
+ *
+ * Note: AA's "response" frame uses `{ok, result}` / `{ok: false, error: {code, message}}`
+ * (see agent_server/infra/connector_rpc.py:send_response), which is NOT the
+ * standard JSON-RPC 2.0 `result`/`error` mutual-exclusion. zai side adapts
+ * to this shape — server-side code reads `ok` to decide which field to look at.
+ *
+ * This file is pure data shapes; no I/O. Use it to parse inbound frames and
+ * construct outbound ones. Validation failures here are bugs, not user input
+ * — the wire format is fixed by AA server.
+ */
+import { z } from 'zod';
+
+// ─── Common helpers ───────────────────────────────────────────────────────
+
+/**
+ * AA's runtime identifier literals. zai is added as a new value here for T4+
+ * when we register runtimes. Keep in sync with AA's
+ * `connector/server/protocol.py::RuntimeName`.
+ */
+export const RuntimeNameSchema = z.enum(['codex', 'claude', 'opencode', 'acp', 'dsh']);
+export type RuntimeName = z.infer<typeof RuntimeNameSchema>;
+
+/** Single character JSON-RPC protocol version. AA v2 uses "1.0". */
+export const PROTOCOL_VERSION_1 = '1.0' as const;
+
+// ─── Request frame (client → server, or server → client) ──────────────────
+
+export const RequestFrameSchema = z.object({
+  type: z.literal('request'),
+  id: z.string().min(1),
+  method: z.string().min(1),
+  params: z.unknown().optional(),
+});
+export type RequestFrame = z.infer<typeof RequestFrameSchema>;
+
+// ─── Response frame (reply to a Request) ──────────────────────────────────
+
+export const ResponseErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+});
+export type ResponseError = z.infer<typeof ResponseErrorSchema>;
+
+/**
+ * AA response shape: either `{ok: true, result}` or `{ok: false, error}`.
+ * Discriminated union on `ok` so callers get proper type narrowing.
+ */
+export const ResponseFrameSchema = z.union([
+  z.object({
+    type: z.literal('response'),
+    id: z.string().min(1),
+    ok: z.literal(true),
+    result: z.unknown(),
+    error: z.undefined().optional(),
+  }),
+  z.object({
+    type: z.literal('response'),
+    id: z.string().min(1),
+    ok: z.literal(false),
+    result: z.undefined().optional(),
+    error: ResponseErrorSchema,
+  }),
+]);
+export type ResponseFrame = z.infer<typeof ResponseFrameSchema>;
+
+// ─── Notification frame (no id, one-way) ─────────────────────────────────
+
+export const NotificationFrameSchema = z.object({
+  type: z.literal('notification'),
+  method: z.string().min(1),
+  params: z.unknown().optional(),
+});
+export type NotificationFrame = z.infer<typeof NotificationFrameSchema>;
+
+// ─── Discriminated union of all inbound frames ───────────────────────────
+
+export const InboundFrameSchema = z.union([
+  RequestFrameSchema,
+  ResponseFrameSchema,
+  NotificationFrameSchema,
+]);
+export type InboundFrame = z.infer<typeof InboundFrameSchema>;
+
+// ─── Outbound builders (typed, no `as any`) ──────────────────────────────
+
+/**
+ * Build a Request frame. `id` must be unique per concurrent request — use
+ * `generateRequestId()` from connection.ts for the standard monotonic pattern.
+ */
+export function buildRequest(id: string, method: string, params?: unknown): RequestFrame {
+  return { type: 'request', id, method, params };
+}
+
+/** Build a Response frame for the success case. */
+export function buildResponse(id: string, result: unknown): ResponseFrame {
+  return { type: 'response', id, ok: true, result };
+}
+
+/** Build a Response frame for the error case. */
+export function buildResponseError(id: string, code: string, message: string): ResponseFrame {
+  return { type: 'response', id, ok: false, error: { code, message } };
+}
+
+/** Build a Notification frame. */
+export function buildNotification(method: string, params?: unknown): NotificationFrame {
+  return { type: 'notification', method, params };
+}
+
+// ─── Server → client RPC method whitelist (AA server pushes these) ────────
+//
+// Mirrored from agent_server/api/connectors.py + runtime_rpc.py dispatch
+// handler. zai implements these in reverseDispatch (T7) so the server can
+// ask zai to do work on behalf of the user (e.g. mobile app sends a
+// message → server asks zai to enqueue on the right child session).
+//
+// `runtime.*` family is invoked once per runtime lifecycle change.
+// `session.*` family is per-session.
+// `interaction.respond` is the unified response channel for approval /
+// input_request / slash responses.
+
+export const SERVER_TO_ZAI_METHODS = [
+  // Runtime lifecycle
+  'runtime.discover',
+  'runtime.configSchema',
+  'runtime.config',
+  'runtime.validateConfig',
+  'runtime.start',
+  'runtime.stop',
+  'runtime.capabilities',
+  'runtime.commands',
+  'runtime.modelCatalog',
+  'runtime.permissionCatalog',
+  // Session lifecycle
+  'session.discover',
+  'session.create',
+  'session.sync',
+  'session.state',
+  'session.capabilities',
+  'session.notices',
+  'session.selections.update',
+  'session.commands',
+  'session.command.execute',
+  // Interaction (mobile user actions)
+  'interaction.respond',
+  // Runtime turn control (mobile user actions)
+  'session.send_message',
+  'session.steer',
+  'session.interrupt',
+] as const;
+export type ServerToZaiMethod = typeof SERVER_TO_ZAI_METHODS[number];
+
+// ─── zai → server notifications (zai pushes these) ───────────────────────
+//
+// These are NOT request/response — one-way notifications zai emits to keep
+// AA server's view of zai's state in sync. Used by event adapter (T6) and
+// runtime registry (T4).
+
+export const ZAI_TO_SERVER_NOTIFICATIONS = [
+  // Heartbeat (30s)
+  'connector.heartbeat',
+  // Capabilities (sent on connect + on change)
+  'protocol.capabilitiesUpdated',
+  // Session state
+  'session.meta.upsert',
+  'session.source.updated',
+  'session.state.updated',
+  'session.turnEnded',
+  // Timeline
+  'timeline.sync',
+  'timeline.itemUpsert',
+  // Notices
+  'notice.upserted',
+  // Inventory
+  'session.inventory.begin',
+  'session.inventory.complete',
+  // Capability changes (runtime / session scoped)
+  'runtime.capability.updated',
+] as const;
+export type ZaiToServerNotification = typeof ZAI_TO_SERVER_NOTIFICATIONS[number];

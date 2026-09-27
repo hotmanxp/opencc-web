@@ -5,13 +5,14 @@ import Resources from './Resources';
 import Config from './Config';
 import Directory from './Directory';
 import Tools from './Tools';
+import AASettings from './AASettings';
 
 // 合并三个原独立页面(/resources /config /dirs)到 /manage 入口;另外把
-// Tools 工具检测页也收进来(原先 /tools 是单独的)。/login 因为是用户
-// 常用入口,保留为顶层菜单 (Layout ALL_MENU_ITEMS 内 /login)。
+// Tools 工具检测页和 Agents Anywhere (AA) 设置也收进来。
+// /login 因为是用户常用入口,保留为顶层菜单 (Layout ALL_MENU_ITEMS 内 /login)。
 // 用 AntD Tabs (tabPosition="top") 顶部横排;active tab 用 ?tab=<key>
 // 持久化。Config 内部仍读 ?tool= 选 provider 子 tab,与 ?tab= 共存无冲突。
-const TAB_KEYS = ['resources', 'config', 'dirs', 'tools'] as const;
+const TAB_KEYS = ['resources', 'config', 'dirs', 'tools', 'aa'] as const;
 type TabKey = (typeof TAB_KEYS)[number];
 
 function isTabKey(value: string | null): value is TabKey {
@@ -29,6 +30,7 @@ export default function Manage() {
       { key: 'config', label: '配置', children: <Config /> },
       { key: 'dirs', label: '目录', children: <Directory /> },
       { key: 'tools', label: '工具', children: <Tools /> },
+      { key: 'aa', label: 'AA 桥', children: <AASettings /> },
     ],
     [],
   );

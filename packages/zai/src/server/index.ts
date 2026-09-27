@@ -30,6 +30,10 @@ import { slashRouter } from './routes/slash.js';
 // MCP 状态 + 手动重连(/api/mcp/status、/api/mcp/reconnect)。后台连接
 // 失败过去只有 console.warn,这两个端点让设置页能展示并重试。
 import { mcpRouter } from './routes/mcp.js';
+import aaPairingRouter from './routes/aa/pairing.js';
+import aaStatusRouter from './routes/aa/status.js';
+import childEventRouter from './routes/internal/childEvent.js';
+import pushActionRouter from './routes/internal/pushAction.js';
 import bashTasksRouter from './routes/bashTasks.js';
 import bashReplRouter from './routes/bashRepl.js';
 import replHistoryRouter from './routes/replHistory.js';
@@ -160,6 +164,14 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
     .then((m) => m.maybeProvisionWeixinInstance())
     .catch((err) => console.warn('[weixin.instance] boot provisioning failed:', err))
 
+  // AA (Agents Anywhere) 桥 — 仅在 `--aa` 启用时初始化,自动重连,
+  // 关闭由 runtimeLifecycle 的 cleanupAndExit 接管(TODO: 接 SIGINT 钩子)。
+  // fire-and-forget —— 连接失败时 initAaClient 内部已 log + 调度重连。
+  // 详见 docs/2026-09-27-zai-aa-integration.md。
+  void import('./services/aaClient/init.js')
+    .then((m) => m.initAaClient())
+    .catch((err) => console.warn('[aa.client] init failed:', err))
+
   // Ensure ~/.zai/ exists for persistent cache (manifest.json) and future
   // config data. This is fire-and-forget — if it fails the app still works,
   // just without disk persistence.
@@ -252,6 +264,17 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   app.use('/api', terminalRouter);
   // /api/mcp/* — 活 MCP server 状态 + 手动重连(见 routes/mcp.ts 头注)。
   app.use('/api', mcpRouter);
+  // /api/aa/* — Agents Anywhere 桥(配对流程 + 连接状态)。
+  // 路由 handler 内部用 isAaEnabled() 自门禁,挂载不需要条件。
+  // 详见 docs/2026-09-27-zai-aa-integration.md。
+  app.use('/api/aa', aaPairingRouter);
+  app.use('/api/aa', aaStatusRouter);
+  // /api/internal/child-event — child zai 进程向 root 上报事件 (T4.5)。
+  // child 端 process.env.ZAI_AA_ENABLED=1 时挂载 + 调用。
+  app.use('/api/internal', childEventRouter);
+  // /api/internal/push-action — root 把 mobile AA app 的操作转发到 child (T7.5)。
+  // child 端 process.env.ZAI_AA_ENABLED=1 时挂载 + 处理。
+  app.use('/api/internal', pushActionRouter);
   // V2 TaskList 只读路由 — zai-web 进会话时 GET 一次把 server 端
   // TaskListStore (按 sessionId 隔离, 实际存储 ~/.zai/tasks/<sid>.json)
   // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).

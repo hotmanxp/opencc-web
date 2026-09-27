@@ -43,6 +43,46 @@ export const PLUGIN_PKG = '@zn-ai/plugin';
 //   owner.json        全局单实例锁持有者元数据 (mode 0600)
 //   inbox-pending/    已鉴权、未注入 agent 的入站消息(崩溃重放)
 //   media-project/    入站媒体镜像到项目可读目录的暂存区
+// ─── AA (Agents Anywhere) bridge 持久化目录 ─────────────────────────
+// 详见 docs/2026-09-27-zai-aa-integration.md。
+//
+//   config.json                AA server URL + 已配对 connector 凭据 (mode 0600)
+//                              含 cxt_xxx token(若已配对)
+//   pairing-state.json         当前未完成的 pairing 流程状态(pairingId + code + expiresAt)
+//                              配对完成后清空,或保存最后一次成功配对的元数据
+//   runtime-map.json           childPort → aaRuntimeId
+//   session-map-{port}.json    childPort + zaiSessionId → aaSessionId
+//   outbox-{port}.jsonl        离线缓冲(WS 断线时事件暂存)
+//
+// 路径用函数暴露(每次从 env 重读 ZAI_DATA_DIR),让测试 ZAI_DATA_DIR 覆盖生效。
+// ESM 静态 import 在模块加载时已求值,生产 wiring 必须用函数版本。跟 weixin
+// 的 weixinDataDir() 同模式。
+export function aaDir(): string {
+  return join(process.env.ZAI_DATA_DIR || join(homedir(), '.zai'), 'aa');
+}
+export function aaConfigPath(): string {
+  return join(aaDir(), 'config.json');
+}
+export function aaPairingStatePath(): string {
+  return join(aaDir(), 'pairing-state.json');
+}
+export function aaRuntimeMapPath(): string {
+  return join(aaDir(), 'runtime-map.json');
+}
+export function aaSessionMapPath(childPort: number): string {
+  return join(aaDir(), `session-map-${childPort}.json`);
+}
+export function aaOutboxPath(childPort: number): string {
+  return join(aaDir(), `outbox-${childPort}.jsonl`);
+}
+/**
+ * 确保 aa 子目录存在;在 initAaClient 时调一次,后续 store 操作不会因目录缺失失败。
+ */
+export async function ensureAaDir(): Promise<void> {
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(aaDir(), { recursive: true });
+}
+
 export const WEIXIN_DIR = join(ZAI_DIR, 'weixin');
 export const WEIXIN_ACCOUNTS_DIR = join(WEIXIN_DIR, 'accounts');
 export const WEIXIN_LOCKS_DIR = join(WEIXIN_DIR, 'locks');
