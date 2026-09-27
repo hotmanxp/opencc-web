@@ -28,8 +28,8 @@
  *
  *   zai event                  | AA notification
  *   ---------------------------|---------------------------
- *   session.created            | session.meta.upsert
- *   session.renamed            | session.meta.upsert (title update)
+ *   session.created            | session.meta.updated
+ *   session.renamed            | session.meta.updated (title update)
  *   session.deleted            | (no-op; AA reaps on connector offline)
  *   prompt.ask                 | notice.upserted (interaction)
  *   prompt.approve             | notice.upserted (interaction)
@@ -57,6 +57,12 @@ import { isAaEnabled } from './index.js';
 export class EventAdapter {
   private readonly conn: AaConnection;
   private installed = false;
+  /**
+   * Accumulated text per (aaSessionId:turnIndex:channel) so streaming
+   * deltas collapse into one AA timeline item instead of one per
+   * fragment. Cleared on each runtime.started.
+   */
+  private readonly streamBuffers = new Map<string, string>();
 
   constructor(conn: AaConnection) {
     this.conn = conn;
@@ -332,81 +338,147 @@ export class EventAdapter {
     }
 
     const t = event.type as string;
+    const turnIndex = typeof event.turnIndex === 'number' ? event.turnIndex : 0;
+
+    // Streaming accumulation. zai emits runtime.delta / runtime.thinking
+    // as many small fragments per turn. AA Web merges timeline items by
+    // `id`, so every fragment of the same (session, turnIndex, channel)
+    // MUST share one stable id and be sent as timeline.item_updated after
+    // the first timeline.item_created — otherwise each fragment renders
+    // as its own bubble. (My first attempt gave every delta a unique
+    // eventId, which produced ~19 separate items for one sentence.)
+    if (t === 'runtime.delta' || t === 'runtime.thinking') {
+      const channel = t === 'runtime.delta' ? 'text' : 'thinking';
+      const key = `${aaSessionId}:${turnIndex}:${channel}`;
+      const frag = t === 'runtime.delta'
+        ? ((event.delta as string | undefined) ?? '')
+        : ((event.thinking as string | undefined) ?? '');
+      const prior = this.streamBuffers.get(key);
+      if (prior === undefined) {
+        this.streamBuffers.set(key, frag);
+        this.pushTimelineItem(runtimeId, aaSessionId, {
+          id: key,
+          type: 'assistant_activity',
+          content: frag,
+          status: channel === 'thinking' ? 'thinking' : 'streaming',
+          title: channel === 'thinking' ? 'Thinking' : 'Assistant',
+          turnIndex,
+          channel,
+        }, true);
+      } else {
+        const next = prior + frag;
+        this.streamBuffers.set(key, next);
+        this.pushTimelineItem(runtimeId, aaSessionId, {
+          id: key,
+          type: 'assistant_activity',
+          content: next,
+          status: channel === 'thinking' ? 'thinking' : 'streaming',
+          title: channel === 'thinking' ? 'Thinking' : 'Assistant',
+          turnIndex,
+          channel,
+        }, false);
+      }
+      return;
+    }
+    if (t === 'runtime.started') {
+      // Do NOT clear streamBuffers here. zai emits runtime.started more
+      // than once per turn (once per model message_start), and clearing
+      // on each one wiped the accumulator mid-turn — the next delta then
+      // looked like a brand-new stream and emitted a second
+      // timeline.item_created for an id AA had already seen, splitting
+      // one assistant message into two bubbles. The buffer key already
+      // contains sessionId + turnIndex, so stale turns can't collide
+      // with current ones without an explicit clear.
+      return;
+    }
+    if (t === 'runtime.done') {
+      // Mark this turn's streaming items final so AA stops showing the
+      // "streaming" affordance once the turn is over.
+      const prefix = `${aaSessionId}:${turnIndex}:`;
+      for (const [key, content] of this.streamBuffers) {
+        if (!key.startsWith(prefix)) continue;
+        this.pushTimelineItem(runtimeId, aaSessionId, {
+          id: key,
+          type: 'assistant_activity',
+          content,
+          status: 'done',
+          title: key.endsWith(':thinking') ? 'Thinking' : 'Assistant',
+          turnIndex,
+          channel: key.endsWith(':thinking') ? 'thinking' : 'text',
+        }, false);
+      }
+      return;
+    }
+
     let kind: string;
     let text = '';
     const metadata: Record<string, unknown> = { zaiEventType: t };
     switch (t) {
-      case 'runtime.started':
-        kind = 'lifecycle';
-        text = 'turn started';
-        metadata.turnIndex = event.turnIndex;
-        metadata.model = event.model;
-        break;
-      case 'runtime.delta':
-        kind = 'assistant_message_delta';
-        text = (event.delta as string | undefined) ?? '';
-        metadata.turnIndex = event.turnIndex;
-        break;
-      case 'runtime.thinking':
-        kind = 'thinking';
-        text = (event.thinking as string | undefined) ?? '';
-        metadata.turnIndex = event.turnIndex;
-        break;
       case 'runtime.tool_call':
-        kind = 'tool_call';
+        kind = 'agent_call';
         text = (event.toolName as string | undefined) ?? '';
         metadata.toolName = event.toolName;
         metadata.toolUseId = event.toolUseId;
         metadata.input = event.input;
         break;
       case 'runtime.tool_result':
-        kind = 'tool_result';
+        kind = 'agent_call';
         text = '';
         metadata.toolUseId = event.toolUseId;
         metadata.output = event.output;
         metadata.isError = event.isError;
         break;
-      case 'runtime.compacted':
-        kind = 'system';
-        text = 'context compacted';
-        break;
-      case 'runtime.done':
-        kind = 'lifecycle';
-        text = 'turn completed';
-        metadata.turnIndex = event.turnIndex;
-        break;
       case 'runtime.error':
-        kind = 'error';
+        kind = 'error_description';
         text = (event.error as { message?: string } | undefined)?.message ?? 'runtime error';
         metadata.error = event.error;
         break;
       case 'runtime.aborted':
-        kind = 'error';
+        kind = 'error_description';
         text = (event.reason as string | undefined) ?? 'aborted';
         metadata.reason = event.reason;
         break;
-      case 'runtime.notification':
-        kind = 'info';
-        text = (event.message as string | undefined) ?? '';
-        metadata.severity = event.severity;
-        break;
       default:
-        kind = 'info';
-        text = '';
+        // runtime.compacted / runtime.notification and anything else:
+        // AA has no obvious slot for these, and pushing junk is worse
+        // than not pushing. Drop them.
+        return;
     }
 
-    const itemId = (event.eventId as string | undefined) ?? `${aaSessionId}-${t}-${Date.now()}`;
+    this.pushTimelineItem(runtimeId, aaSessionId, {
+      id: (event.eventId as string | undefined) ?? `${aaSessionId}-${t}-${Date.now()}`,
+      type: kind,
+      content: text,
+      status: t === 'runtime.tool_call' ? 'running' : t === 'runtime.tool_result' ? 'done' : undefined,
+      title: (event.toolName as string | undefined) ?? undefined,
+      toolName: (event.toolName as string | undefined) ?? undefined,
+      turnIndex,
+      metadata,
+    }, true);
+  }
+
+  /**
+   * Single funnel for timeline pushes so the AA item shape is defined in
+   * exactly one place. Field names (`id` / `type` / `content` / `status` /
+   * `title` / `toolName`) mirror what AA Web's client reads off
+   * `payload.item`; see upsertTimelineItem in rpc.ts for how that was
+   * determined.
+   */
+  private pushTimelineItem(
+    runtimeId: string,
+    aaSessionId: string,
+    item: Record<string, unknown>,
+    created: boolean,
+  ): void {
     upsertTimelineItem(this.conn, {
       runtimeId,
       sessionId: aaSessionId,
+      created,
       item: {
-        itemId,
         sessionId: aaSessionId,
-        kind,
-        role: t === 'runtime.delta' || t === 'runtime.thinking' ? 'assistant' : undefined,
-        text,
-        timestamp: event.ts ?? new Date().toISOString(),
-        metadata,
+        runtimeId,
+        createdAt: new Date().toISOString(),
+        ...item,
       },
     });
   }

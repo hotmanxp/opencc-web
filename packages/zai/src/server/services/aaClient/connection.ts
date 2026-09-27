@@ -287,6 +287,17 @@ export class AaConnection {
     }
     try {
       this.sendFrame(buildNotification(method, params));
+      // Outbound notification trace. Skips the 30s heartbeat so the log
+      // stays readable; everything else (session.meta.upsert,
+      // session.state.updated, timeline.itemUpsert, notice.upserted) is
+      // what AA Web consumes to paint its timeline, so seeing exactly
+      // what we push (and its shape) is the fastest way to spot a
+      // field-name mismatch.
+      if (method !== 'connector.heartbeat') {
+        console.log(
+          `[aa.outbound] ${method} params=${JSON.stringify(params ?? null).slice(0, 300)}`,
+        );
+      }
     } catch (err) {
       void this.queueOffline(method, params);
     }
@@ -548,16 +559,31 @@ export class AaConnection {
 
   private async handleRequest(frame: RequestFrame): Promise<void> {
     const handler = this.requestHandlers.get(frame.method);
+    // Every inbound RPC gets logged, including ones we have no handler
+    // for. AA Web navigates via read RPCs we may not have implemented
+    // yet; without this log there's no way to tell "AA asked for
+    // something we don't implement" from "AA never asked".
+    const paramsPreview = JSON.stringify(frame.params ?? null).slice(0, 400);
     if (!handler) {
+      console.log(
+        `[aa.inbound] ${frame.method} NO_HANDLER params=${paramsPreview}`,
+      );
       this.sendFrame(buildResponseError(frame.id, 'method_not_implemented', `no handler for ${frame.method}`));
       return;
     }
     try {
       const result = await handler(frame.params);
+      const resultPreview = JSON.stringify(result ?? null).slice(0, 300);
+      console.log(
+        `[aa.inbound] ${frame.method} → ok params=${paramsPreview} result=${resultPreview}`,
+      );
       this.sendFrame(buildResponse(frame.id, result));
     } catch (err) {
       const code = (err as { code?: string }).code ?? (err instanceof Error ? err.constructor.name : 'unknown');
       const message = err instanceof Error ? err.message : String(err);
+      console.log(
+        `[aa.inbound] ${frame.method} → ERROR ${code}: ${message} params=${paramsPreview}`,
+      );
       this.sendFrame(buildResponseError(frame.id, code, message));
     }
   }

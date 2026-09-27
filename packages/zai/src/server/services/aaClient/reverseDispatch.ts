@@ -33,6 +33,7 @@
 import { z } from 'zod';
 import { readdir, readFile, writeFile as fsWriteFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 import { resolve as pathResolve, join, sep, dirname, basename } from 'node:path';
 import type { AaConnection } from './connection.js';
 import type { RuntimeRegistry } from './runtimeRegistry.js';
@@ -172,6 +173,13 @@ export class ReverseDispatch {
     this.conn.onRequest('runtime.stop', async (params) => {
       return this.handleRuntimeStop(params);
     });
+    // runtime.capabilities — AA Web asks for this while rendering the
+    // runtime's "可添加" (addable) list. Traced from a real AA Web
+    // session: it was returning method_not_implemented, which is why
+    // that section rendered empty.
+    this.conn.onRequest('runtime.capabilities', async (params) => {
+      return this.handleRuntimeCapabilities(params);
+    });
     // Session creation is the entrypoint for the conversation flow: AA Web
     // "Start new session" → session.create → forwarded to child which
     // creates the transcript + queues the first turn.
@@ -252,13 +260,43 @@ export class ReverseDispatch {
   }
 
   private async handleRuntimeStop(params: unknown): Promise<unknown> {
-    // Same flat shape as runtime.start.
     const p = (params ?? {}) as { runtimeId?: string };
     const runtimeId = p?.runtimeId;
     if (!runtimeId) {
       throw new AaServerError('runtime.stop: missing runtimeId', 400, null);
     }
     return { runtimeId, status: 'stopped' };
+  }
+
+  /**
+   * `runtime.capabilities` — AA Web calls this (params:
+   * {runtime, runtimeId}) while rendering a runtime's capability panel.
+   * Traced live: it was hitting the no-handler path and returning
+   * method_not_implemented, which is why the "可添加" area came up empty.
+   *
+   * We report the same capability ids we already push via
+   * runtime.capability.updated in runtimeRegistry.capabilitiesFor(), so
+   * the two views can't drift.
+   */
+  private async handleRuntimeCapabilities(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { runtimeId?: string };
+    const runtimeId = p?.runtimeId;
+    if (!runtimeId) {
+      throw new AaServerError('runtime.capabilities: missing runtimeId', 400, null);
+    }
+    return {
+      runtimeId,
+      runtime: 'codex',
+      capabilities: {
+        'session.send_message': true,
+        'session.steer': true,
+        'session.interrupt': true,
+        'session.command': true,
+        'catalog.model': true,
+        'notice.approval': true,
+        'notice.input_request': true,
+      },
+    };
   }
 
   /**
@@ -350,14 +388,35 @@ export class ReverseDispatch {
   }
 
   /**
+   * Expand a leading `~` (and `~/…`) to the user's home directory.
+   *
+   * AA Web's Files panel sends `root: "~"` literally (traced live:
+   * fs.readDir params={"sessionId":"browse_conn_I_7ObXlReW5h-w",
+   * "root":"~","path":"~"}). Without this the escape guard below rejects
+   * it as "path outside workspace root" and the whole panel stays empty.
+   */
+  private expandTilde(p: string): string {
+    if (p === '~') return homedir();
+    if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+    return p;
+  }
+
+  /**
    * Resolve a user-supplied path against the AA-provided workspace root,
    * rejecting anything that escapes via "..". Mirrors routes/fs.ts::
    * resolveSafePath but adapted for AA's flat params shape.
+   *
+   * Both `root` and `relPath` go through expandTilde first: AA sends "~"
+   * for the home directory, and a bare "~" would otherwise fail the
+   * containment check (pathResolve("~", "~") is a literal "./~" dir that
+   * sits outside root).
    */
-  private fsResolve(root: string, relPath: string): string {
+  private fsResolve(rawRoot: string, rawRelPath: string): string {
+    const root = this.expandTilde(rawRoot);
+    const relPath = this.expandTilde(rawRelPath);
     const normalized = relPath === '' ? root : pathResolve(root, relPath);
     if (normalized !== root && !normalized.startsWith(root + sep)) {
-      throw new AaServerError(`fs: path outside workspace root: ${relPath}`, 400, null);
+      throw new AaServerError(`fs: path outside workspace root: ${rawRelPath}`, 400, null);
     }
     return normalized;
   }
@@ -367,6 +426,9 @@ export class ReverseDispatch {
     const p = (params ?? {}) as { root?: string; path?: string };
     if (!p.root) throw new AaServerError('fs.readDir: root is required', 422, null);
     const target = this.fsResolve(p.root, p.path ?? '');
+    // Compare against the *expanded* root — p.root may be the literal
+    // "~" that AA sends, which never equals an absolute path.
+    const absRoot = this.expandTilde(p.root);
     let stats;
     try {
       stats = await stat(target);
@@ -384,7 +446,7 @@ export class ReverseDispatch {
     const out: { name: string; path: string; type: string; size: number | null }[] = [];
     for (const ent of entries) {
       if (['node_modules', '.git', '.next', 'dist', 'build'].includes(ent.name)) continue;
-      if (ent.name.startsWith('.') && dir !== p.root) continue;
+      if (ent.name.startsWith('.') && dir !== absRoot) continue;
       let type: string = ent.isDirectory() ? 'directory' : ent.isFile() ? 'file' : 'other';
       let size: number | null = null;
       if (ent.isFile()) {
@@ -395,7 +457,7 @@ export class ReverseDispatch {
       }
       out.push({
         name: ent.name,
-        path: dir === p.root ? ent.name : `${p.path ?? ''}/${ent.name}`.replace(/^\//, ''),
+        path: dir === absRoot ? ent.name : `${p.path ?? ''}/${ent.name}`.replace(/^\//, ''),
         type,
         size,
       });
@@ -705,6 +767,7 @@ export class ReverseDispatch {
     // otherwise any live port — transcripts are shared on disk so any
     // child can serve the read.
     if (livePorts.includes(ownerPort)) return ownerPort;
+    console.log(`[aa.reverseDispatch] resolveChildPort: aa=${aaSessionId} ownerPort=${ownerPort} (stale); falling back to livePort=${livePorts[0]}`);
     return livePorts[0];
   }
 

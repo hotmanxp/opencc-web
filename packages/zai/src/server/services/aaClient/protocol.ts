@@ -162,24 +162,32 @@ export type ServerToZaiMethod = typeof SERVER_TO_ZAI_METHODS[number];
 // AA server's view of zai's state in sync. Used by event adapter (T6) and
 // runtime registry (T4).
 
+// Names below were recovered from AA Web's own client bundle (fetched
+// 2026-09-27) rather than guessed. The client's WS reducer dispatches on
+// exactly these types and reads the body from a nested payload key:
+//   "session.meta.updated"    -> t.payload.session
+//   "runtime.state.updated"   -> t.payload.state
+//   "timeline.item_created"   -> t.payload.item
+//   "timeline.item_updated"   -> t.payload.item
+//   "timeline.snapshot"       -> t.payload.items  (array)
+//   "runtime.notice.updated"  -> t.payload.notice
+//   "runtime.notice.snapshot" -> t.payload.notices (array)
+// Anything else is dropped, so the previous names (timeline.itemUpsert,
+// session.meta.upsert, session.state.updated, notice.upserted) were being
+// silently discarded — that was the cause of the empty AA Web timeline.
 export const ZAI_TO_SERVER_NOTIFICATIONS = [
   // Heartbeat (30s)
   'connector.heartbeat',
-  // Capabilities (sent on connect + on change)
-  'protocol.capabilitiesUpdated',
-  // Session state
-  'session.meta.upsert',
-  'session.source.updated',
-  'session.state.updated',
-  'session.turnEnded',
+  // Session meta / runtime state
+  'session.meta.updated',
+  'runtime.state.updated',
   // Timeline
-  'timeline.sync',
-  'timeline.itemUpsert',
+  'timeline.item_created',
+  'timeline.item_updated',
+  'timeline.snapshot',
   // Notices
-  'notice.upserted',
-  // Inventory
-  'session.inventory.begin',
-  'session.inventory.complete',
+  'runtime.notice.updated',
+  'runtime.notice.snapshot',
   // Capability changes (runtime / session scoped)
   'runtime.capability.updated',
 ] as const;

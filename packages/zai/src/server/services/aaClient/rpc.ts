@@ -103,8 +103,24 @@ export async function createSession(
 }
 
 /**
- * Tell AA server about a new timeline item (message, tool call, etc).
- * Fire-and-forget: no response expected.
+ * Push a timeline item to AA.
+ *
+ * NOTE (2026-09-27): the type name and payload envelope here were both
+ * wrong until this rewrite. zai used to send
+ *   type: 'timeline.itemUpsert', payload: {runtimeId, sessionId, item}
+ * but AA Web's client (recovered from its own JS bundle) dispatches on
+ *   'timeline.item_created' | 'timeline.item_updated'
+ * and reads the item from `payload.item`:
+ *   ("timeline.item_created"===t.type||"timeline.item_updated"===t.type)
+ *     ? t.payload.item : null
+ * Any type it doesn't recognise is dropped on the floor, so every
+ * message we sent was silently discarded — which is exactly why the AA
+ * Web timeline showed "暂无活动" (no activity) even though zai had a
+ * complete transcript on disk.
+ *
+ * `created` picks between item_created (new item) and item_updated
+ * (same itemId seen before — used for streaming deltas that mutate an
+ * existing assistant message).
  */
 export function upsertTimelineItem(
   conn: AaConnection,
@@ -112,12 +128,21 @@ export function upsertTimelineItem(
     runtimeId: string;
     sessionId: string;
     item: Record<string, unknown>;
+    /** true when this itemId was already pushed (streaming update). */
+    created?: boolean;
   },
 ): void {
-  conn.sendNotification('timeline.itemUpsert', payload);
+  const { created, ...rest } = payload;
+  conn.sendNotification(created === false ? 'timeline.item_updated' : 'timeline.item_created', rest);
 }
 
-/** Fire-and-forget session meta upsert (called on session.created/renamed/cwd change). */
+/**
+ * Fire-and-forget session meta update (called on session.created / renamed /
+ * cwd change).
+ *
+ * AA Web reads `t.payload.session` for this type — see upsertTimelineItem's
+ * note on how the real type names were recovered.
+ */
 export function upsertSessionMeta(
   conn: AaConnection,
   payload: {
@@ -130,10 +155,29 @@ export function upsertSessionMeta(
     metadata?: Record<string, unknown>;
   },
 ): void {
-  conn.sendNotification('session.meta.upsert', payload);
+  conn.sendNotification('session.meta.updated', {
+    runtimeId: payload.runtimeId,
+    sessionId: payload.sessionId,
+    session: {
+      sessionId: payload.sessionId,
+      runtimeId: payload.runtimeId,
+      runtime: payload.runtime,
+      ...(payload.title !== undefined ? { title: payload.title } : {}),
+      ...(payload.cwd !== undefined ? { cwd: payload.cwd } : {}),
+      ...(payload.externalSessionId !== undefined
+        ? { externalSessionId: payload.externalSessionId }
+        : {}),
+      ...(payload.metadata ? { metadata: payload.metadata } : {}),
+    },
+  });
 }
 
-/** Fire-and-forget session state update. */
+/**
+ * Fire-and-forget runtime/session state update (busy/idle).
+ *
+ * AA Web reads `t.payload.state` for 'runtime.state.updated' — note the
+ * type is scoped to *runtime*, not session.
+ */
 export function upsertSessionState(
   conn: AaConnection,
   payload: {
@@ -146,10 +190,27 @@ export function upsertSessionState(
     metadata?: Record<string, unknown>;
   },
 ): void {
-  conn.sendNotification('session.state.updated', payload);
+  conn.sendNotification('runtime.state.updated', {
+    runtimeId: payload.runtimeId,
+    sessionId: payload.sessionId,
+    state: {
+      sessionId: payload.sessionId,
+      runtimeId: payload.runtimeId,
+      runtime: payload.runtime,
+      ...(payload.status !== undefined ? { status: payload.status } : {}),
+      ...(payload.selections ? { selections: payload.selections } : {}),
+      ...(payload.error ? { error: payload.error } : {}),
+      ...(payload.metadata ? { metadata: payload.metadata } : {}),
+    },
+  });
 }
 
-/** Fire-and-forget notice upsert (approval / input_request / error). */
+/**
+ * Fire-and-forget notice update (approval / input_request / error).
+ *
+ * AA Web reads `t.payload.notice` for 'runtime.notice.updated', and
+ * handles 'runtime.notice.snapshot' with a `payload.notices` array.
+ */
 export function upsertNotice(
   conn: AaConnection,
   payload: {
@@ -159,7 +220,15 @@ export function upsertNotice(
     notice: Record<string, unknown>;
   },
 ): void {
-  conn.sendNotification('notice.upserted', payload);
+  conn.sendNotification('runtime.notice.updated', {
+    runtimeId: payload.runtimeId,
+    ...(payload.sessionId !== undefined ? { sessionId: payload.sessionId } : {}),
+    notice: {
+      ...payload.notice,
+      runtimeId: payload.runtimeId,
+      ...(payload.sessionId !== undefined ? { sessionId: payload.sessionId } : {}),
+    },
+  });
 }
 
 // ─── Inbound: typed handlers (AA server → zai) ──────────────────────────
@@ -229,16 +298,16 @@ export const INBOUND_METHOD_LIST: readonly ServerToZaiMethod[] = [
   'interaction.respond',
 ] as const;
 
-/** Same idea for outbound notifications. */
+/** Same idea for outbound notifications. Mirrors ZAI_TO_SERVER_NOTIFICATIONS
+ *  in protocol.ts — keep the two in sync (TS will flag a mismatch). */
 export const OUTBOUND_NOTIFICATION_LIST: readonly ZaiToServerNotification[] = [
   'connector.heartbeat',
-  'protocol.capabilitiesUpdated',
-  'session.meta.upsert',
-  'session.state.updated',
-  'session.turnEnded',
-  'timeline.itemUpsert',
-  'notice.upserted',
-  'session.inventory.begin',
-  'session.inventory.complete',
+  'session.meta.updated',
+  'runtime.state.updated',
+  'timeline.item_created',
+  'timeline.item_updated',
+  'timeline.snapshot',
+  'runtime.notice.updated',
+  'runtime.notice.snapshot',
   'runtime.capability.updated',
 ] as const;

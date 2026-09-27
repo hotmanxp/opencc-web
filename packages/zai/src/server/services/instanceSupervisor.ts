@@ -191,10 +191,39 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     // activity predates STALE_RUNNING_RESET_MS. Keeps `lastHeartbeatAt` so
     // the UI can still show when the instance was last alive; clears the
     // runtime endpoints and any stale error. Returns true when reset.
+    //
+    // On hydration there is never an attached child (a fresh root process
+    // can't re-adopt the previous root's children), so a persisted
+    // `running`/`starting` is only believable while its pid is actually
+    // alive. Previously we waited STALE_RUNNING_RESET_MS (30 min) on
+    // lastActivityAt alone, which meant a child killed seconds earlier
+    // kept reporting state:"running" with a dead pid and a port nobody
+    // was listening on — the supervisor then refused to start it again
+    // ("already running"), and AA's portFromRuntime liveness probe
+    // rejected the only mapping. Signal-0 liveness probing is the fix;
+    // a genuinely-alive pid still falls through to the 30-min rule so we
+    // don't stomp on a process we can't actually manage.
+    const isPidAlive = (pid: number | null | undefined): boolean => {
+      if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return false
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch (err) {
+        // EPERM means the pid exists but belongs to another user — treat
+        // as alive so we don't try to manage (or report dead) someone
+        // else's process.
+        return (err as NodeJS.ErrnoException).code === 'EPERM'
+      }
+    }
     const resetStaleActive = (entry: Entry, nowMs: number): boolean => {
       if (entry.child) return false
       const st = entry.status.state
       if (st !== 'running' && st !== 'starting' && st !== 'stopping') return false
+      if (!isPidAlive(entry.status.pid)) {
+        // Pid is gone — the child cannot possibly still be serving.
+        setStatus(entry, { state: 'stopped', port: null, pid: null, lastError: null })
+        return true
+      }
       if (nowMs - lastActivityAt(entry) <= STALE_RUNNING_RESET_MS) return false
       setStatus(entry, { state: 'stopped', port: null, pid: null, lastError: null })
       return true
