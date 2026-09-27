@@ -317,14 +317,22 @@ export class ReverseDispatch {
     }
     const mappings = reg.listAll();
     console.log('[aa.reverseDispatch] portFromRuntime lookup', runtimeId, 'mappings:', mappings.map(m => ({ rid: m.runtimeId, port: m.port })));
-    // Exact match first.
+    // Exact match first. Probing liveness here too, not just on the
+    // fallback path: runtime-map.json keeps entries for children that
+    // exited without an instance.changed 'stopped' event, so an exact
+    // runtimeId match can still point at a dead port — returning it
+    // blindly made session.create fail with a connect error.
     for (const m of mappings) {
-      if (m.runtimeId === runtimeId) return m.port;
+      if (m.runtimeId === runtimeId && m.port > 0 && (await this.isPortListening(m.port))) {
+        return m.port;
+      }
     }
     // AA's legacy "type-equal" convention allows runtimeId == runtimeType.
     // Match by instance name too (sometimes AA passes the name).
     for (const m of mappings) {
-      if (m.name === runtimeId) return m.port;
+      if (m.name === runtimeId && m.port > 0 && (await this.isPortListening(m.port))) {
+        return m.port;
+      }
     }
     // Fallback: AA sent a value we don't recognize as either an instance
     // id or a registered name. This happens when AA passes the runtime
@@ -728,22 +736,23 @@ export class ReverseDispatch {
     //   1. Find the port whose session-map-{oldport}.json contains
     //      this aaSessionId (cross-port scan, returns the OLD port
     //      where the mapping was originally written).
-    //   2. Return the LIVE port if any (the child process that's
-    //      actually running and owns the transcript files). The live
-    //      port is whichever runtime registry entry is currently
-    //      running — typically there's only one, but if there were
-    //      multiple, we'd need to forward-probe each. For the single-
-    //      child deployment model we currently use, picking the first
-    //      live port that answers health is enough.
-    //   3. If no live port exists at all (child is fully down), return
-    //      the dead port so the caller sees a 503 (vs. silent miss).
+    //   2. Return the port that is ACTUALLY LISTENING. This must be a
+    //      real liveness probe, not just "a port the registry knows
+    //      about": runtime-map.json accumulates dead entries (a child
+    //      that exits without an instance.changed 'stopped' event is
+    //      never deregistered, and the map is reloaded wholesale on
+    //      boot), so registry.listAll() routinely contains several
+    //      stale ports. Returning listAll()[0] sent traffic to a dead
+    //      child and every session.* read failed with "child
+    //      unreachable" — which is what kept the AA Web timeline empty.
+    //   3. If nothing is listening, fail loudly rather than guessing.
     const sessionMap = getSessionMap();
     if (!sessionMap) {
       throw new AaServerError('session map not initialized', 503, null);
     }
-    const livePorts = this.registry.listAll().map((m) => m.port);
-    if (livePorts.length === 0) {
-      throw new AaServerError('no live child instances', 503, null);
+    const registeredPorts = this.registry.listAll().map((m) => m.port);
+    if (registeredPorts.length === 0) {
+      throw new AaServerError('no registered child instances', 503, null);
     }
 
     // Find the OLD port (where the mapping was written).
@@ -766,9 +775,28 @@ export class ReverseDispatch {
     // Prefer the live port that matches the owner (happy path),
     // otherwise any live port — transcripts are shared on disk so any
     // child can serve the read.
-    if (livePorts.includes(ownerPort)) return ownerPort;
-    console.log(`[aa.reverseDispatch] resolveChildPort: aa=${aaSessionId} ownerPort=${ownerPort} (stale); falling back to livePort=${livePorts[0]}`);
-    return livePorts[0];
+    //
+    // Probe for a real listener among every registered port. Newest
+    // registration wins (highest port = most recently started child),
+    // which mirrors portFromRuntime's existing tie-break.
+    const candidates = [...new Set([ownerPort, ...registeredPorts])]
+      .filter((p) => p > 0)
+      .sort((a, b) => b - a);
+    for (const port of candidates) {
+      if (await this.isPortListening(port)) {
+        if (port !== ownerPort) {
+          console.log(
+            `[aa.reverseDispatch] resolveChildPort: aa=${aaSessionId} ownerPort=${ownerPort} (stale) → livePort=${port}`,
+          );
+        }
+        return port;
+      }
+    }
+    throw new AaServerError(
+      `no listening child for AA session ${aaSessionId} (tried ports ${candidates.join(', ')})`,
+      503,
+      null,
+    );
   }
 
   /**
@@ -911,11 +939,11 @@ export class ReverseDispatch {
       if (typeof message?.content === 'string') {
         // Simple user / system / human message.
         items.push({
-          itemId: baseId,
+          id: baseId,
           sessionId: aaSessionId,
-          kind: 'message',
+          type: 'message',
           ...(role ? { role } : {}),
-          text: message.content,
+          content: message.content,
           timestamp: ts,
           metadata,
         });
@@ -936,32 +964,32 @@ export class ReverseDispatch {
 
         if (thinkingBlock && typeof thinkingBlock.thinking === 'string') {
           items.push({
-            itemId: `${baseId}-thinking`,
+            id: `${baseId}-thinking`,
             sessionId: aaSessionId,
-            kind: 'thinking',
+            type: 'assistant_activity',
             ...(role ? { role } : {}),
-            text: thinkingBlock.thinking,
+            content: thinkingBlock.thinking,
             timestamp: ts,
             metadata: { ...metadata, blockType: 'thinking' },
           });
         }
         if (textBlock && typeof textBlock.text === 'string') {
           items.push({
-            itemId: `${baseId}-text`,
+            id: `${baseId}-text`,
             sessionId: aaSessionId,
-            kind: 'message',
+            type: 'assistant_activity',
             ...(role ? { role } : {}),
-            text: textBlock.text,
+            content: textBlock.text,
             timestamp: ts,
             metadata,
           });
         }
         if (toolUse) {
           items.push({
-            itemId: `${baseId}-tooluse`,
+            id: `${baseId}-tooluse`,
             sessionId: aaSessionId,
-            kind: 'tool_call',
-            text: '',
+            type: 'agent_call',
+            content: '',
             timestamp: ts,
             metadata: {
               ...metadata,
@@ -973,10 +1001,10 @@ export class ReverseDispatch {
         }
         if (toolResult) {
           items.push({
-            itemId: `${baseId}-toolresult`,
+            id: `${baseId}-toolresult`,
             sessionId: aaSessionId,
-            kind: 'tool_result',
-            text: '',
+            type: 'agent_call',
+            content: '',
             timestamp: ts,
             metadata: {
               ...metadata,
@@ -990,11 +1018,11 @@ export class ReverseDispatch {
 
       // Fallback: pass through with whatever content we have.
       items.push({
-        itemId: baseId,
+        id: baseId,
         sessionId: aaSessionId,
-        kind: 'message',
+        type: 'message',
         ...(role ? { role } : {}),
-        text: '',
+        content: '',
         timestamp: ts,
         metadata,
       });
