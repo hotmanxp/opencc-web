@@ -56,7 +56,13 @@ const PushActionSchema = z.object({
 
 // Module-level slot for the sessionCreate follow-up. forwardToZai assigns
 // here so the route handler can read it without closure narrowing pain.
-let pendingFollowupFromForward: { sessionId: string; actualSessionId: string | null; content: string; cwd: string } | null = null;
+let pendingFollowupFromForward: {
+  sessionId: string;
+  actualSessionId: string | null;
+  content: string;
+  cwd: string;
+  permissionMode?: string;
+} | null = null;
 
 const SendMessagePayloadSchema = z.object({
   content: z.string().min(1),
@@ -72,6 +78,14 @@ const SessionCreatePayloadSchema = z.object({
   cwd: z.string().optional().default(''),
   runtimeId: z.string().min(1),
   runtimeType: z.string().optional().default('codex'),
+  // zai patch (2026-09-28): the model / provider / permission the user
+  // picked on AA's new-session screen travel in `session.create`'s
+  // `selections`. They must be part of CREATE, not a follow-up PATCH:
+  // the child starts the first turn off this same request, so a later
+  // PATCH races it and the first turn silently runs on the default model.
+  model: z.string().optional(),
+  providerId: z.string().optional(),
+  permissionMode: z.string().optional(),
 });
 
 const ApprovePayloadSchema = z.object({
@@ -187,17 +201,18 @@ async function forwardToZai(
       }
       const p = SessionCreatePayloadSchema.parse({ ...payload, sessionId: topSid });
       endpoint = '/api/agent/sessions';
-      // AA doesn't tell us which model the user wants (mobile/web picks
-      // via project context). Pass 'unknown' so zai falls back to its
-      // env/settings default — same as the web UI does when no model is
-      // chosen.
+      // When AA told us which model/provider/permission the user picked
+      // (`selections` on session.create), create the transcript with them.
+      // Otherwise 'unknown' lets zai fall back to its env/settings default,
+      // same as the web UI does when no model is chosen.
       // Note: /api/agent/sessions does NOT consume a `prompt` field —
       // it only reserves the transcript. The first prompt goes through
       // the followup below, targeting the returned sessionId.
       body = {
         sessionId: p.sessionId,
         cwd: p.cwd || undefined,
-        model: 'unknown',
+        model: p.model || 'unknown',
+        ...(p.providerId ? { providerId: p.providerId } : {}),
       };
       // After creating the session, we enqueue the first prompt. We
       // use a module-level mutable slot (avoiding TS closure narrowing).
@@ -208,6 +223,7 @@ async function forwardToZai(
         actualSessionId: null, // filled in after /api/agent/sessions returns
         content: p.content,
         cwd: p.cwd,
+        permissionMode: p.permissionMode,
       };
       break;
     }
@@ -308,7 +324,11 @@ router.post('/push-action', async (req, res) => {
             sessionId: followupSessionId,
             prompt: pendingFollowupFromForward.content,
             ...(pendingFollowupFromForward.cwd ? { cwd: pendingFollowupFromForward.cwd } : {}),
-            model: 'unknown',
+            // The model was already fixed by the create call above; this
+            // route has no `model` field, so don't pretend otherwise.
+            ...(pendingFollowupFromForward.permissionMode
+              ? { permissionMode: pendingFollowupFromForward.permissionMode }
+              : {}),
           }),
         });
       } catch (followupErr) {

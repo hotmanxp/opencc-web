@@ -635,25 +635,7 @@ export class ReverseDispatch {
     const childPort = await this.resolveChildPort(p.sessionId);
     const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
 
-    const patch: Record<string, unknown> = {};
-    const selection = selections.model ?? selections['catalog.model'];
-    if (typeof selection === 'string' && selection) {
-      // Catalog selectionIds are `providerId::model` so a model offered by
-      // two custom providers routes to the one the user actually picked;
-      // a bare id (older client) falls back to "first profile that has it".
-      const { providerId: encoded, model } = decodeSelectionId(selection);
-      const providerId =
-        encoded ?? findProviderIdForModel(await this.readChildProviderConfig(childPort), model);
-      patch.model = model;
-      if (providerId) patch.providerId = providerId;
-    }
-    const permission = selections.permission ?? selections['catalog.permission'];
-    if (typeof permission === 'string' && permission) patch.permissionMode = permission;
-    // zai has no per-session reasoning-effort knob wired into the
-    // agent loop, so `reasoning_effort` is accepted and recorded but
-    // deliberately not forwarded — silently dropping it beats inventing
-    // a field the runtime would reject.
-
+    const patch = await this.resolveSelectionsPatch(childPort, selections);
     if (Object.keys(patch).length === 0) {
       return { ok: true, applied: {}, sessionId: p.sessionId };
     }
@@ -671,6 +653,55 @@ export class ReverseDispatch {
       );
     }
     return { ok: true, applied: patch, sessionId: p.sessionId };
+  }
+
+  /**
+   * Turn AA's flat `selections` map into a child session patch.
+   *
+   * `selections` is a single flat dict keyed by whatever the client last
+   * touched, and in practice the model slot sometimes carries a REASONING
+   * EFFORT value — real captures from the new-session screen:
+   *
+   *   {"model": "high",     "permission": "bypassPermissions"}
+   *   {"model": "medium",   "permission": "bypassPermissions"}
+   *   {"model": "provider_x::MiniMax-M3.1-Flash-Preview", "permission": …}
+   *
+   * Patching `model: "high"` verbatim is actively harmful: no provider
+   * profile lists it, so `findProfileForModel` misses, the call falls back
+   * to the default env endpoint, and the session quietly runs on the
+   * default model — the user picks a model and nothing changes. So a model
+   * value is only accepted when it actually resolves to a profile model.
+   */
+  private async resolveSelectionsPatch(
+    childPort: number,
+    selections: Record<string, string | null>,
+  ): Promise<Record<string, unknown>> {
+    const patch: Record<string, unknown> = {};
+    const selection = selections.model ?? selections['catalog.model'];
+    if (typeof selection === 'string' && selection) {
+      // Catalog selectionIds are `providerId::model` so a model offered by
+      // two custom providers routes to the one the user actually picked;
+      // a bare id (older client) falls back to "first profile that has it".
+      const { providerId: encoded, model } = decodeSelectionId(selection);
+      const cfg = await this.readChildProviderConfig(childPort);
+      const providerId = encoded ?? findProviderIdForModel(cfg, model);
+      if (encoded || providerId) {
+        patch.model = model;
+        if (providerId) patch.providerId = providerId;
+      } else {
+        console.warn(
+          '[aa.reverseDispatch] selections.model is not a known model, ignoring:',
+          selection,
+        );
+      }
+    }
+    const permission = selections.permission ?? selections['catalog.permission'];
+    if (typeof permission === 'string' && permission) patch.permissionMode = permission;
+    // zai has no per-session reasoning-effort knob wired into the
+    // agent loop, so `reasoning_effort` is accepted and recorded but
+    // deliberately not forwarded — silently dropping it beats inventing
+    // a field the runtime would reject.
+    return patch;
   }
 
   private async readChildProviderConfig(port: number): Promise<{ profiles?: AaProviderProfile[] } | null> {
@@ -949,6 +980,7 @@ export class ReverseDispatch {
       cwd?: string;
       runtimeId?: string;
       runtimeType?: string;
+      selections?: Record<string, string | null>;
       runtimeOptions?: { runtimeId?: string; runtimeType?: string; name?: string };
     };
     if (!p.sessionId) throw new AaServerError('session.create: sessionId required', 400, null);
@@ -976,7 +1008,15 @@ export class ReverseDispatch {
     // Forward to child via push-action. Child will create the transcript
     // with the AA-provided sessionId (so AA can reference it later) and
     // enqueue the first turn.
+    //
+    // `selections` (what the user picked on the new-session screen) has to
+    // ride along with the CREATE: the child starts the first turn from this
+    // same request, so a follow-up PATCH would race it and the first turn
+    // would run on the default model.
     const cwd = await this.canonicalCwd(p.cwd);
+    const selectionPatch = p.selections
+      ? await this.resolveSelectionsPatch(port, p.selections)
+      : {};
     const childResp = await forwardToChild(port, 'sessionCreate', p.sessionId, {
       sessionId: p.sessionId,
       content: p.content,
@@ -984,6 +1024,11 @@ export class ReverseDispatch {
       cwd,
       runtimeId,
       runtimeType: p.runtimeType ?? p.runtimeOptions?.runtimeType ?? 'codex',
+      ...(selectionPatch.model ? { model: selectionPatch.model as string } : {}),
+      ...(selectionPatch.providerId ? { providerId: selectionPatch.providerId as string } : {}),
+      ...(selectionPatch.permissionMode
+        ? { permissionMode: selectionPatch.permissionMode as string }
+        : {}),
     });
 
     // Capture the ACTUAL zai sessionId returned by the child — the child

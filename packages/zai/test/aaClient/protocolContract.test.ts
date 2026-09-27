@@ -414,6 +414,133 @@ describe('model catalog', () => {
   });
 });
 
+describe('session.create selections', () => {
+  it('carries the picked model into CREATE and ignores effort values in the model slot', async () => {
+    // Two real defects, both surfacing as "user picks a model, nothing happens":
+    //
+    // 1. `selections` was never read on session.create, so whatever was
+    //    picked on the new-session screen never reached the child. It
+    //    can't be a follow-up PATCH either: the child starts the first
+    //    turn from this same request, so a later PATCH loses the race.
+    // 2. The model slot sometimes carries a REASONING EFFORT value
+    //    ("high" / "medium" in real captures). Patching that verbatim means
+    //    no profile lists it, provider resolution misses, and the call
+    //    falls back to the default env endpoint — the default model.
+    const { ReverseDispatch } = await import(
+      '../../src/server/services/aaClient/reverseDispatch.js'
+    );
+    const handlers = new Map<string, (p: unknown) => Promise<unknown>>();
+    const conn = {
+      onRequest: (method: string, handler: (p: unknown) => Promise<unknown>) => {
+        handlers.set(method, handler);
+      },
+      sendNotification: () => {},
+    };
+    const { conn: registryConn } = fakeConn();
+    const { RuntimeRegistry: Registry } = await import(
+      '../../src/server/services/aaClient/runtimeRegistry.js'
+    );
+    const registry = new Registry(registryConn as never);
+    (registry as unknown as { mappings: Record<string, unknown> }).mappings = {
+      '9451': {
+        runtimeId: 'rti_test',
+        instanceId: 'inst_test',
+        name: 'AA Test Project',
+        port: 9451,
+        cwd: '/tmp/x',
+        registeredAt: '2026-09-27T00:00:00.000Z',
+      },
+    };
+    const dispatch = new ReverseDispatch({ conn: conn as never, registry: registry as never });
+    // portFromRuntime/portForRuntime reach for `require()`, unavailable in
+    // the ESM test env; the model lookups go through readChildProviderConfig.
+    (dispatch as unknown as { portFromRuntime(id: string): Promise<number | null> })
+      .portFromRuntime = async () => 9451;
+    (dispatch as unknown as { portForRuntime(id: string | undefined): Promise<number | null> })
+      .portForRuntime = async () => 9451;
+    dispatch.install();
+
+    const { initSessionMap } = await import('../../src/server/services/aaClient/sessionMap.js');
+    const sessionMap = initSessionMap();
+    await sessionMap.put(9451, {
+      aaSessionId: 'sess-new',
+      runtimeId: 'rti_test',
+      zaiSessionId: 'sess-sess-new',
+      createdAt: '2026-09-27T00:00:00.000Z',
+      metadata: {},
+    });
+
+    const profiles = [
+      {
+        id: 'provider_mm',
+        name: 'MiniMax',
+        model: 'MiniMax-M2.7-highspeed,MiniMax-M3',
+        capabilities: {},
+      },
+    ];
+    const captured: Record<string, unknown>[] = [];
+    const origFetch = globalThis.fetch;
+    const stub = (): typeof fetch =>
+      (async (url: unknown, init: RequestInit) => {
+        if (String(url).includes('/api/config/zai/provider')) {
+          return new Response(JSON.stringify({ profiles }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          action: string;
+          payload: Record<string, unknown>;
+        };
+        captured.push(body.payload);
+        return new Response('{"sessionId":"sess-sess-new"}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch;
+    const create = handlers.get('session.create')!;
+
+    globalThis.fetch = stub();
+    try {
+      // A real model selection rides along with CREATE.
+      await create({
+        sessionId: 'sess-new',
+        runtimeId: 'rti_test',
+        content: '你是什么模型',
+        cwd: '/tmp/x',
+        selections: {
+          model: 'provider_mm::MiniMax-M2.7-highspeed',
+          permission: 'bypassPermissions',
+        },
+      });
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+    const createPayload = captured[captured.length - 1];
+    expect(createPayload.model).toBe('MiniMax-M2.7-highspeed');
+    expect(createPayload.providerId).toBe('provider_mm');
+    expect(createPayload.permissionMode).toBe('bypassPermissions');
+
+    // An effort value in the model slot must not become the session model.
+    captured.length = 0;
+    globalThis.fetch = stub();
+    try {
+      await create({
+        sessionId: 'sess-new',
+        runtimeId: 'rti_test',
+        content: '你是什么模型',
+        cwd: '/tmp/x',
+        selections: { model: 'high', permission: 'bypassPermissions' },
+      });
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+    const effortPayload = captured[captured.length - 1];
+    expect(effortPayload.model).toBeUndefined();
+    expect(effortPayload.providerId).toBeUndefined();
+  });
+});
+
 describe('runtime.done', () => {
   it('finalises open streams from every turnIndex, not just the last one', async () => {
     // zai's turnIndex counts model messages within a user turn, and the
