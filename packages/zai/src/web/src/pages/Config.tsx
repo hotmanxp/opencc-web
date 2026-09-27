@@ -680,6 +680,9 @@ function AgentsMdEditor({
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  // 2026-09-27:Monaco editor ref,handleSave 优先从 api 取最新值(markdown
+  // 编辑器实时改但 state 还没 commit 的场景),fallback 到 draft state。
+  const editorRef = useRef<MonacoCodeViewApi | null>(null);
 
   const endpoint = `/config/${tool}/agents-md`;
 
@@ -710,10 +713,13 @@ function AgentsMdEditor({
   };
 
   const handleSave = async () => {
+    // 2026-09-27:从 editorRef 取最新 markdown 内容(Monaco 编辑器实时改但
+    // React state 还没 commit 的场景),fallback 到 draft state。
+    const currentDraft = editorRef.current?.getValue() ?? draft;
     setSaving(true);
     try {
       // 纯文本:不做 JSON/语法校验,服务端只校验 content 字段是 string。
-      await api.put(endpoint, { content: draft });
+      await api.put(endpoint, { content: currentDraft });
       message.success(missing ? 'AGENTS.md 已创建' : 'AGENTS.md 已保存');
       setModalOpen(false);
       await fetchContent();
@@ -765,17 +771,23 @@ function AgentsMdEditor({
         width={760}
         destroyOnClose
       >
-        <Input.TextArea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          autoSize={{ minRows: 16, maxRows: 30 }}
-          spellCheck={false}
-          placeholder={missing ? '# AGENTS.md\n\n在此编写工具说明...' : undefined}
-          className="text-xs"
-          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
-        />
+        {/* 2026-09-27:从 <Input.TextArea> 切到 LazyMonacoCodeView(markdown 语言)。
+            收益:标题/列表/代码块语法高亮、自动列表续行、Cmd/Ctrl+F 查找,
+            远超裸 textarea。modalOpen 进 documentKey,关掉 Modal 触发 model
+            切换,避免下次打开时残留旧内容。 */}
+        <div style={{ height: 460 }}>
+          <LazyMonacoCodeView
+            content={draft}
+            documentKey={`${endpoint}|${modalOpen}`}
+            fileName={`${label} AGENTS.md`}
+            language="markdown"
+            editable={true}
+            onReady={(api) => { editorRef.current = api }}
+            onChange={(value) => setDraft(value)}
+          />
+        </div>
         <Text type="secondary" className="text-xs block mt-2">
-          纯文本 (Markdown)。保存时使用原子写 (tmp + rename)。
+          纯文本 (Markdown)。保存时使用原子写 (tmp + rename)。Cmd/Ctrl+F 查找。
         </Text>
       </Modal>
     </Card>
