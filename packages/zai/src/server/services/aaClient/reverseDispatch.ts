@@ -253,10 +253,17 @@ export class ReverseDispatch {
         // (single runtime types must set maxInstances to 1). Set explicitly
         // here; null is rejected by pydantic's validator.
         maxInstances: 1,
-        // `configSchema` is required even when null. Pydantic rejects
-        // omitted fields with `extra="forbid"`. None means zai has no
-        // per-runtime config (sessions are configured per-prompt).
-        configSchema: null,
+        // AA Web's runtimeTypeCanCreateInstance filters types with
+        // `schema === null` out of the "可添加" (addable) list. We send a
+        // minimal valid JSON Schema (Draft 2020-12) — zai has no
+        // per-runtime config to expose, so the schema accepts any object.
+        configSchema: {
+          revision: 0,
+          schema: { type: 'object', properties: {} },
+          uiSchema: null,
+          defaults: {},
+          metadata: {},
+        },
       },
     ];
   }
