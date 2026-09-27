@@ -6,7 +6,7 @@ import { extname, basename, join, sep, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
-import { MAX_FILE_BYTES, writeTextFile } from '../utils/fsWrite.js';
+import { MAX_FILE_BYTES, sha256OfString, writeTextFile } from '../utils/fsWrite.js';
 import { resolveRgPath, runRipgrep } from '../services/ripgrep.js';
 import type {
   FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult,
@@ -504,6 +504,9 @@ fsRouter.get('/fs/file', async (req, res) => {
       size: info.size,
       mtime: info.mtime.toISOString(),
       content,
+      // 2026-09-27:与 AA `connectorFsReadText` 同步,text kind 返回 sha256,
+      // 客户端走 ifMatch 路径做乐观并发写。
+      sha256: sha256OfString(content),
     };
     res.json(body);
   } catch (err) {
@@ -516,6 +519,8 @@ fsRouter.put('/fs/file', async (req, res) => {
   const body = req.body ?? {};
   const rel = typeof body.path === 'string' ? body.path : '';
   const content = typeof body.content === 'string' ? body.content : null;
+  // 2026-09-27:与 AA `connectorFsWrite` 同步,ifMatch 可选;不传 → 向后兼容无条件覆盖。
+  const ifMatch = typeof body.ifMatch === 'string' && body.ifMatch.length > 0 ? body.ifMatch : undefined;
   if (!rel) {
     res.status(400).json({ ok: false, error: '缺少 path 参数' } satisfies FsFile);
     return;
@@ -561,8 +566,25 @@ fsRouter.put('/fs/file', async (req, res) => {
     res.status(400).json({ ok: false, error: '不是文件' } satisfies FsFile);
     return;
   }
-  const result = await writeTextFile(safe.abs, content);
+  // writeTextFile 内部:ifMatch 命中 → 写 + 返回 sha256;不匹配 → CONFLICT;
+  // ENOENT/EACCES/ENOSPC/OTHER 与原行为一致。
+  //
+  // CONFLICT 走 200 + ok:false 风格(而非 412):与本路由 ENOENT/EACCES/ENOSPC/
+  // OTHER 的 ok:false 模式保持一致,客户端 useFsWrite / FsTab 用 res.ok+res.code
+  // 分支处理,无需走 apiBase 抛 ApiError → notifyApiError 的全局通知路径。
+  // 这是 dev trade-off:HTTP 语义上 412 更准,但本应用是单端点、单客户端,自定义
+  // 错误码更易定位;与 AA `connectorFsWrite` 不一样(AA 是 RPC,客户端自己解析)。
+  const result = await writeTextFile(safe.abs, content, { ifMatch });
   if (!result.ok) {
+    if (result.code === 'CONFLICT') {
+      res.json({
+        ok: false,
+        code: 'CONFLICT',
+        error: result.error,
+        diskSha256: result.diskSha256,
+      } satisfies FsFile);
+      return;
+    }
     if (result.code === 'ENOENT') {
       res.status(404).json({ ok: false, error: result.error } satisfies FsFile);
       return;
@@ -577,6 +599,7 @@ fsRouter.put('/fs/file', async (req, res) => {
     name: base,
     size: result.size,
     mtime: result.mtime,
+    sha256: result.sha256,
   } satisfies FsFile);
 });
 

@@ -153,7 +153,14 @@ export default defineConfig({
       output: {
         manualChunks: (id) => {
           if (!id.includes('node_modules')) return undefined;
-          if (id.includes('@codemirror')) return 'codemirror';
+          // Monaco editor — 仅当用户进入代码编辑时才加载。AA 的 monaco-code-view.tsx
+          // 用 `import('monaco-editor')` 做代码分割,我们套同一模式。worker 走
+          // `new URL(..., import.meta.url)` 由 Vite 自动 emit 为独立 chunk,无需新增
+          // vite plugin。basic-languages / language / editor 各自独立,首屏不影响。
+          if (id.includes('monaco-editor/esm/vs/basic-languages/')) return 'monaco-langs';
+          if (id.includes('monaco-editor/esm/vs/language/')) return 'monaco-lang-workers';
+          if (id.includes('monaco-editor/esm/vs/editor/')) return 'monaco-editor-core';
+          if (id === 'monaco-editor' || id.includes('monaco-editor/esm/vs/editor/standalone') || id.includes('monaco-editor/esm/vs/editor/main')) return 'monaco-standalone';
           if (id.includes('react-markdown') || id.includes('remark') || id.includes('micromark')) return 'markdown';
           if (
             id.includes('react-syntax-highlighter') ||

@@ -26,6 +26,13 @@ export interface FsAck {
 export interface FsFile {
   ok: boolean;
   error?: string;
+  /** 错误码(2026-09-27 + 与 AA `connectorFsWrite` 同步):
+   *   - 'CONFLICT'  — PUT /fs/file 携带的 ifMatch 与 diskSha256 不匹配(412)
+   *   - 其余 ENOENT/EACCES/ENOSPC/OTHER 与 writeTextFile 对齐
+   * 老调用方仍可通过 `ok === false` 判断,新增 `code` 不破坏既有契约。 */
+  code?: 'CONFLICT' | 'ENOENT' | 'EACCES' | 'ENOSPC' | 'OTHER';
+  /** 仅 code === 'CONFLICT':磁盘当前 sha256,客户端可用它拉新内容。 */
+  diskSha256?: string;
   /** Preview kind. 'text' (default for known text extensions) returns
    *  utf8 `content`. 'image' returns base64 `dataUrl` + `mime` for
    *  binary image formats. 'html' is like 'image' but mime is text/html
@@ -47,6 +54,12 @@ export interface FsFile {
   dataUrl?: string;
   /** 文档类 kind:扩展名前缀(eg. ".docx")。 */
   ext?: string;
+  /** 仅 text kind:UTF-8 内容的 SHA-256 十六进制(2026-09-27 与 AA 同步),
+   *  用于 FsTab 的乐观并发写(PUT 时回传 ifMatch)。 */
+  sha256?: string;
+  /** 仅 text kind:true 表示内容已被服务端截断(超过 MAX_FILE_BYTES),
+   *  客户端不应把截断内容当成原文件全文保存。 */
+  truncated?: boolean;
 }
 
 /**

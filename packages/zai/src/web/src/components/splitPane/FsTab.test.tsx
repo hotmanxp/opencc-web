@@ -42,26 +42,43 @@ vi.mock('../documentPreview/index.js', async (importOriginal) => {
     ),
   };
 });
-// TextEditor and the markdown SyntaxHighlighter chunks are dynamic
+// MonacoCodeView and the markdown SyntaxHighlighter chunks are dynamic
 // imports that happy-dom never resolves (vitest's module loader uses
 // a separate Promise machinery from Node's). We stub them so that
 // the dynamic-import promise resolves on the next microtask with
 // our test stub, which FsTab's lazy load() then mounts.
-vi.mock('./TextEditor.js', () => ({
-  TextEditor: (props: any) => (
-    <div data-testid="fs-editor">
-      <pre>{props.initialContent}</pre>
-      <button
-        data-testid="fs-editor-mod-s"
-        onClick={() => props.onSave?.(props.initialContent)}
-      >
-        save
-      </button>
-      <button data-testid="fs-editor-escape" onClick={() => props.onCancel?.()}>
-        cancel
-      </button>
-    </div>
-  ),
+//
+// 2026-09-27:从 ./TextEditor.js(CodeMirror)迁移到 ./MonacoCodeView.js;mock
+// 暴露 onReady/onChange/content 接口,fs-editor / fs-editor-mod-s 测试钩子
+// 保留,供既有测试继续工作。
+vi.mock('./MonacoCodeView.js', () => ({
+  MonacoCodeView: (props: any) => {
+    const api = {
+      getValue: () => props.content,
+      focus: () => {},
+      openSearch: () => {},
+      revealPosition: () => {},
+      destroy: () => {},
+    };
+    // 立即触发 onReady,与真实 MonacoCodeView 行为对齐(挂载即注入)。
+    if (typeof props.onReady === 'function') props.onReady(api);
+    return (
+      <div data-testid="fs-editor" data-editable={props.editable ? 'true' : 'false'}>
+        <pre>{props.content}</pre>
+        <input
+          data-testid="fs-editor-input"
+          defaultValue={props.content}
+          onChange={(e: any) => props.onChange?.(e.target.value)}
+        />
+        <button
+          data-testid="fs-editor-mod-s"
+          onClick={() => props.onChange?.(`${props.content}\nmod-s`) }
+        >
+          save
+        </button>
+      </div>
+    );
+  },
 }));
 vi.mock('../markdown/syntaxHighlighter.js', () => ({
   // The real SyntaxHighlighter (with showLineNumbers + wrapLines +
