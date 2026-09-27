@@ -319,6 +319,101 @@ describe('session.send_message attachments', () => {
   });
 });
 
+describe('model catalog', () => {
+  it('lists the models the user configured, not just the capabilities map', async () => {
+    // `capabilities` is per-model metadata and routinely omits the models
+    // actually configured on the profile's `model` field (comma-separated).
+    // Enumerating only the map hid deepseek-flash / glm-5.3-flash /
+    // deepseek-v4.1-flash / MiniMax-M3.1-Flash-Preview from the picker.
+    // The shapes below are copied from the real ~/.zai.json.
+    const { ReverseDispatch } = await import(
+      '../../src/server/services/aaClient/reverseDispatch.js'
+    );
+    const handlers = new Map<string, (p: unknown) => Promise<unknown>>();
+    const conn = {
+      onRequest: (method: string, handler: (p: unknown) => Promise<unknown>) => {
+        handlers.set(method, handler);
+      },
+    };
+    const { conn: registryConn } = fakeConn();
+    const { RuntimeRegistry: Registry } = await import(
+      '../../src/server/services/aaClient/runtimeRegistry.js'
+    );
+    const registry = new Registry(registryConn as never);
+    (registry as unknown as { mappings: Record<string, unknown> }).mappings = {
+      '9451': {
+        runtimeId: 'rti_test',
+        instanceId: 'inst_test',
+        name: 'AA Test Project',
+        port: 9451,
+        cwd: '/tmp/x',
+        registeredAt: '2026-09-27T00:00:00.000Z',
+      },
+    };
+    const dispatch = new ReverseDispatch({ conn: conn as never, registry: registry as never });
+    // Point the catalogue handler at a port directly — portForRuntime
+    // resolves via the process registry, which reaches for `require()` and
+    // isn't available in the ESM test environment.
+    (dispatch as unknown as { portForRuntime(id: string | undefined): Promise<number | null> })
+      .portForRuntime = async () => 9451;
+    dispatch.install();
+
+    const profiles = [
+      {
+        id: 'provider_ds',
+        name: 'Anthropic-DS',
+        provider: 'anthropic',
+        model: 'deepseek-flash',
+        capabilities: {
+          'MiniMax-M3': { supportsReasoning: true, contextWindow: 1000000 },
+          'qwen3.6-plus': {},
+        },
+      },
+      {
+        id: 'provider_mm',
+        name: 'MiniMax',
+        provider: 'anthropic',
+        model: 'MiniMax-M3.1-Flash-Preview,MiniMax-M3,M3.2-Flash-Preview',
+        capabilities: {
+          'MiniMax-M3': { supportsReasoning: true, contextWindow: 1000000 },
+        },
+      },
+    ];
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown) => {
+      if (String(url).includes('/api/config/zai/provider')) {
+        return new Response(JSON.stringify({ profiles }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    let models: { selectionId: string; metadata: Record<string, unknown> }[];
+    try {
+      const res = (await handlers.get('runtime.modelCatalog')!({
+        runtimeId: 'test-runtime',
+      })) as { catalog: { models: typeof models } };
+      models = res.catalog.models;
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+
+    const ids = models.map((m) => m.selectionId);
+    // Models configured only in `model` are present…
+    expect(ids).toContain('provider_ds::deepseek-flash');
+    expect(ids).toContain('provider_mm::MiniMax-M3.1-Flash-Preview');
+    expect(ids).toContain('provider_mm::M3.2-Flash-Preview');
+    // …and one model name offered by two providers stays two entries.
+    expect(ids.filter((i) => i.endsWith('::MiniMax-M3'))).toHaveLength(2);
+    // Reasoning is offered only where the capability says so.
+    const dsFlash = models.find((m) => m.selectionId === 'provider_ds::deepseek-flash');
+    expect(dsFlash?.metadata.supportsReasoning).toBe(false);
+  });
+});
+
 describe('runtime.done', () => {
   it('finalises open streams from every turnIndex, not just the last one', async () => {
     // zai's turnIndex counts model messages within a user turn, and the

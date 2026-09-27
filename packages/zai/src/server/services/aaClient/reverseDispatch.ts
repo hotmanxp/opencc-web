@@ -61,12 +61,54 @@ const ZAI_EFFORT_ITEMS = [
   { id: 'high', selectionId: 'high', displayName: '高' },
 ] as const;
 
+/** A provider profile as `/api/config/zai/provider` returns it. */
+interface AaProviderProfile {
+  id?: string;
+  name?: string;
+  provider?: string;
+  model?: string;
+  capabilities?: Record<string, { supportsReasoning?: boolean; contextWindow?: number }>;
+}
+
+/**
+ * Every model a profile offers, in display order.
+ *
+ * `capabilities` is only per-model METADATA and routinely omits the models
+ * the user actually configured — those live in `model` (comma-separated).
+ * Enumerating `capabilities` alone hid e.g. `deepseek-flash`,
+ * `glm-5.3-flash`, `deepseek-v4.1-flash`, `MiniMax-M3.1-Flash-Preview`
+ * and `M3.2-Flash-Preview` from the AA model picker even though they were
+ * the configured ones. The catalogue and the provider lookup both have to
+ * agree on this list, so it lives in one place.
+ */
+function profileModelIds(profile: AaProviderProfile): string[] {
+  const configured = (profile.model ?? '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+  return [...new Set([...configured, ...Object.keys(profile.capabilities ?? {})])];
+}
+
+/** `selectionId` carries the profile so two providers offering the same
+ *  model name stay distinguishable, and so the selection can be routed to
+ *  the right custom provider instead of the first one that happens to
+ *  mention that model. */
+function encodeSelectionId(profileId: string | undefined, modelId: string): string {
+  return profileId ? `${profileId}::${modelId}` : modelId;
+}
+
+function decodeSelectionId(selectionId: string): { providerId?: string; model: string } {
+  const sep = selectionId.indexOf('::');
+  if (sep <= 0) return { model: selectionId };
+  return { providerId: selectionId.slice(0, sep), model: selectionId.slice(sep + 2) };
+}
+
 function findProviderIdForModel(
-  cfg: { profiles?: { id?: string; capabilities?: Record<string, unknown> }[] } | null,
+  cfg: { profiles?: AaProviderProfile[] } | null,
   model: string,
 ): string | undefined {
   for (const p of cfg?.profiles ?? []) {
-    if (p?.capabilities && Object.prototype.hasOwnProperty.call(p.capabilities, model)) return p.id;
+    if (profileModelIds(p).includes(model)) return p.id;
   }
   return undefined;
 }
@@ -535,22 +577,22 @@ export class ReverseDispatch {
     if (!Array.isArray(profiles)) return [];
     const models: Record<string, unknown>[] = [];
     const seen = new Set<string>();
-    for (const profile of profiles) {
-      if (!profile || typeof profile !== 'object') continue;
-      const p = profile as {
-        id?: string;
-        name?: string;
-        model?: string;
-        capabilities?: Record<string, { supportsReasoning?: boolean; contextWindow?: number }>;
-      };
+    for (const raw of profiles) {
+      if (!raw || typeof raw !== 'object') continue;
+      const p = raw as AaProviderProfile;
       const caps = p.capabilities ?? {};
-      for (const [modelId, cap] of Object.entries(caps)) {
-        if (seen.has(modelId)) continue;
-        seen.add(modelId);
+      for (const modelId of profileModelIds(p)) {
+        // Keyed by selectionId, not modelId: two custom providers can
+        // legitimately offer the same model name, and collapsing them on
+        // the bare name hid the second one entirely.
+        const selectionId = encodeSelectionId(p.id, modelId);
+        if (seen.has(selectionId)) continue;
+        seen.add(selectionId);
+        const cap = caps[modelId];
         const supportsReasoning = cap?.supportsReasoning === true;
         models.push({
-          id: modelId,
-          selectionId: modelId,
+          id: selectionId,
+          selectionId,
           displayName: modelId,
           description: [
             p.name ? `provider: ${p.name}` : undefined,
@@ -561,7 +603,9 @@ export class ReverseDispatch {
           // models that actually advertise reasoning support.
           reasoningItems: supportsReasoning ? ZAI_EFFORT_ITEMS : [],
           metadata: {
-            providerId: p.id,
+            providerId: p.id ?? null,
+            providerName: p.name ?? null,
+            model: modelId,
             contextWindow: cap?.contextWindow ?? null,
             supportsReasoning,
           },
@@ -592,9 +636,14 @@ export class ReverseDispatch {
     const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
 
     const patch: Record<string, unknown> = {};
-    const model = selections.model ?? selections['catalog.model'];
-    if (typeof model === 'string' && model) {
-      const providerId = findProviderIdForModel(await this.readChildProviderConfig(childPort), model);
+    const selection = selections.model ?? selections['catalog.model'];
+    if (typeof selection === 'string' && selection) {
+      // Catalog selectionIds are `providerId::model` so a model offered by
+      // two custom providers routes to the one the user actually picked;
+      // a bare id (older client) falls back to "first profile that has it".
+      const { providerId: encoded, model } = decodeSelectionId(selection);
+      const providerId =
+        encoded ?? findProviderIdForModel(await this.readChildProviderConfig(childPort), model);
       patch.model = model;
       if (providerId) patch.providerId = providerId;
     }
@@ -624,11 +673,9 @@ export class ReverseDispatch {
     return { ok: true, applied: patch, sessionId: p.sessionId };
   }
 
-  private async readChildProviderConfig(port: number): Promise<{
-    profiles?: { id?: string; capabilities?: Record<string, unknown> }[];
-  } | null> {
+  private async readChildProviderConfig(port: number): Promise<{ profiles?: AaProviderProfile[] } | null> {
     const res = await this.fetchChildJson(port, 'GET', '/api/config/zai/provider');
-    return (res?.body as { profiles?: { id?: string; capabilities?: Record<string, unknown> }[] }) ?? null;
+    return (res?.body as { profiles?: AaProviderProfile[] }) ?? null;
   }
 
   private async portFromRuntime(runtimeId: string): Promise<number | null> {
