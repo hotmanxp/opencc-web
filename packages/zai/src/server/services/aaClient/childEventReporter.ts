@@ -56,6 +56,21 @@ export class ChildEventReporter {
       'prompt.approve',
       'prompt.permission',
       'agent_task.changed',
+      // Runtime lifecycle events — root's AA event adapter turns these
+      // into `timeline.itemUpsert` notifications so AA Web shows
+      // assistant replies incrementally (otherwise the timeline only
+      // populates on the next `session.sync` round-trip, which AA Web
+      // may not auto-trigger once it's already rendered an empty view).
+      'runtime.started',
+      'runtime.delta',
+      'runtime.thinking',
+      'runtime.tool_call',
+      'runtime.tool_result',
+      'runtime.compacted',
+      'runtime.done',
+      'runtime.error',
+      'runtime.aborted',
+      'runtime.notification',
     ]);
     if (!FORWARDED_TYPES.has(event.type)) return;
 

@@ -47,6 +47,7 @@ import {
   upsertSessionMeta,
   upsertSessionState,
   upsertNotice,
+  upsertTimelineItem,
   createSession,
 } from './rpc.js';
 import { getRuntimeRegistry } from './runtimeRegistry.js';
@@ -112,6 +113,25 @@ export class EventAdapter {
         return;
       case 'agent_task.changed':
         await this.handleAgentTaskChanged(runtimeId, childPort, event);
+        return;
+      // Runtime timeline events — forwarded by childEventReporter from
+      // each child's own eventBus (was: only the 7 above were forwarded,
+      // leaving assistant messages invisible to AA Web). Each runtime.*
+      // event carries the session id on `event.sessionId`; we project
+      // zai's payload onto AA's `timeline.itemUpsert` shape and let
+      // AA Web merge into the live timeline. AA server dedupes by
+      // itemId, so this stays consistent with `session.sync`.
+      case 'runtime.started':
+      case 'runtime.delta':
+      case 'runtime.thinking':
+      case 'runtime.tool_call':
+      case 'runtime.tool_result':
+      case 'runtime.compacted':
+      case 'runtime.done':
+      case 'runtime.error':
+      case 'runtime.aborted':
+      case 'runtime.notification':
+        await this.handleRuntimeTimeline(runtimeId, childPort, event);
         return;
       default:
         // Unmapped event type — silently ignore. T6 follow-up will map more.
@@ -273,6 +293,121 @@ export class EventAdapter {
       runtime: 'codex',
       status,
       metadata: { taskKind: task?.kind },
+    });
+  }
+
+  /**
+   * Project a zai runtime.* event onto AA's TimelineItem shape and
+   * push it via `timeline.itemUpsert`. AA Web subscribes to the
+   * notification stream and merges by itemId, so this stays
+   * consistent with the full snapshot returned by `session.sync`.
+   *
+   * Translation rules:
+   *   runtime.started     → kind:'lifecycle', text:'turn started'
+   *   runtime.delta       → kind:'assistant_message_delta' (text accumulates client-side)
+   *   runtime.thinking    → kind:'thinking'
+   *   runtime.tool_call   → kind:'tool_call' (toolUseId + input in metadata)
+   *   runtime.tool_result → kind:'tool_result'
+   *   runtime.compacted   → kind:'system'
+   *   runtime.done        → kind:'lifecycle' (text:'turn completed')
+   *   runtime.error/aborted → kind:'error'
+   *   runtime.notification → kind:'info'
+   *
+   * The `sessionId` from the runtime event is the zai-side id
+   * (post-prefix); we translate to AA's id via sessionMap so the
+   * timeline item is filed under the same session AA Web shows.
+   */
+  private async handleRuntimeTimeline(
+    runtimeId: string,
+    childPort: number | undefined,
+    event: Record<string, unknown>,
+  ): Promise<void> {
+    const zaiSessionId = event.sessionId as string | undefined;
+    if (!zaiSessionId) return;
+    let aaSessionId = zaiSessionId;
+    if (childPort !== undefined) {
+      const map = getSessionMap();
+      const mapped = await map?.getAaSessionId(childPort, zaiSessionId);
+      if (mapped) aaSessionId = mapped;
+    }
+
+    const t = event.type as string;
+    let kind: string;
+    let text = '';
+    const metadata: Record<string, unknown> = { zaiEventType: t };
+    switch (t) {
+      case 'runtime.started':
+        kind = 'lifecycle';
+        text = 'turn started';
+        metadata.turnIndex = event.turnIndex;
+        metadata.model = event.model;
+        break;
+      case 'runtime.delta':
+        kind = 'assistant_message_delta';
+        text = (event.delta as string | undefined) ?? '';
+        metadata.turnIndex = event.turnIndex;
+        break;
+      case 'runtime.thinking':
+        kind = 'thinking';
+        text = (event.thinking as string | undefined) ?? '';
+        metadata.turnIndex = event.turnIndex;
+        break;
+      case 'runtime.tool_call':
+        kind = 'tool_call';
+        text = (event.toolName as string | undefined) ?? '';
+        metadata.toolName = event.toolName;
+        metadata.toolUseId = event.toolUseId;
+        metadata.input = event.input;
+        break;
+      case 'runtime.tool_result':
+        kind = 'tool_result';
+        text = '';
+        metadata.toolUseId = event.toolUseId;
+        metadata.output = event.output;
+        metadata.isError = event.isError;
+        break;
+      case 'runtime.compacted':
+        kind = 'system';
+        text = 'context compacted';
+        break;
+      case 'runtime.done':
+        kind = 'lifecycle';
+        text = 'turn completed';
+        metadata.turnIndex = event.turnIndex;
+        break;
+      case 'runtime.error':
+        kind = 'error';
+        text = (event.error as { message?: string } | undefined)?.message ?? 'runtime error';
+        metadata.error = event.error;
+        break;
+      case 'runtime.aborted':
+        kind = 'error';
+        text = (event.reason as string | undefined) ?? 'aborted';
+        metadata.reason = event.reason;
+        break;
+      case 'runtime.notification':
+        kind = 'info';
+        text = (event.message as string | undefined) ?? '';
+        metadata.severity = event.severity;
+        break;
+      default:
+        kind = 'info';
+        text = '';
+    }
+
+    const itemId = (event.eventId as string | undefined) ?? `${aaSessionId}-${t}-${Date.now()}`;
+    upsertTimelineItem(this.conn, {
+      runtimeId,
+      sessionId: aaSessionId,
+      item: {
+        itemId,
+        sessionId: aaSessionId,
+        kind,
+        role: t === 'runtime.delta' || t === 'runtime.thinking' ? 'assistant' : undefined,
+        text,
+        timestamp: event.ts ?? new Date().toISOString(),
+        metadata,
+      },
     });
   }
 }
