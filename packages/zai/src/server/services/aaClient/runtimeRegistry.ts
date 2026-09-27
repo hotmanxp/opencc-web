@@ -45,7 +45,7 @@ import type { RuntimeName } from './protocol.js';
 // ─── Persisted shape ─────────────────────────────────────────────────────
 
 const RuntimeMappingSchema = z.object({
-  runtimeId: z.string().regex(/^zai_inst_[A-Za-z0-9_-]+$/),
+  runtimeId: z.string().regex(/^rti_[A-Za-z0-9_-]+$/),
   instanceId: z.string().min(1),
   name: z.string().min(1),
   port: z.number().int().positive(),
@@ -189,7 +189,7 @@ export class RuntimeRegistry {
     const cwd = def?.cwd ?? '';
     const app = def?.app;
 
-    const runtimeId = `zai_inst_${event.instanceId}`;
+    const runtimeId = `rti_${event.instanceId}`;
     const now = new Date().toISOString();
 
     const mapping: RuntimeMapping = existing ?? {

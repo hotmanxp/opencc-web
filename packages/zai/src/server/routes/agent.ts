@@ -2020,12 +2020,21 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     // 可选 model: 前端在 createNewSession 时会把"用户最近手动选过的模型"
     // 传过来, 让新建会话默认继承. 缺省/'unknown'/空串都视为不指定, 维持
     // 旧行为 (useConversationInfo 看到 'unknown' 就会回退到 runtime.defaultModel).
-    const body = req.body as { model?: unknown; providerId?: unknown; mainAgent?: unknown; cwd?: unknown } | undefined
+    const body = req.body as { model?: unknown; providerId?: unknown; mainAgent?: unknown; cwd?: unknown; sessionId?: unknown } | undefined
     const requested = body?.model
     const model =
       typeof requested === 'string' && requested.length > 0 && requested !== 'unknown'
         ? requested
         : 'unknown'
+    // zai patch (2026-09-27, AA integration): accept a client-provided
+    // sessionId so AA's session.create (which allocates the id client-side
+    // and passes it to the connector) maps to the same id in zai. AA expects
+    // an externalSessionId-style binding; reusing zai's sessionId for the AA
+    // sessionId is the simplest bridge. If omitted, fall back to generating
+    // a fresh id as before.
+    const requestedSessionId = typeof body?.sessionId === 'string' && body.sessionId.length > 0
+      ? body.sessionId
+      : null
     // zai patch: also accept the providerId the user picked for the
     // most recent model. Same sanity rules as `model` — empty / unknown
     // / non-string fall back to "not specified" so old clients without
@@ -2069,6 +2078,9 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
       // vendor-owned and only widened in serverTypes.ts).
       ...(providerId ? { providerId } : {}),
       permissionMode: getDefaultMode(),
+      // zai patch (2026-09-27, AA integration): accept a client-provided
+      // sessionId so AA's session.create RPC maps to the same id in zai.
+      ...(requestedSessionId ? { sessionId: requestedSessionId } : {}),
     } as Parameters<typeof store.create>[0], { cwd: ctx.cwd })
     if (mainAgent) {
       // create 已落盘 transcript,patch 写 meta.mainAgent(await —— 首条

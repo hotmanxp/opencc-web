@@ -42,11 +42,14 @@ const PushActionSchema = z.object({
     'approve',
     'inputResponse',
     'command',
+    'sessionCreate',
   ]),
   /** ID for idempotent dispatch — child dedupes via this where applicable. */
   idempotencyKey: z.string().min(1),
-  /** The session to act on, in child's zai session id space. */
-  zaiSessionId: z.string().min(1),
+  /** The session to act on, in child's zai session id space. Optional for sessionCreate. */
+  zaiSessionId: z.string().min(1).optional(),
+  /** AA-provided session id (used by sessionCreate to alias zai sessionId). */
+  sessionId: z.string().min(1).optional(),
   /** Action-specific payload. Validated per-action below. */
   payload: z.record(z.string(), z.unknown()).default({}),
 });
@@ -56,6 +59,15 @@ const SendMessagePayloadSchema = z.object({
   contentBlocks: z.array(z.unknown()).optional(),
   clientMessageId: z.string().optional(),
   displayText: z.string().optional(),
+});
+
+const SessionCreatePayloadSchema = z.object({
+  sessionId: z.string().min(1),
+  content: z.string().min(1),
+  title: z.string().optional().default(''),
+  cwd: z.string().optional().default(''),
+  runtimeId: z.string().min(1),
+  runtimeType: z.string().optional().default('codex'),
 });
 
 const ApprovePayloadSchema = z.object({
@@ -87,7 +99,7 @@ type Action = z.infer<typeof PushActionSchema>['action'];
  */
 async function forwardToZai(
   action: Action,
-  zaiSessionId: string,
+  zaiSessionId: string | undefined,
   payload: Record<string, unknown>,
 ): Promise<{ ok: boolean; [k: string]: unknown }> {
   const port = Number(process.env.ZAI_PORT ?? '9201');
@@ -95,7 +107,7 @@ async function forwardToZai(
   const token = process.env.ZAI_TOKEN ?? '';
   let endpoint: string;
   let method = 'POST';
-  let body: unknown;
+  let body: { [k: string]: unknown; ok?: boolean };
 
   switch (action) {
     case 'sendMessage':
@@ -154,6 +166,27 @@ async function forwardToZai(
       body = { command: p.commandName, args: p.args ?? '', sessionId: zaiSessionId };
       break;
     }
+    case 'sessionCreate': {
+      // sessionId lives at the top level (not inside payload) so the
+      // child can use it as the canonical zai sessionId alias.
+      const topSid = zaiSessionId;
+      if (!topSid) {
+        throw new Error('sessionCreate: sessionId required');
+      }
+      const p = SessionCreatePayloadSchema.parse({ ...payload, sessionId: topSid });
+      endpoint = '/api/agent/sessions';
+      // AA doesn't tell us which model the user wants (mobile/web picks
+      // via project context). Pass 'unknown' so zai falls back to its
+      // env/settings default — same as the web UI does when no model is
+      // chosen.
+      body = {
+        sessionId: p.sessionId,
+        prompt: p.content,
+        cwd: p.cwd || undefined,
+        model: 'unknown',
+      };
+      break;
+    }
     default: {
       // exhaustive — action is a z.enum, TS narrows correctly above
       const _never: never = action;
@@ -163,7 +196,9 @@ async function forwardToZai(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'X-Session-Id': zaiSessionId,
+    // X-Session-Id is informational on the child side (paths validate the
+    // session via req.app.locals.instanceContext, not this header).
+    ...(zaiSessionId ? { 'X-Session-Id': zaiSessionId } : {}),
   };
   if (token) headers['X-Zai-Token'] = token;
 
@@ -213,7 +248,14 @@ router.post('/push-action', async (req, res) => {
   const { action, idempotencyKey, zaiSessionId, payload } = parsed.data;
 
   try {
-    const result = await forwardToZai(action, zaiSessionId, payload);
+    // sessionCreate doesn't have a pre-existing zaiSessionId; the AA-side
+    // sessionId is propagated as the top-level `sessionId` field and used
+    // as the canonical zai sessionId alias.
+    const result = await forwardToZai(
+      action,
+      action === 'sessionCreate' ? parsed.data.sessionId : zaiSessionId,
+      payload,
+    );
     res.json({
       ok: result.ok,
       idempotencyKey,

@@ -74,7 +74,7 @@ interface ChildActionResult {
 
 async function forwardToChild(
   childPort: number,
-  action: 'sendMessage' | 'steer' | 'interrupt' | 'approve' | 'inputResponse' | 'command',
+  action: 'sendMessage' | 'steer' | 'interrupt' | 'approve' | 'inputResponse' | 'command' | 'sessionCreate',
   body: Record<string, unknown>,
 ): Promise<ChildActionResult> {
   // 127.0.0.1 by default; LAN instance uses its LAN IP. For T7 we
@@ -158,6 +158,12 @@ export class ReverseDispatch {
     this.conn.onRequest('runtime.stop', async (params) => {
       return this.handleRuntimeStop(params);
     });
+    // Session creation is the entrypoint for the conversation flow: AA Web
+    // "Start new session" → session.create → forwarded to child which
+    // creates the transcript + queues the first turn.
+    this.conn.onRequest('session.create', async (params) => {
+      return this.handleSessionCreate(params);
+    });
     // File system RPCs — AA Web/Mobile "Files" panel talks to the connector
     // via these. We expose the same node:fs-backed operations the local
     // zai web UI uses, with the zai process cwd as the workspace root.
@@ -218,14 +224,77 @@ export class ReverseDispatch {
     return { runtimeId, status: 'stopped' };
   }
 
-  private portFromRuntime(runtimeId: string): number | null {
+  /**
+   * Resolve which child port owns a given runtime identifier. AA passes
+   * EITHER a specific runtimeId (rti_xxx) OR the runtime type (legacy
+   * "codex"). We accept both:
+   *   - exact runtimeId match → that instance's port
+   *   - runtimeType match → any registered instance's port of that type
+   */
+  private async portFromRuntime(runtimeId: string): Promise<number | null> {
+    // Lazy import via require() — circular-free across the AA bundle.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getRuntimeRegistry } = require('./runtimeRegistry.js') as typeof import('./runtimeRegistry.js');
     const reg = getRuntimeRegistry();
-    if (!reg) return null;
-    for (const m of reg.listAll()) {
+    if (!reg) {
+      console.warn('[aa.reverseDispatch] portFromRuntime: no registry');
+      return null;
+    }
+    const mappings = reg.listAll();
+    console.log('[aa.reverseDispatch] portFromRuntime lookup', runtimeId, 'mappings:', mappings.map(m => ({ rid: m.runtimeId, port: m.port })));
+    // Exact match first.
+    for (const m of mappings) {
       if (m.runtimeId === runtimeId) return m.port;
     }
+    // AA's legacy "type-equal" convention allows runtimeId == runtimeType.
+    // Match by instance name too (sometimes AA passes the name).
+    for (const m of mappings) {
+      if (m.name === runtimeId) return m.port;
+    }
+    // Fallback: AA sent a value we don't recognize as either an instance
+    // id or a registered name. This happens when AA passes the runtime
+    // type ("codex") and our local registry uses opaque instance ids. Just
+    // return any registered port — there's only one InstanceDefinition
+    // active in our deployment model.
+    if (mappings.length > 0) {
+      // Filter out mappings whose port isn't actually listening — zai
+      // may have been restarted, leaving the runtime-map.json entries
+      // pointing at ports whose child process is gone.
+      for (const m of mappings) {
+        if (m.port > 0 && (await this.isPortListening(m.port))) {
+          return m.port;
+        }
+      }
+    }
     return null;
+  }
+
+  /** Tiny helper: returns true if the given TCP port has a listener. */
+  private async isPortListening(port: number): Promise<boolean> {
+    // Bun does not expose Node's `require()` from globals; dynamic import
+    // works in both bun and node. Cache the resolved module.
+    type NetModule = typeof import('node:net');
+    const netMod = ((globalThis as { __netMod?: NetModule }).__netMod ??
+      await (async () => {
+        const m = await import('node:net');
+        (globalThis as { __netMod?: NetModule }).__netMod = m;
+        return m;
+      })());
+    return await new Promise((resolve) => {
+      let done = false;
+      const finish = (ok: boolean) => {
+        if (done) return;
+        done = true;
+        resolve(ok);
+      };
+      const sock = netMod.connect(port, '127.0.0.1');
+      sock.once('connect', () => {
+        try { sock.end(); } catch { /* ignore */ }
+        finish(true);
+      });
+      sock.once('error', () => finish(false));
+      setTimeout(() => finish(false), 300);
+    });
   }
 
   // ─── Filesystem RPCs (AA "Files" panel) ────────────────────────────
@@ -347,6 +416,63 @@ export class ReverseDispatch {
   }
 
   // ─── Handlers ────────────────────────────────────────────────────────
+
+  private async handleSessionCreate(params: unknown): Promise<unknown> {
+    console.log('[aa.reverseDispatch] session.create params:', JSON.stringify(params));
+    // AA's SessionCreateParams (server/.../core/runtime_rpc_params.py):
+    //   { sessionId, content, title?, cwd?, selections?, attachments?,
+    //     clientMessageId?, runtimeOptions? }
+    // NOTE: AA also sends `runtimeId` + `runtimeType` at the TOP level
+    // (from the HTTP endpoint's payload), and our reverseDispatch handler
+    // receives the flattened form. runtimeOptions is still passed too.
+    const p = (params ?? {}) as {
+      sessionId?: string;
+      content?: string;
+      title?: string;
+      cwd?: string;
+      runtimeId?: string;
+      runtimeType?: string;
+      runtimeOptions?: { runtimeId?: string; runtimeType?: string; name?: string };
+    };
+    if (!p.sessionId) throw new AaServerError('session.create: sessionId required', 400, null);
+    if (!p.content) throw new AaServerError('session.create: content required', 400, null);
+
+    // Prefer top-level runtimeId (AA's flattened WS payload), then
+    // runtimeOptions.runtimeId (legacy fallback), then runtimeType as
+    // last resort (the legacy type-equal convention where instance ==
+    // type).
+    const runtimeId = p.runtimeId ?? p.runtimeOptions?.runtimeId ?? p.runtimeType;
+    if (!runtimeId) throw new AaServerError('session.create: runtimeId required', 400, null);
+
+    const port = await this.portFromRuntime(runtimeId);
+    if (port === null) throw new AaServerError(`session.create: unknown runtime ${runtimeId}`, 404, null);
+
+    // Forward to child via push-action. Child will create the transcript
+    // with the AA-provided sessionId (so AA can reference it later) and
+    // enqueue the first turn.
+    const childResp = await forwardToChild(port, 'sessionCreate', {
+      sessionId: p.sessionId,
+      content: p.content,
+      title: p.title ?? '',
+      cwd: p.cwd ?? '',
+      runtimeId,
+      runtimeType: p.runtimeType ?? p.runtimeOptions?.runtimeType ?? 'codex',
+    });
+
+    // Record the zai<->aa mapping in sessionMap so subsequent sends
+    // (session.send_message, etc.) can find the child via aa sessionId.
+    const map = getSessionMap();
+    await map?.put(port, {
+      aaSessionId: p.sessionId,
+      runtimeId,
+      zaiSessionId: p.sessionId, // we aliased zai sid to AA sid
+      createdAt: new Date().toISOString(),
+      metadata: { title: p.title ?? '', cwd: p.cwd ?? '' },
+    });
+
+    console.log(`[aa.reverseDispatch] session.create: ${p.sessionId} on port=${port}`);
+    return childResp;
+  }
 
   private async handleSendMessage(p: z.infer<typeof SendMessageParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);

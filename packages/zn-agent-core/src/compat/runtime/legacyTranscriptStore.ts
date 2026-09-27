@@ -202,10 +202,16 @@ export class TranscriptStore {
   }
 
   async create(
-    meta: { cwd: string; model: string; permissionMode?: string },
+    meta: { cwd: string; model: string; permissionMode?: string; sessionId?: string },
     opts?: { cwd?: string },
   ): Promise<string> {
-    const sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    // zai patch (2026-09-27, AA integration): accept an external sessionId
+    // so AA's session.create RPC (which allocates the id client-side) can
+    // map to the same id in zai. Validate the shape (sess-... prefix) to
+    // avoid accepting arbitrary strings as transcript ids.
+    const sessionId = meta.sessionId && meta.sessionId.length > 0
+      ? (meta.sessionId.startsWith('sess-') ? meta.sessionId : `sess-${meta.sessionId}`)
+      : `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     const cwd = opts?.cwd ?? meta.cwd
     REGISTRY.set(this.key(sessionId, cwd), {
       cwd,
