@@ -316,7 +316,15 @@ export class AaConnection {
 
   // ─── Auth ──────────────────────────────────────────────────────────────
 
-  private async authenticate(): Promise<string> {
+  /**
+   * Current connector access token, refreshing when stale.
+   *
+   * Public because connector-side HTTP calls need it too — e.g.
+   * downloading a user-uploaded attachment from
+   * `GET /api/v2/connector/sessions/{id}/attachments/{fileId}/content`,
+   * which requires `Authorization: Bearer <accessToken>`.
+   */
+  async authenticate(): Promise<string> {
     // Already-fresh token?
     if (
       this.accessToken &&

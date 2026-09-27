@@ -9,7 +9,7 @@
  *   server/agent_server/core/models.py                      (TimelineItemIn / NoticeIn)
  *   server/agent_server/services/effective_capabilities.py   (capability grouping)
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { upsertTimelineItem } from '../../src/server/services/aaClient/rpc.js';
 import { EventAdapter } from '../../src/server/services/aaClient/eventAdapter.js';
 import { RuntimeRegistry } from '../../src/server/services/aaClient/runtimeRegistry.js';
@@ -210,6 +210,112 @@ describe('fs path shape', () => {
       expect(e.path.startsWith('/')).toBe(true);
       expect(e.path).not.toContain('~');
     }
+  });
+});
+
+describe('session.send_message attachments', () => {
+  it('downloads attachments and inlines them as zai contentBlocks', async () => {
+    // The child's push-action schema accepts only {content, contentBlocks,
+    // clientMessageId, displayText} and strips everything else, so
+    // forwarding `attachments` verbatim dropped every image and the model
+    // answered "我没有看到附带的图片". AA sends metadata + a downloadUrl;
+    // the bytes must be fetched with the connector bearer token and inlined.
+    vi.resetModules();
+    vi.doMock('../../src/server/services/aaClient/config.js', () => ({
+      readAaConfig: async () => ({ serverUrl: 'https://aa.example' }),
+    }));
+
+    const { ReverseDispatch } = await import(
+      '../../src/server/services/aaClient/reverseDispatch.js'
+    );
+    const handlers = new Map<string, (p: unknown) => Promise<unknown>>();
+    const conn = {
+      onRequest: (method: string, handler: (p: unknown) => Promise<unknown>) => {
+        handlers.set(method, handler);
+      },
+      authenticate: async () => 'test-access-token',
+      sendNotification: () => {},
+    };
+    const { conn: registryConn } = fakeConn();
+    const { RuntimeRegistry: Registry } = await import(
+      '../../src/server/services/aaClient/runtimeRegistry.js'
+    );
+    const registry = new Registry(registryConn as never);
+    new ReverseDispatch({
+      conn: conn as never,
+      registry: registry as never,
+    }).install();
+    const { initSessionMap } = await import('../../src/server/services/aaClient/sessionMap.js');
+    const sessionMap = initSessionMap();
+    await sessionMap.put(9451, {
+      aaSessionId: 'sess-aa-1',
+      runtimeId: 'rti_test',
+      zaiSessionId: 'sess-zai-1',
+      createdAt: '2026-09-27T00:00:00.000Z',
+      metadata: {},
+    });
+    // One registered child, so the handler can resolve a port to forward to.
+    (registry as unknown as { mappings: Record<string, unknown> }).mappings = {
+      '9451': {
+        runtimeId: 'rti_test',
+        instanceId: 'inst_test',
+        name: 'AA Test Project',
+        port: 9451,
+        cwd: '/tmp/aa-test-cwd',
+        registeredAt: '2026-09-27T00:00:00.000Z',
+      },
+    };
+
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const seenAuth: (string | undefined)[] = [];
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+      seenAuth.push(new Headers(init?.headers).get('Authorization') ?? undefined);
+      if (String(url).endsWith('/content')) {
+        return new Response(pngBytes, { status: 200 });
+      }
+      // The child forward itself: capture what we send.
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        action: string;
+        payload: Record<string, unknown>;
+      };
+      if (body.action === 'sendMessage') capturedPayload = body.payload;
+      return new Response('{"ok":true}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    let capturedPayload: Record<string, unknown> | undefined;
+
+    try {
+      await handlers.get('session.send_message')!({
+        sessionId: 'sess-aa-1',
+        content: '识别这张图片信息',
+        attachments: [
+          {
+            fileId: 'file_abc',
+            name: 'a.png',
+            mediaType: 'image/png',
+            downloadUrl: '/api/v2/connector/sessions/sess-aa-1/attachments/file_abc/content',
+          },
+        ],
+      });
+    } finally {
+      globalThis.fetch = origFetch;
+      vi.doUnmock('../../src/server/services/aaClient/config.js');
+      vi.resetModules();
+    }
+
+    expect(seenAuth[0]).toBe('Bearer test-access-token');
+    expect(capturedPayload).toBeDefined();
+    // Never the raw AA shape — the child would strip it.
+    expect(capturedPayload).not.toHaveProperty('attachments');
+    expect(capturedPayload!.contentBlocks).toEqual([
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: pngBytes.toString('base64') },
+      },
+    ]);
   });
 });
 

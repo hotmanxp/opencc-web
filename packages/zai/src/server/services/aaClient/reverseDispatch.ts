@@ -36,6 +36,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { resolve as pathResolve, join, sep, dirname, basename } from 'node:path';
 import type { AaConnection } from './connection.js';
+import { readAaConfig } from './config.js';
 import type { RuntimeRegistry } from './runtimeRegistry.js';
 import { isAaaAssignedRuntimeId } from './runtimeRegistry.js';
 import { getSessionMap } from './sessionMap.js';
@@ -138,9 +139,24 @@ function decodeInputRequestAnswers(
 const SendMessageParamsSchema = z.object({
   sessionId: z.string().min(1),
   content: z.string(),
-  attachments: z.array(z.unknown()).optional(),
+  attachments: z
+    .array(
+      z.object({
+        fileId: z.string().min(1),
+        name: z.string().optional(),
+        mediaType: z.string().optional(),
+        /** Path on the AA server, e.g. /api/v2/connector/sessions/…/content */
+        downloadUrl: z.string().optional(),
+      }),
+    )
+    .max(10)
+    .optional(),
   clientMessageId: z.string().optional(),
 });
+
+/** zai's `/api/agent/prompt` image block (Anthropic protocol). */
+const IMAGE_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
+type ImageMediaType = (typeof IMAGE_MEDIA_TYPES)[number];
 
 const SteerParamsSchema = z.object({
   sessionId: z.string().min(1),
@@ -977,11 +993,64 @@ export class ReverseDispatch {
     // was never superseded and stayed `optimistic && running` forever —
     // which is what kept the "zai-code 正在处理" spinner up.
     this.pushUserMessage(this.runtimeIdForPort(childPort), p.sessionId, p.content, p.clientMessageId);
+    const contentBlocks = await this.attachmentContentBlocks(p.attachments);
     return forwardToChild(childPort, 'sendMessage', zaiSid, {
       content: p.content,
-      attachments: p.attachments,
+      // The child's push-action schema only carries contentBlocks (zai's
+      // image/text protocol); it has no `attachments` field, so passing
+      // them through here was silently stripped and the model answered
+      // "我没有看到附带的图片".
+      ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
       clientMessageId: p.clientMessageId,
     });
+  }
+
+  /**
+   * Download AA's attachment metadata into zai `contentBlocks`.
+   *
+   * AA sends metadata plus a `downloadUrl` pointing at
+   * `GET /api/v2/connector/sessions/{id}/attachments/{fileId}/content`,
+   * which needs the connector's bearer token — no bytes on the wire
+   * otherwise. Non-image attachments are dropped rather than smuggled
+   * through as text: zai's prompt route only accepts image + text blocks.
+   */
+  private async attachmentContentBlocks(
+    attachments: z.infer<typeof SendMessageParamsSchema>['attachments'],
+  ): Promise<Record<string, unknown>[]> {
+    if (!attachments || attachments.length === 0) return [];
+    const config = await readAaConfig();
+    if (!config) {
+      console.warn('[aa.reverseDispatch] no AA config; dropping attachments');
+      return [];
+    }
+    const token = await this.conn.authenticate();
+    const base = config.serverUrl.replace(/\/+$/, '');
+    const blocks: Record<string, unknown>[] = [];
+    for (const att of attachments) {
+      const mediaType = att.mediaType as ImageMediaType | undefined;
+      if (!mediaType || !IMAGE_MEDIA_TYPES.includes(mediaType)) {
+        console.warn('[aa.reverseDispatch] skipping non-image attachment', att.name, att.mediaType);
+        continue;
+      }
+      if (!att.downloadUrl) {
+        console.warn('[aa.reverseDispatch] attachment has no downloadUrl', att.fileId);
+        continue;
+      }
+      try {
+        const res = await fetch(`${base}${att.downloadUrl}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          console.warn('[aa.reverseDispatch] attachment download failed', res.status, att.fileId);
+          continue;
+        }
+        const data = Buffer.from(await res.arrayBuffer()).toString('base64');
+        blocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
+      } catch (err) {
+        console.warn('[aa.reverseDispatch] attachment download error', (err as Error).message);
+      }
+    }
+    return blocks;
   }
 
   /** The runtime_id AA uses to address the child on this port. */
