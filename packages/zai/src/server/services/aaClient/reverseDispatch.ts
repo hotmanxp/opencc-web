@@ -75,6 +75,10 @@ interface ChildActionResult {
 async function forwardToChild(
   childPort: number,
   action: 'sendMessage' | 'steer' | 'interrupt' | 'approve' | 'inputResponse' | 'command' | 'sessionCreate',
+  // For most actions, this is the existing zai session id (used by child
+  // to validate the request). For sessionCreate it's the AA session id
+  // which becomes the new zai session id.
+  sessionId: string,
   body: Record<string, unknown>,
 ): Promise<ChildActionResult> {
   // 127.0.0.1 by default; LAN instance uses its LAN IP. For T7 we
@@ -260,10 +264,15 @@ export class ReverseDispatch {
       // Filter out mappings whose port isn't actually listening — zai
       // may have been restarted, leaving the runtime-map.json entries
       // pointing at ports whose child process is gone.
+      const live: number[] = [];
       for (const m of mappings) {
         if (m.port > 0 && (await this.isPortListening(m.port))) {
-          return m.port;
+          live.push(m.port);
         }
+      }
+      if (live.length > 0) {
+        console.log('[aa.reverseDispatch] portFromRuntime: live ports', live);
+        return live[live.length - 1]; // newest first (highest port = latest start)
       }
     }
     return null;
@@ -293,7 +302,7 @@ export class ReverseDispatch {
         finish(true);
       });
       sock.once('error', () => finish(false));
-      setTimeout(() => finish(false), 300);
+      setTimeout(() => finish(false), 800);
     });
   }
 
@@ -450,7 +459,7 @@ export class ReverseDispatch {
     // Forward to child via push-action. Child will create the transcript
     // with the AA-provided sessionId (so AA can reference it later) and
     // enqueue the first turn.
-    const childResp = await forwardToChild(port, 'sessionCreate', {
+    const childResp = await forwardToChild(port, 'sessionCreate', p.sessionId, {
       sessionId: p.sessionId,
       content: p.content,
       title: p.title ?? '',
@@ -476,7 +485,7 @@ export class ReverseDispatch {
 
   private async handleSendMessage(p: z.infer<typeof SendMessageParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
-    return forwardToChild(childPort, 'sendMessage', {
+    return forwardToChild(childPort, 'sendMessage', p.sessionId, {
       zaiSessionId: p.sessionId,
       content: p.content,
       attachments: p.attachments,
@@ -486,7 +495,7 @@ export class ReverseDispatch {
 
   private async handleSteer(p: z.infer<typeof SteerParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
-    return forwardToChild(childPort, 'steer', {
+    return forwardToChild(childPort, 'steer', p.sessionId, {
       zaiSessionId: p.sessionId,
       content: p.content,
       clientMessageId: p.clientMessageId,
@@ -495,7 +504,7 @@ export class ReverseDispatch {
 
   private async handleInterrupt(p: z.infer<typeof InterruptParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
-    return forwardToChild(childPort, 'interrupt', {
+    return forwardToChild(childPort, 'interrupt', p.sessionId, {
       zaiSessionId: p.sessionId,
     });
   }
@@ -510,7 +519,7 @@ export class ReverseDispatch {
       for (const [k, v] of Object.entries(input)) {
         answers[k] = typeof v === 'string' ? v : JSON.stringify(v);
       }
-      return forwardToChild(childPort, 'inputResponse', {
+      return forwardToChild(childPort, 'inputResponse', p.sessionId, {
         zaiSessionId: p.sessionId,
         toolUseId: p.toolUseId,
         answers,
@@ -519,8 +528,7 @@ export class ReverseDispatch {
     // approve / deny → pushAction's `approve` action with zai-native
     // decision vocabulary.
     const zaiDecision: 'approved' | 'rejected' = p.decision === 'allow' ? 'approved' : 'rejected';
-    return forwardToChild(childPort, 'approve', {
-      zaiSessionId: p.sessionId,
+    return forwardToChild(childPort, 'approve', p.sessionId, {
       toolUseId: p.toolUseId,
       decision: zaiDecision,
       comment: p.decision === 'deny' ? 'denied via mobile AA app' : undefined,

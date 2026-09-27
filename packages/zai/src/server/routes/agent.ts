@@ -2101,6 +2101,7 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     });
     res.json({ sessionId })
   } catch (err) {
+    console.error('[agent.sessions POST] error:', (err as Error).message, (err as Error).stack);
     res.status(500).json({ error: (err as Error).message });
   }
 });

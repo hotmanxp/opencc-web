@@ -54,6 +54,10 @@ const PushActionSchema = z.object({
   payload: z.record(z.string(), z.unknown()).default({}),
 });
 
+// Module-level slot for the sessionCreate follow-up. forwardToZai assigns
+// here so the route handler can read it without closure narrowing pain.
+let pendingFollowupFromForward: { sessionId: string; content: string; cwd: string } | null = null;
+
 const SendMessagePayloadSchema = z.object({
   content: z.string().min(1),
   contentBlocks: z.array(z.unknown()).optional(),
@@ -167,8 +171,9 @@ async function forwardToZai(
       break;
     }
     case 'sessionCreate': {
-      // sessionId lives at the top level (not inside payload) so the
-      // child can use it as the canonical zai sessionId alias.
+      // "Create and start" semantics — AA passes the sessionId AND a first
+      // prompt. We need to: (1) create the transcript with that id, then
+      // (2) enqueue the prompt on that session.
       const topSid = zaiSessionId;
       if (!topSid) {
         throw new Error('sessionCreate: sessionId required');
@@ -184,6 +189,13 @@ async function forwardToZai(
         prompt: p.content,
         cwd: p.cwd || undefined,
         model: 'unknown',
+      };
+      // After creating the session, we enqueue the first prompt. We
+      // use a module-level mutable slot (avoiding TS closure narrowing).
+      pendingFollowupFromForward = {
+        sessionId: p.sessionId,
+        content: p.content,
+        cwd: p.cwd,
       };
       break;
     }
@@ -256,6 +268,28 @@ router.post('/push-action', async (req, res) => {
       action === 'sessionCreate' ? parsed.data.sessionId : zaiSessionId,
       payload,
     );
+    // For create-and-start: after creating the session, immediately enqueue
+    // the first turn on it. Otherwise the conversation sits idle until the
+    // mobile sends another message — which defeats the purpose of "start".
+    if (action === 'sessionCreate' && result.ok && pendingFollowupFromForward) {
+      try {
+        await fetch(`http://127.0.0.1:${Number(process.env.ZAI_PORT ?? '9201')}/api/agent/prompt`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(process.env.ZAI_TOKEN ? { 'X-Zai-Token': process.env.ZAI_TOKEN } : {}),
+          },
+          body: JSON.stringify({
+            sessionId: pendingFollowupFromForward.sessionId,
+            prompt: pendingFollowupFromForward.content,
+            ...(pendingFollowupFromForward.cwd ? { cwd: pendingFollowupFromForward.cwd } : {}),
+            model: 'unknown',
+          }),
+        });
+      } catch (followupErr) {
+        console.error('[push-action] sessionCreate followup enqueue failed:', (followupErr as Error).message);
+      }
+    }
     res.json({
       ok: result.ok,
       idempotencyKey,
