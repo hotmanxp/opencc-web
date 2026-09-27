@@ -40,7 +40,7 @@ const zhiniaoCaps: Record<string, ModelCapabilities> = {
 /** openplatform-* capability map. Mirrors src/integrations/models/openplatform.ts. */
 const openplatformCaps: Record<string, ModelCapabilities> = {
   'MiniMax-M3':           allCaps({ contextWindow: 1_000_000, maxOutputTokens: 512_000, supportsVision: true }),
-  'M3.1-Flash-Preview':   allCaps({ contextWindow: 1_000_000, maxOutputTokens: 512_000, supportsVision: true }),
+  'MiniMax-M3.1-Flash-Preview': allCaps({ contextWindow: 1_000_000, maxOutputTokens: 512_000, supportsVision: true }),
   'MiniMax-M2.7-highspeed': allCaps({ contextWindow: 204_800, maxOutputTokens: 131_072, supportsVision: false }),
   'qwen3.6-plus':         allCaps({ contextWindow: 1_000_000, maxOutputTokens: 65_536, supportsVision: true }),
   'qwen3.7-plus':         allCaps({ contextWindow: 1_000_000, maxOutputTokens: 65_536, supportsVision: true }),
