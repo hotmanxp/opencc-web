@@ -37,8 +37,99 @@ import { homedir } from 'node:os';
 import { resolve as pathResolve, join, sep, dirname, basename } from 'node:path';
 import type { AaConnection } from './connection.js';
 import type { RuntimeRegistry } from './runtimeRegistry.js';
+import { isAaaAssignedRuntimeId } from './runtimeRegistry.js';
 import { getSessionMap } from './sessionMap.js';
 import { AaNetworkError, AaServerError } from './pairing.js';
+import { upsertTimelineItem } from './rpc.js';
+import { nextTimelineOrderSeq } from './timelineOrder.js';
+import { getNotice, listNoticesForSession, resolveNotice } from './noticeStore.js';
+
+/** zai's real permission modes — what PATCH /api/agent/sessions/:id accepts. */
+const ZAI_PERMISSION_MODES = [
+  { id: 'bypassPermissions', displayName: '自动放行', description: '自动批准工具调用' },
+  { id: 'acceptEdits', displayName: '自动接受编辑', description: '文件编辑自动批准，其余询问' },
+  { id: 'default', displayName: '逐次确认', description: '每个工具调用都询问' },
+  { id: 'plan', displayName: '仅规划', description: '只读分析，不做修改' },
+] as const;
+
+/** Effort levels offered for models that advertise reasoning support. */
+const ZAI_EFFORT_ITEMS = [
+  { id: 'none', selectionId: 'none', displayName: '关闭', default: false },
+  { id: 'low', selectionId: 'low', displayName: '低' },
+  { id: 'medium', selectionId: 'medium', displayName: '中', default: true },
+  { id: 'high', selectionId: 'high', displayName: '高' },
+] as const;
+
+function findProviderIdForModel(
+  cfg: { profiles?: { id?: string; capabilities?: Record<string, unknown> }[] } | null,
+  model: string,
+): string | undefined {
+  for (const p of cfg?.profiles ?? []) {
+    if (p?.capabilities && Object.prototype.hasOwnProperty.call(p.capabilities, model)) return p.id;
+  }
+  return undefined;
+}
+
+/**
+ * What the AA server ACTUALLY sends for `interaction.respond`
+ * (`server/agent_server/api/sessions.py::respond_interaction`):
+ * `{sessionId, runtime, runtimeId, noticeId, actionId, inputData}`.
+ * `inputData` is the notice's stored `context` merged with the user's
+ * answer — which is how the zai toolUseId reaches us.
+ */
+type InteractionRespondRpcParams = {
+  sessionId?: string;
+  noticeId?: string;
+  actionId?: string;
+  inputData?: unknown;
+  runtime?: string;
+  runtimeId?: string;
+  externalSessionId?: string;
+};
+
+/**
+ * Turn the client's `{answers: {q0: {optionIds: ["q0o1"], customText}} back into zai's `{answers: {<question text>: <label>}}`.
+ *
+ * Ids were minted positionally by `toInputRequestQuestions`, so the
+ * same positional walk over the ORIGINAL zai questions recovers the
+ * labels. `customText` (allowCustom) wins when present.
+ */
+function decodeInputRequestAnswers(
+  rawAnswers: Record<string, unknown>,
+  questions: unknown[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  questions.forEach((q, qi) => {
+    const question = (q ?? {}) as {
+      question?: string;
+      options?: { label?: string }[];
+    };
+    const key = `q${qi}`;
+    const entry = rawAnswers[key];
+    if (entry === undefined) return;
+    if (typeof entry === 'string') {
+      out[question.question ?? key] = entry;
+      return;
+    }
+    const { optionIds, customText } = (entry ?? {}) as {
+      optionIds?: string[];
+      customText?: string;
+    };
+    if (customText && customText.trim()) {
+      out[question.question ?? key] = customText.trim();
+      return;
+    }
+    const labels = (optionIds ?? [])
+      .map((id) => {
+        const m = /^q(\d+)o(\d+)$/.exec(id);
+        if (!m) return undefined;
+        return question.options?.[Number(m[2])]?.label;
+      })
+      .filter((l): l is string => Boolean(l));
+    if (labels.length > 0) out[question.question ?? key] = labels.join('、');
+  });
+  return out;
+}
 
 // ─── Common param schemas ─────────────────────────────────────────────────
 
@@ -177,6 +268,12 @@ export class ReverseDispatch {
     // runtime's "可添加" (addable) list. Traced from a real AA Web
     // session: it was returning method_not_implemented, which is why
     // that section rendered empty.
+    this.conn.onRequest('runtime.modelCatalog', async (params) => {
+      return this.handleRuntimeModelCatalog(params);
+    });
+    this.conn.onRequest('runtime.permissionCatalog', async (params) => {
+      return this.handleRuntimePermissionCatalog(params);
+    });
     this.conn.onRequest('runtime.capabilities', async (params) => {
       return this.handleRuntimeCapabilities(params);
     });
@@ -203,6 +300,9 @@ export class ReverseDispatch {
     });
     this.conn.onRequest('session.capabilities', async (params) => {
       return this.handleSessionCapabilities(params);
+    });
+    this.conn.onRequest('session.selections.update', async (params) => {
+      return this.handleSessionSelectionsUpdate(params);
     });
     this.conn.onRequest('session.notices', async (params) => {
       return this.handleSessionNotices(params);
@@ -250,6 +350,13 @@ export class ReverseDispatch {
     if (!runtimeId) {
       throw new AaServerError('runtime.start: missing runtimeId', 400, null);
     }
+    // runtime.start is the AUTHORITATIVE source of the id AA assigned
+    // this runtime. Adopt it before anything else, so every outbound
+    // timeline push is addressed to the runtime the clients actually
+    // know by. (session.create can't be trusted for this — it may send
+    // only the runtime *type*, e.g. "codex", and adopting that would
+    // break capability lookups on the client side.)
+    await this.adoptAaaRuntimeId(runtimeId);
     const port = await this.portFromRuntime(runtimeId);
     if (port !== null) {
       console.log(`[aa.reverseDispatch] runtime.start: ${runtimeId} (port=${port})`);
@@ -257,6 +364,25 @@ export class ReverseDispatch {
       console.warn(`[aa.reverseDispatch] runtime.start: ${runtimeId} — no live port (session.create will 404)`);
     }
     return { runtimeId, status: 'started' };
+  }
+
+  /**
+   * Point the registry at the runtime id AA assigned us, ignoring bare
+   * runtimeType names. Resolves the child via portFromRuntime, which
+   * falls back to the only live child when the id doesn't match yet —
+   * that's what breaks the chicken-and-egg on first contact (AA starts
+   * out addressing us by an id our fabricated placeholder has never
+   * seen).
+   */
+  private async adoptAaaRuntimeId(runtimeId: string): Promise<void> {
+    if (!isAaaAssignedRuntimeId(runtimeId)) return;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getRuntimeRegistry } = require('./runtimeRegistry.js') as typeof import('./runtimeRegistry.js');
+    const reg = getRuntimeRegistry();
+    if (!reg) return;
+    const port = await this.portFromRuntime(runtimeId);
+    if (port === null) return;
+    await reg.adoptServerRuntimeId(port, runtimeId);
   }
 
   private async handleRuntimeStop(params: unknown): Promise<unknown> {
@@ -284,28 +410,185 @@ export class ReverseDispatch {
     if (!runtimeId) {
       throw new AaServerError('runtime.capabilities: missing runtimeId', 400, null);
     }
+    // The mobile "新建会话" screen calls this (over REST
+    // GET /connectors/{id}/runtimes/{runtimeId}/capabilities) and shows
+    // "无法加载运行时能力" when it fails. Server side,
+    // api/connector_runtimes.py::parse_runtime_capability_response reads
+    // `result["capabilitySet"]` and validates it as
+    // ProtocolCapabilitySet — {revision, capabilities: ProtocolCapability[]}.
+    // Returning a flat `{session.send_message: true, …}` map under a
+    // `capabilities` key made the server raise invalid_runtime_capabilities
+    // (HTTP 502), which the app surfaces verbatim.
+    await this.adoptAaaRuntimeId(runtimeId);
     return {
       runtimeId,
       runtime: 'codex',
-      capabilities: {
-        'session.send_message': true,
-        'session.steer': true,
-        'session.interrupt': true,
-        'session.command': true,
-        'catalog.model': true,
-        'notice.approval': true,
-        'notice.input_request': true,
+      capabilitySet: {
+        revision: 0,
+        capabilities: this.registry.capabilitiesForRuntime(),
       },
     };
   }
 
   /**
-   * Resolve which child port owns a given runtime identifier. AA passes
-   * EITHER a specific runtimeId (rti_xxx) OR the runtime type (legacy
-   * "codex"). We accept both:
-   *   - exact runtimeId match → that instance's port
-   *   - runtimeType match → any registered instance's port of that type
+   * `runtime.modelCatalog` — populates the client model picker.
+   *
+   * Returning `models: []` (the earlier placeholder) is *valid* but
+   * leaves the picker spinning forever with "暂无可用设置", so read the
+   * real catalogue off the child instead: every configured provider
+   * profile and its per-model capabilities. `supportsReasoning` becomes
+   * the effort list, which is what `catalog.effort` advertises.
    */
+  private async handleRuntimeModelCatalog(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { runtimeId?: string };
+    if (p?.runtimeId) await this.adoptAaaRuntimeId(p.runtimeId);
+    const port = await this.portForRuntime(p?.runtimeId);
+    const models = port === null ? [] : await this.readChildModels(port);
+    return { catalog: { runtime: 'codex', revision: 0, models } };
+  }
+
+  /**
+   * `runtime.permissionCatalog` — the 权限模式 picker.
+   *
+   * zai's real permission modes, so the picker is populated instead of
+   * empty. They map 1:1 onto what zai's PATCH /api/agent/sessions/:id
+   * already accepts for `permissionMode`.
+   */
+  private async handleRuntimePermissionCatalog(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { runtimeId?: string };
+    if (p?.runtimeId) await this.adoptAaaRuntimeId(p.runtimeId);
+    return {
+      catalog: {
+        runtime: 'codex',
+        revision: 0,
+        permissions: ZAI_PERMISSION_MODES.map((m, i) => ({
+          id: m.id,
+          displayName: m.displayName,
+          selectionId: m.id,
+          description: m.description,
+          default: m.id === 'bypassPermissions',
+        })),
+      },
+    };
+  }
+
+  private async portForRuntime(runtimeId: string | undefined): Promise<number | null> {
+    if (runtimeId) {
+      const port = await this.portFromRuntime(runtimeId);
+      if (port !== null) return port;
+    }
+    // Fall back to the single live child.
+    const mappings = this.registry.listAll();
+    for (const m of [...mappings].reverse()) {
+      if (m.port > 0 && (await this.isPortListening(m.port))) return m.port;
+    }
+    return null;
+  }
+
+  /** Read zai's configured provider profiles and project them onto AA's
+   *  `ProtocolModelItem` shape. */
+  private async readChildModels(port: number): Promise<Record<string, unknown>[]> {
+    const res = await this.fetchChildJson(port, 'GET', '/api/config/zai/provider');
+    const profiles = (res?.body as { profiles?: unknown[] } | undefined)?.profiles;
+    if (!Array.isArray(profiles)) return [];
+    const models: Record<string, unknown>[] = [];
+    const seen = new Set<string>();
+    for (const profile of profiles) {
+      if (!profile || typeof profile !== 'object') continue;
+      const p = profile as {
+        id?: string;
+        name?: string;
+        model?: string;
+        capabilities?: Record<string, { supportsReasoning?: boolean; contextWindow?: number }>;
+      };
+      const caps = p.capabilities ?? {};
+      for (const [modelId, cap] of Object.entries(caps)) {
+        if (seen.has(modelId)) continue;
+        seen.add(modelId);
+        const supportsReasoning = cap?.supportsReasoning === true;
+        models.push({
+          id: modelId,
+          selectionId: modelId,
+          displayName: modelId,
+          description: [
+            p.name ? `provider: ${p.name}` : undefined,
+            cap?.contextWindow ? `${Math.round(cap.contextWindow / 1000)}k ctx` : undefined,
+          ].filter(Boolean).join(' · ') || undefined,
+          default: false,
+          // AA renders 推理强度 from `reasoningItems`; only offer it for
+          // models that actually advertise reasoning support.
+          reasoningItems: supportsReasoning ? ZAI_EFFORT_ITEMS : [],
+          metadata: {
+            providerId: p.id,
+            contextWindow: cap?.contextWindow ?? null,
+            supportsReasoning,
+          },
+        });
+      }
+    }
+    return models;
+  }
+
+  /**
+   * `session.selections.update` — the user picked a model / effort /
+   * permission mode in the client.
+   *
+   * The server calls this with `{sessionId, runtime, runtimeId,
+   * selections}` (services/session_run.py). There was no handler at
+   * all before, so every selection returned `method_not_implemented`
+   * and the picker silently reverted.
+   *
+   * `selections` is a `{scope: selectionId}` map. Apply it through the
+   * same PATCH the zai web UI uses, so a session selected from AA and
+   * one selected locally end up identical.
+   */
+  private async handleSessionSelectionsUpdate(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { sessionId?: string; selections?: Record<string, string | null> };
+    if (!p.sessionId) throw new AaServerError('session.selections.update: sessionId required', 400, null);
+    const selections = p.selections ?? {};
+    const childPort = await this.resolveChildPort(p.sessionId);
+    const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
+
+    const patch: Record<string, unknown> = {};
+    const model = selections.model ?? selections['catalog.model'];
+    if (typeof model === 'string' && model) {
+      const providerId = findProviderIdForModel(await this.readChildProviderConfig(childPort), model);
+      patch.model = model;
+      if (providerId) patch.providerId = providerId;
+    }
+    const permission = selections.permission ?? selections['catalog.permission'];
+    if (typeof permission === 'string' && permission) patch.permissionMode = permission;
+    // zai has no per-session reasoning-effort knob wired into the
+    // agent loop, so `reasoning_effort` is accepted and recorded but
+    // deliberately not forwarded — silently dropping it beats inventing
+    // a field the runtime would reject.
+
+    if (Object.keys(patch).length === 0) {
+      return { ok: true, applied: {}, sessionId: p.sessionId };
+    }
+    const res = await this.fetchChildJson(
+      childPort,
+      'PATCH',
+      `/api/agent/sessions/${encodeURIComponent(zaiSid)}`,
+      patch,
+    );
+    if (!res || res.status !== 200) {
+      throw new AaServerError(
+        `session.selections.update: child rejected (${res?.status ?? 'unreachable'})`,
+        502,
+        res?.body ?? null,
+      );
+    }
+    return { ok: true, applied: patch, sessionId: p.sessionId };
+  }
+
+  private async readChildProviderConfig(port: number): Promise<{
+    profiles?: { id?: string; capabilities?: Record<string, unknown> }[];
+  } | null> {
+    const res = await this.fetchChildJson(port, 'GET', '/api/config/zai/provider');
+    return (res?.body as { profiles?: { id?: string; capabilities?: Record<string, unknown> }[] }) ?? null;
+  }
+
   private async portFromRuntime(runtimeId: string): Promise<number | null> {
     // Lazy import via require() — circular-free across the AA bundle.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -384,6 +667,9 @@ export class ReverseDispatch {
       setTimeout(() => finish(false), 800);
     });
   }
+
+  /**
+   * Workspace root for fs.* RPCs. Use the zai process cwd so the panel
 
   // ─── Filesystem RPCs (AA "Files" panel) ────────────────────────────
 
@@ -559,6 +845,15 @@ export class ReverseDispatch {
     const port = await this.portFromRuntime(runtimeId);
     if (port === null) throw new AaServerError(`session.create: unknown runtime ${runtimeId}`, 404, null);
 
+    // The opening message is a user turn too — publish it for the same
+    // reason as handleSendMessage (supersede the client's optimistic item).
+    this.pushUserMessage(
+      this.runtimeIdForPort(port),
+      p.sessionId,
+      p.content,
+      (params as { clientMessageId?: string } | undefined)?.clientMessageId,
+    );
+
     // Forward to child via push-action. Child will create the transcript
     // with the AA-provided sessionId (so AA can reference it later) and
     // enqueue the first turn.
@@ -616,10 +911,68 @@ export class ReverseDispatch {
   private async handleSendMessage(p: z.infer<typeof SendMessageParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
     const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
+    // Publish the user's turn as a real timeline item. The client
+    // renders an OPTIMISTIC `message`/`user` item at status `pending`
+    // and only replaces it when a server item carrying the SAME
+    // `source.clientMessageId` arrives
+    // (web-next `optimisticUserMessageMatchesServerItem`). zai used to
+    // push only assistant/system/tool items, so the optimistic entry
+    // was never superseded and stayed `optimistic && running` forever —
+    // which is what kept the "zai-code 正在处理" spinner up.
+    this.pushUserMessage(this.runtimeIdForPort(childPort), p.sessionId, p.content, p.clientMessageId);
     return forwardToChild(childPort, 'sendMessage', zaiSid, {
       content: p.content,
       attachments: p.attachments,
       clientMessageId: p.clientMessageId,
+    });
+  }
+
+  /** The runtime_id AA uses to address the child on this port. */
+  private runtimeIdForPort(port: number): string {
+    return this.registry.getMappingByPort(port)?.runtimeId ?? '';
+  }
+
+  /**
+   * Push the user's own message onto the AA timeline.
+   *
+   * Shape follows the official reference connector
+   * (`_reference/claude/timeline/messages.py`): `type: "message"`,
+   * `role: "user"`, `status: "done"`, text in `content`, and the
+   * correlation id in `source.clientMessageId`. `orderSeq` comes from
+   * the shared counter so user turns interleave with assistant items
+   * instead of sorting to the bottom.
+   */
+  private pushUserMessage(
+    runtimeId: string,
+    aaSessionId: string,
+    content: string,
+    clientMessageId: string | undefined,
+  ): void {
+    const id = `u_${aaSessionId}_${clientMessageId ?? Date.now()}`;
+    const now = new Date().toISOString();
+    upsertTimelineItem(this.conn, {
+      runtimeId,
+      sessionId: aaSessionId,
+      created: true,
+      item: {
+        id,
+        sessionId: aaSessionId,
+        runtimeId,
+        type: 'message',
+        role: 'user',
+        status: 'done',
+        content: { kind: 'text', text: content },
+        source: {
+          runtime: 'codex',
+          itemType: 'user_message',
+          ...(clientMessageId ? { clientMessageId } : {}),
+        },
+        orderSeq: nextTimelineOrderSeq(aaSessionId),
+        contentHash: createHash('sha256').update(content).digest('hex'),
+        revision: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
     });
   }
 
@@ -638,29 +991,52 @@ export class ReverseDispatch {
     return forwardToChild(childPort, 'interrupt', zaiSid, {});
   }
 
-  private async handleInteractionRespond(p: z.infer<typeof InteractionRespondParamsSchema>): Promise<unknown> {
-    const childPort = await this.resolveChildPort(p.sessionId);
-    const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
-    if (p.decision === 'input') {
-      // Mobile's input_response: user filled in answers. Convert AA's
-      // {input: unknown} → zai's {answers: Record<question, answer>}.
-      const input = (p.input ?? {}) as Record<string, unknown>;
-      const answers: Record<string, string> = {};
-      for (const [k, v] of Object.entries(input)) {
-        answers[k] = typeof v === 'string' ? v : JSON.stringify(v);
-      }
+  /**
+   * `interaction.respond` — the user answered an open notice.
+   *
+   * The server's `api/sessions.py::respond_interaction` calls this with
+   * `{sessionId, runtime, runtimeId, noticeId, actionId, inputData,
+   * externalSessionId?}` — NOT the `{toolUseId, decision, input}` shape
+   * this handler used to expect. `inputData` is the notice's stored
+   * `context` (read back through our `session.notices` handler) merged
+   * with whatever the user submitted.
+   *
+   * So the zai toolUseId comes from the notice we registered when the
+   * ask was pushed, and the answer text is reconstructed by mapping the
+   * selected option ids back to labels through the original questions.
+   */
+  private async handleInteractionRespond(p: InteractionRespondRpcParams): Promise<unknown> {
+    if (!p.sessionId) throw new AaServerError('interaction.respond: sessionId required', 400, null);
+    if (!p.noticeId) throw new AaServerError('interaction.respond: noticeId required', 400, null);
+
+    const stored = getNotice(p.noticeId);
+    const childPort = stored && stored.childPort > 0
+      ? stored.childPort
+      : await this.resolveChildPort(p.sessionId);
+    const zaiSid = stored?.zaiSessionId ?? (await this.resolveZaiSessionId(childPort, p.sessionId));
+
+    const inputData = (p.inputData ?? {}) as Record<string, unknown>;
+    const toolUseId = stored?.toolUseId
+      ?? (typeof inputData.toolUseId === 'string' ? inputData.toolUseId : undefined);
+    const isInput = stored?.notice.interactionType === 'input_request';
+    resolveNotice(p.noticeId);
+
+    if (isInput) {
+      const rawAnswers = (inputData.answers ?? inputData) as Record<string, unknown>;
+      const questions = Array.isArray(stored?.notice.context
+        ? (stored.notice.context as { questions?: unknown[] }).questions
+        : undefined)
+        ? ((stored!.notice.context as { questions: unknown[] }).questions)
+        : [];
       return forwardToChild(childPort, 'inputResponse', zaiSid, {
-        toolUseId: p.toolUseId,
-        answers,
+        toolUseId,
+        answers: decodeInputRequestAnswers(rawAnswers, questions),
       });
     }
-    // approve / deny → pushAction's `approve` action with zai-native
-    // decision vocabulary.
-    const zaiDecision: 'approved' | 'rejected' = p.decision === 'allow' ? 'approved' : 'rejected';
     return forwardToChild(childPort, 'approve', zaiSid, {
-      toolUseId: p.toolUseId,
-      decision: zaiDecision,
-      comment: p.decision === 'deny' ? 'denied via mobile AA app' : undefined,
+      toolUseId,
+      decision: 'approved',
+      comment: `answered via AA client (actionId=${p.actionId ?? 'unknown'})`,
     });
   }
 
@@ -808,7 +1184,7 @@ export class ReverseDispatch {
    */
   private async fetchChildJson(
     childPort: number,
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PATCH',
     path: string,
     body?: Record<string, unknown>,
   ): Promise<{ status: number; body: unknown } | null> {
@@ -820,7 +1196,7 @@ export class ReverseDispatch {
           'Content-Type': 'application/json',
           'X-Zai-Token': process.env.ZAI_TOKEN ?? '',
         },
-        ...(method === 'POST' && body ? { body: JSON.stringify(body) } : {}),
+        ...(method !== 'GET' && body ? { body: JSON.stringify(body) } : {}),
       });
       let parsed: unknown = null;
       try { parsed = await response.json(); } catch { /* non-JSON */ }
@@ -1066,14 +1442,22 @@ export class ReverseDispatch {
     // Verify ownership but don't fail on missing — capability set is
     // identical across sessions, only the validation matters.
     try { await this.resolveAaSession(p.sessionId); } catch { /* unknown id is fine */ }
+    // Same contract as `runtime.capabilities`, and this one gates ACTION
+    // ADMISSION, not just display: the server reads `capabilitySet` in
+    // `services/effective_capabilities.py::read_session_capability_facts`
+    // ("use the same live facts for displayed capabilities and action
+    // admission") and raises "connector did not return a capability set"
+    // otherwise — after which the client renders
+    // "当前运行时状态下不可发送消息" and `session.send_message` is refused.
+    //
+    // The ids must be dot-separated (`session.send_message`), matching
+    // the official Android client's SESSION_SEND_MESSAGE_CAPABILITY
+    // constant, which is matched verbatim by EffectiveCapabilities.find.
     return {
       sessionId: p.sessionId,
-      capabilities: {
-        session_send_message: true,
-        session_steer: true,
-        session_interrupt: true,
-        notice_approval: true,
-        notice_input_request: true,
+      capabilitySet: {
+        revision: 0,
+        capabilities: this.registry.capabilitiesForSession(p.sessionId),
       },
     };
   }
@@ -1089,7 +1473,12 @@ export class ReverseDispatch {
   private async handleSessionNotices(params: unknown): Promise<unknown> {
     const p = (params ?? {}) as { sessionId?: string };
     if (!p.sessionId) throw new AaServerError('session.notices: sessionId required', 400, null);
-    return { sessionId: p.sessionId, notices: [] };
+    // NOT a stub: the server calls this from
+    // `api/sessions.py::best_effort_runtime_notice_context` to read a
+    // notice's `context` and merge it into `inputData` when the user
+    // answers. Returning `[]` meant the original question and the zai
+    // toolUseId never came back, so the response could not be routed.
+    return { sessionId: p.sessionId, notices: listNoticesForSession(p.sessionId) };
   }
 
   // ─── Test-only ────────────────────────────────────────────────────────

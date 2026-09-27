@@ -53,6 +53,53 @@ import {
 import { getRuntimeRegistry } from './runtimeRegistry.js';
 import { getSessionMap } from './sessionMap.js';
 import { isAaEnabled } from './index.js';
+import { createHash } from 'node:crypto';
+import { nextTimelineOrderSeq } from './timelineOrder.js';
+import { registerNotice } from './noticeStore.js';
+
+/** sha256 hex of an arbitrary serializable value — AA uses this as the
+ *  contentHash idempotency key on every TimelineItem. */
+function sha256Hex(s: string): string {
+  return createHash('sha256').update(s).digest('hex');
+}
+
+/**
+ * Project zai's `prompt.ask` questions onto AA's input-request
+ * `uiSchema.questions` shape.
+ *
+ * zai:  [{question, header?, options?: [{label, description?}], multiSelect?}]
+ * AA:   [{id, prompt, header?, options: [{id, label, description?}],
+ *         multiple?, allowCustom?}]
+ *
+ * Question and option ids are positional and stable, because the
+ * response comes back keyed by them
+ * (`buildPayload` → `{answers: {qId: {optionIds, customText}}}`) and
+ * `handleInteractionRespond` maps the selected ids back to labels using
+ * the same positional walk over the stored context.
+ */
+export function toInputRequestQuestions(raw: unknown[]): Record<string, unknown>[] {
+  return raw.map((q, qi) => {
+    const question = (q ?? {}) as {
+      question?: string;
+      header?: string;
+      multiSelect?: boolean;
+      options?: { label?: string; description?: string }[];
+    };
+    const options = Array.isArray(question.options) ? question.options : [];
+    return {
+      id: `q${qi}`,
+      prompt: question.question ?? `问题 ${qi + 1}`,
+      header: question.header,
+      options: options.map((o, oi) => ({
+        id: `q${qi}o${oi}`,
+        label: o?.label ?? `选项 ${oi + 1}`,
+        description: o?.description,
+      })),
+      multiple: question.multiSelect === true,
+      allowCustom: true,
+    };
+  });
+}
 
 export class EventAdapter {
   private readonly conn: AaConnection;
@@ -63,6 +110,9 @@ export class EventAdapter {
    * fragment. Cleared on each runtime.started.
    */
   private readonly streamBuffers = new Map<string, string>();
+  /** Monotonic revision per item id — bumped on every streaming update so
+   *  AA's client knows the upsert is a new fragment, not a duplicate. */
+  private readonly revisions = new Map<string, number>();
 
   constructor(conn: AaConnection) {
     this.conn = conn;
@@ -242,33 +292,86 @@ export class EventAdapter {
       if (mapped) aaSessionId = mapped;
     }
 
-    const noticeType = (() => {
+    // `NoticeIn` splits the concept across two fields: `type` is
+    // "notification" | "interaction" (NOT "interaction.input_request"),
+    // and the flavour goes in `interactionType` (approval |
+    // execution_error | confirmation | input_request | unknown). zai's
+    // old "interaction.permission" value is not in that enum, so it
+    // would have failed `NoticeIn.model_validate` outright.
+    const interactionType: string = (() => {
       switch (event.type) {
-        case 'prompt.ask': return 'interaction.input_request';
-        case 'prompt.approve': return 'interaction.approval';
-        case 'prompt.permission': return 'interaction.permission';
-        default: return 'notification';
+        case 'prompt.ask': return 'input_request';
+        case 'prompt.approve':
+        case 'prompt.permission': return 'approval';
+        default: return 'unknown';
       }
     })();
 
     const toolUseId = event.toolUseId as string | undefined;
-    const notice = {
-      noticeId: toolUseId ? `n_${aaSessionId}_${toolUseId}` : `n_${aaSessionId}_${Date.now()}`,
-      type: noticeType,
+    const isAsk = event.type === 'prompt.ask';
+    const noticeId = toolUseId
+      ? `n_${aaSessionId}_${toolUseId}`
+      : `n_${aaSessionId}_${event.eventId ?? Date.now()}`;
+    const questions = (event.questions as unknown[] | undefined) ?? [];
+
+    const notice: Record<string, unknown> = {
+      noticeId,
+      type: 'interaction',
       sessionId: aaSessionId,
-      title: (event.title as string | undefined) ?? (event.toolName as string | undefined) ?? 'Action required',
+      title: (event.title as string | undefined)
+        ?? (event.toolName as string | undefined)
+        ?? (isAsk ? '需要你补充信息' : '需要确认'),
       message: (event.message as string | undefined) ?? (event.summary as string | undefined),
-      severity: 'info' as const,
-      interactionType: noticeType.split('.')[1],
+      severity: 'info',
+      status: 'open',
+      interactionType,
+      // Marks the session as waiting on the user — the client switches
+      // its composer into the approval/input affordance off this.
+      blocking: { scope: 'session', targetId: aaSessionId },
       responseRequired: true,
-      // Carry zai-native fields in metadata so a reverse-dispatch handler can
-      // resolve the right zai-side registry.
-      metadata: {
-        zaiEventType: event.type,
-        toolUseId,
-        raw: event,
+      // For `input_request` the client renders a form ONLY from
+      // `action.input.uiSchema` — see the official Android client
+      // `SessionRuntimeState.kt::inputRequestForm()`, which bails out
+      // unless `uiSchema.component == "inputRequest"` and
+      // `uiSchema.version == 1`, and `localizedNoticeActionLabel` keys
+      // the button off `actionId == "submit"`. Without this the notice
+      // card rendered with a dead "提交" button and nothing to fill in.
+      actions: isAsk
+        ? [{
+            actionId: 'submit',
+            label: '提交',
+            input: {
+              required: true,
+              uiSchema: {
+                component: 'inputRequest',
+                version: 1,
+                questions: toInputRequestQuestions(questions),
+              },
+            },
+          }]
+        : [{
+            actionId: 'approve',
+            label: '允许',
+            input: { required: false },
+          }],
+      // `context` is what the server reads back via the
+      // `session.notices` RPC and merges into `inputData` on respond —
+      // this is how the original questions and the zai toolUseId
+      // survive the round trip.
+      context: {
+        ...(toolUseId ? { toolUseId } : {}),
+        ...(isAsk && questions.length > 0 ? { questions } : {}),
       },
+      source: { runtime: 'codex', ...(toolUseId ? { operationId: toolUseId } : {}) },
+      metadata: { zaiEventType: event.type, toolUseId },
     };
+
+    registerNotice({
+      notice,
+      childPort: childPort ?? 0,
+      zaiSessionId: sessionId,
+      ...(toolUseId ? { toolUseId } : {}),
+    });
 
     upsertNotice(this.conn, {
       runtimeId,
@@ -339,14 +442,14 @@ export class EventAdapter {
 
     const t = event.type as string;
     const turnIndex = typeof event.turnIndex === 'number' ? event.turnIndex : 0;
+    const now = new Date().toISOString();
 
-    // Streaming accumulation. zai emits runtime.delta / runtime.thinking
-    // as many small fragments per turn. AA Web merges timeline items by
-    // `id`, so every fragment of the same (session, turnIndex, channel)
-    // MUST share one stable id and be sent as timeline.item_updated after
-    // the first timeline.item_created — otherwise each fragment renders
-    // as its own bubble. (My first attempt gave every delta a unique
-    // eventId, which produced ~19 separate items for one sentence.)
+    // Streaming accumulation. zai emits runtime.delta / runtime.thinking as
+    // many small fragments per turn. AA Web merges timeline items by `id`;
+    // every fragment of the same (session, turnIndex, channel) MUST share
+    // one stable id and bump `revision` — otherwise each fragment renders
+    // as its own bubble (caught live: ~19 separate items for one sentence
+    // before this was tightened).
     if (t === 'runtime.delta' || t === 'runtime.thinking') {
       const channel = t === 'runtime.delta' ? 'text' : 'thinking';
       const key = `${aaSessionId}:${turnIndex}:${channel}`;
@@ -354,141 +457,262 @@ export class EventAdapter {
         ? ((event.delta as string | undefined) ?? '')
         : ((event.thinking as string | undefined) ?? '');
       const prior = this.streamBuffers.get(key);
-      if (prior === undefined) {
-        this.streamBuffers.set(key, frag);
-        this.pushTimelineItem(runtimeId, aaSessionId, {
+      const next = prior === undefined ? frag : prior + frag;
+      this.streamBuffers.set(key, next);
+      const created = prior === undefined;
+      const revision = this.bumpRevision(key);
+      const isText = channel === 'text';
+      this.pushTimelineItem(
+        runtimeId,
+        aaSessionId,
+        {
           id: key,
-          type: 'assistant_activity',
-          content: frag,
-          status: channel === 'thinking' ? 'thinking' : 'streaming',
-          title: channel === 'thinking' ? 'Thinking' : 'Assistant',
-          turnIndex,
-          channel,
-        }, true);
-      } else {
-        const next = prior + frag;
-        this.streamBuffers.set(key, next);
-        this.pushTimelineItem(runtimeId, aaSessionId, {
-          id: key,
-          type: 'assistant_activity',
-          content: next,
-          status: channel === 'thinking' ? 'thinking' : 'streaming',
-          title: channel === 'thinking' ? 'Thinking' : 'Assistant',
-          turnIndex,
-          channel,
-        }, false);
-      }
+          type: isText ? 'message' : 'system',
+          role: isText ? 'assistant' : 'system',
+          status: 'running',
+          text: next,
+          content: isText
+            ? { kind: 'text', text: next, content: { text: next } }
+            : {
+                // `kind` is the discriminator AA's clients branch on
+                // (web-next SystemCard: `kind === "reasoning"` renders a
+                // collapsible ReasoningEntry). Without it a thinking
+                // block falls through to the generic marker and renders
+                // as a literal `system: <raw english reasoning>` line.
+                kind: 'reasoning',
+                text: next,
+                blockType: 'thinking',
+                content: { text: next },
+              },
+          source: { runtime: 'codex', itemType: channel, derivedKey: channel },
+          revision,
+        },
+        now,
+        created,
+      );
       return;
     }
     if (t === 'runtime.started') {
-      // Do NOT clear streamBuffers here. zai emits runtime.started more
-      // than once per turn (once per model message_start), and clearing
-      // on each one wiped the accumulator mid-turn — the next delta then
-      // looked like a brand-new stream and emitted a second
-      // timeline.item_created for an id AA had already seen, splitting
-      // one assistant message into two bubbles. The buffer key already
-      // contains sessionId + turnIndex, so stale turns can't collide
-      // with current ones without an explicit clear.
+      // AA's protocol has no explicit turn-start marker for the
+      // timeline, but the SESSION state does need one: the server turns
+      // `status:"running"` into an active run and refuses
+      // `session.send_message` while one exists, and clears it only on
+      // `idle`/`error`. Without this the session stayed "running" after
+      // a finished turn ("zai-code 正在处理" + disabled composer).
+      //
+      // Do NOT clear streamBuffers here: zai emits runtime.started once
+      // per model message_start (multiple times per turn), and clearing
+      // would split one assistant message into two bubbles.
+      upsertSessionState(this.conn, {
+        runtimeId,
+        sessionId: aaSessionId,
+        runtime: 'codex',
+        status: 'running',
+      });
       return;
     }
     if (t === 'runtime.done') {
-      // Mark this turn's streaming items final so AA stops showing the
-      // "streaming" affordance once the turn is over.
-      const prefix = `${aaSessionId}:${turnIndex}:`;
-      for (const [key, content] of this.streamBuffers) {
-        if (!key.startsWith(prefix)) continue;
-        this.pushTimelineItem(runtimeId, aaSessionId, {
-          id: key,
-          type: 'assistant_activity',
-          content,
-          status: 'done',
-          title: key.endsWith(':thinking') ? 'Thinking' : 'Assistant',
-          turnIndex,
-          channel: key.endsWith(':thinking') ? 'thinking' : 'text',
-        }, false);
+      // Finalise every open stream for this session — NOT just the ones
+      // matching this event's turnIndex.
+      //
+      // zai's `turnIndex` counts model calls *within* a user turn, not
+      // user turns: one user turn emits
+      //   started/thinking @13, started/delta @14, started @15, done @15
+      // because `agent.ts` bumps turnIndex on every message_start and
+      // sdkEventAdapter SUPPRESSES the intermediate `message_stop`
+      // events (see agent.ts ~L419). So the only `runtime.done` we ever
+      // receive is the final one, carrying the LAST turnIndex — while
+      // the content items were created under earlier ones. Matching on
+      // `${sessionId}:${turnIndex}:` therefore finalises nothing, items
+      // stay `running` forever, AA reports the session as busy, and the
+      // client refuses to send another message.
+      //
+      // Because intermediate dones are suppressed, receiving one means
+      // the user turn really is over — so closing every open stream for
+      // the session is both safe and what AA needs.
+      const sessionPrefix = `${aaSessionId}:`;
+      for (const [key, content] of [...this.streamBuffers]) {
+        if (!key.startsWith(sessionPrefix)) continue;
+        // Error items are already terminal (status failed / cancelled);
+        // just drop them from the buffer instead of re-pushing.
+        if (key.includes(':tool:') || key.includes(':error')) {
+          this.streamBuffers.delete(key);
+          continue;
+        }
+        const channel = key.endsWith(':thinking') ? 'thinking' : 'text';
+        const isText = channel === 'text';
+        const revision = this.bumpRevision(key);
+        this.pushTimelineItem(
+          runtimeId,
+          aaSessionId,
+          {
+            id: key,
+            type: isText ? 'message' : 'system',
+            role: isText ? 'assistant' : 'system',
+            status: 'done',
+            text: content,
+            content: isText
+              ? { kind: 'text', text: content, content: { text: content } }
+              : {
+                  kind: 'reasoning',
+                  text: content,
+                  blockType: 'thinking',
+                  content: { text: content },
+                },
+            source: { runtime: 'codex', itemType: channel, derivedKey: channel },
+            revision,
+            completedAt: now,
+          },
+          now,
+          false,
+        );
+        this.streamBuffers.delete(key);
       }
+      // Turn finished: hand the session back so the server clears its
+      // active run and the composer becomes usable again.
+      upsertSessionState(this.conn, {
+        runtimeId,
+        sessionId: aaSessionId,
+        runtime: 'codex',
+        status: 'idle',
+      });
       return;
     }
-
-    let kind: string;
-    let text = '';
-    const metadata: Record<string, unknown> = { zaiEventType: t };
-    switch (t) {
-      case 'runtime.tool_call':
-        kind = 'agent_call';
-        text = (event.toolName as string | undefined) ?? '';
-        metadata.toolName = event.toolName;
-        metadata.toolUseId = event.toolUseId;
-        metadata.input = event.input;
-        break;
-      case 'runtime.tool_result':
-        kind = 'agent_call';
-        text = '';
-        metadata.toolUseId = event.toolUseId;
-        metadata.output = event.output;
-        metadata.isError = event.isError;
-        break;
-      case 'runtime.error':
-        kind = 'error_description';
-        text = (event.error as { message?: string } | undefined)?.message ?? 'runtime error';
-        metadata.error = event.error;
-        break;
-      case 'runtime.aborted':
-        kind = 'error_description';
-        text = (event.reason as string | undefined) ?? 'aborted';
-        metadata.reason = event.reason;
-        break;
-      default:
-        // runtime.compacted / runtime.notification and anything else:
-        // AA has no obvious slot for these, and pushing junk is worse
-        // than not pushing. Drop them.
-        return;
+    if (t === 'runtime.tool_call') {
+      const toolUseId = (event.toolUseId as string | undefined) ?? `${aaSessionId}-call-${Date.now()}`;
+      const toolName = (event.toolName as string | undefined) ?? '';
+      const input = (event.input as Record<string, unknown> | undefined) ?? null;
+      const key = `${aaSessionId}:${turnIndex}:tool:${toolUseId}`;
+      this.pushTimelineItem(
+        runtimeId,
+        aaSessionId,
+        {
+          id: key,
+          type: 'tool',
+          role: 'tool',
+          status: 'running',
+          // `kind`/`title`/`input` are the fields AA's ToolTimelineContent
+          // defines (connector/runtime_protocol/timeline.py). Clients read
+          // `content.title` for the label and `content.kind` to pick a
+          // renderer, so a tool without them degrades to a bare marker.
+          content: { kind: 'tool_call', title: toolName, input, toolUseId },
+          source: { runtime: 'codex', itemType: 'tool_call', itemId: toolUseId, derivedKey: toolUseId },
+          metadata: { toolName, toolUseId, input },
+          revision: 1,
+        },
+        now,
+        true,
+      );
+      return;
     }
-
-    // Spread optional fields conditionally: JSON.stringify turns an
-    // explicit `undefined` into an absent key only for top-level object
-    // literals, but these values are nested inside a helper's parameter
-    // object, so `toolName: undefined` was arriving at AA as an explicit
-    // `"toolName": null`. Observed live in a payload dump. AA's item
-    // schema is better off not seeing the key at all than seeing null.
-    const toolName = typeof event.toolName === 'string' && event.toolName.length > 0
-      ? event.toolName
-      : undefined;
-    this.pushTimelineItem(runtimeId, aaSessionId, {
-      id: (event.eventId as string | undefined) ?? `${aaSessionId}-${t}-${Date.now()}`,
-      type: kind,
-      content: text,
-      status: t === 'runtime.tool_call' ? 'running' : t === 'runtime.tool_result' ? 'done' : undefined,
-      ...(toolName ? { title: toolName, toolName } : {}),
-      turnIndex,
-      metadata,
-    }, true);
+    if (t === 'runtime.tool_result') {
+      const toolUseId = (event.toolUseId as string | undefined) ?? '';
+      const isError = event.isError === true;
+      const output = (event.output as unknown) ?? null;
+      const key = `${aaSessionId}:${turnIndex}:tool:${toolUseId}`;
+      this.pushTimelineItem(
+        runtimeId,
+        aaSessionId,
+        {
+          id: key,
+          type: 'tool',
+          role: 'tool',
+          status: isError ? 'failed' : 'done',
+          content: {
+            kind: 'tool_result',
+            title: typeof event.toolName === 'string' ? event.toolName : undefined,
+            output,
+            toolUseId,
+            isError,
+          },
+          source: { runtime: 'codex', itemType: 'tool_result', itemId: toolUseId, derivedKey: toolUseId },
+          metadata: { toolUseId, output, isError },
+          revision: 1,
+        },
+        now,
+        true,
+      );
+      return;
+    }
+    if (t === 'runtime.error' || t === 'runtime.aborted') {
+      const message = t === 'runtime.error'
+        ? ((event.error as { message?: string } | undefined)?.message ?? 'runtime error')
+        : ((event.reason as string | undefined) ?? 'aborted');
+      const key = `${aaSessionId}:${turnIndex}:error`;
+      this.streamBuffers.set(key, message);
+      const isErr = t === 'runtime.error';
+      // The server clears its active run on `idle`/`error` only; without
+      // this a failed turn would leave the session locked in "running".
+      upsertSessionState(this.conn, {
+        runtimeId,
+        sessionId: aaSessionId,
+        runtime: 'codex',
+        status: isErr ? 'error' : 'idle',
+        ...(isErr && event.error ? { error: event.error as Record<string, unknown> } : {}),
+      });
+      this.pushTimelineItem(
+        runtimeId,
+        aaSessionId,
+        {
+          id: key,
+          type: isErr ? 'message' : 'system',
+          role: isErr ? 'assistant' : 'system',
+          status: isErr ? 'failed' : 'cancelled',
+          text: message,
+          content: { content: { text: message }, text: message },
+          source: { runtime: 'codex', itemType: t },
+          metadata: isErr ? { error: event.error } : { reason: event.reason },
+          revision: 1,
+        },
+        now,
+        true,
+      );
+      return;
+    }
+    // runtime.compacted / runtime.notification / unknown → AA has no
+    // slot. Dropping is better than shipping junk that the client
+    // can't render.
   }
 
   /**
-   * Single funnel for timeline pushes so the AA item shape is defined in
-   * exactly one place. Field names (`id` / `type` / `content` / `status` /
-   * `title` / `toolName`) mirror what AA Web's client reads off
-   * `payload.item`; see upsertTimelineItem in rpc.ts for how that was
-   * determined.
+   * Single funnel for timeline pushes. Computes `orderSeq` (monotonic
+   * per AA session — AA's server uses this to order items within a
+   * session timeline) and `contentHash` (used by AA as an idempotency
+   * key when the same content is upserted twice). Callers stay focused
+   * on the shape they actually want to send.
    */
   private pushTimelineItem(
     runtimeId: string,
     aaSessionId: string,
     item: Record<string, unknown>,
+    now: string,
     created: boolean,
   ): void {
+    const orderSeq = nextTimelineOrderSeq(aaSessionId);
+    const contentHash = sha256Hex(JSON.stringify(item.content ?? null));
     upsertTimelineItem(this.conn, {
       runtimeId,
       sessionId: aaSessionId,
       created,
       item: {
+        ...item,
         sessionId: aaSessionId,
         runtimeId,
-        createdAt: new Date().toISOString(),
-        ...item,
+        orderSeq,
+        contentHash,
+        createdAt: now,
+        updatedAt: now,
       },
     });
+  }
+
+
+  /** Monotonic revision per item id, starting at 1. */
+  private bumpRevision(id: string): number {
+    const cur = this.revisions.get(id) ?? 0;
+    const next = cur + 1;
+    this.revisions.set(id, next);
+    return next;
   }
 }
 

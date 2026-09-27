@@ -136,7 +136,10 @@ describe('Multi-instance session map isolation', () => {
     expect(await map.getAaSessionId(9202, 'zai-sess-1')).toBe('sess_b');
     expect(await map.getZaiSessionId(9201, 'sess_a')).toBe('zai-sess-1');
     expect(await map.getZaiSessionId(9202, 'sess_b')).toBe('zai-sess-1');
-    expect(await map.getZaiSessionId(9201, 'sess_b')).toBeNull();
+    // Reverse lookups fall back across port files on purpose: a child port can
+    // be reassigned after a restart, and the session it hosted must stay
+    // reachable from the new port. So `sess_b` resolves even from 9201.
+    expect(await map.getZaiSessionId(9201, 'sess_b')).toBe('zai-sess-1');
   });
 
   it('reconcile drops mappings for no-longer-live zai sessions', async () => {

@@ -114,16 +114,6 @@ export async function initAaClient(): Promise<(() => Promise<void>) | null> {
   }
 
   const conn = initAaConnection(config);
-  try {
-    await conn.start();
-    console.log(
-      `[aa.client] connected to ${config.serverUrl} as ${config.connectorId} (${config.connectorName})`,
-    );
-  } catch (err) {
-    console.warn('[aa.client] initial connect failed; reconnecting in background:', err);
-    // Don't return null — the connection schedules its own reconnects. The
-    // caller can still shut down via the returned function.
-  }
 
   // T5: session map first — event adapter and reverse dispatch need it.
   const sessionMap = initSessionMap();
@@ -152,6 +142,35 @@ export async function initAaClient(): Promise<(() => Promise<void>) | null> {
   // Singleton so debug routes can invoke handlers locally.
   const reverse = initReverseDispatch(conn, registry);
   reverse.install();
+
+  // ★ ORDERING: connect LAST. AA server probes us the instant the WS
+  // opens — `runtime.discover` first (that's what the mobile
+  // "新建会话" screen calls to load runtime types / model catalog), then
+  // `runtime.start`, `runtime.capabilities`. Connecting before the
+  // handlers above are installed leaves a window in which those probes
+  // hit the no-handler path and get answered `method_not_implemented`;
+  // the client then renders "无法加载运行时能力" with empty 模型 / 推理强度
+  // / 权限模式 fields. Observed live: 7 `runtime.discover NO_HANDLER`
+  // frames. The handlers only need the `conn` object to *send* on, so
+  // they can be installed while the socket is still down.
+  try {
+    await conn.start();
+    console.log(
+      `[aa.client] connected to ${config.serverUrl} as ${config.connectorId} (${config.connectorName})`,
+    );
+  } catch (err) {
+    console.warn('[aa.client] initial connect failed; reconnecting in background:', err);
+    // Don't return null — the connection schedules its own reconnects. The
+    // caller can still shut down via the returned function.
+  }
+
+  // Now that the socket is live, push the capability set. Children that
+  // were already running before this process started never emit
+  // `instance.changed`, so nothing else would refresh the server's copy —
+  // and a stale set silently drops capabilities the client gates its UI
+  // on (e.g. `session.interaction.approval` greys out every notice
+  // action, including AskUserQuestion forms).
+  await registry.reannounceAll();
 
   // Refresh subject to sessionMap so type-checker doesn't flag unused.
   void sessionMap;

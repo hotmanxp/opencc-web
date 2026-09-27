@@ -131,7 +131,7 @@ describe('method whitelists', () => {
   it('zai-to-server notifications include heartbeat + timeline + notices', () => {
     expect(ZAI_TO_SERVER_NOTIFICATIONS).toContain('connector.heartbeat');
     expect(ZAI_TO_SERVER_NOTIFICATIONS).toContain('timeline.itemUpsert');
-    expect(ZAI_TO_SERVER_NOTIFICATIONS).toContain('notice.upserted');
+    expect(ZAI_TO_SERVER_NOTIFICATIONS).toContain('notice.upsert');
     expect(ZAI_TO_SERVER_NOTIFICATIONS).toContain('session.meta.upsert');
   });
 });

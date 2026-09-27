@@ -45,7 +45,12 @@ import type { RuntimeName } from './protocol.js';
 // ─── Persisted shape ─────────────────────────────────────────────────────
 
 const RuntimeMappingSchema = z.object({
-  runtimeId: z.string().regex(/^rti_[A-Za-z0-9_-]+$/),
+  // AA assigns this id and may use either `rti_<random>` (legacy UI
+  // flow) or the bare runtimeType name like `"codex"` (v2 REST
+  // `create-and-start` path). Accept any non-empty string so the
+  // schema doesn't silently drop a map entry on reload and break
+  // `portFromRuntime` after a restart.
+  runtimeId: z.string().min(1),
   instanceId: z.string().min(1),
   name: z.string().min(1),
   port: z.number().int().positive(),
@@ -58,6 +63,27 @@ export type RuntimeMapping = z.infer<typeof RuntimeMappingSchema>;
 
 const RuntimeMapFileSchema = z.record(z.string(), RuntimeMappingSchema);
 export type RuntimeMapFile = z.infer<typeof RuntimeMapFileSchema>;
+
+/**
+ * Does this look like a real AA-assigned runtime identity (`rti_…`)?
+ *
+ * AA speaks with two different id vocabularies and mixing them up is
+ * what made replies invisible:
+ *   - `runtime.start` / `runtime.stop` / `runtime.capabilities` carry
+ *     the real identity AA assigned, e.g. `rti_nJK4nB_g0dapspAZ`.
+ *     This is what the Web/mobile clients address the runtime by, and
+ *     therefore what every outbound notification must use.
+ *   - `session.create` may instead carry just the runtime *type*
+ *     (`codex`) — the legacy "type-equal" convention, where the caller
+ *     names a runtime kind rather than a specific instance.
+ *
+ * So: only adopt ids that look like `rti_…`. Adopting a bare
+ * runtimeType would overwrite the identity AA uses to route back to us
+ * and break capability lookups on the client.
+ */
+export function isAaaAssignedRuntimeId(id: string | undefined | null): boolean {
+  return typeof id === 'string' && /^rti_[A-Za-z0-9_-]+$/.test(id.trim());
+}
 
 // ─── Persistence helpers ──────────────────────────────────────────────────
 
@@ -115,6 +141,30 @@ export class RuntimeRegistry {
     this.listenerInstalled = true;
   }
 
+  /**
+   * Re-announce every mapping we already know about.
+   *
+   * Separate from `start()` on purpose: `initAaClient` wires the
+   * registry BEFORE it opens the WS (so inbound handlers are installed
+   * before AA's first probe), which means anything sent from inside
+   * `start()` lands on a closed socket and is silently dropped. The
+   * server then keeps the capability set the *previous* process pushed,
+   * so a connector-side capability change only takes effect once some
+   * child happens to restart.
+   *
+   * Call this once the connection is live — `initAaClient` does.
+   */
+  async reannounceAll(): Promise<void> {
+    for (const mapping of this.listAll()) {
+      if (mapping.port <= 0) continue;
+      try {
+        await this.announce(mapping);
+      } catch (err) {
+        console.warn('[aa.runtimeRegistry] reannounce failed:', err);
+      }
+    }
+  }
+
   async stop(): Promise<void> {
     this.listenerInstalled = false;
     // No unsubscribe — eventBus's singleton lifetime matches the process.
@@ -138,6 +188,41 @@ export class RuntimeRegistry {
   /** All currently-registered runtimes. */
   listAll(): RuntimeMapping[] {
     return Object.values(this.mappings);
+  }
+
+  /**
+   * Adopt the runtime_id the AA server actually assigned to this port.
+   *
+   * AA does NOT accept a client-invented runtime_id: when the server
+   * creates a session it stamps the session with whatever id it chose
+   * (`rti_<random>` from the established UI flow, or just the runtimeType
+   * name like `"codex"` from the v2 REST `create-and-start` path) and
+   * hands it back in `session.create`'s params. If our outgoing
+   * notifications carry a different id, the server files them under a
+   * runtime the session doesn't belong to and drops them — "the model
+   * replied but the client sees nothing". So the first time AA tells us
+   * its id, we converge on it and persist.
+   *
+   * No-op when the port is unknown, the id is empty, or unchanged.
+   * Accepts any non-empty string — AA uses both `rti_<…>` and bare
+   * runtimeType names depending on the code path, and what matters is
+   * round-trip consistency, not the shape.
+   */
+  async adoptServerRuntimeId(port: number, serverRuntimeId: string): Promise<boolean> {
+    const trimmed = (serverRuntimeId ?? '').trim();
+    if (!trimmed) return false;
+    const portKey = String(port);
+    const mapping = this.mappings[portKey];
+    if (!mapping) return false;
+    if (mapping.runtimeId === trimmed) return false;
+    console.log(
+      `[aa.runtimeRegistry] port ${port}: adopting server runtime_id ` +
+        `${trimmed} (was ${mapping.runtimeId})`,
+    );
+    mapping.runtimeId = trimmed;
+    this.mappings[portKey] = mapping;
+    await writeRuntimeMap(this.mappings);
+    return true;
   }
 
   // ─── Internal ──────────────────────────────────────────────────────────
@@ -180,7 +265,7 @@ export class RuntimeRegistry {
     port: number;
   }): Promise<void> {
     const portKey = String(event.port);
-    const existing = this.mappings[portKey];
+    const existing = this.mappings[portKey] ?? this.findByInstanceId(event.instanceId);
 
     // Get the InstanceDefinition for richer metadata (name, cwd, app).
     // Falls back to bare instanceId if the supervisor isn't reachable yet.
@@ -189,7 +274,12 @@ export class RuntimeRegistry {
     const cwd = def?.cwd ?? '';
     const app = def?.app;
 
-    const runtimeId = `rti_${event.instanceId}`;
+    // Provisional id until AA assigns a real one. Once
+    // adoptServerRuntimeId() has converged on the server's id, that wins —
+    // otherwise a child's re-announce (heartbeat → instance.changed →
+    // register) would silently revert us to an id AA never issued, and
+    // every outgoing notification would be dropped server-side again.
+    const runtimeId = existing?.runtimeId ?? `rti_${event.instanceId}`;
     const now = new Date().toISOString();
 
     const mapping: RuntimeMapping = existing ?? {
@@ -206,12 +296,21 @@ export class RuntimeRegistry {
     mapping.name = name;
     mapping.cwd = cwd;
     mapping.app = app;
+    // `existing` may have been carried over from the instance's previous
+    // port (a restart moves it), and the map is keyed by the *current* port —
+    // so the entry we're writing under portKey must report that same port.
+    mapping.port = event.port;
 
     this.mappings[portKey] = mapping;
     await writeRuntimeMap(this.mappings);
 
+    await this.announce(mapping);
+  }
+
+  /** Push this runtime's inventory + capabilities to AA. */
+  private async announce(mapping: RuntimeMapping): Promise<void> {
     const capabilities = this.capabilitiesFor(mapping);
-    await announceRuntimeInventory(this.conn, this.runtime, runtimeId, capabilities);
+    await announceRuntimeInventory(this.conn, this.runtime, mapping.runtimeId, capabilities);
     await publishCapabilities(this.conn, capabilities);
   }
 
@@ -225,18 +324,85 @@ export class RuntimeRegistry {
     // missing this runtime and clean up server-side.
   }
 
+  /**
+   * The canonical capability list, in the exact shape AA's
+   * `ProtocolCapabilitySet` validates (`capabilities: ProtocolCapability[]`).
+   * Exposed because `runtime.capabilities` RPC must answer with the same
+   * data the registry announces — two shapes drifting is what made the
+   * server 502 with invalid_runtime_capabilities.
+   */
+  capabilitiesForRuntime(): RuntimeCapability[] {
+    return this.capabilitiesFor(this.anyMapping());
+  }
+
+  /**
+   * Session-scoped capabilities, in the same `ProtocolCapabilitySet`
+   * shape. `session.capabilities` must answer with THIS shape, not a
+   * flat `{session_send_message: true}` map: the server validates it as
+   * ProtocolCapabilitySet and — more importantly — uses it to decide
+   * whether `session.send_message` is admitted at all.
+   */
+  capabilitiesForSession(sessionId: string): RuntimeCapability[] {
+    return this.capabilitiesFor(this.anyMapping())
+      .filter((c) => c.scope === 'session')
+      .map((c) => ({ ...c, sessionId }));
+  }
+
+  private anyMapping(): RuntimeMapping {
+    const first = Object.values(this.mappings)[0];
+    return first ?? {
+      runtimeId: '',
+      instanceId: '',
+      name: '',
+      port: 0,
+      cwd: '',
+      registeredAt: new Date(0).toISOString(),
+    };
+  }
+
   private capabilitiesFor(mapping: RuntimeMapping): RuntimeCapability[] {
+    // `runtime` is NOT optional in practice: the server groups every
+    // stored capability by `(capability.runtime, scope, sessionId,
+    // runtimeId)` in `services/effective_capabilities.py::
+    // SessionCapabilityIndex.__init__`, and then filters
+    // `capability.runtime != session.runtime`. Entries sent without a
+    // `runtime` land in a `(None, …)` bucket that none of the four
+    // lookup keys can reach, so every capability silently resolves to
+    // `source=None` → `supported=False` → the client computes
+    // `usable = false` and renders "当前运行时状态下不可发送消息".
+    //
+    // The ids below are the ones the server inherits onto a session
+    // (`_INHERITED_RUNTIME_CAPABILITY_IDS` in core/capabilities.py) —
+    // spellings must match exactly.
+    const runtime: RuntimeName = 'codex';
+    const cap = (
+      capabilityId: string,
+      scope: 'runtime' | 'session',
+    ): RuntimeCapability => ({
+      capabilityId,
+      runtime,
+      scope,
+      supported: true,
+      available: true,
+      allowed: true,
+    });
     return [
-      { capabilityId: 'session.send_message', scope: 'runtime', supported: true, available: true, allowed: true },
-      { capabilityId: 'session.steer', scope: 'runtime', supported: true, available: true, allowed: true },
-      { capabilityId: 'session.interrupt', scope: 'runtime', supported: true, available: true, allowed: true },
-      { capabilityId: 'session.command', scope: 'runtime', supported: true, available: true, allowed: true },
-      { capabilityId: 'catalog.model', scope: 'runtime', supported: true, available: true, allowed: true },
-      { capabilityId: 'notice.approval', scope: 'runtime', supported: true, available: true, allowed: true },
-      { capabilityId: 'notice.input_request', scope: 'runtime', supported: true, available: true, allowed: true },
-      { capabilityId: 'session.send_message', scope: 'session', supported: true, available: true, allowed: true },
-      { capabilityId: 'session.steer', scope: 'session', supported: true, available: true, allowed: true },
-      { capabilityId: 'session.interrupt', scope: 'session', supported: true, available: true, allowed: true },
+      cap('session.send_message', 'runtime'),
+      cap('session.steer', 'runtime'),
+      cap('session.interrupt', 'runtime'),
+      cap('session.command', 'runtime'),
+      cap('session.commands', 'runtime'),
+      cap('session.interaction.approval', 'runtime'),
+      cap('runtime.attachment', 'runtime'),
+      cap('runtime.config', 'runtime'),
+      cap('catalog.model', 'runtime'),
+      cap('catalog.permission', 'runtime'),
+      cap('catalog.effort', 'runtime'),
+      cap('notice.approval', 'runtime'),
+      cap('notice.input_request', 'runtime'),
+      cap('session.send_message', 'session'),
+      cap('session.steer', 'session'),
+      cap('session.interrupt', 'session'),
     ];
   }
 
