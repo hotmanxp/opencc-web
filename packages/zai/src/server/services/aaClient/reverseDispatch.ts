@@ -232,7 +232,11 @@ export class ReverseDispatch {
         displayName: 'zai (Codex-compatible)',
         description: 'Local zai instance with one runtime per InstanceDefinition.',
         available: runningCount > 0,
-        reason: runningCount > 0 ? undefined : 'no InstanceDefinitions currently running',
+        // `reason` is required by AA's RuntimeTypeDescriptor (no default,
+        // min_length=1). pydantic rejects undefined / null / empty-string.
+        reason: runningCount > 0
+          ? `${runningCount} active InstanceDefinition(s)`
+          : 'no InstanceDefinitions currently running',
         recommended: true,
         recommendationRank: 0,
         implementationType: 'zai-local',
@@ -245,7 +249,14 @@ export class ReverseDispatch {
         },
         metadata: { zaiVersion: '0.12.0', activeRuntimes: runningCount },
         instancePolicy: 'single',
-        maxInstances: null,
+        // AA requires instancePolicy='single' to have maxInstances=1
+        // (single runtime types must set maxInstances to 1). Set explicitly
+        // here; null is rejected by pydantic's validator.
+        maxInstances: 1,
+        // `configSchema` is required even when null. Pydantic rejects
+        // omitted fields with `extra="forbid"`. None means zai has no
+        // per-runtime config (sessions are configured per-prompt).
+        configSchema: null,
       },
     ];
   }
