@@ -230,6 +230,12 @@ export class AaConnection {
     this.requestHandlers.set(method, handler);
   }
 
+  /** Read-only access to the registered inbound handlers (used by debug
+   * routes to invoke RPCs locally without going through the AA WS). */
+  getRequestHandler(method: string): ((params: unknown) => Promise<unknown>) | undefined {
+    return this.requestHandlers.get(method);
+  }
+
   /** Register a handler for inbound Notification frames. */
   onNotification(method: string, handler: (params: unknown) => void): void {
     this.notificationHandlers.set(method, handler);

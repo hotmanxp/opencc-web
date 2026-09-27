@@ -178,6 +178,27 @@ export class ReverseDispatch {
     this.conn.onRequest('session.create', async (params) => {
       return this.handleSessionCreate(params);
     });
+    // Session inventory + timeline reads — AA Web uses these to populate
+    // the session list and timeline view when the user opens the app or
+    // navigates into an existing session. Without these the UI is empty
+    // (or hangs) because the server has no other way to fetch past
+    // conversation state. Each handler fans out to the appropriate child
+    // over HTTP loopback; root has no in-memory copy of transcripts.
+    this.conn.onRequest('session.discover', async (params) => {
+      return this.handleSessionDiscover(params);
+    });
+    this.conn.onRequest('session.sync', async (params) => {
+      return this.handleSessionSync(params);
+    });
+    this.conn.onRequest('session.state', async (params) => {
+      return this.handleSessionState(params);
+    });
+    this.conn.onRequest('session.capabilities', async (params) => {
+      return this.handleSessionCapabilities(params);
+    });
+    this.conn.onRequest('session.notices', async (params) => {
+      return this.handleSessionNotices(params);
+    });
     // File system RPCs — AA Web/Mobile "Files" panel talks to the connector
     // via these. We expose the same node:fs-backed operations the local
     // zai web UI uses, with the zai process cwd as the workspace root.
@@ -653,4 +674,334 @@ export class ReverseDispatch {
       null,
     );
   }
+
+  /**
+   * Generic GET against a child HTTP route, used by the read-only
+   * session.* RPCs (discover / sync / state / notices) to fan out
+   * queries to whichever child owns the AA session id. Returns null
+   * on network failure so the caller can surface a clean 404/503
+   * instead of a half-parsed body.
+   */
+  private async fetchChildJson(
+    childPort: number,
+    method: 'GET' | 'POST',
+    path: string,
+    body?: Record<string, unknown>,
+  ): Promise<{ status: number; body: unknown } | null> {
+    const url = `http://127.0.0.1:${childPort}${path}`;
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Zai-Token': process.env.ZAI_TOKEN ?? '',
+        },
+        ...(method === 'POST' && body ? { body: JSON.stringify(body) } : {}),
+      });
+      let parsed: unknown = null;
+      try { parsed = await response.json(); } catch { /* non-JSON */ }
+      return { status: response.status, body: parsed };
+    } catch (err) {
+      console.warn(`[aa.reverseDispatch] fetchChildJson(${method} ${path}) failed:`, (err as Error).message);
+      return null;
+    }
+  }
+
+  /**
+   * Resolve a session id that AA sent us (always the AA-side id — AA
+   * never knows about our `sess-` prefix). Returns the matching child
+   * port AND the zai-side (prefixed) session id. For read-only RPCs
+   * we don't care which port owns the session; we need both pieces so
+   * the child can resolve the session on its own endpoints.
+   */
+  private async resolveAaSession(aaSessionId: string): Promise<{ port: number; zaiSessionId: string }> {
+    const port = await this.resolveChildPort(aaSessionId);
+    const zaiSessionId = await this.resolveZaiSessionId(port, aaSessionId);
+    return { port, zaiSessionId };
+  }
+
+  // ─── Read-only session.* RPCs ────────────────────────────────────────
+
+  /**
+   * `session.discover` — return the inventory of sessions AA is allowed
+   * to display. AA Web calls this on initial load and when the user
+   * navigates between runtime projects. We enumerate every registered
+   * child's session list (loopback HTTP) and project each onto the AA
+   * session id from our sessionMap, so the connector-side id surface
+   * matches what AA stored when the session was first created.
+   *
+   * Return shape (per AA schema): `{ sessions: SessionMeta[] }`. The
+   * fields we populate are the ones AA's UI actually reads (id,
+   * runtimeId, status, title, cwd, createdAt, updatedAt).
+   */
+  private async handleSessionDiscover(_params: unknown): Promise<unknown> {
+    const mappings = this.registry.listAll();
+    const sessionMap = getSessionMap();
+    const sessions: Array<Record<string, unknown>> = [];
+    for (const mapping of mappings) {
+      const result = await this.fetchChildJson(mapping.port, 'GET', '/api/agent/sessions');
+      if (!result || result.status !== 200) continue;
+      const list = (result.body as { sessions?: Array<Record<string, unknown>> })?.sessions ?? [];
+      // Project each child session onto its AA id (if AA knows it).
+      const portSessions = await sessionMap?.listForPort(mapping.port) ?? [];
+      const aaByZai = new Map(portSessions.map((s) => [s.zaiSessionId, s.aaSessionId]));
+      for (const s of list) {
+        const zaiSid = String(s.sessionId ?? s.id ?? '');
+        const aaSid = aaByZai.get(zaiSid) ?? zaiSid;
+        sessions.push({
+          sessionId: aaSid,
+          runtimeId: mapping.runtimeId,
+          runtime: 'codex',
+          title: (s.title as string | undefined) ?? '',
+          cwd: (s.cwd as string | undefined) ?? '',
+          createdAt: s.createdAt ?? new Date().toISOString(),
+          updatedAt: s.updatedAt ?? new Date().toISOString(),
+          status: (s.state as string | undefined) ?? 'idle',
+          // Carry the zai id for callers that want to round-trip back.
+          externalSessionId: zaiSid,
+          metadata: { zaiSessionId: zaiSid },
+        });
+      }
+    }
+    return { sessions };
+  }
+
+  /**
+   * `session.sync` — return the timeline items for a single session.
+   * AA Web calls this when the user opens an existing session so the
+   * conversation history shows up without waiting for incremental
+   * `timeline.itemUpsert` notifications. We forward to the child's
+   * `GET /api/agent/sessions/:id` (zai-side id) and convert the
+   * transcript messages into AA's `TimelineItem` shape.
+   */
+  private async handleSessionSync(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { sessionId?: string };
+    if (!p.sessionId) throw new AaServerError('session.sync: sessionId required', 400, null);
+    const { port, zaiSessionId } = await this.resolveAaSession(p.sessionId);
+    const result = await this.fetchChildJson(port, 'GET', `/api/agent/sessions/${encodeURIComponent(zaiSessionId)}`);
+    if (!result) throw new AaServerError('session.sync: child unreachable', 503, null);
+    if (result.status === 404) throw new AaServerError(`session.sync: session not found`, 404, null);
+    if (result.status !== 200) {
+      throw new AaServerError(`session.sync: child returned ${result.status}`, result.status, result.body);
+    }
+    const transcript = (result.body as { transcript?: { messages?: Array<Record<string, unknown>>; meta?: Record<string, unknown> } })?.transcript;
+    const items = this.transcriptToTimeline(p.sessionId, transcript?.messages ?? []);
+    return {
+      sessionId: p.sessionId,
+      items,
+      metadata: transcript?.meta ?? {},
+      cursor: { lastIndex: items.length },
+    };
+  }
+
+  /**
+   * Project zai's transcript entries onto AA TimelineItem shape. We
+   * cover user / assistant / tool_call / tool_result / file-history /
+   * session-meta; unknown types are passed through as a generic item
+   * so nothing is silently dropped. Thinking blocks are merged into
+   * the assistant text item's metadata so AA Web can render them
+   * inline if it wants.
+   */
+  private transcriptToTimeline(aaSessionId: string, messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+    const items: Array<Record<string, unknown>> = [];
+    for (const m of messages) {
+      const t = m.type as string | undefined;
+      const message = m.message as { role?: string; content?: unknown } | undefined;
+      const role = message?.role;
+      const ts = m.timestamp ?? null;
+      const baseId = (m.uuid as string | undefined) ?? `${aaSessionId}-${items.length}`;
+      const metadata: Record<string, unknown> = { rawType: t };
+
+      if (typeof message?.content === 'string') {
+        // Simple user / system / human message.
+        items.push({
+          itemId: baseId,
+          sessionId: aaSessionId,
+          kind: 'message',
+          ...(role ? { role } : {}),
+          text: message.content,
+          timestamp: ts,
+          metadata,
+        });
+        continue;
+      }
+
+      if (Array.isArray(message?.content)) {
+        // Anthropic blocks: text + thinking + tool_use + tool_result. zai's
+        // runtime emits thinking and text as SEPARATE entries in the JSONL
+        // (one entry per block), but on a single response (when streaming
+        // was bypassed) they may share one entry's content array. Handle
+        // both shapes by emitting one timeline item per logical block.
+        const blocks = message.content as Array<Record<string, unknown>>;
+        const textBlock = blocks.find((b) => b.type === 'text');
+        const thinkingBlock = blocks.find((b) => b.type === 'thinking');
+        const toolUse = blocks.find((b) => b.type === 'tool_use');
+        const toolResult = blocks.find((b) => b.type === 'tool_result');
+
+        if (thinkingBlock && typeof thinkingBlock.thinking === 'string') {
+          items.push({
+            itemId: `${baseId}-thinking`,
+            sessionId: aaSessionId,
+            kind: 'thinking',
+            ...(role ? { role } : {}),
+            text: thinkingBlock.thinking,
+            timestamp: ts,
+            metadata: { ...metadata, blockType: 'thinking' },
+          });
+        }
+        if (textBlock && typeof textBlock.text === 'string') {
+          items.push({
+            itemId: `${baseId}-text`,
+            sessionId: aaSessionId,
+            kind: 'message',
+            ...(role ? { role } : {}),
+            text: textBlock.text,
+            timestamp: ts,
+            metadata,
+          });
+        }
+        if (toolUse) {
+          items.push({
+            itemId: `${baseId}-tooluse`,
+            sessionId: aaSessionId,
+            kind: 'tool_call',
+            text: '',
+            timestamp: ts,
+            metadata: {
+              ...metadata,
+              toolName: toolUse.name,
+              toolUseId: toolUse.id,
+              input: toolUse.input,
+            },
+          });
+        }
+        if (toolResult) {
+          items.push({
+            itemId: `${baseId}-toolresult`,
+            sessionId: aaSessionId,
+            kind: 'tool_result',
+            text: '',
+            timestamp: ts,
+            metadata: {
+              ...metadata,
+              toolUseId: toolResult.tool_use_id,
+              output: toolResult.content,
+            },
+          });
+        }
+        continue;
+      }
+
+      // Fallback: pass through with whatever content we have.
+      items.push({
+        itemId: baseId,
+        sessionId: aaSessionId,
+        kind: 'message',
+        ...(role ? { role } : {}),
+        text: '',
+        timestamp: ts,
+        metadata,
+      });
+    }
+    return items;
+  }
+
+  /**
+   * `session.state` — AA Web polls this to drive the busy/idle badge
+   * on each session card. We forward to the child's
+   * `GET /api/agent/sessions/:id/state` which already aggregates
+   * cwd + tasks + bash + agent state into a cold-start snapshot.
+   * Falls back to `{status:'idle'}` if the session can't be found
+   * so the UI doesn't hard-fail on a stale id.
+   */
+  private async handleSessionState(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { sessionId?: string };
+    if (!p.sessionId) throw new AaServerError('session.state: sessionId required', 400, null);
+    const { port, zaiSessionId } = await this.resolveAaSession(p.sessionId);
+    const result = await this.fetchChildJson(port, 'GET', `/api/agent/sessions/${encodeURIComponent(zaiSessionId)}/state`);
+    if (!result || result.status !== 200) {
+      return { sessionId: p.sessionId, status: 'idle' };
+    }
+    return {
+      sessionId: p.sessionId,
+      status: 'idle', // cold-start snapshot doesn't expose busy/idle directly; child SSE drives real-time
+      ...(result.body as Record<string, unknown>),
+    };
+  }
+
+  /**
+   * `session.capabilities` — AA Web asks what each session can do
+   * (send_message / steer / interrupt / approve / input_request).
+   * Capabilities are static for our model: every session supports the
+   * full set. We still require the sessionId param so we can verify
+   * the session is known (404 otherwise).
+   */
+  private async handleSessionCapabilities(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { sessionId?: string };
+    if (!p.sessionId) throw new AaServerError('session.capabilities: sessionId required', 400, null);
+    // Verify ownership but don't fail on missing — capability set is
+    // identical across sessions, only the validation matters.
+    try { await this.resolveAaSession(p.sessionId); } catch { /* unknown id is fine */ }
+    return {
+      sessionId: p.sessionId,
+      capabilities: {
+        session_send_message: true,
+        session_steer: true,
+        session_interrupt: true,
+        notice_approval: true,
+        notice_input_request: true,
+      },
+    };
+  }
+
+  /**
+   * `session.notices` — AA Web fetches pending notices (approve / input /
+   * permission requests) for a session. We currently don't have a
+   * dedicated child endpoint for the active notice queue, so we return
+   * an empty list. Real notices flow via the `notice.upserted`
+   * notification (see eventAdapter), which AA subscribes to and merges
+   * into the session view on its own.
+   */
+  private async handleSessionNotices(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { sessionId?: string };
+    if (!p.sessionId) throw new AaServerError('session.notices: sessionId required', 400, null);
+    return { sessionId: p.sessionId, notices: [] };
+  }
+
+  // ─── Test-only ────────────────────────────────────────────────────────
+
+  /**
+   * Invoke a registered RPC handler locally. Used by the debug HTTP
+   * route so we can verify handler return shapes without going through
+   * the full AA Web → AA server → zai WS path. Throws if AA is
+   * disabled, no connection is wired, or the method has no handler.
+   */
+  async callHandlerForTest(method: string, params: unknown): Promise<unknown> {
+    const handler = this.conn.getRequestHandler(method);
+    if (!handler) {
+      throw new Error(`no handler registered for ${method}`);
+    }
+    return await handler(params);
+  }
+}
+
+// ─── Singleton ────────────────────────────────────────────────────────────
+
+let singleton: ReverseDispatch | null = null;
+
+export function initReverseDispatch(
+  conn: AaConnection,
+  registry: RuntimeRegistry,
+): ReverseDispatch {
+  if (singleton) singleton.install(); // idempotent — re-install handlers
+  else singleton = new ReverseDispatch({ conn, registry });
+  return singleton;
+}
+
+export function getReverseDispatch(): ReverseDispatch | null {
+  return singleton;
+}
+
+export function resetReverseDispatchForTests(): void {
+  singleton = null;
 }

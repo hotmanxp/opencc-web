@@ -32,6 +32,7 @@ import { slashRouter } from './routes/slash.js';
 import { mcpRouter } from './routes/mcp.js';
 import aaPairingRouter from './routes/aa/pairing.js';
 import aaStatusRouter from './routes/aa/status.js';
+import aaDebugRouter from './routes/aa/debug.js';
 import childEventRouter from './routes/internal/childEvent.js';
 import pushActionRouter from './routes/internal/pushAction.js';
 import bashTasksRouter from './routes/bashTasks.js';
@@ -269,6 +270,7 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // 详见 docs/2026-09-27-zai-aa-integration.md。
   app.use('/api/aa', aaPairingRouter);
   app.use('/api/aa', aaStatusRouter);
+  app.use('/api/aa/debug', aaDebugRouter);
   // /api/internal/child-event — child zai 进程向 root 上报事件 (T4.5)。
   // child 端 process.env.ZAI_AA_ENABLED=1 时挂载 + 调用。
   app.use('/api/internal', childEventRouter);

@@ -40,7 +40,7 @@ import {
   initOfflineBuffer,
   resetOfflineBufferForTests,
 } from './offlineBuffer.js';
-import { ReverseDispatch } from './reverseDispatch.js';
+import { ReverseDispatch, initReverseDispatch } from './reverseDispatch.js';
 import {
   initChildEventReporter,
   resetChildEventReporterForTests,
@@ -149,7 +149,8 @@ export async function initAaClient(): Promise<(() => Promise<void>) | null> {
   // T7: reverse dispatch — wires inbound RPC handlers on the connection
   // so AA server requests (mobile user actions) get routed to the right
   // child. No-op until the connection actually receives requests.
-  const reverse = new ReverseDispatch({ conn, registry });
+  // Singleton so debug routes can invoke handlers locally.
+  const reverse = initReverseDispatch(conn, registry);
   reverse.install();
 
   // Refresh subject to sessionMap so type-checker doesn't flag unused.
