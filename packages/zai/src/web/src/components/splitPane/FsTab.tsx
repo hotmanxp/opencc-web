@@ -975,10 +975,17 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       >
         {/* 当前 tab 的路径: 「文件」tab 显示 cwd, 文件 tab 显示该文件的绝对
             路径. 搜索框只在「文件」tab 出现 —— 在文件 tab 上输入搜索词会把
-            树的结果换掉, 而那时树并不在视野里. */}
+            树的结果换掉, 而那时树并不在视野里.
+            「文件」tab 时把路径 span 设 hidden —— 路径信息仍写在 DOM 里
+            (testid fs-path, FsTab.test 仍能读到 textContent),只是不让它
+            占据 flex 空间,搜索 Input 才能 flex-1 占满宽度. */}
         <span
           data-testid="fs-path"
-          className="flex-1 min-w-0 font-mono text-xs truncate"
+          className={
+            isFilesTab
+              ? 'hidden'
+              : 'flex-1 min-w-0 font-mono text-xs truncate'
+          }
           style={{ color: 'var(--text-dim-55)' }}
           title={activePathLabel}
         >
@@ -1002,7 +1009,9 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 if (v === '') setSubmittedQuery('');
               }}
               onPressEnter={() => setSubmittedQuery(draft.trim())}
-              className="w-44 shrink-0"
+              // 占满头部行剩余空间:「文件」tab 时 cwd 路径已 hidden,
+              // 搜索框用 flex-1 撑满,Switch 与清空按钮贴右.
+              className="flex-1 min-w-0"
             />
             <Switch
               size="small"
