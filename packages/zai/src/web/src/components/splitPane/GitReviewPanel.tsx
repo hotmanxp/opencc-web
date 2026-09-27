@@ -12,8 +12,8 @@ import {
 } from 'antd';
 import {
   CheckIcon,
-  GitBranchIcon,
   GitCommitIcon,
+  GitForkIcon,
   LayersIcon,
   RotateCwIcon,
   Undo2Icon,
@@ -103,7 +103,7 @@ export function GitReviewPanel({ cwd }: { cwd: string | null }) {
           options={[
             { label: '变更', value: 'changes', icon: <LayersIcon size={12} /> },
             { label: '提交', value: 'commits', icon: <GitCommitIcon size={12} /> },
-            { label: '分支', value: 'branches', icon: <GitBranchIcon size={12} /> },
+            { label: '分支', value: 'branches', icon: <GitForkIcon size={12} /> },
             ...(showWorktreeSelector
               ? [{ label: 'Worktree', value: 'worktrees' as GitMode }]
               : []),
