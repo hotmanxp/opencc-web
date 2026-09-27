@@ -31,7 +31,7 @@
  * easier to reason about.
  */
 import { z } from 'zod';
-import { readdir, readFile, writeFile as fsWriteFile, stat } from 'node:fs/promises';
+import { readdir, readFile, writeFile as fsWriteFile, stat, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { resolve as pathResolve, join, sep, dirname, basename } from 'node:path';
@@ -722,6 +722,27 @@ export class ReverseDispatch {
   }
 
   /**
+   * Canonicalize a client-supplied workspace directory.
+   *
+   * The picker hands us whatever the user tapped, which can be a symlink
+   * path (`/tmp/aa-test-cwd`), while the child reports its cwd through
+   * `process.cwd()` — always the resolved real path
+   * (`/private/tmp/aa-test-cwd` on macOS, where `/tmp` is a symlink).
+   * Storing both spellings splits one workspace into two entries in the
+   * client's 工作目录 list and makes "same directory" checks fail.
+   */
+  private async canonicalCwd(raw: string | undefined): Promise<string> {
+    const expanded = this.expandTilde((raw ?? '').trim());
+    if (!expanded) return '';
+    try {
+      return await realpath(expanded);
+    } catch {
+      // Not created yet (or unreadable) — keep what the client sent.
+      return expanded;
+    }
+  }
+
+  /**
    * Resolve a user-supplied path against the AA-provided workspace root,
    * rejecting anything that escapes via "..". Mirrors routes/fs.ts::
    * resolveSafePath but adapted for AA's flat params shape.
@@ -900,11 +921,12 @@ export class ReverseDispatch {
     // Forward to child via push-action. Child will create the transcript
     // with the AA-provided sessionId (so AA can reference it later) and
     // enqueue the first turn.
+    const cwd = await this.canonicalCwd(p.cwd);
     const childResp = await forwardToChild(port, 'sessionCreate', p.sessionId, {
       sessionId: p.sessionId,
       content: p.content,
       title: p.title ?? '',
-      cwd: p.cwd ?? '',
+      cwd,
       runtimeId,
       runtimeType: p.runtimeType ?? p.runtimeOptions?.runtimeType ?? 'codex',
     });
@@ -930,7 +952,7 @@ export class ReverseDispatch {
       runtimeId,
       zaiSessionId: actualZaiSessionId,
       createdAt: new Date().toISOString(),
-      metadata: { title: p.title ?? '', cwd: p.cwd ?? '' },
+      metadata: { title: p.title ?? '', cwd },
     });
 
     console.log(`[aa.reverseDispatch] session.create: ${p.sessionId} → zai=${actualZaiSessionId} on port=${port}`);
