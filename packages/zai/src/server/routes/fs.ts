@@ -480,6 +480,11 @@ fsRouter.get('/fs/file', async (req, res) => {
       // client can drop it straight into a sandboxed <iframe>. We keep
       // it as utf8 (not Buffer) so <meta charset> in the document works
       // correctly without re-decoding latin1 → utf8 on the client.
+      //
+      // 2026-09-27:同时回传 raw `content` + sha256 —— FsTab 的 .html
+      // 三状态切换(preview / 源码 / 编辑)在 source/edit 模式走
+      // Monaco,需要原文 + 乐观并发的 sha256。只用 dataUrl 的话,前端
+      // 还得自己 base64 解码,不优雅。
       const content = await readFile(safe.abs, 'utf8');
       const dataUrl = `data:text/html;charset=utf-8;base64,${Buffer.from(content, 'utf8').toString('base64')}`;
       const body: FsFile = {
@@ -491,6 +496,8 @@ fsRouter.get('/fs/file', async (req, res) => {
         mtime: info.mtime.toISOString(),
         mime: 'text/html',
         dataUrl,
+        content,
+        sha256: sha256OfString(content),
       };
       res.json(body);
       return;

@@ -560,17 +560,18 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     submittedQuery,
     { enabled: mode === 'content' },
   );
-  // HTML preview view mode: 'preview' shows the rendered iframe,
-  // 'source' shows the markup. Driven by a Segmented control rendered
-  // only when the active file is HTML (see below).
-  const [htmlMode, setHtmlMode] = useState<HtmlMode>('preview');
+  // 3-state view mode for .md / .html files(预览 / 源码 / 编辑)。
+  // 2026-09-27:扩展原 htmlMode 仅为 HTML 服务的 2-state 模式,把 markdown
+  // 也拉进来;非 .md/.html 文本文件(viewMode 字段无效)走默认「编辑」路径。
+  // 切到不同文件时由下面的 useEffect 把 viewMode 重置为合适的初值。
+  const [viewMode, setViewMode] = useState<'preview' | 'source' | 'edit'>('preview');
   // 系统拖入的悬浮高亮标记(拖入预览走 FilePreviewDrawer,见 handleFsDrop)
   const [dropHover, setDropHover] = useState(false);
-  // True only when the currently-selected file is an HTML preview.
-  // Used to gate the Segmented control in the header so it doesn't
-  // appear for unrelated file types.
-  const showHtmlToggle =
-    !!file.data && file.data.kind === 'html' && !!file.data.dataUrl;
+  // True only when the currently-selected file is .md or .html — gates the
+  // Segmented control in the header so it doesn't appear for unrelated types.
+  const isMd = !!file.data && file.data.kind === 'text' && /\.(md|markdown)$/i.test(file.data.name ?? '');
+  const isHtml = !!file.data && file.data.kind === 'html' && !!file.data.dataUrl;
+  const showViewModeToggle = isMd || isHtml;
   // 当前文件是否文档类(docx/sheet/ppt/pdf/legacy-office)—— 决定预览区
   // 是否套用文本预览的 p-3 + 等宽字体外框。
   const activeIsDocument = !!file.data && isDocumentPreviewKind(file.data.kind);
@@ -735,9 +736,37 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setSavedFlashAt(null);
     setEditSha256(null);
     setSaveError(null);
+    setViewMode('preview');
     initialContentRef.current = '';
     lastSavedContentRef.current = '';
   }, [cwd]);
+
+  // 切到不同文件时:重置 viewMode 为 'preview'(让用户从渲染视图开始浏览),
+  // 并同步 editingPath —— 当 viewMode === 'edit' 时进入编辑会话,否则退出。
+  useEffect(() => {
+    if (file.data?.path) {
+      setViewMode('preview');
+    }
+  }, [file.data?.path]);
+
+  // viewMode 切到 'edit' 时初始化编辑会话(锁定 baseline + sha256);
+  // 切到 'preview'/'source' 时退出编辑。
+  useEffect(() => {
+    if (viewMode === 'edit' && file.data && file.data.kind === 'text') {
+      setEditingPath(file.data.path);
+      initialContentRef.current = file.data.content ?? '';
+      lastSavedContentRef.current = file.data.content ?? '';
+      setEditSha256(file.data.sha256 ?? null);
+      setSaveState('idle');
+      setSaveError(null);
+    } else {
+      setEditingPath(null);
+      // 退出编辑时清掉 save 状态(用户切到 'source'/'preview' 后再回来需要重置)
+      setSaveState('idle');
+      setSaveError(null);
+      setSavedFlashAt(null);
+    }
+  }, [viewMode, file.data?.path]);
 
   // 2026-09-27:全局 Cmd/Ctrl+F + Cmd/Ctrl+S(capture phase),仅在当前 tab 进入
   // 编辑模式时拦截。对齐 AA file-preview-page.tsx:485-501。
@@ -986,30 +1015,30 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             />
           </>
         )}
-        {showHtmlToggle && (
+        {showViewModeToggle && (
           <Segmented
-            data-testid="fs-html-mode"
+            data-testid="fs-view-mode"
             size="small"
-            value={htmlMode}
-            onChange={(v) => setHtmlMode(v as HtmlMode)}
+            value={viewMode}
+            onChange={(v) => setViewMode(v as 'preview' | 'source' | 'edit')}
             options={[
               { label: '预览', value: 'preview' },
               { label: '源码', value: 'source' },
+              { label: '编辑', value: 'edit' },
             ]}
           />
         )}
-        {file.data && file.data.kind === 'text' && file.data.path && editingPath !== file.data.path && (
+        {file.data && file.data.kind === 'text' && file.data.path && editingPath !== file.data.path && !isMd && (
+          // 只在非 .md 文件显示「编辑」按钮:.md 用 Segmented 切 3 状态,
+          // .html 走 html kind(也用 Segmented)。其他代码文件(.ts/.py/...)
+          // 保留单击进入编辑的快捷方式,Monaco 一直可写(readOnly 翻转)。
           <Button
             size="small"
             data-testid="fs-edit-btn"
             onClick={() => {
-              setEditingPath(file.data!.path!);
+              setViewMode('edit');
               // 锁定 baseline = 当前 server 拉到的内容;同时记 sha256。
-              initialContentRef.current = file.data!.content ?? '';
-              lastSavedContentRef.current = file.data!.content ?? '';
-              setEditSha256(file.data!.sha256 ?? null);
-              setSaveState('idle');
-              setSaveError(null);
+              // viewMode 改 'edit' 会触发上面的 useEffect 自动 init。
             }}
           >
             编辑
@@ -1150,21 +1179,49 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               </div>
             ) : file.error ? (
               <Empty description={file.error} />
+            ) : file.data && file.data.kind === 'text' && file.data.content !== undefined && isMd && viewMode === 'preview' ? (
+              // .md 预览:走 MarkdownText(对齐原 FilePreview 的 MD 分支);
+              // Monaco 此时 hidden 仍 mounted,切回源码/编辑保留滚动位置与未保存编辑。
+              <div data-testid="fs-md-preview" className="flex-1 min-h-0 overflow-auto rounded-md p-3">
+                <MarkdownText text={file.data.content} />
+              </div>
+            ) : file.data && file.data.kind === 'html' && isHtml && viewMode === 'preview' ? (
+              // .html 预览:FilePreview 现有 iframe 路径不变。
+              <FilePreviewMemo file={file.data} htmlMode="preview" pendingLine={pendingLine} />
             ) : file.data && file.data.kind === 'text' && file.data.content !== undefined ? (
-              // 2026-09-27:inline 编辑(对齐 AA file-preview-page.tsx),不再 view-swap
-              // 到独立编辑器 —— 始终挂载 LazyMonacoCodeView,通过 editable prop
-              // 翻转 readOnly。同实例切换瞬时、无滚动位置丢失。
+              // 其它 text(.md source/edit, 其它代码文件):统一走 Monaco,
+              // editable 由 viewMode 决定(.md 'source' → readOnly, 'edit' → 可写)。
               <LazyMonacoCodeView
                 content={file.data.content}
                 documentKey={file.data.path}
                 fileName={file.data.name ?? undefined}
-                language={file.data.name ? extToLanguage(file.data.name) ?? undefined : undefined}
+                language={
+                  isMd
+                    ? 'markdown'
+                    : file.data.name
+                      ? extToLanguage(file.data.name) ?? undefined
+                      : undefined
+                }
                 editable={editingPath === file.data.path}
                 onReady={handleEditorReady}
                 onChange={handleEditorChange}
               />
-            ) : file.data && (file.data.kind === 'image' || file.data.kind === 'html' || isDocumentPreviewKind(file.data.kind)) ? (
-              <FilePreviewMemo file={file.data} htmlMode={htmlMode} pendingLine={pendingLine} />
+            ) : file.data && file.data.kind === 'html' && (viewMode === 'source' || viewMode === 'edit') ? (
+              // .html 源码/编辑:与 .md 一样走 Monaco,language='html',
+              // viewMode 决定 editable;切到 'preview' 才回 iframe。
+              <LazyMonacoCodeView
+                content={file.data.content}
+                documentKey={file.data.path}
+                fileName={file.data.name ?? undefined}
+                language="html"
+                editable={viewMode === 'edit'}
+                onReady={handleEditorReady}
+                onChange={handleEditorChange}
+              />
+            ) : file.data && file.data.kind === 'html' ? (
+              <FilePreviewMemo file={file.data} htmlMode="preview" pendingLine={pendingLine} />
+            ) : file.data && (file.data.kind === 'image' || isDocumentPreviewKind(file.data.kind)) ? (
+              <FilePreviewMemo file={file.data} htmlMode="preview" pendingLine={pendingLine} />
             ) : (
               <Empty description="没有内容" />
             )}
