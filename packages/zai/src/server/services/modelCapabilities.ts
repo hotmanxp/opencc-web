@@ -54,6 +54,7 @@ const MIN_MAX_OUTPUT_TOKENS = 4_000
 const MODEL_MAX_OUTPUT_TOKENS: ReadonlyMap<string, number> = new Map([
   // MiniMax (default models in zai)
   ['MiniMax-M3', 512_000],
+  ['M3.1-Flash-Preview', 512_000],
   ['MiniMax-M2.7', 131_072],
   ['MiniMax-M2.7-highspeed', 131_072],
   ['MiniMax-M2.5', 131_072],
