@@ -177,48 +177,29 @@ export function MonacoCodeView({
 //
 // 2026-09-27:从 FsTab 提到此处,让 Config.tsx(JsonFileEditor)/ 其他需要代码编辑
 // 的页面复用同一套缓存。monaco chunk (~3MB gzip)只在该组件第一次挂载时才
-// 下载;模块级 `cachedMonacoCodeView` 保证后续 mount 直接拿到组件引用,不走
-// Suspense(happy-dom 无法 resolve Suspense)。
+// 下载。
 //
-// 与 React.lazy + Suspense 不同:lazy 的 chunk 永远是异步 resolve,happy-dom
-// 测不出来;此处的 loadPromise + cachedMonacoCodeView 把"加载"折叠成同步
-// 状态(挂载前 cached=undefined,第一次 import 后 cached 立即可读)。
+// 关键决策:直接用模块级 `MonacoCodeView` 函数引用,**不再**走
+// `import('./MonacoCodeView.js')` 自循环 import —— 后者在 Vite dev 模式下
+// 会因 chunk 拆分/HMR 返回与 module 顶层不同的模块实例(不同的 `m.MonacoCodeView`
+// 函数引用),第二次挂载时 React 把这个 stale 引用当组件调用,props 解构时抛
+// "Cannot destructure property 'className' of 'undefined'"(整个 React 树崩)。
+//
+// 真正的"懒"由 MonacoCodeView 内部 `import('monaco-editor')` 承担 —— 该动态
+// import 才是真正切分 monaco chunk(~3MB)的地方,本壳只是延迟到 React 第一次
+// 渲染时再触发它,UI 行为与原来的 FsTab LazyTextEditor 一致。
 // ─────────────────────────────────────────────────────────────────────────────
-let cachedMonacoCodeView: typeof MonacoCodeView | null = null;
 function loadMonacoCodeView(): Promise<typeof MonacoCodeView> {
-  if (cachedMonacoCodeView) return Promise.resolve(cachedMonacoCodeView);
-  // monaco 实际入口就是本模块的 MonacoCodeView 命名导出,import meta 用于 chunk
-  // 边界识别;首次访问会触发 vite 的 monaco-* chunk 下载。
-  return import('./MonacoCodeView.js').then((m) => {
-    cachedMonacoCodeView = m.MonacoCodeView;
-    return cachedMonacoCodeView;
-  });
+  return Promise.resolve(MonacoCodeView);
 }
 
 export type LazyMonacoCodeViewProps = MonacoCodeViewProps;
 
 export function LazyMonacoCodeView(props: LazyMonacoCodeViewProps): JSX.Element {
-  const [Editor, setEditor] = useState<typeof MonacoCodeView | null>(cachedMonacoCodeView);
-  useEffect(() => {
-    if (Editor) return;
-    let cancelled = false;
-    loadMonacoCodeView().then((m) => {
-      if (!cancelled) setEditor(() => m);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [Editor]);
-  if (!Editor) {
-    return (
-      <div
-        data-testid="monaco-code-view-loading"
-        className="flex-1 min-h-0 p-3 text-[color:var(--text-dim-45)] text-xs"
-      >
-        正在加载编辑器…
-      </div>
-    );
-  }
+  // useState 初始值是函数引用;首屏即直接渲染 MonacoCodeView,不再走"加载中"
+  // 状态(模块已被 FsTab / Config.tsx 的 import 链同步加载,函数引用可用)。
+  // MonacoCodeView 内部自己处理 monaco-editor 的 lazy import + 加载占位。
+  const [Editor] = useState<typeof MonacoCodeView>(() => MonacoCodeView);
   return <Editor {...props} />;
 }
 
