@@ -162,7 +162,11 @@ export function MonacoCodeView({
     <div
       ref={hostRef}
       data-testid={testId ?? 'monaco-code-view'}
-      className={`zai-monaco-code-view overscroll-contain ${className ?? ''}`}
+      // h-full w-full 是 Monaco host 必须的:Monaco 用 `automaticLayout:true`
+      // 通过 ResizeObserver 跟 host 的尺寸。host 没有显式高度时,block 元素
+      // 高度收缩为 0,编辑器看不见。className 仍可由调用方叠加(flex-1 /
+      // min-h-0 / overflow-hidden 等),但默认 h-full w-full 必须兜底。
+      className={`zai-monaco-code-view overscroll-contain h-full w-full ${className ?? ''}`}
       style={style}
     />
   );
