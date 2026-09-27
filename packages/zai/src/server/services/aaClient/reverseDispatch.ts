@@ -480,25 +480,52 @@ export class ReverseDispatch {
       runtimeType: p.runtimeType ?? p.runtimeOptions?.runtimeType ?? 'codex',
     });
 
+    // Capture the ACTUAL zai sessionId returned by the child — the child
+    // may rewrite the id (legacyTranscriptStore.create auto-prepends
+    // `sess-` when the input doesn't already start with it, so AA's raw
+    // id like `aa-sess-xxx` becomes `sess-aa-sess-xxx`). The sessionMap
+    // MUST store the rewritten id; otherwise subsequent send_message /
+    // steer / interrupt calls would target a non-existent session.
+    const childBody = (childResp as { zaiBody?: unknown }).zaiBody;
+    const actualZaiSessionId =
+      typeof childBody === 'object' && childBody !== null &&
+      typeof (childBody as { sessionId?: unknown }).sessionId === 'string'
+        ? (childBody as { sessionId: string }).sessionId
+        : p.sessionId;
+
     // Record the zai<->aa mapping in sessionMap so subsequent sends
     // (session.send_message, etc.) can find the child via aa sessionId.
     const map = getSessionMap();
     await map?.put(port, {
       aaSessionId: p.sessionId,
       runtimeId,
-      zaiSessionId: p.sessionId, // we aliased zai sid to AA sid
+      zaiSessionId: actualZaiSessionId,
       createdAt: new Date().toISOString(),
       metadata: { title: p.title ?? '', cwd: p.cwd ?? '' },
     });
 
-    console.log(`[aa.reverseDispatch] session.create: ${p.sessionId} on port=${port}`);
+    console.log(`[aa.reverseDispatch] session.create: ${p.sessionId} → zai=${actualZaiSessionId} on port=${port}`);
     return childResp;
+  }
+
+  /**
+   * Translate an AA sessionId (passed in via WS RPC) to the zai
+   * sessionId the child actually uses on its own endpoints. AA passes
+   * its own server-allocated id (raw, no `sess-` prefix), but the child
+   * stores sessions under a normalised id (with `sess-` prefix).
+   * Falls back to the AA id if no mapping exists — defensive in case
+   * the session was created outside the AA bridge.
+   */
+  private async resolveZaiSessionId(port: number, aaSessionId: string): Promise<string> {
+    const map = getSessionMap();
+    const mapped = await map?.getZaiSessionId(port, aaSessionId);
+    return mapped ?? aaSessionId;
   }
 
   private async handleSendMessage(p: z.infer<typeof SendMessageParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
-    return forwardToChild(childPort, 'sendMessage', p.sessionId, {
-      zaiSessionId: p.sessionId,
+    const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
+    return forwardToChild(childPort, 'sendMessage', zaiSid, {
       content: p.content,
       attachments: p.attachments,
       clientMessageId: p.clientMessageId,
@@ -507,8 +534,8 @@ export class ReverseDispatch {
 
   private async handleSteer(p: z.infer<typeof SteerParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
-    return forwardToChild(childPort, 'steer', p.sessionId, {
-      zaiSessionId: p.sessionId,
+    const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
+    return forwardToChild(childPort, 'steer', zaiSid, {
       content: p.content,
       clientMessageId: p.clientMessageId,
     });
@@ -516,13 +543,13 @@ export class ReverseDispatch {
 
   private async handleInterrupt(p: z.infer<typeof InterruptParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
-    return forwardToChild(childPort, 'interrupt', p.sessionId, {
-      zaiSessionId: p.sessionId,
-    });
+    const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
+    return forwardToChild(childPort, 'interrupt', zaiSid, {});
   }
 
   private async handleInteractionRespond(p: z.infer<typeof InteractionRespondParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
+    const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
     if (p.decision === 'input') {
       // Mobile's input_response: user filled in answers. Convert AA's
       // {input: unknown} → zai's {answers: Record<question, answer>}.
@@ -531,8 +558,7 @@ export class ReverseDispatch {
       for (const [k, v] of Object.entries(input)) {
         answers[k] = typeof v === 'string' ? v : JSON.stringify(v);
       }
-      return forwardToChild(childPort, 'inputResponse', p.sessionId, {
-        zaiSessionId: p.sessionId,
+      return forwardToChild(childPort, 'inputResponse', zaiSid, {
         toolUseId: p.toolUseId,
         answers,
       });
@@ -540,7 +566,7 @@ export class ReverseDispatch {
     // approve / deny → pushAction's `approve` action with zai-native
     // decision vocabulary.
     const zaiDecision: 'approved' | 'rejected' = p.decision === 'allow' ? 'approved' : 'rejected';
-    return forwardToChild(childPort, 'approve', p.sessionId, {
+    return forwardToChild(childPort, 'approve', zaiSid, {
       toolUseId: p.toolUseId,
       decision: zaiDecision,
       comment: p.decision === 'deny' ? 'denied via mobile AA app' : undefined,

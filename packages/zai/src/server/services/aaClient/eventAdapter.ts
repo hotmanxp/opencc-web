@@ -127,19 +127,23 @@ export class EventAdapter {
     const cwd = (event.cwd as string | undefined) ?? '';
     if (!sessionId) return;
 
-    // Persist zai->AA mapping locally (using zai sessionId as AA sessionId
-    // — see comment below). Best-effort; failure doesn't block the upsert.
-    const childPort = this.childPortFromRuntime(runtimeId);
-    if (childPort !== null) {
-      const map = getSessionMap();
-      void map?.put(childPort, {
-        aaSessionId: sessionId, // zai sessionId doubles as AA sessionId in this simplified model
-        runtimeId,
-        zaiSessionId: sessionId,
-        createdAt: new Date().toISOString(),
-        metadata: { title, cwd },
-      }).catch((err) => console.warn('[aa.eventAdapter] session-map put failed:', err));
-    }
+    // DO NOT write to sessionMap here. The sessionMap mapping
+    // (aaSessionId ↔ zaiSessionId) is established by reverseDispatch's
+    // session.create handler at RPC entry time, where both ids are known
+    // authoritatively. Writing here would clobber the AA id with zai's
+    // normalised id — they're NOT always equal (legacyTranscriptStore
+    // auto-prepends `sess-` when the input doesn't already start with it,
+    // so AA's raw id like `aa-sess-xxx` becomes `sess-aa-sess-xxx`). If
+    // we overwrite, subsequent send_message / steer / interrupt calls
+    // look up by aaSessionId and miss — producing 404s on every mobile
+    // action after the first.
+    //
+    // If sessionMap has no entry for this zai sessionId, it was created
+    // outside the AA bridge (e.g. local web UI) — leave it that way. AA
+    // can still discover the session via runtime.discover + the metadata
+    // we emit below; it just won't have a translation entry for
+    // reverse-dispatch routing, which is fine because no AA-initiated
+    // actions will target a session AA never saw.
 
     // Announce to AA so mobile shows the session.
     //
