@@ -2078,6 +2078,15 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     if (requestedCwd) {
       CwdStore.set(sessionId, requestedCwd)
     }
+    // zai patch (2026-09-27, AA integration): emit session.created so
+    // downstream consumers (e.g. AA event adapter) can react to new
+    // sessions. Harmless if no consumer subscribes.
+    eventBus.emit({
+      type: 'session.created',
+      sessionId,
+      title: '',
+      cwd: ctx.cwd,
+    });
     res.json({ sessionId })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -2137,6 +2146,12 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
     } catch (termErr) {
       console.warn('[agent] dispose terminal sessions failed:', termErr)
     }
+    // zai patch (2026-09-27, AA integration): notify consumers (AA session
+    // mapping cleanup) that this session is gone.
+    eventBus.emit({
+      type: 'session.deleted',
+      sessionId: req.params.id,
+    });
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

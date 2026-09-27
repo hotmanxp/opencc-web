@@ -60,6 +60,14 @@ export async function publishCapabilities(
 /**
  * Tell AA server a new runtime instance is now available. Called by the
  * runtime registry (T4) when an InstanceDefinition transitions to `running`.
+ *
+ * AA's `_merge_runtime_capability_update` (server/.../connector_notifications.py)
+ * validates the payload as `ProtocolCapabilitySet` which is `{revision,
+ * capabilities}` — no extra fields. pydantic rejects unknown fields by
+ * default, so `runtime`/`runtimeId` MUST NOT be included in the payload.
+ * Runtime-instance binding is implicit: AA associates the capability set
+ * with whichever runtimes in the connector are "running"; we send the same
+ * capability set for all of them.
  */
 export async function announceRuntimeInventory(
   conn: AaConnection,
@@ -68,8 +76,6 @@ export async function announceRuntimeInventory(
   capabilities: RuntimeCapability[],
 ): Promise<void> {
   conn.sendNotification('runtime.capability.updated', {
-    runtime,
-    runtimeId,
     revision: 0,
     capabilities,
   });

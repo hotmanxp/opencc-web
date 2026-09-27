@@ -271,14 +271,29 @@ export class AaConnection {
    */
   sendNotification(method: string, params?: unknown): void {
     if (!this.ws || this.status.state !== 'connected') {
-      return; // dropped; offline buffer (T8) is the proper handler for this
+      // Queue for replay when connection comes back. The offline buffer is
+      // a per-port JSONL; passing 0 here means "let the buffer pick a
+      // representative port based on the most recent runtime registration".
+      // For runtime/timeline notifications specifically, that's fine —
+      // AA server accepts slight reordering across a reconnect window.
+      void this.queueOffline(method, params);
+      return;
     }
     try {
       this.sendFrame(buildNotification(method, params));
+    } catch (err) {
+      void this.queueOffline(method, params);
+    }
+  }
+
+  private async queueOffline(method: string, params: unknown): Promise<void> {
+    try {
+      const { getOfflineBuffer } = await import('./offlineBuffer.js');
+      const buffer = getOfflineBuffer();
+      await buffer?.enqueue(method, params);
     } catch {
-      // Send failures on a notification don't throw — they're side-channel
-      // best-effort. The next reconnect / heartbeat will reveal a broken
-      // pipe; no need to bubble up here.
+      // Swallow — losing a single notification during reconnect is acceptable;
+      // the next reconnect + capability refresh will restore consistency.
     }
   }
 

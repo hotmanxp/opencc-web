@@ -99,6 +99,13 @@ export interface InstanceSupervisor {
 }
 
 interface InitOptions { cwd: string; dataDir?: string; cliEntry?: string; deps?: Partial<InstanceSupervisorDeps> }
+
+// Module-level capture of the root process's listening port. Set when
+// initInstanceSupervisor runs; read in doStart when constructing AA env
+// vars for spawned children. Read via `getRootPort()`.
+let rootPort: string | null = null;
+function initRootPort(port: string): void { rootPort = port; }
+function getRootPort(): string | null { return rootPort; }
 let singleton: InstanceSupervisor | null = null
 // In-flight initialization promise. If `initInstanceSupervisor` is called
 // while a previous call is still hydrating, the new call awaits the same
@@ -142,6 +149,10 @@ function isChildRestartMessage(msg: ChildIpcMessage): msg is ChildRestartMessage
 export async function initInstanceSupervisor(opts: InitOptions): Promise<InstanceSupervisor> {
   if (singleton) return singleton
   if (initPromise) return initPromise
+  // Capture the root's port so spawned children know where to forward events.
+  // We capture here so it's set even if no instance is ever started (rare,
+  // but keeps the invariant "supervisor always knows the root port" simple).
+  initRootPort(opts.deps?.spawn ? (process.env.ZAI_PORT ?? '9201') : (process.env.ZAI_PORT ?? '9201'));
   initPromise = (async () => {
     const deps: InstanceSupervisorDeps = {
       spawn: opts.deps?.spawn ?? nodeSpawn,
@@ -300,7 +311,16 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         // 才会向 root POST 事件(T4.5 childEventGateway)。
         // root 不启用 → child 也不启用,事件全本地化,跟现状一致。
         // 详见 docs/2026-09-27-zai-aa-integration.md §架构总览。
-        if (process.env.ZAI_AA_ENABLED === '1') args.push('--aa')
+        // ZAI_AA_PARENT_URL must point to the ROOT process (the user's
+        // `zai start`), NOT the child itself — otherwise child events loop
+        // back to the child's own Express and fail (no RuntimeRegistry
+        // there). The supervisor captured this via initInstanceSupervisor().
+        const rootPort = getRootPort();
+        const aaParentUrl =
+          process.env.ZAI_AA_ENABLED === '1' && rootPort
+            ? `http://127.0.0.1:${rootPort}`
+            : undefined;
+        if (aaParentUrl) args.push('--aa');
         // 进程标题:让 ps / top / macOS Activity Monitor 在 spawn 后立即
         // 显示 `zai[name]:port` 而不是 `node .../bin/zai.js`。`argv0` 改
         // `argv[0]`(Linux ps/macOS ps 列都从 argv[0] 起始读);`ZAI_PROCESS_TITLE`
@@ -322,6 +342,9 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
               ZAI_SUPERVISOR_PID: String(process.pid),
               ZAI_INSTANCE_HEARTBEAT_MS: '5000',
               ZAI_PROCESS_TITLE: title,
+              ...(aaParentUrl
+                ? { ZAI_AA_PARENT_URL: aaParentUrl, ZAI_AA_PARENT_PORT: rootPort ?? undefined }
+                : {}),
             },
           },
         )

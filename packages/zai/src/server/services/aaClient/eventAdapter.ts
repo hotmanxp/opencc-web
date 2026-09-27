@@ -47,6 +47,7 @@ import {
   upsertSessionMeta,
   upsertSessionState,
   upsertNotice,
+  createSession,
 } from './rpc.js';
 import { getRuntimeRegistry } from './runtimeRegistry.js';
 import { getSessionMap } from './sessionMap.js';
@@ -62,10 +63,9 @@ export class EventAdapter {
 
   start(): void {
     if (this.installed) return;
-    if (!isAaEnabled()) return; // belt-and-suspenders; init.ts already gates
+    if (!isAaEnabled()) return;
     eventBus.subscribe((event) => {
       void this.handleEvent(event).catch((err) => {
-        // Don't let a bad event crash the bus. Log and move on.
         console.warn('[aa.eventAdapter] handler error:', err);
       });
     });
@@ -127,22 +127,53 @@ export class EventAdapter {
     const cwd = (event.cwd as string | undefined) ?? '';
     if (!sessionId) return;
 
-    // We don't synchronously create the AA session here (that requires a
-    // RPC round-trip). Instead we fire-and-forget the meta upsert with
-    // a placeholder zai session id; the AA server allocates the AA session
-    // id on its own when the first timeline item lands. T5 wires up the
-    // explicit session.create call as part of session lifecycle.
+    // Persist zai->AA mapping locally (using zai sessionId as AA sessionId
+    // — see comment below). Best-effort; failure doesn't block the upsert.
+    const childPort = this.childPortFromRuntime(runtimeId);
+    if (childPort !== null) {
+      const map = getSessionMap();
+      void map?.put(childPort, {
+        aaSessionId: sessionId, // zai sessionId doubles as AA sessionId in this simplified model
+        runtimeId,
+        zaiSessionId: sessionId,
+        createdAt: new Date().toISOString(),
+        metadata: { title, cwd },
+      }).catch((err) => console.warn('[aa.eventAdapter] session-map put failed:', err));
+    }
+
+    // Announce to AA so mobile shows the session.
     //
-    // For T6 we just announce existence to AA so the mobile app can show
-    // the session in the list immediately.
+    // NOTE: AA's `session.create` RPC is actually a "create session AND start
+    // first turn" compound — it requires `content` (the first prompt) and
+    // uses a client-provided `sessionId`. There is no "allocate id" RPC.
+    // For a true round-trip we'd send the first prompt here, but at session
+    // creation time the user typically hasn't typed anything yet. So we
+    // use `session.meta.upsert` directly with zai's sessionId as the id —
+    // AA accepts arbitrary ids on upsert. Future: when first prompt arrives,
+    // we can also send `session.create` with the content to formally register
+    // the session-turn pair with AA.
     upsertSessionMeta(this.conn, {
       runtimeId,
-      sessionId: sessionId, // zai sessionId; AA's session.create will allocate AA sessionId
+      sessionId,
       runtime: 'codex',
       title,
       cwd,
       metadata: { zaiSessionId: sessionId },
     });
+  }
+
+  /**
+   * Reverse-lookup: runtimeId -> childPort via the runtime registry.
+   * Returns null if the runtime isn't currently registered (the session
+   * was created before --aa was set, or the child is in transition).
+   */
+  private childPortFromRuntime(runtimeId: string): number | null {
+    const reg = getRuntimeRegistry();
+    if (!reg) return null;
+    for (const m of reg.listAll()) {
+      if (m.runtimeId === runtimeId) return m.port;
+    }
+    return null;
   }
 
   private handleSessionRenamed(runtimeId: string, event: Record<string, unknown>): void {

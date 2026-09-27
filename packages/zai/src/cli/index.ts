@@ -82,6 +82,13 @@ program
     // 见上方 dev command 的说明。start 也按同口径透传（未知 profile 无害）。
     if (options.app) process.env.ZAI_APP = options.app;
     if (options.aa) process.env.ZAI_AA_ENABLED = '1';
+    // Marker for init.ts to distinguish the `__current__` "root" instance
+    // from real children spawned by InstanceSupervisor. Both receive
+    // --managed-child (cli-only flag), but only the user-launched `zai start`
+    // path goes through this action with `--managed-child` UNSET (it would
+    // be set by the supervisor's inner spawn). Without this marker, init.ts
+    // can't tell which mode it's in.
+    if (!options.managedChild) process.env.ZAI_IS_ROOT_INSTANCE = '1';
     return runStart(options);
   });
 

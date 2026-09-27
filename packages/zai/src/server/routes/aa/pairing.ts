@@ -206,7 +206,16 @@ router.post('/pairing/cancel', async (_req, res) => {
  *   - display the server URL / connector name in settings
  */
 router.get('/config', async (_req, res) => {
-  const config = await readAaConfig();
+  let config;
+  try {
+    config = await readAaConfig();
+  } catch (err) {
+    res.json({
+      status: 'config_error',
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
   if (!config) {
     res.json({ status: 'unpaired' });
     return;

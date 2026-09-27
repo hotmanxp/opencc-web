@@ -125,9 +125,12 @@ describe('aaClient/pairing — pollPairing', () => {
         status: 200,
         body: {
           status: 'claimed',
-          connectorId: 'conn_NEW',
-          connectorToken: 'cxt_NEW_TOKEN',
-          connectorName: 'zai Mac',
+          config: {
+            serverUrl: 'https://x.example.com',
+            connectorId: 'conn_NEW',
+            connectorToken: 'cxt_NEW_TOKEN',
+          },
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
         },
       }),
     });
@@ -141,8 +144,8 @@ describe('aaClient/pairing — pollPairing', () => {
     });
     expect(result.status).toBe('claimed');
     if (result.status === 'claimed') {
-      expect(result.connectorId).toBe('conn_NEW');
-      expect(result.connectorToken).toBe('cxt_NEW_TOKEN');
+      expect(result.config.connectorId).toBe('conn_NEW');
+      expect(result.config.connectorToken).toBe('cxt_NEW_TOKEN');
     }
   });
 
@@ -195,14 +198,20 @@ describe('aaClient/pairing — finalizePairing', () => {
       },
       {
         status: 'claimed',
-        connectorId: 'conn_NEW',
-        connectorToken: 'cxt_NEW_TOKEN',
-        connectorName: 'zai Mac',
+        config: {
+          serverUrl: 'https://web.agents-anywhere.com',
+          connectorId: 'conn_NEW',
+          connectorToken: 'cxt_NEW_TOKEN',
+        },
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
       },
     );
     expect(config.connectorId).toBe('conn_NEW');
     expect(config.connectorToken).toBe('cxt_NEW_TOKEN');
-    expect(config.connectorName).toBe('zai Mac');
+    // connectorName is derived from serverUrl in finalizePairing, not from
+    // the upstream claimed response (the AA claimed payload doesn't include
+    // a human-readable name).
+    expect(config.connectorName).toBe('zai on https://web.agents-anywhere.com');
 
     expect(await readPairingState()).toBeNull();
     const persisted = await readAaConfig();
@@ -224,9 +233,11 @@ describe('aaClient/pairing — waitForPairingClaim', () => {
           : new Response(
               JSON.stringify({
                 status: 'claimed',
-                connectorId: 'conn_X',
-                connectorToken: 'cxt_X',
-                connectorName: 'zai',
+                config: {
+                  serverUrl: 'https://x.example.com',
+                  connectorId: 'conn_X',
+                  connectorToken: 'cxt_X',
+                },
               }),
               { status: 200 },
             );

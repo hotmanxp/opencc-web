@@ -234,16 +234,30 @@ export async function startPairing(input: {
 
 // ─── Step 2: poll pairing ────────────────────────────────────────────────
 
+/**
+ * Mirrors AA's PairingPollResponse (server/agent_server/core/models.py:675):
+ *   { status, config: ConnectorConfigBundle | null, expiresAt: string | null }
+ *
+ * The `config` object is the only place connectorId/connectorToken appear;
+ * it's present iff status === 'claimed'. We mirror that with a discriminated
+ * union — keeping the `config` field strictly required on 'claimed' so
+ * downstream code can access it without null checks.
+ *
+ * AA marks the pairing as 'consumed' after the first poll that returns
+ * 'claimed', so a subsequent poll returns 'consumed' — handled below.
+ */
+const PairingConfigSchema = z.object({
+  serverUrl: z.string(),
+  connectorId: z.string(),
+  connectorToken: z.string(),
+});
+
 const PairingPollResponseSchema = z.union([
-  z.object({ status: z.literal('pending') }),
-  z.object({ status: z.literal('expired') }),
-  z.object({ status: z.literal('cancelled') }),
-  z.object({
-    status: z.literal('claimed'),
-    connectorId: z.string(),
-    connectorToken: z.string(),
-    connectorName: z.string().optional(),
-  }),
+  z.object({ status: z.literal('pending'), config: z.unknown().optional(), expiresAt: z.string().optional() }),
+  z.object({ status: z.literal('claimed'), config: PairingConfigSchema, expiresAt: z.string().optional() }),
+  z.object({ status: z.literal('expired'), config: z.unknown().optional(), expiresAt: z.string().optional() }),
+  z.object({ status: z.literal('cancelled'), config: z.unknown().optional(), expiresAt: z.string().optional() }),
+  z.object({ status: z.literal('consumed'), config: z.unknown().optional(), expiresAt: z.string().optional() }),
 ]);
 
 export type PairingPollResult = z.infer<typeof PairingPollResponseSchema>;
@@ -315,9 +329,9 @@ export async function finalizePairing(
 ): Promise<AaConfig> {
   const config = buildAaConfigFromPairing({
     serverUrl: state.serverUrl,
-    connectorId: result.connectorId,
-    connectorToken: result.connectorToken,
-    connectorName: result.connectorName ?? `zai on ${state.serverUrl}`,
+    connectorId: result.config.connectorId,
+    connectorToken: result.config.connectorToken,
+    connectorName: `zai on ${state.serverUrl}`,
   });
   await writeAaConfigQueued(config);
   await clearPairingState();

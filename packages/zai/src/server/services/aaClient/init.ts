@@ -41,25 +41,69 @@ import {
   resetOfflineBufferForTests,
 } from './offlineBuffer.js';
 import { ReverseDispatch } from './reverseDispatch.js';
+import {
+  initChildEventReporter,
+  resetChildEventReporterForTests,
+} from './childEventReporter.js';
 
 /**
  * Initialize the AA client. Returns a shutdown function or null when AA
  * isn't enabled / not paired.
  *
- * Boot order matters:
+ * Two distinct paths based on process role:
+ *
+ *   ROOT process (no ZAI_SUPERVISOR_PID):
+ *     - Opens the AA WS connection
+ *     - Owns runtime registry + event adapter + reverse dispatch
+ *     - Subscribes to its own eventBus (children forward via /api/internal/child-event)
+ *
+ *   CHILD process (ZAI_SUPERVISOR_PID set):
+ *     - Does NOT open its own AA WS (root owns it)
+ *     - Subscribes to its own eventBus and POSTs to root's /api/internal/child-event
+ *     - Receives push-action from root via /api/internal/push-action (the route
+ *       lives on the child's own Express)
+ *
+ * Why this split: AA server allows ONE active WS connection per connector.
+ * If every child tried to connect independently, only one would win and
+ * others would fail with auth errors. Centralizing at root is mandatory.
+ *
+ * Boot order for ROOT:
  *   1. Connection (T2)        — establishes WS to AA server
  *   2. Session map (T5)       — must be live before event adapter runs
  *   3. Runtime registry (T4)  — registers children as AA runtime_instances
  *   4. Event adapter (T6)     — subscribes to root's eventBus, pushes AA
  *   5. Offline buffer (T8)    — drains outbox-{port}.jsonl on reconnect
  *
- * T7 reverse dispatch (root → child) registers inbound RPC handlers on
- * the connection in a follow-up; this init function is the natural place
- * to extend.
+ * For CHILD:
+ *   1. ChildEventReporter      — POSTs own events to root
  */
 export async function initAaClient(): Promise<(() => Promise<void>) | null> {
   if (!isAaEnabled()) return null;
 
+  // Three distinct process roles:
+  //   - SUPERVISOR: ZAI_INSTANCE_ID unset, no Express → initAaClient NOT called
+  //                 (server/index.ts gates init behind `!process.env.ZAI_INSTANCE_ID`)
+  //   - ROOT (a.k.a. `__current__` instance): ZAI_INSTANCE_ID === '__current__'
+  //                 → opens AaConnection, owns RuntimeRegistry + EventAdapter
+  //   - CHILD (a.k.a. managed InstanceDefinition): ZAI_INSTANCE_ID starts with 'inst_'
+  //                 → only forwards events to parent via ChildEventReporter
+  //
+  // Note: the supervisor auto-spawns the `__current__` instance as its FIRST
+  // child (same spawn args as real children), but conceptually it's the
+  // root. We distinguish by ZAI_INSTANCE_ID prefix — that's set by the
+  // supervisor and is the only stable signal of "who am I".
+  const instanceId = process.env.ZAI_INSTANCE_ID ?? '';
+  const isChild = instanceId.startsWith('inst_') && !!process.env.ZAI_AA_PARENT_URL;
+
+  if (isChild) {
+    // CHILD PATH: forward own events to root. No AA WS, no runtime registry.
+    initChildEventReporter();
+    return async () => {
+      resetChildEventReporterForTests();
+    };
+  }
+
+  // ROOT PATH
   const config = await readAaConfig();
   if (!config) {
     console.warn(

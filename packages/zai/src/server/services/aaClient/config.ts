@@ -20,8 +20,9 @@ import { aaConfigPath, ensureAaDir } from '../paths.js';
 export const AaConfigSchema = z.object({
   /** AA server origin, e.g. "https://web.agents-anywhere.com". No trailing slash. */
   serverUrl: z.string().url(),
-  /** AA-issued connector id, e.g. "conn_xxxxxxxxxxxx". */
-  connectorId: z.string().regex(/^conn_[A-Za-z0-9]+$/),
+  /** AA-issued connector id, e.g. "conn_xxxxxxxxxxxx" or "conn_xxxxxxxx-xxxx".
+   *  AA uses uuid-style suffixes — allow alphanumeric + dash + underscore. */
+  connectorId: z.string().regex(/^conn_[A-Za-z0-9_-]+$/),
   /**
    * AA-issued connector token, e.g. "cxt_xxxxxxxxxxxx". Treated as a secret.
    * Stored with mode 0600.

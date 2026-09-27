@@ -21,7 +21,18 @@ router.get('/status', async (_req, res) => {
     res.json({ status: 'disabled' });
     return;
   }
-  const config = await readAaConfig();
+  let config: Awaited<ReturnType<typeof readAaConfig>> = null;
+  try {
+    config = await readAaConfig();
+  } catch (err) {
+    // Corrupt or schema-mismatched config: surface as paired-but-broken so
+    // the UI can prompt the user to re-pair instead of crashing the route.
+    res.json({
+      status: 'config_error',
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
   if (!config) {
     res.json({ status: 'unpaired' });
     return;
