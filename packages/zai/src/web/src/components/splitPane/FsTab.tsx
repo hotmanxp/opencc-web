@@ -19,86 +19,9 @@ import { MarkdownText } from '../markdown/MarkdownText.js';
 import { FsContextMenu } from './FsContextMenu.js';
 import { useFsWrite } from './useFsWrite.js';
 import { useCodeThemeMode } from '../../hooks/useCodeThemeMode.js';
-
-// MonacoCodeView: dynamic-imported monaco-editor; we keep a module-scoped
-// cache rather than React.lazy + Suspense so FsTab tests don't need
-// to wait on a chunk that happy-dom never resolves. After the first
-// import resolves, subsequent mounts reuse the cached reference.
-//
-// 2026-09-27:替换 CodeMirror 路径(原 TextEditor.tsx 已被 MonacoCodeView 取代),
-// 与 AA `monaco-code-view.tsx` 的设计模式对齐:editable 同实例 toggle、
-// 通过 onReady 注入的 api 暴露 getValue/openSearch/destroy(不再走 DOM
-// CustomEvent 'fs-editor-get-doc')。
-type MonacoCodeViewComponent = React.ComponentType<{
-  content: string;
-  documentKey?: string;
-  fileName?: string;
-  language?: string;
-  editable?: boolean;
-  options?: import('monaco-editor').editor.IStandaloneEditorConstructionOptions;
-  onReady?: (api: { getValue: () => string; focus: () => void; openSearch: () => void; revealPosition: (pos: { lineNumber: number; column: number }) => void; destroy: () => void }) => void;
-  onChange?: (value: string) => void;
-  className?: string;
-}>;
-let cachedMonacoCodeView: MonacoCodeViewComponent | null = null;
-function loadMonacoCodeView(): Promise<MonacoCodeViewComponent> {
-  if (cachedMonacoCodeView) return Promise.resolve(cachedMonacoCodeView);
-  return import('./MonacoCodeView.js').then((m) => {
-    cachedMonacoCodeView = m.MonacoCodeView;
-    return cachedMonacoCodeView;
-  });
-}
+import { LazyMonacoCodeView, type MonacoCodeViewApi } from './MonacoCodeView.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
-
-// Wrapper that resolves MonacoCodeView via module-scoped cache before
-// mounting. Avoids the Suspense-and-React.lazy pattern (which happy-dom
-// can't resolve). 与原 LazyTextEditor 同样的 lazy 策略:仅在用户点开
-// 编辑时才下载 ~3MB 的 monaco chunk,首屏不受影响。
-function LazyMonacoCodeView(props: {
-  content: string;
-  documentKey?: string;
-  fileName?: string;
-  language?: string;
-  editable: boolean;
-  onReady?: (api: { getValue: () => string; focus: () => void; openSearch: () => void; revealPosition: (pos: { lineNumber: number; column: number }) => void; destroy: () => void }) => void;
-  onChange?: (value: string) => void;
-}) {
-  const [Editor, setEditor] = useState<MonacoCodeViewComponent | null>(cachedMonacoCodeView);
-  useEffect(() => {
-    if (Editor) return;
-    let cancelled = false;
-    loadMonacoCodeView().then((m) => {
-      if (!cancelled) setEditor(() => m);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [Editor]);
-  if (!Editor) {
-    return (
-      <div
-        data-testid="fs-editor-loading"
-        className="flex-1 min-h-0 p-3 text-[color:var(--text-dim-45)] text-xs"
-      >
-        正在加载编辑器…
-      </div>
-    );
-  }
-  const MonacoCodeView = Editor;
-  return (
-    <MonacoCodeView
-      content={props.content}
-      documentKey={props.documentKey}
-      fileName={props.fileName}
-      language={props.language}
-      editable={props.editable}
-      onReady={props.onReady}
-      onChange={props.onChange}
-      className="flex-1 min-h-0 overflow-hidden"
-    />
-  );
-}
 
 // We track loaded children in a map keyed by parent path.
 type Entry = { name: string; path: string; type: 'dir' | 'file'; size: number | null };
@@ -666,7 +589,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [savedFlashAt, setSavedFlashAt] = useState<number | null>(null);
   const [editSha256, setEditSha256] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const editorRef = useRef<{ getValue: () => string; focus: () => void; openSearch: () => void; revealPosition: (pos: { lineNumber: number; column: number }) => void; destroy: () => void } | null>(null);
+  const editorRef = useRef<MonacoCodeViewApi | null>(null);
   const initialContentRef = useRef<string>('');
   const lastSavedContentRef = useRef<string>('');
 

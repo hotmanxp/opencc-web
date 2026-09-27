@@ -1,11 +1,12 @@
 import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, Popconfirm, Select, Space, Modal, Tooltip, Tag, List } from 'antd';
 import IconButton from "../components/IconButton.js";
 import { PlusIcon, Trash2Icon, PencilIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ConfigTool, ProviderProfile, SystemInfo, ModelCapabilities, AgentsMdFile } from '@shared/types';
 import { BUILTIN_PROVIDERS } from '@shared/builtinProviders';
 import { api } from '../lib/api';
+import { LazyMonacoCodeView, type MonacoCodeViewApi } from '../components/splitPane/MonacoCodeView.js';
 
 const { Text } = Typography;
 
@@ -523,6 +524,10 @@ function JsonFileEditor({
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  // 2026-09-27:与 FsTab 同样的 editorRef 模式,MonacoCodeView onReady 注入 api;
+  // handleSave 优先从 editorRef 取最新内容(JSON 编辑器可能实时改但 state 还没
+  // commit),fallback 到 draft state。
+  const editorRef = useRef<MonacoCodeViewApi | null>(null);
 
   const fetchContent = async () => {
     setLoading(true);
@@ -552,12 +557,15 @@ function JsonFileEditor({
   };
 
   const handleSave = async () => {
+    // 2026-09-27:从 MonacoCodeView api 取最新值(实时改但 state 还没 commit
+    // 的场景),fallback 到 draft state;对齐 FsTab 的 editorRef 模式。
+    const currentDraft = editorRef.current?.getValue() ?? draft;
     // Validate JSON before sending — the server is the source of truth but a
     // client-side check gives instant feedback and avoids round-trip on
     // obviously bad input.
     let parsed: unknown;
     try {
-      parsed = JSON.parse(draft);
+      parsed = JSON.parse(currentDraft);
     } catch (err) {
       message.error(`JSON 解析失败: ${(err as Error).message}`);
       return;
@@ -620,16 +628,23 @@ function JsonFileEditor({
         width={760}
         destroyOnClose
       >
-        <Input.TextArea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          autoSize={{ minRows: 16, maxRows: 30 }}
-          spellCheck={false}
-          className="text-xs"
-          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
-        />
+        {/* 2026-09-27:从 <Input.TextArea> 切到 LazyMonacoCodeView(JSON 语言)。
+            收益:括号配对/语法高亮/自动缩进/折叠,远超裸 textarea 的可读性。
+            documentKey=endpoint 让 Modal 重建时换 doc key → Monaco 切换 model
+            (避免旧内容残留)。Modal 760 宽对应 16-30 行,height: 460 固定。 */}
+        <div style={{ height: 460 }}>
+          <LazyMonacoCodeView
+            content={draft}
+            documentKey={`${endpoint}|${modalOpen}`}
+            fileName={title}
+            language="json"
+            editable={true}
+            onReady={(api) => { editorRef.current = api }}
+            onChange={(value) => setDraft(value)}
+          />
+        </div>
         <Text type="secondary" className="text-xs block mt-2">
-          必须是合法 JSON 对象。保存时自动校验。
+          必须是合法 JSON 对象。保存时自动校验。Cmd/Ctrl+F 查找。
         </Text>
       </Modal>
     </Card>

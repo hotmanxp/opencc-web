@@ -18,7 +18,7 @@
  *  - editable 翻转不卸载 DOM,切换瞬时且不丢失滚动位置
  *  - 暴露 openSearch 用于全局 Cmd/Ctrl+F(对齐 AA file-preview-page line 492-497)
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type MonacoCodeViewApi = {
   getValue: () => string
@@ -166,6 +166,56 @@ export function MonacoCodeView({
       style={style}
     />
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LazyMonacoCodeView — 共享的懒加载壳。
+//
+// 2026-09-27:从 FsTab 提到此处,让 Config.tsx(JsonFileEditor)/ 其他需要代码编辑
+// 的页面复用同一套缓存。monaco chunk (~3MB gzip)只在该组件第一次挂载时才
+// 下载;模块级 `cachedMonacoCodeView` 保证后续 mount 直接拿到组件引用,不走
+// Suspense(happy-dom 无法 resolve Suspense)。
+//
+// 与 React.lazy + Suspense 不同:lazy 的 chunk 永远是异步 resolve,happy-dom
+// 测不出来;此处的 loadPromise + cachedMonacoCodeView 把"加载"折叠成同步
+// 状态(挂载前 cached=undefined,第一次 import 后 cached 立即可读)。
+// ─────────────────────────────────────────────────────────────────────────────
+let cachedMonacoCodeView: typeof MonacoCodeView | null = null;
+function loadMonacoCodeView(): Promise<typeof MonacoCodeView> {
+  if (cachedMonacoCodeView) return Promise.resolve(cachedMonacoCodeView);
+  // monaco 实际入口就是本模块的 MonacoCodeView 命名导出,import meta 用于 chunk
+  // 边界识别;首次访问会触发 vite 的 monaco-* chunk 下载。
+  return import('./MonacoCodeView.js').then((m) => {
+    cachedMonacoCodeView = m.MonacoCodeView;
+    return cachedMonacoCodeView;
+  });
+}
+
+export type LazyMonacoCodeViewProps = MonacoCodeViewProps;
+
+export function LazyMonacoCodeView(props: LazyMonacoCodeViewProps): JSX.Element {
+  const [Editor, setEditor] = useState<typeof MonacoCodeView | null>(cachedMonacoCodeView);
+  useEffect(() => {
+    if (Editor) return;
+    let cancelled = false;
+    loadMonacoCodeView().then((m) => {
+      if (!cancelled) setEditor(() => m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [Editor]);
+  if (!Editor) {
+    return (
+      <div
+        data-testid="monaco-code-view-loading"
+        className="flex-1 min-h-0 p-3 text-[color:var(--text-dim-45)] text-xs"
+      >
+        正在加载编辑器…
+      </div>
+    );
+  }
+  return <Editor {...props} />;
 }
 
 function safeDispose(dispose: () => void): void {
