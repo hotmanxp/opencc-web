@@ -741,6 +741,23 @@ export class ReverseDispatch {
     return normalized;
   }
 
+  /**
+   * Express an absolute path the way AA's clients expect it back: RELATIVE
+   * to the workspace root (`.` for the root itself).
+   *
+   * `displayRemotePath` (android/feature/files/RemoteFileNavigation.kt)
+   * renders any path that doesn't start with `/` as `"$root/$path"`, so
+   * echoing a tilde path back verbatim — which is what the picker sends,
+   * `path: "~/code"` under `root: "~"` — renders as `~/~/code`. Absolute
+   * paths pass through untouched, so callers that want a real filesystem
+   * path keep working; this only shapes what goes on the wire.
+   */
+  private fsRootRelative(absRoot: string, abs: string): string {
+    if (abs === absRoot) return '.';
+    if (abs.startsWith(absRoot + sep)) return abs.slice(absRoot.length + 1);
+    return abs;
+  }
+
   private async handleFsReadDir(params: unknown): Promise<unknown> {
     // AA params: { sessionId, root, path } (after AA server's preprocessing).
     const p = (params ?? {}) as { root?: string; path?: string };
@@ -777,7 +794,7 @@ export class ReverseDispatch {
       }
       out.push({
         name: ent.name,
-        path: dir === absRoot ? ent.name : `${p.path ?? ''}/${ent.name}`.replace(/^\//, ''),
+        path: this.fsRootRelative(absRoot, join(dir, ent.name)),
         type,
         size,
       });
@@ -787,7 +804,7 @@ export class ReverseDispatch {
       return a.name.localeCompare(b.name);
     });
     return {
-      path: p.path ?? '',
+      path: this.fsRootRelative(absRoot, dir),
       entries: out,
       truncated: false,
       targetPath: target,
@@ -807,7 +824,7 @@ export class ReverseDispatch {
     const content = binary ? '' : clipped.toString('utf-8');
     const hash = createHash('sha256').update(full).digest('hex');
     return {
-      path: p.path ?? '',
+      path: this.fsRootRelative(this.expandTilde(p.root), abs),
       name: basename(abs),
       size: full.byteLength,
       sha256: hash,
@@ -824,7 +841,7 @@ export class ReverseDispatch {
     const abs = this.fsResolve(p.root, p.path ?? '');
     const buf = await readFile(abs);
     return {
-      path: p.path ?? '',
+      path: this.fsRootRelative(this.expandTilde(p.root), abs),
       name: basename(abs),
       size: buf.byteLength,
       contentBytes: buf.toString('base64'),
@@ -836,7 +853,7 @@ export class ReverseDispatch {
     if (!p.root) throw new AaServerError('fs.writeFile: root is required', 422, null);
     const abs = this.fsResolve(p.root, p.path ?? '');
     await fsWriteFile(abs, p.content ?? '', 'utf-8');
-    return { path: p.path ?? '', size: (p.content ?? '').length };
+    return { path: this.fsRootRelative(this.expandTilde(p.root), abs), size: (p.content ?? '').length };
   }
 
   // ─── Handlers ────────────────────────────────────────────────────────

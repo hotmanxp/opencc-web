@@ -159,6 +159,50 @@ describe('interaction.respond', () => {
   });
 });
 
+describe('fs path shape', () => {
+  it('returns root-relative paths, not the tilde path the client sent', async () => {
+    // The picker sends {root: "~", path: "~/code"} and renders any path that
+    // doesn't start with "/" as "$root/$path"
+    // (android/feature/files/RemoteFileNavigation.kt::displayRemotePath).
+    // Echoing the request verbatim renders the label as `~/~/code`.
+    const { ReverseDispatch } = await import(
+      '../../src/server/services/aaClient/reverseDispatch.js'
+    );
+    const handlers = new Map<string, (p: unknown) => Promise<unknown>>();
+    const conn = {
+      onRequest: (method: string, handler: (p: unknown) => Promise<unknown>) => {
+        handlers.set(method, handler);
+      },
+    };
+    const { conn: registryConn } = fakeConn();
+    const { RuntimeRegistry: Registry } = await import(
+      '../../src/server/services/aaClient/runtimeRegistry.js'
+    );
+    const dispatch = new ReverseDispatch({
+      conn: conn as never,
+      registry: new Registry(registryConn as never),
+    });
+    dispatch.install();
+
+    const readDir = handlers.get('fs.readDir')!;
+    const dir = (await readDir({ root: '~', path: '~' })) as {
+      path: string;
+      entries: { path: string }[];
+    };
+    expect(dir.path).toBe('.');
+    // Entry paths are root-relative too, never `~/code/<name>`.
+    for (const e of dir.entries) {
+      expect(e.path.startsWith('~')).toBe(false);
+    }
+
+    const home = await import('node:os');
+    const codeDir = home.homedir() + '/code';
+    const sub = (await readDir({ root: '~', path: '~/code' })) as { path: string };
+    expect(sub.path).toBe('code');
+    expect(sub.path).not.toContain('~');
+  });
+});
+
 describe('runtime.done', () => {
   it('finalises open streams from every turnIndex, not just the last one', async () => {
     // zai's turnIndex counts model messages within a user turn, and the
