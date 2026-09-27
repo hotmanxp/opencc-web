@@ -351,6 +351,7 @@ const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
   'MiniMax-Vision-01-Fast':   16_384,
   'MiniMax-M2':               204_800,
   'MiniMax-M3':             1_000_000,
+  'M3.1-Flash-Preview':    1_000_000,
   'zhiniao-MiniMax-M2.7':   1_000_000,
 
   // Google (via OpenRouter)
@@ -542,6 +543,7 @@ const OPENAI_MAX_OUTPUT_TOKENS: Record<string, number> = {
   // New MiniMax models
   'MiniMax-M2':              131_072,
   'MiniMax-M3':             512_000,
+  'M3.1-Flash-Preview':      512_000,
   'zhiniao-MiniMax-M2.7-highspeed': 131_072,
   'zhiniao-MiniMax-M2.7':         512_000,
   'zhiniao-qwen3.6-plus':     65_536,

@@ -36,6 +36,17 @@ export default [
     maxOutputTokens: 512_000,
   }),
   defineModel({
+    id: 'openplatform-m3.1-flash-preview',
+    label: 'M3.1 Flash Preview (Open Platform)',
+    brandId: 'openplatform',
+    vendorId: 'anthropic',
+    classification: ['chat', 'reasoning', 'vision', 'coding'],
+    defaultModel: 'M3.1-Flash-Preview',
+    capabilities: openplatformCapabilities,
+    contextWindow: 1_000_000,
+    maxOutputTokens: 512_000,
+  }),
+  defineModel({
     id: 'openplatform-minimax-m2.7-highspeed',
     label: 'MiniMax M2.7 Highspeed (Open Platform)',
     brandId: 'openplatform',
