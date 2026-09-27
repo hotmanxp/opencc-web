@@ -128,6 +128,18 @@ export class ReverseDispatch {
 
   /** Wire the inbound handlers onto the connection. Idempotent. */
   install(): void {
+    this.conn.onRequest('runtime.discover', async () => {
+      // AA server calls this to enumerate the runtimes available on this
+      // connector (drives the mobile/web "Runtimes" tab). We return one
+      // descriptor per registered InstanceDefinition (currently always
+      // reported as the single `codex` runtime type since zai's agent
+      // surface is one logical runtime per InstanceDefinition).
+      //
+      // AA's schema (RuntimeDiscoveryResponse / RuntimeTypeDescriptor) is
+      // strict (`extra="forbid"`) so we only send fields the schema
+      // defines.
+      return { runtimeTypes: this.runtimeDescriptors() };
+    });
     this.conn.onRequest('session.send_message', async (params) => {
       const p = SendMessageParamsSchema.parse(params);
       return this.handleSendMessage(p);
@@ -202,6 +214,41 @@ export class ReverseDispatch {
   }
 
   // ─── Routing helpers ────────────────────────────────────────────────
+
+  /**
+   * Build the RuntimeTypeDescriptor list for runtime.discover.
+   * Currently we always report one descriptor of type 'codex' (AA's
+   * closest match for our generic agent runtime); one descriptor per
+   * InstanceDefinition would require AA to support multiple of the same
+   * runtime type, which `instancePolicy: 'multiple'` allows but adds UI
+   * complexity. Single is enough for v1.
+   */
+  private runtimeDescriptors(): unknown[] {
+    const mappings = this.registry.listAll();
+    const runningCount = mappings.length;
+    return [
+      {
+        runtimeType: 'codex',
+        displayName: 'zai (Codex-compatible)',
+        description: 'Local zai instance with one runtime per InstanceDefinition.',
+        available: runningCount > 0,
+        reason: runningCount > 0 ? undefined : 'no InstanceDefinitions currently running',
+        recommended: true,
+        recommendationRank: 0,
+        implementationType: 'zai-local',
+        capabilities: {
+          session_send_message: true,
+          session_steer: true,
+          session_interrupt: true,
+          notice_approval: true,
+          notice_input_request: true,
+        },
+        metadata: { zaiVersion: '0.12.0', activeRuntimes: runningCount },
+        instancePolicy: 'single',
+        maxInstances: null,
+      },
+    ];
+  }
 
   /**
    * Resolve which child port owns the given AA sessionId by scanning all
