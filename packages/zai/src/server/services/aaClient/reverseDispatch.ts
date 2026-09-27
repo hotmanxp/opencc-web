@@ -86,6 +86,14 @@ async function forwardToChild(
   const url = `http://127.0.0.1:${childPort}/api/internal/push-action`;
   let response: Response;
   try {
+    // Wire format — pushAction's PushActionSchema (zod default `strip`)
+    // drops any keys not in {action, idempotencyKey, zaiSessionId,
+    // sessionId, payload}. Per-action fields (content, runtimeId, cwd,
+    // ...) MUST travel inside the `payload` envelope; otherwise they get
+    // silently dropped and the child handler fails to parse its required
+    // fields. The top-level session id is duplicated under both keys
+    // because the child picks `sessionId` for sessionCreate and
+    // `zaiSessionId` for everything else; the unused one is dropped.
     response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -99,7 +107,9 @@ async function forwardToChild(
       body: JSON.stringify({
         action,
         idempotencyKey: crypto.randomUUID(),
-        ...body,
+        sessionId,
+        zaiSessionId: sessionId,
+        payload: body,
       }),
     });
   } catch (err) {
@@ -211,9 +221,11 @@ export class ReverseDispatch {
     if (!runtimeId) {
       throw new AaServerError('runtime.start: missing runtimeId', 400, null);
     }
-    const port = this.portFromRuntime(runtimeId);
+    const port = await this.portFromRuntime(runtimeId);
     if (port !== null) {
       console.log(`[aa.reverseDispatch] runtime.start: ${runtimeId} (port=${port})`);
+    } else {
+      console.warn(`[aa.reverseDispatch] runtime.start: ${runtimeId} — no live port (session.create will 404)`);
     }
     return { runtimeId, status: 'started' };
   }

@@ -56,7 +56,7 @@ const PushActionSchema = z.object({
 
 // Module-level slot for the sessionCreate follow-up. forwardToZai assigns
 // here so the route handler can read it without closure narrowing pain.
-let pendingFollowupFromForward: { sessionId: string; content: string; cwd: string } | null = null;
+let pendingFollowupFromForward: { sessionId: string; actualSessionId: string | null; content: string; cwd: string } | null = null;
 
 const SendMessagePayloadSchema = z.object({
   content: z.string().min(1),
@@ -174,6 +174,13 @@ async function forwardToZai(
       // "Create and start" semantics — AA passes the sessionId AND a first
       // prompt. We need to: (1) create the transcript with that id, then
       // (2) enqueue the prompt on that session.
+      //
+      // legacyTranscriptStore.create() auto-prepends 'sess-' when the
+      // supplied sessionId doesn't already start with it (e.g. AA's
+      // `aa-sess-xxx` becomes `sess-aa-sess-xxx`). The followup prompt
+      // MUST target the *returned* sessionId — not the raw AA id — or
+      // it hits a non-existent session and silently no-ops (visible as
+      // `[legacyTranscriptStore] patch: session not found: <id>`).
       const topSid = zaiSessionId;
       if (!topSid) {
         throw new Error('sessionCreate: sessionId required');
@@ -184,16 +191,21 @@ async function forwardToZai(
       // via project context). Pass 'unknown' so zai falls back to its
       // env/settings default — same as the web UI does when no model is
       // chosen.
+      // Note: /api/agent/sessions does NOT consume a `prompt` field —
+      // it only reserves the transcript. The first prompt goes through
+      // the followup below, targeting the returned sessionId.
       body = {
         sessionId: p.sessionId,
-        prompt: p.content,
         cwd: p.cwd || undefined,
         model: 'unknown',
       };
       // After creating the session, we enqueue the first prompt. We
       // use a module-level mutable slot (avoiding TS closure narrowing).
+      // actualSessionId is captured from the response and used below —
+      // see the followup block after forwardToZai returns.
       pendingFollowupFromForward = {
         sessionId: p.sessionId,
+        actualSessionId: null, // filled in after /api/agent/sessions returns
         content: p.content,
         cwd: p.cwd,
       };
@@ -271,7 +283,20 @@ router.post('/push-action', async (req, res) => {
     // For create-and-start: after creating the session, immediately enqueue
     // the first turn on it. Otherwise the conversation sits idle until the
     // mobile sends another message — which defeats the purpose of "start".
+    //
+    // The followup targets the *returned* sessionId (which may have been
+    // rewritten to `sess-<raw>` by legacyTranscriptStore), not the raw AA
+    // id from parsed.data.sessionId. AA-side sessionId and zai-side
+    // sessionId can diverge because the store normalizes; the followup
+    // request body must use the normalized id or the prompt queue writes
+    // hit a non-existent session (visible as `[legacyTranscriptStore]
+    // patch: session not found: <id>`).
     if (action === 'sessionCreate' && result.ok && pendingFollowupFromForward) {
+      const returnedBody = result.body as { sessionId?: unknown } | null;
+      const followupSessionId =
+        typeof returnedBody?.sessionId === 'string' && returnedBody.sessionId.length > 0
+          ? returnedBody.sessionId
+          : pendingFollowupFromForward.sessionId;
       try {
         await fetch(`http://127.0.0.1:${Number(process.env.ZAI_PORT ?? '9201')}/api/agent/prompt`, {
           method: 'POST',
@@ -280,7 +305,7 @@ router.post('/push-action', async (req, res) => {
             ...(process.env.ZAI_TOKEN ? { 'X-Zai-Token': process.env.ZAI_TOKEN } : {}),
           },
           body: JSON.stringify({
-            sessionId: pendingFollowupFromForward.sessionId,
+            sessionId: followupSessionId,
             prompt: pendingFollowupFromForward.content,
             ...(pendingFollowupFromForward.cwd ? { cwd: pendingFollowupFromForward.cwd } : {}),
             model: 'unknown',
