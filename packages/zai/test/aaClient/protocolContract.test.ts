@@ -160,11 +160,17 @@ describe('interaction.respond', () => {
 });
 
 describe('fs path shape', () => {
-  it('returns root-relative paths, not the tilde path the client sent', async () => {
-    // The picker sends {root: "~", path: "~/code"} and renders any path that
-    // doesn't start with "/" as "$root/$path"
-    // (android/feature/files/RemoteFileNavigation.kt::displayRemotePath).
-    // Echoing the request verbatim renders the label as `~/~/code`.
+  it('returns absolute paths, never the tilde form the client sent', async () => {
+    // Two client behaviours pin this down, and they pull in opposite
+    // directions — only an absolute path satisfies both:
+    //
+    // 1. `displayRemotePath` (android/…/RemoteFileNavigation.kt:112) renders
+    //    any path that doesn't start with "/" as "$root/$path", so echoing
+    //    the picker's own `~/code` under `root: "~"` renders as `~/~/code`.
+    // 2. The picker adopts `result.path` as the resolved workspace
+    //    (NewSessionScreen.kt:453 → `homePath`) and requires it to satisfy
+    //    `isSelectableRemoteDirectory` — a relative "." there leaves the
+    //    directory unselectable and blocks creating a session on it.
     const { ReverseDispatch } = await import(
       '../../src/server/services/aaClient/reverseDispatch.js'
     );
@@ -178,28 +184,32 @@ describe('fs path shape', () => {
     const { RuntimeRegistry: Registry } = await import(
       '../../src/server/services/aaClient/runtimeRegistry.js'
     );
-    const dispatch = new ReverseDispatch({
+    new ReverseDispatch({
       conn: conn as never,
       registry: new Registry(registryConn as never),
-    });
-    dispatch.install();
+    }).install();
 
     const readDir = handlers.get('fs.readDir')!;
-    const dir = (await readDir({ root: '~', path: '~' })) as {
+    const home = (await import('node:os')).homedir();
+
+    // How the picker first resolves the home directory.
+    const rootListing = (await readDir({ root: '~', path: '.' })) as {
       path: string;
       entries: { path: string }[];
     };
-    expect(dir.path).toBe('.');
-    // Entry paths are root-relative too, never `~/code/<name>`.
-    for (const e of dir.entries) {
-      expect(e.path.startsWith('~')).toBe(false);
-    }
+    expect(rootListing.path).toBe(home);
+    expect(rootListing.path.startsWith('/')).toBe(true);
 
-    const home = await import('node:os');
-    const codeDir = home.homedir() + '/code';
-    const sub = (await readDir({ root: '~', path: '~/code' })) as { path: string };
-    expect(sub.path).toBe('code');
-    expect(sub.path).not.toContain('~');
+    // Descending: request comes in as the tilde form.
+    const sub = (await readDir({ root: '~', path: '~/code' })) as {
+      path: string;
+      entries: { path: string }[];
+    };
+    expect(sub.path).toBe(`${home}/code`);
+    for (const e of sub.entries) {
+      expect(e.path.startsWith('/')).toBe(true);
+      expect(e.path).not.toContain('~');
+    }
   });
 });
 

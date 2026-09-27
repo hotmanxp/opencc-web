@@ -762,23 +762,6 @@ export class ReverseDispatch {
     return normalized;
   }
 
-  /**
-   * Express an absolute path the way AA's clients expect it back: RELATIVE
-   * to the workspace root (`.` for the root itself).
-   *
-   * `displayRemotePath` (android/feature/files/RemoteFileNavigation.kt)
-   * renders any path that doesn't start with `/` as `"$root/$path"`, so
-   * echoing a tilde path back verbatim — which is what the picker sends,
-   * `path: "~/code"` under `root: "~"` — renders as `~/~/code`. Absolute
-   * paths pass through untouched, so callers that want a real filesystem
-   * path keep working; this only shapes what goes on the wire.
-   */
-  private fsRootRelative(absRoot: string, abs: string): string {
-    if (abs === absRoot) return '.';
-    if (abs.startsWith(absRoot + sep)) return abs.slice(absRoot.length + 1);
-    return abs;
-  }
-
   private async handleFsReadDir(params: unknown): Promise<unknown> {
     // AA params: { sessionId, root, path } (after AA server's preprocessing).
     const p = (params ?? {}) as { root?: string; path?: string };
@@ -815,7 +798,7 @@ export class ReverseDispatch {
       }
       out.push({
         name: ent.name,
-        path: this.fsRootRelative(absRoot, join(dir, ent.name)),
+        path: join(dir, ent.name),
         type,
         size,
       });
@@ -824,8 +807,17 @@ export class ReverseDispatch {
       if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
+    // `path` comes back ABSOLUTE, never as the caller's tilde form. Both
+    // clients treat a non-`/`-leading path as root-relative and rebuild it
+    // themselves — `displayRemotePath`
+    // (android/feature/files/RemoteFileNavigation.kt:112) renders
+    // `"$root/$path"`, so echoing `~/code` back under `root: "~"` shows up
+    // as `~/~/code`. It can't be root-relative either: the session picker
+    // adopts `result.path` as the resolved workspace
+    // (NewSessionScreen.kt:453 → `homePath`), and a `.` there fails
+    // `isSelectableRemoteDirectory`, leaving the directory unselectable.
     return {
-      path: this.fsRootRelative(absRoot, dir),
+      path: dir,
       entries: out,
       truncated: false,
       targetPath: target,
@@ -845,7 +837,7 @@ export class ReverseDispatch {
     const content = binary ? '' : clipped.toString('utf-8');
     const hash = createHash('sha256').update(full).digest('hex');
     return {
-      path: this.fsRootRelative(this.expandTilde(p.root), abs),
+      path: abs,
       name: basename(abs),
       size: full.byteLength,
       sha256: hash,
@@ -862,7 +854,7 @@ export class ReverseDispatch {
     const abs = this.fsResolve(p.root, p.path ?? '');
     const buf = await readFile(abs);
     return {
-      path: this.fsRootRelative(this.expandTilde(p.root), abs),
+      path: abs,
       name: basename(abs),
       size: buf.byteLength,
       contentBytes: buf.toString('base64'),
@@ -874,7 +866,7 @@ export class ReverseDispatch {
     if (!p.root) throw new AaServerError('fs.writeFile: root is required', 422, null);
     const abs = this.fsResolve(p.root, p.path ?? '');
     await fsWriteFile(abs, p.content ?? '', 'utf-8');
-    return { path: this.fsRootRelative(this.expandTilde(p.root), abs), size: (p.content ?? '').length };
+    return { path: abs, size: (p.content ?? '').length };
   }
 
   // ─── Handlers ────────────────────────────────────────────────────────
