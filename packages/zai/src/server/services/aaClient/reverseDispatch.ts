@@ -31,6 +31,9 @@
  * easier to reason about.
  */
 import { z } from 'zod';
+import { readdir, readFile, writeFile as fsWriteFile, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { resolve as pathResolve, join, sep, dirname, basename } from 'node:path';
 import type { AaConnection } from './connection.js';
 import type { RuntimeRegistry } from './runtimeRegistry.js';
 import { getSessionMap } from './sessionMap.js';
@@ -155,6 +158,21 @@ export class ReverseDispatch {
     this.conn.onRequest('runtime.stop', async (params) => {
       return this.handleRuntimeStop(params);
     });
+    // File system RPCs — AA Web/Mobile "Files" panel talks to the connector
+    // via these. We expose the same node:fs-backed operations the local
+    // zai web UI uses, with the zai process cwd as the workspace root.
+    this.conn.onRequest('fs.readDir', async (params) => {
+      return this.handleFsReadDir(params);
+    });
+    this.conn.onRequest('fs.readText', async (params) => {
+      return this.handleFsReadText(params);
+    });
+    this.conn.onRequest('fs.read', async (params) => {
+      return this.handleFsRead(params);
+    });
+    this.conn.onRequest('fs.writeFile', async (params) => {
+      return this.handleFsWriteFile(params);
+    });
     this.conn.onRequest('session.send_message', async (params) => {
       const p = SendMessageParamsSchema.parse(params);
       return this.handleSendMessage(p);
@@ -209,6 +227,126 @@ export class ReverseDispatch {
     }
     return null;
   }
+
+  // ─── Filesystem RPCs (AA "Files" panel) ────────────────────────────
+
+  /**
+   * Workspace root for fs.* RPCs. Use the zai process cwd so the panel
+   * shows the same tree the local zai web UI sees.
+   */
+  private fsRoot(): string {
+    return process.env.ZAI_CWD ?? process.cwd();
+  }
+
+  /**
+   * Resolve a user-supplied path against the AA-provided workspace root,
+   * rejecting anything that escapes via "..". Mirrors routes/fs.ts::
+   * resolveSafePath but adapted for AA's flat params shape.
+   */
+  private fsResolve(root: string, relPath: string): string {
+    const normalized = relPath === '' ? root : pathResolve(root, relPath);
+    if (normalized !== root && !normalized.startsWith(root + sep)) {
+      throw new AaServerError(`fs: path outside workspace root: ${relPath}`, 400, null);
+    }
+    return normalized;
+  }
+
+  private async handleFsReadDir(params: unknown): Promise<unknown> {
+    // AA params: { sessionId, root, path } (after AA server's preprocessing).
+    const p = (params ?? {}) as { root?: string; path?: string };
+    if (!p.root) throw new AaServerError('fs.readDir: root is required', 422, null);
+    const target = this.fsResolve(p.root, p.path ?? '');
+    let stats;
+    try {
+      stats = await stat(target);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new AaServerError(`fs.readDir: path does not exist: ${p.path}`, 404, null);
+      }
+      throw err;
+    }
+    let dir = target;
+    if (!stats.isDirectory()) {
+      dir = dirname(target);
+    }
+    const entries = await readdir(dir, { withFileTypes: true });
+    const out: { name: string; path: string; type: string; size: number | null }[] = [];
+    for (const ent of entries) {
+      if (['node_modules', '.git', '.next', 'dist', 'build'].includes(ent.name)) continue;
+      if (ent.name.startsWith('.') && dir !== p.root) continue;
+      let type: string = ent.isDirectory() ? 'directory' : ent.isFile() ? 'file' : 'other';
+      let size: number | null = null;
+      if (ent.isFile()) {
+        try {
+          const s = await stat(join(dir, ent.name));
+          size = s.size;
+        } catch { /* ENOENT */ }
+      }
+      out.push({
+        name: ent.name,
+        path: dir === p.root ? ent.name : `${p.path ?? ''}/${ent.name}`.replace(/^\//, ''),
+        type,
+        size,
+      });
+    }
+    out.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return {
+      path: p.path ?? '',
+      entries: out,
+      truncated: false,
+      targetPath: target,
+      targetType: stats.isDirectory() ? 'directory' : stats.isFile() ? 'file' : 'other',
+    };
+  }
+
+  private async handleFsReadText(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { root?: string; path?: string; maxBytes?: number };
+    if (!p.root) throw new AaServerError('fs.readText: root is required', 422, null);
+    const abs = this.fsResolve(p.root, p.path ?? '');
+    const full = await readFile(abs);
+    const maxBytes = p.maxBytes ?? 1_048_576;
+    const clipped = full.slice(0, maxBytes);
+    const truncated = full.byteLength > maxBytes;
+    const binary = clipped.includes(0);
+    const content = binary ? '' : clipped.toString('utf-8');
+    const hash = createHash('sha256').update(full).digest('hex');
+    return {
+      path: p.path ?? '',
+      name: basename(abs),
+      size: full.byteLength,
+      sha256: hash,
+      encoding: 'utf8',
+      content,
+      truncated,
+      binary,
+    };
+  }
+
+  private async handleFsRead(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { root?: string; path?: string };
+    if (!p.root) throw new AaServerError('fs.read: root is required', 422, null);
+    const abs = this.fsResolve(p.root, p.path ?? '');
+    const buf = await readFile(abs);
+    return {
+      path: p.path ?? '',
+      name: basename(abs),
+      size: buf.byteLength,
+      contentBytes: buf.toString('base64'),
+    };
+  }
+
+  private async handleFsWriteFile(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { root?: string; path?: string; content?: string };
+    if (!p.root) throw new AaServerError('fs.writeFile: root is required', 422, null);
+    const abs = this.fsResolve(p.root, p.path ?? '');
+    await fsWriteFile(abs, p.content ?? '', 'utf-8');
+    return { path: p.path ?? '', size: (p.content ?? '').length };
+  }
+
+  // ─── Handlers ────────────────────────────────────────────────────────
 
   private async handleSendMessage(p: z.infer<typeof SendMessageParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
