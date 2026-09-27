@@ -105,22 +105,28 @@ export async function createSession(
 /**
  * Push a timeline item to AA.
  *
- * NOTE (2026-09-27): the type name and payload envelope here were both
- * wrong until this rewrite. zai used to send
- *   type: 'timeline.itemUpsert', payload: {runtimeId, sessionId, item}
- * but AA Web's client (recovered from its own JS bundle) dispatches on
- *   'timeline.item_created' | 'timeline.item_updated'
- * and reads the item from `payload.item`:
- *   ("timeline.item_created"===t.type||"timeline.item_updated"===t.type)
- *     ? t.payload.item : null
- * Any type it doesn't recognise is dropped on the floor, so every
- * message we sent was silently discarded — which is exactly why the AA
- * Web timeline showed "暂无活动" (no activity) even though zai had a
- * complete transcript on disk.
+ * The connector→server hop is ALWAYS `timeline.itemUpsert` — that is
+ * the only timeline method the server's notification handler accepts
+ * (`server/agent_server/services/connector_notifications.py`:
+ * `METHODS = {"timeline.sync", "timeline.itemUpsert"}`), and it's what
+ * the official reference connector sends
+ * (`connector/connector/_reference/claude/sdk_adapter.py:589`).
  *
- * `created` picks between item_created (new item) and item_updated
- * (same itemId seen before — used for streaming deltas that mutate an
- * existing assistant message).
+ * Do NOT "optimise" this into `timeline.item_created` /
+ * `timeline.item_updated`. Those are what the SERVER emits *to
+ * clients*, derived in `server/agent_server/core/events.py::
+ * timeline_events_from_items`, which reads `item.updatedSeq` to build
+ * the event and SKIPS any item whose seq is 0. Emitting them from the
+ * connector skips persistence entirely, so `updatedSeq` is never
+ * assigned, and the client's own guard
+ * (`web-next/.../timeline-sequence.ts::incomingTimelineItemCanReplace`
+ * → `incoming.updatedSeq >= current.updatedSeq`) evaluates
+ * `undefined >= undefined` → false. First push creates a bubble,
+ * every later streaming update is refused — which is exactly the
+ * "empty/frozen bubble" symptom, even though zai had a full reply.
+ *
+ * `revision` on the item is what tells the server which of
+ * created/updated to emit downstream; `created` is accepted and ignored.
  */
 export function upsertTimelineItem(
   conn: AaConnection,
@@ -128,20 +134,24 @@ export function upsertTimelineItem(
     runtimeId: string;
     sessionId: string;
     item: Record<string, unknown>;
-    /** true when this itemId was already pushed (streaming update). */
+    /** Ignored: the server derives created/updated from item.revision. */
     created?: boolean;
   },
 ): void {
-  const { created, ...rest } = payload;
-  conn.sendNotification(created === false ? 'timeline.item_updated' : 'timeline.item_created', rest);
+  const { created: _ignored, ...rest } = payload;
+  conn.sendNotification('timeline.itemUpsert', rest);
 }
 
 /**
  * Fire-and-forget session meta update (called on session.created / renamed /
  * cwd change).
  *
- * AA Web reads `t.payload.session` for this type — see upsertTimelineItem's
- * note on how the real type names were recovered.
+ * Method name is `session.meta.upsert` — that's the connector→server hop
+ * the server accepts (`connector_notifications.py:294`:
+ * `if method not in {"session.meta.upsert", "session.updated"}`).
+ * `session.meta.updated` is the name the SERVER emits back to clients
+ * (`core/events.py:168`); sending it from the connector is silently
+ * dropped, so session titles/cwd never reach AA.
  */
 export function upsertSessionMeta(
   conn: AaConnection,
@@ -155,7 +165,7 @@ export function upsertSessionMeta(
     metadata?: Record<string, unknown>;
   },
 ): void {
-  conn.sendNotification('session.meta.updated', {
+  conn.sendNotification('session.meta.upsert', {
     runtimeId: payload.runtimeId,
     sessionId: payload.sessionId,
     session: {
@@ -173,10 +183,25 @@ export function upsertSessionMeta(
 }
 
 /**
- * Fire-and-forget runtime/session state update (busy/idle).
+ * Fire-and-forget session runtime state (running / idle).
  *
- * AA Web reads `t.payload.state` for 'runtime.state.updated' — note the
- * type is scoped to *runtime*, not session.
+ * Connector→server method is `session.state.updated` — the server's
+ * `SessionStateNotificationHandler` only accepts that name (plus
+ * `session.updated`); `runtime.state.updated` is what the SERVER emits
+ * to clients (`core/events.py:155`) and is silently dropped from this
+ * direction.
+ *
+ * The payload is FLAT: `runtime_state_from_session_state_params` reads
+ * `params.get("status")` / `params.get("selections")` at the top level,
+ * not nested under a `state` object. Nesting it left the server with
+ * `status → None → "idle"` default, so a finished turn never cleared
+ * the active run and the client kept showing "正在处理" with the input
+ * disabled.
+ *
+ * This matters for action admission, not just display: the server calls
+ * `start_active_run()` on `running` and `clear_active_run()` on
+ * `idle`/`error`, and `session.send_message` is refused while a run is
+ * active.
  */
 export function upsertSessionState(
   conn: AaConnection,
@@ -190,26 +215,32 @@ export function upsertSessionState(
     metadata?: Record<string, unknown>;
   },
 ): void {
-  conn.sendNotification('runtime.state.updated', {
+  conn.sendNotification('session.state.updated', {
     runtimeId: payload.runtimeId,
     sessionId: payload.sessionId,
-    state: {
-      sessionId: payload.sessionId,
-      runtimeId: payload.runtimeId,
-      runtime: payload.runtime,
-      ...(payload.status !== undefined ? { status: payload.status } : {}),
-      ...(payload.selections ? { selections: payload.selections } : {}),
-      ...(payload.error ? { error: payload.error } : {}),
-      ...(payload.metadata ? { metadata: payload.metadata } : {}),
-    },
+    runtime: payload.runtime,
+    ...(payload.status !== undefined ? { status: payload.status } : {}),
+    ...(payload.selections ? { selections: payload.selections } : {}),
+    ...(payload.error ? { error: payload.error } : {}),
+    ...(payload.metadata ? { metadata: payload.metadata } : {}),
   });
 }
 
 /**
- * Fire-and-forget notice update (approval / input_request / error).
+ * Fire-and-forget notice (interaction.input_request / approval / error).
  *
- * AA Web reads `t.payload.notice` for 'runtime.notice.updated', and
- * handles 'runtime.notice.snapshot' with a `payload.notices` array.
+ * Connector→server method is `notice.upsert` — the server's
+ * `InteractionNotificationHandler.METHODS` is exactly
+ * `{"notice.upsert", "runtime.error"}`. `runtime.notice.updated` and
+ * `runtime.notice.snapshot` are the names the SERVER emits to clients
+ * and are silently dropped from this direction, which is why an
+ * AskUserQuestion turn surfaced as a bare tool label with no interactive
+ * prompt and the composer stuck on "发送中断，或等待当前回合结束".
+ *
+ * The payload is the NoticeIn body FLAT at the top level — the server
+ * runs `NoticeIn.model_validate(params)` directly, and takes the
+ * runtime identity from top-level `runtime` / `runtimeId` (or
+ * `source.runtime` / `source.runtimeId`).
  */
 export function upsertNotice(
   conn: AaConnection,
@@ -220,14 +251,11 @@ export function upsertNotice(
     notice: Record<string, unknown>;
   },
 ): void {
-  conn.sendNotification('runtime.notice.updated', {
+  conn.sendNotification('notice.upsert', {
+    ...payload.notice,
+    runtime: payload.runtime,
     runtimeId: payload.runtimeId,
     ...(payload.sessionId !== undefined ? { sessionId: payload.sessionId } : {}),
-    notice: {
-      ...payload.notice,
-      runtimeId: payload.runtimeId,
-      ...(payload.sessionId !== undefined ? { sessionId: payload.sessionId } : {}),
-    },
   });
 }
 
@@ -299,15 +327,18 @@ export const INBOUND_METHOD_LIST: readonly ServerToZaiMethod[] = [
 ] as const;
 
 /** Same idea for outbound notifications. Mirrors ZAI_TO_SERVER_NOTIFICATIONS
- *  in protocol.ts — keep the two in sync (TS will flag a mismatch). */
+ *  in protocol.ts — keep the two in sync (TS will flag a mismatch).
+ *
+ *  These are connector→server method names only. The `*upsert*` spelling
+ *  is what the server's notification handlers whitelist; the
+ *  `*created` / `*updated` variants are the names the server derives
+ *  and emits back to clients. */
 export const OUTBOUND_NOTIFICATION_LIST: readonly ZaiToServerNotification[] = [
   'connector.heartbeat',
-  'session.meta.updated',
-  'runtime.state.updated',
-  'timeline.item_created',
-  'timeline.item_updated',
+  'session.meta.upsert',
+  'session.state.updated',
+  'timeline.itemUpsert',
   'timeline.snapshot',
-  'runtime.notice.updated',
-  'runtime.notice.snapshot',
+  'notice.upsert',
   'runtime.capability.updated',
 ] as const;

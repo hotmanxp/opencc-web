@@ -179,15 +179,16 @@ export const ZAI_TO_SERVER_NOTIFICATIONS = [
   // Heartbeat (30s)
   'connector.heartbeat',
   // Session meta / runtime state
-  'session.meta.updated',
-  'runtime.state.updated',
-  // Timeline
-  'timeline.item_created',
-  'timeline.item_updated',
+  'session.meta.upsert',
+  'session.state.updated',
+  // Timeline — the connector→server hop is `itemUpsert` only; the
+  // server derives `item_created` / `item_updated` for clients from
+  // each item's `updatedSeq` + `revision`. Sending the derived names
+  // from here bypasses persistence (see upsertTimelineItem in rpc.ts).
+  'timeline.itemUpsert',
   'timeline.snapshot',
   // Notices
-  'runtime.notice.updated',
-  'runtime.notice.snapshot',
+  'notice.upsert',
   // Capability changes (runtime / session scoped)
   'runtime.capability.updated',
 ] as const;
