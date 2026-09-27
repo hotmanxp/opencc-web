@@ -445,13 +445,21 @@ export class EventAdapter {
         return;
     }
 
+    // Spread optional fields conditionally: JSON.stringify turns an
+    // explicit `undefined` into an absent key only for top-level object
+    // literals, but these values are nested inside a helper's parameter
+    // object, so `toolName: undefined` was arriving at AA as an explicit
+    // `"toolName": null`. Observed live in a payload dump. AA's item
+    // schema is better off not seeing the key at all than seeing null.
+    const toolName = typeof event.toolName === 'string' && event.toolName.length > 0
+      ? event.toolName
+      : undefined;
     this.pushTimelineItem(runtimeId, aaSessionId, {
       id: (event.eventId as string | undefined) ?? `${aaSessionId}-${t}-${Date.now()}`,
       type: kind,
       content: text,
       status: t === 'runtime.tool_call' ? 'running' : t === 'runtime.tool_result' ? 'done' : undefined,
-      title: (event.toolName as string | undefined) ?? undefined,
-      toolName: (event.toolName as string | undefined) ?? undefined,
+      ...(toolName ? { title: toolName, toolName } : {}),
       turnIndex,
       metadata,
     }, true);
