@@ -4,10 +4,14 @@
 > 是新会话的入场引导 — 把现状、已知 bug、手动验证步骤、关键源码位置一次性讲清,
 > 不需要重新调研架构。
 >
-> **最新状态(2026-09-27):** AA Web → zai 端到端对话已验证可用。详见 §12。
-> 本次会话修了 wire-format + sessionMap 两个关键 bug(`b58be7c1` +
-> `0b5d333f`),browser-agent 在 https://web.agents-anywhere.com 创建会话后
-> assistant 回合成功落地。新会话进来从 §0 走,如果 zai 还活着就能直接验证。
+> **⚠️ 先读 §13 再动手。** 本文档 §5 的"已知 bug"大部分结论已被证伪 ——
+> 真正的根因是**通知类型名和 payload envelope 全部写错了,AA Web 把每一条
+> 都静默丢弃**。§13 是本次会话(2026-09-27 晚)从 AA Web 自己的 JS bundle
+> 里挖出的真实协议契约,照着它做才对。
+>
+> **最新状态(2026-09-27):** 对话链路本身(AA → WS → zai → child → LLM →
+> transcript 落盘)是通的,回合完整跑完。但 **AA Web 时间线一直显示
+> "暂无活动"**,根因已定位并修复(`1dc12915`),浏览器侧复验尚未完成。
 
 ---
 
@@ -459,3 +463,145 @@ Assistant 回合成功落地 "Hello! Session is active and responding..."。
 **总结一句话**:架构 + 数据流已经全通,UI 端到端对话卡在两件事上 — (1) zai 没
 持续 broadcast capability 给 AA(导致 UI 显示未连接/无能力),(2) session 创建
 后 child 没立刻入队第一条 turn。这两个修一下,对话就完全跑通。
+
+---
+
+## 13. 真实 AA 协议契约(2026-09-27 从 AA Web 自己的 JS bundle 里挖出来的)
+
+> **本节优先于 §5。** §5 的结论是在"猜"的前提下得出的,大部分是错的。
+> 下面这份契约是把 web.agents-anywhere.com 的 18 个 `_next/static/chunks/*.js`
+> 拉下来(`curl` 首页 → 解析 chunk 路径 → 逐个下载 → grep)反推出来的,
+> 配合 `connection.ts` 里新加的 `[aa.inbound]` / `[aa.outbound]` 双向 trace
+> 实测确认。**不要再靠猜协议名。**
+
+### 13.1 AA Web 只会主动发这 5 个 session RPC
+
+从客户端 bundle 里 grep 出的全部 `"session.*"` 字面量:
+
+```
+session.interrupt
+session.refetch_required
+session.send_message
+session.steer
+session.subscribed
+```
+
+**它从不调用 `session.discover`,也不调用 `session.sync`。**
+所以 §12 里"实现 session.discover/sync 就能修好 UI"是**错的**——
+时间线只能靠 zai 主动 push 通知到达。这也解释了为什么补了 5 个读 RPC
+之后 UI 依然是"暂无活动"。
+
+`session.subscribed` 是**服务端 → 客户端**的通知(告诉客户端"这个会话你已订阅"),
+不是请求。
+
+### 13.2 通知信封
+
+```
+{ protocolVersion, eventId, sequence, cursor, type, sessionId, emittedAt, payload }
+```
+
+数据都在 `payload` 里,不是平铺的。
+
+### 13.3 zai→AA 通知类型名对照表(错的一律被丢弃)
+
+| zai 原来发的 | AA Web 实际监听 | 修复 |
+|---|---|---|
+| `timeline.itemUpsert` | `timeline.item_created` / `timeline.item_updated` / `timeline.snapshot` | ✅ 已改 |
+| `session.meta.upsert` | `session.meta.updated` | ✅ 已改 |
+| `session.state.updated` | `runtime.state.updated` | ✅ 已改 |
+| `notice.upserted` | `runtime.notice.updated` / `runtime.notice.snapshot` | ✅ 已改 |
+| `session.turnEnded` | (无) | ✅ 已移除 |
+| `session.inventory.begin/complete` | (无) | ✅ 已移除 |
+| `protocol.capabilitiesUpdated` | (无) | ✅ 已移除 |
+| `runtime.capability.updated` | ✅ 本来就对 | 保持 |
+
+客户端 reducer 的原始判断逻辑(反推自 bundle,原文):
+
+```js
+let l = "session.meta.updated"    === t.type ? eu(t.payload.session) : null
+let d = "runtime.state.updated"   === t.type ? eu(t.payload.state)   : null
+let u = ("timeline.item_created"===t.type||"timeline.item_updated"===t.type)
+                                    ? eu(t.payload.item) : null
+let c = "timeline.snapshot"===t.type && Array.isArray(t.payload.items)
+                                    ? t.payload.items.filter(ec) : null
+let f = "runtime.notice.updated"  === t.type ? eu(t.payload.notice)  : null
+```
+
+**注意类型名是 `runtime.*` 而不是 `session.*` 的那几个** —— session 状态和
+notice 都挂在 runtime 命名空间下。
+
+### 13.4 TimelineItem 的字段
+
+客户端在 `payload.item` 上读这些字段(按出现频次):
+`id` / `type` / `content` / `status` / `title` / `toolName` / `sessionId` / `createdAt`
+
+**之前 zai 发的是 `itemId` / `kind` / `text` —— 三个关键字段全错。**
+
+`type` 取值来自 AA 的枚举(从 bundle 提取):
+`system_user`、`system_time`、`assistant_activity`、`agent_call`、
+`file_change`、`error_description`,外加单词的 `tool` / `context` / `hunk` / `reconnect` / `message`。
+
+> 语义映射是推断的,还没在浏览器里逐个验过:
+> - 助手正文/思考 → `assistant_activity`
+> - 工具调用/结果 → `agent_call`
+> - 错误 → `error_description`
+> - 用户发言 → `system_user`(**这个还没接**,见 §13.6)
+
+### 13.5 流式必须按 id 合并
+
+`runtime.delta` / `runtime.thinking` 每来一片碎片就发一次通知,AA 端按
+`payload.item.id` 合并。所以**同一个 (session, turnIndex, channel) 的所有碎片
+必须共用一个稳定 id**:第一次 `timeline.item_created`,之后全部
+`timeline.item_updated`(内容累加),`runtime.done` 时补一发 `status:"done"`。
+
+踩过的坑:早期给每片碎片一个唯一 eventId → 一句话被拆成 19 个气泡。
+修完又踩第二个坑:在每个 `runtime.started` 上清空累加缓冲 —— 但 zai 一个 turn
+里会发多次 `runtime.started`(每个 message_start 一次),清空后下一片碎片又被当成
+新流,同一个 id 发了两次 `item_created`,一条消息被劈成两半。**别清。**
+buffer key 里已经含 sessionId + turnIndex,不会撞。
+
+### 13.6 还没做的
+
+- **用户消息没 push**。`runtime.*` 只覆盖 assistant 侧;用户发言要靠
+  `system_user` 类型(或在 push-action 里主动补一条),当前 UI 里用户那半边
+  可能是空的。
+- `timeline.snapshot` 没实现 —— 现在全靠实时 push,刷新页面/重连后历史
+  timeline 拿不回来(AA Web 也没有 `session.sync` 可调)。
+- 13.4 的 type 枚举映射和 `status` 字符串("streaming"/"done"/"thinking")
+  是从 bundle 推断的,需要一次真实浏览器复验。
+- `runtime.capabilities` handler(`reverseDispatch.ts`)返回的 capability
+  字段名同样是猜的,浏览器里 "可添加" 面板是否真的出内容待验。
+
+---
+
+## 14. 测试环境陷阱(踩了两次,别再踩)
+
+**Bash 工具的 shell 是从一个 zai child 进程里派生的**,所以环境里天然带着:
+
+```
+ZAI_INSTANCE_ID=inst_915b5414
+ZAI_SUPERVISOR_PID=7547
+ZAI_PORT=9987
+ZAI_TOKEN=...
+ZAI_IS_ROOT_INSTANCE=1
+```
+
+后果:任何 `pnpm start` 起来的进程都**自认为 child**,于是
+`/api/instances` 返回 `instance management not available on child`,
+`pushAction` 里的 `process.env.ZAI_PORT` 也指向别的端口。
+
+**起 zai 必须剥掉这些变量**:
+
+```bash
+cd /Users/ethan/code/opencc-web/packages/zai   # pnpm start 只在子包里有
+env -u ZAI_INSTANCE_ID -u ZAI_SUPERVISOR_PID -u ZAI_PORT -u ZAI_TOKEN \
+    -u ZAI_PROCESS_TITLE -u ZAI_IS_ROOT_INSTANCE \
+    -u ZAI_INSTANCE_HEARTBEAT_MS -u ZAI_HEAP_RESTARTED \
+    ZAI_DATA_DIR=/tmp/zai-aa-test nohup pnpm start --aa --port 9398 --no-open \
+    >/tmp/zai-aa.log 2>&1 &
+```
+
+另外:重排 child 端口 → `runtime-map.json` 跟着变,但 `session-map-{port}.json`
+按端口分文件,旧端口的映射就"失联"了(已用跨端口扫描兜住,见 §12.2)。
+调试时**别反复重启** —— 每重启一次端口就变一次,任何已经打开的 AA Web 页面
+拿到的都是过期状态。之前有一整轮排查是在跟这个幻影打架。
