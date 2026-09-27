@@ -77,15 +77,17 @@ function findProviderIdForModel(
  * `inputData` is the notice's stored `context` merged with the user's
  * answer — which is how the zai toolUseId reaches us.
  */
-type InteractionRespondRpcParams = {
-  sessionId?: string;
-  noticeId?: string;
-  actionId?: string;
-  inputData?: unknown;
-  runtime?: string;
-  runtimeId?: string;
-  externalSessionId?: string;
-};
+const InteractionRespondParamsSchema = z.object({
+  sessionId: z.string().min(1),
+  noticeId: z.string().min(1),
+  actionId: z.string().optional(),
+  inputData: z.unknown().optional(),
+  runtime: z.string().optional(),
+  runtimeId: z.string().optional(),
+  externalSessionId: z.string().optional(),
+});
+
+type InteractionRespondRpcParams = z.infer<typeof InteractionRespondParamsSchema>;
 
 /**
  * Turn the client's `{answers: {q0: {optionIds: ["q0o1"], customText}} back into zai's `{answers: {<question text>: <label>}}`.
@@ -148,13 +150,6 @@ const SteerParamsSchema = z.object({
 
 const InterruptParamsSchema = z.object({
   sessionId: z.string().min(1),
-});
-
-const InteractionRespondParamsSchema = z.object({
-  sessionId: z.string().min(1),
-  toolUseId: z.string().min(1),
-  decision: z.enum(['allow', 'deny', 'input']),
-  input: z.unknown().optional(),
 });
 
 // ─── HTTP forwarding to child ────────────────────────────────────────────
@@ -1006,9 +1001,6 @@ export class ReverseDispatch {
    * selected option ids back to labels through the original questions.
    */
   private async handleInteractionRespond(p: InteractionRespondRpcParams): Promise<unknown> {
-    if (!p.sessionId) throw new AaServerError('interaction.respond: sessionId required', 400, null);
-    if (!p.noticeId) throw new AaServerError('interaction.respond: noticeId required', 400, null);
-
     const stored = getNotice(p.noticeId);
     const childPort = stored && stored.childPort > 0
       ? stored.childPort

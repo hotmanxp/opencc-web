@@ -112,6 +112,53 @@ describe('session.capabilities admission', () => {
   });
 });
 
+describe('interaction.respond', () => {
+  it('accepts the payload the AA server actually sends', async () => {
+    // The handler was validating against a `{toolUseId, decision}` shape
+    // that AA never sends, so every answer died in zod validation and the
+    // error surfaced verbatim in the notice card. Ground truth:
+    // `api/sessions.py::respond_interaction` → {sessionId, runtime,
+    // runtimeId, noticeId, actionId, inputData}.
+    const { ReverseDispatch } = await import(
+      '../../src/server/services/aaClient/reverseDispatch.js'
+    );
+    const handlers = new Map<string, (p: unknown) => Promise<unknown>>();
+    const conn = {
+      onRequest: (method: string, handler: (p: unknown) => Promise<unknown>) => {
+        handlers.set(method, handler);
+      },
+    };
+    const { conn: registryConn } = fakeConn();
+    const { RuntimeRegistry: Registry } = await import(
+      '../../src/server/services/aaClient/runtimeRegistry.js'
+    );
+    new ReverseDispatch({
+      conn: conn as never,
+      registry: new Registry(registryConn as never),
+    }).install();
+
+    const respond = handlers.get('interaction.respond');
+    expect(respond, 'interaction.respond must be installed').toBeTypeOf('function');
+
+    // An unknown noticeId still has to get past validation and fail on the
+    // routing side, not on a schema that describes a protocol that isn't real.
+    const call = respond!({
+      sessionId: 'sess-aa-1',
+      runtime: 'codex',
+      runtimeId: 'rti_test',
+      noticeId: 'n_missing',
+      actionId: 'submit',
+      inputData: { answers: { q0: { optionIds: ['q0o1'] } } },
+    });
+    // Either resolves (child reachable) or rejects for routing reasons —
+    // what it must NOT do is throw a ZodError mentioning toolUseId/decision.
+    await expect(call.catch((err: Error) => {
+      expect(err.message).not.toContain('toolUseId');
+      expect(err.message).not.toContain('decision');
+    })).resolves.toBeUndefined();
+  });
+});
+
 describe('runtime.done', () => {
   it('finalises open streams from every turnIndex, not just the last one', async () => {
     // zai's turnIndex counts model messages within a user turn, and the
