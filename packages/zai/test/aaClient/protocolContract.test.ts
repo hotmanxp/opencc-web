@@ -411,6 +411,23 @@ describe('model catalog', () => {
     // Reasoning is offered only where the capability says so.
     const dsFlash = models.find((m) => m.selectionId === 'provider_ds::deepseek-flash');
     expect(dsFlash?.metadata.supportsReasoning).toBe(false);
+
+    // Reasoning selectionIds must be scoped to their model. AA's client
+    // sends the picked reasoning item in the MODEL scope
+    // (NewSessionRuntimeSelectionState.kt:202-209) and the official
+    // connector recovers model_id from that id — so a bare effort name
+    // ("high") loses the model entirely and the client sends it verbatim.
+    const withReasoning = models.filter((m) => (m.reasoningItems as unknown[])?.length);
+    expect(withReasoning.length).toBeGreaterThan(0);
+    const effortIds = withReasoning.flatMap((m) =>
+      (m.reasoningItems as { id: string; selectionId: string }[]).map((r) => r.selectionId),
+    );
+    // Unique across every model…
+    expect(new Set(effortIds).size).toBe(effortIds.length);
+    // …and each one still names the model it belongs to.
+    const mmEffort = (models.find((m) => m.selectionId === 'provider_mm::MiniMax-M3')!
+      .reasoningItems as { selectionId: string }[])[0]!;
+    expect(mmEffort.selectionId).toContain('provider_mm::MiniMax-M3');
   });
 });
 
@@ -538,6 +555,28 @@ describe('session.create selections', () => {
     const effortPayload = captured[captured.length - 1];
     expect(effortPayload.model).toBeUndefined();
     expect(effortPayload.providerId).toBeUndefined();
+
+    // The real fix: a reasoning item's selectionId names its model, so the
+    // model the user was looking at survives the round trip.
+    captured.length = 0;
+    globalThis.fetch = stub();
+    try {
+      await create({
+        sessionId: 'sess-new',
+        runtimeId: 'rti_test',
+        content: '你是什么模型',
+        cwd: '/tmp/x',
+        selections: {
+          model: 'provider_mm::MiniMax-M2.7-highspeed::medium',
+          permission: 'bypassPermissions',
+        },
+      });
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+    const effortScoped = captured[captured.length - 1];
+    expect(effortScoped.model).toBe('MiniMax-M2.7-highspeed');
+    expect(effortScoped.providerId).toBe('provider_mm');
   });
 });
 

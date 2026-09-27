@@ -53,13 +53,34 @@ const ZAI_PERMISSION_MODES = [
   { id: 'plan', displayName: '仅规划', description: '只读分析，不做修改' },
 ] as const;
 
-/** Effort levels offered for models that advertise reasoning support. */
-const ZAI_EFFORT_ITEMS = [
-  { id: 'none', selectionId: 'none', displayName: '关闭', default: false },
-  { id: 'low', selectionId: 'low', displayName: '低' },
-  { id: 'medium', selectionId: 'medium', displayName: '中', default: true },
-  { id: 'high', selectionId: 'high', displayName: '高' },
+/**
+ * Effort levels offered for models that advertise reasoning support.
+ *
+ * The selectionId is scoped to the model it belongs to. AA's clients treat
+ * the model slot as "model, or the reasoning item the user picked for that
+ * model" — `NewSessionRuntimeSelectionState.kt:202-209` returns
+ * `reasoning.selectionId` when a reasoning level is selected, and the
+ * official connector relies on that id encoding the model too
+ * (`runtimes/claude/domain/models.py::model_selection_from_selection_id`
+ * recovers `model_id` from an effort's selection_id). Bare effort names
+ * collide across every model, so the client would send `"medium"` with no
+ * way to tell which model the user was looking at.
+ */
+const ZAI_EFFORT_LEVELS = [
+  { id: 'none', displayName: '关闭', default: false },
+  { id: 'low', displayName: '低', default: false },
+  { id: 'medium', displayName: '中', default: true },
+  { id: 'high', displayName: '高', default: false },
 ] as const;
+
+function effortItemsFor(modelSelectionId: string): Record<string, unknown>[] {
+  return ZAI_EFFORT_LEVELS.map((e) => ({
+    id: e.id,
+    selectionId: encodeSelectionId(undefined, `${modelSelectionId}::${e.id}`),
+    displayName: e.displayName,
+    default: e.default,
+  }));
+}
 
 /** A provider profile as `/api/config/zai/provider` returns it. */
 interface AaProviderProfile {
@@ -97,10 +118,36 @@ function encodeSelectionId(profileId: string | undefined, modelId: string): stri
   return profileId ? `${profileId}::${modelId}` : modelId;
 }
 
-function decodeSelectionId(selectionId: string): { providerId?: string; model: string } {
-  const sep = selectionId.indexOf('::');
-  if (sep <= 0) return { model: selectionId };
-  return { providerId: selectionId.slice(0, sep), model: selectionId.slice(sep + 2) };
+/**
+ * Split a catalog selectionId back into its parts.
+ *
+ * Three shapes come back from the clients:
+ *   `providerId::model`           — a model
+ *   `providerId::model::effort`   — a reasoning item for that model; the
+ *                                   client sends this in the model slot
+ *   `model`                       — older client, no provider scoping
+ */
+function decodeSelectionId(selectionId: string): {
+  providerId?: string;
+  model: string;
+  effort?: string;
+} {
+  const parts = selectionId.split('::');
+  if (parts[0] === undefined) return { model: selectionId };
+  // A trailing segment that is a known effort level is the reasoning pick.
+  const looksLikeEffort = (v: string | undefined): boolean =>
+    v !== undefined && ZAI_EFFORT_LEVELS.some((e) => e.id === v);
+  if (parts.length >= 3 && looksLikeEffort(parts[2])) {
+    return {
+      providerId: parts.length >= 4 ? parts.slice(0, -2).join('::') : undefined,
+      model: parts[parts.length - 2]!,
+      effort: parts[parts.length - 1],
+    };
+  }
+  if (parts.length >= 2) {
+    return { providerId: parts.slice(0, -1).join('::'), model: parts[parts.length - 1]! };
+  }
+  return { model: parts[0] };
 }
 
 function findProviderIdForModel(
@@ -601,7 +648,7 @@ export class ReverseDispatch {
           default: false,
           // AA renders 推理强度 from `reasoningItems`; only offer it for
           // models that actually advertise reasoning support.
-          reasoningItems: supportsReasoning ? ZAI_EFFORT_ITEMS : [],
+          reasoningItems: supportsReasoning ? effortItemsFor(selectionId) : [],
           metadata: {
             providerId: p.id ?? null,
             providerName: p.name ?? null,
@@ -658,19 +705,20 @@ export class ReverseDispatch {
   /**
    * Turn AA's flat `selections` map into a child session patch.
    *
-   * `selections` is a single flat dict keyed by whatever the client last
-   * touched, and in practice the model slot sometimes carries a REASONING
-   * EFFORT value — real captures from the new-session screen:
+   * `selections` is keyed by SCOPE, and the model scope carries whichever
+   * sub-selection the user last touched — including a reasoning item, which
+   * is why our catalog scopes each effort's selectionId to its model
+   * (`providerId::model::effort`). Real captures before that fix, where the
+   * id was a bare effort name and the model was unrecoverable:
    *
-   *   {"model": "high",     "permission": "bypassPermissions"}
-   *   {"model": "medium",   "permission": "bypassPermissions"}
-   *   {"model": "provider_x::MiniMax-M3.1-Flash-Preview", "permission": …}
+   *   {"model": "high",   "permission": "bypassPermissions"}
+   *   {"model": "medium", "permission": "bypassPermissions"}
    *
    * Patching `model: "high"` verbatim is actively harmful: no provider
-   * profile lists it, so `findProfileForModel` misses, the call falls back
-   * to the default env endpoint, and the session quietly runs on the
-   * default model — the user picks a model and nothing changes. So a model
-   * value is only accepted when it actually resolves to a profile model.
+   * profile lists it, `findProfileForModel` misses, the call falls back to
+   * the default env endpoint, and the session quietly runs on the default
+   * model. So a model value is only applied when it resolves to a profile
+   * model — which is also the case that recovers the model from an effort id.
    */
   private async resolveSelectionsPatch(
     childPort: number,
@@ -679,15 +727,20 @@ export class ReverseDispatch {
     const patch: Record<string, unknown> = {};
     const selection = selections.model ?? selections['catalog.model'];
     if (typeof selection === 'string' && selection) {
-      // Catalog selectionIds are `providerId::model` so a model offered by
-      // two custom providers routes to the one the user actually picked;
-      // a bare id (older client) falls back to "first profile that has it".
-      const { providerId: encoded, model } = decodeSelectionId(selection);
+      const { providerId: encoded, model, effort } = decodeSelectionId(selection);
       const cfg = await this.readChildProviderConfig(childPort);
       const providerId = encoded ?? findProviderIdForModel(cfg, model);
       if (encoded || providerId) {
         patch.model = model;
         if (providerId) patch.providerId = providerId;
+        if (effort) {
+          // zai has no per-session reasoning-effort knob wired into the
+          // agent loop. The model is what matters here; the effort travels
+          // only in the log so a "why didn't 高 apply" question is answerable.
+          console.log(
+            `[aa.reverseDispatch] selection carries reasoning effort=${effort} for model=${model} (not forwarded)`,
+          );
+        }
       } else {
         console.warn(
           '[aa.reverseDispatch] selections.model is not a known model, ignoring:',
@@ -697,10 +750,6 @@ export class ReverseDispatch {
     }
     const permission = selections.permission ?? selections['catalog.permission'];
     if (typeof permission === 'string' && permission) patch.permissionMode = permission;
-    // zai has no per-session reasoning-effort knob wired into the
-    // agent loop, so `reasoning_effort` is accepted and recorded but
-    // deliberately not forwarded — silently dropping it beats inventing
-    // a field the runtime would reject.
     return patch;
   }
 
