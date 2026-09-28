@@ -774,7 +774,16 @@ export class ReverseDispatch {
     return (res?.body as { profiles?: AaProviderProfile[] }) ?? null;
   }
 
-  private async portFromRuntime(runtimeId: string): Promise<number | null> {
+  /**
+   * Resolve a child port from an AA runtime identifier.
+   *
+   * `requestCwd` is the workspace the client asked for (carried on
+   * `session.create`). When present it is matched against each mapping's
+   * `cwd` BEFORE the "any live port" fallback, so a multi-instance
+   * deployment routes to the instance that actually owns the workspace
+   * rather than to whichever child started most recently.
+   */
+  private async portFromRuntime(runtimeId: string, requestCwd?: string): Promise<number | null> {
     // 同 adoptAaaRuntimeId:静态 import 已在文件顶部,无需 require()。
     const reg = getRuntimeRegistry();
     if (!reg) {
@@ -782,7 +791,7 @@ export class ReverseDispatch {
       return null;
     }
     const mappings = reg.listAll();
-    console.log('[aa.reverseDispatch] portFromRuntime lookup', runtimeId, 'mappings:', mappings.map(m => ({ rid: m.runtimeId, port: m.port })));
+    console.log('[aa.reverseDispatch] portFromRuntime lookup', runtimeId, 'cwd:', requestCwd, 'mappings:', mappings.map(m => ({ rid: m.runtimeId, name: m.name, port: m.port, cwd: m.cwd })));
     // Exact match first. Probing liveness here too, not just on the
     // fallback path: runtime-map.json keeps entries for children that
     // exited without an instance.changed 'stopped' event, so an exact
@@ -800,11 +809,51 @@ export class ReverseDispatch {
         return m.port;
       }
     }
+    // Workspace match. `runtimeId` / `name` are AA-side identifiers and
+    // routinely fail to identify the instance (AA allocates opaque
+    // `rti_*` ids, and `session.create` may carry only the runtime *type*
+    // "codex"), but the client always knows which workspace it is talking
+    // about. Matching on cwd is the one signal that comes from the user.
+    //
+    // Semantics: the requested cwd may be a directory *inside* the
+    // instance's workspace, so prefix-match (not equality) is what we
+    // want — and when a nested instance shadows its parent, the LONGEST
+    // matching prefix is the most specific owner. Both sides go through
+    // canonicalCwd (expandTilde + realpath) because the mapping's cwd is
+    // whatever the user typed into the instance form, while the request's
+    // cwd may arrive with `~`, a trailing slash, or a symlinked parent.
+    if (requestCwd) {
+      const wanted = await this.canonicalCwd(requestCwd);
+      const matched: { port: number; base: string }[] = [];
+      for (const m of mappings) {
+        if (!m.cwd || m.port <= 0) continue;
+        if (!(await this.isPortListening(m.port))) continue;
+        const base = await this.canonicalCwd(m.cwd);
+        if (!base) continue;
+        const isOwner = wanted === base || wanted.startsWith(base.endsWith('/') ? base : `${base}/`);
+        if (isOwner) matched.push({ port: m.port, base });
+      }
+      if (matched.length > 0) {
+        const best = matched.reduce((a, b) => (b.base.length > a.base.length ? b : a));
+        console.log(
+          `[aa.reverseDispatch] portFromRuntime: cwd match "${wanted}" → port ${best.port} ` +
+          `(instance cwd "${best.base}")${matched.length > 1 ? ` [${matched.length} candidates, picked most specific]` : ''}`,
+        );
+        return best.port;
+      }
+      console.warn(
+        `[aa.reverseDispatch] portFromRuntime: no instance owns cwd "${wanted}" ` +
+        `(candidates: ${mappings.map((m) => m.cwd || '<empty>').join(', ')})`,
+      );
+    }
     // Fallback: AA sent a value we don't recognize as either an instance
-    // id or a registered name. This happens when AA passes the runtime
-    // type ("codex") and our local registry uses opaque instance ids. Just
-    // return any registered port — there's only one InstanceDefinition
-    // active in our deployment model.
+    // id or a registered name, and no mapping owns the requested cwd.
+    // This happens when AA passes the runtime type ("codex") and our local
+    // registry uses opaque instance ids. Return any registered port —
+    // correct for the single-instance deployment this fallback was written
+    // for, but a guess once more than one AA instance is registered, so
+    // say so loudly: the previous silent return is what made a
+    // runtimeId mismatch look like "AA routing is just flaky".
     if (mappings.length > 0) {
       // Filter out mappings whose port isn't actually listening — zai
       // may have been restarted, leaving the runtime-map.json entries
@@ -816,7 +865,12 @@ export class ReverseDispatch {
         }
       }
       if (live.length > 0) {
-        console.log('[aa.reverseDispatch] portFromRuntime: live ports', live);
+        console.warn(
+          `[aa.reverseDispatch] portFromRuntime: GUESSING port ${live[live.length - 1]} for ` +
+          `runtimeId="${runtimeId}"${requestCwd ? ` cwd="${requestCwd}"` : ''} — ` +
+          `no id/name/cwd match among ${mappings.length} mapping(s). ` +
+          `With >1 AA instance this may route to the wrong workspace.`,
+        );
         return live[live.length - 1]; // newest first (highest port = latest start)
       }
     }
@@ -1056,7 +1110,12 @@ export class ReverseDispatch {
     const runtimeId = p.runtimeId ?? p.runtimeOptions?.runtimeId ?? p.runtimeType;
     if (!runtimeId) throw new AaServerError('session.create: runtimeId required', 400, null);
 
-    const port = await this.portFromRuntime(runtimeId);
+    // Canonicalise the requested workspace ONCE and use it for both
+    // instance selection (a cwd-owning instance beats the any-live-port
+    // guess) and the child's session cwd.
+    const cwd = await this.canonicalCwd(p.cwd);
+
+    const port = await this.portFromRuntime(runtimeId, cwd);
     if (port === null) throw new AaServerError(`session.create: unknown runtime ${runtimeId}`, 404, null);
 
     // The opening message is a user turn too — publish it for the same
@@ -1076,7 +1135,6 @@ export class ReverseDispatch {
     // ride along with the CREATE: the child starts the first turn from this
     // same request, so a follow-up PATCH would race it and the first turn
     // would run on the default model.
-    const cwd = await this.canonicalCwd(p.cwd);
     const selectionPatch = p.selections
       ? await this.resolveSelectionsPatch(port, p.selections)
       : {};
