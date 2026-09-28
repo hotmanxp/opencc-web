@@ -70,13 +70,13 @@ export WEB_SEARCH_PROVIDER=auto
 
 ## Built-in Provider Timeout
 
-Built-in adapter providers use a 15s request timeout so `auto` mode can fall through when a backend stalls. Override it with:
+Built-in adapter providers use a 60s request timeout so `auto` mode can fall through when a backend stalls. Override it with:
 
 ```bash
 export WEB_SEARCH_TIMEOUT_SEC=30
 ```
 
-Invalid, fractional, zero, negative, or very large values fall back to 15s. Custom API providers keep their separate `WEB_CUSTOM_TIMEOUT_SEC` setting because self-hosted endpoints may need different budgets.
+Invalid, fractional, zero, negative, or very large values fall back to 60s. Custom API providers keep their separate `WEB_CUSTOM_TIMEOUT_SEC` setting because self-hosted endpoints may need different budgets.
 
 ## Provider Request & Response Formats
 
