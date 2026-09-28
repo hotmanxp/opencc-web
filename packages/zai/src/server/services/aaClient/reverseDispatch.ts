@@ -44,6 +44,7 @@ import { AaNetworkError, AaServerError } from './pairing.js';
 import { upsertTimelineItem } from './rpc.js';
 import { nextTimelineOrderSeq } from './timelineOrder.js';
 import { getNotice, listNoticesForSession, resolveNotice } from './noticeStore.js';
+import { logHttp } from '../accessLog.js';
 
 /** zai's real permission modes — what PATCH /api/agent/sessions/:id accepts. */
 const ZAI_PERMISSION_MODES = [
@@ -462,7 +463,7 @@ export class ReverseDispatch {
     await this.adoptAaaRuntimeId(runtimeId);
     const port = await this.portFromRuntime(runtimeId);
     if (port !== null) {
-      console.log(`[aa.reverseDispatch] runtime.start: ${runtimeId} (port=${port})`);
+      logHttp(`[aa.reverseDispatch] runtime.start: ${runtimeId} (port=${port})`);
     } else {
       console.warn(`[aa.reverseDispatch] runtime.start: ${runtimeId} — no live port (session.create will 404)`);
     }
@@ -791,7 +792,10 @@ export class ReverseDispatch {
       return null;
     }
     const mappings = reg.listAll();
-    console.log('[aa.reverseDispatch] portFromRuntime lookup', runtimeId, 'cwd:', requestCwd, 'mappings:', mappings.map(m => ({ rid: m.runtimeId, name: m.name, port: m.port, cwd: m.cwd })));
+    logHttp(
+      `[aa.reverseDispatch] portFromRuntime lookup ${runtimeId} cwd=${requestCwd} ` +
+        `mappings=${JSON.stringify(mappings.map(m => ({ rid: m.runtimeId, name: m.name, port: m.port, cwd: m.cwd })))}`,
+    );
     // Exact match first. Probing liveness here too, not just on the
     // fallback path: runtime-map.json keeps entries for children that
     // exited without an instance.changed 'stopped' event, so an exact
@@ -835,7 +839,7 @@ export class ReverseDispatch {
       }
       if (matched.length > 0) {
         const best = matched.reduce((a, b) => (b.base.length > a.base.length ? b : a));
-        console.log(
+        logHttp(
           `[aa.reverseDispatch] portFromRuntime: cwd match "${wanted}" → port ${best.port} ` +
           `(instance cwd "${best.base}")${matched.length > 1 ? ` [${matched.length} candidates, picked most specific]` : ''}`,
         );
@@ -1083,7 +1087,7 @@ export class ReverseDispatch {
   // ─── Handlers ────────────────────────────────────────────────────────
 
   private async handleSessionCreate(params: unknown): Promise<unknown> {
-    console.log('[aa.reverseDispatch] session.create params:', JSON.stringify(params));
+    logHttp(`[aa.reverseDispatch] session.create params: ${JSON.stringify(params)}`);
     // AA's SessionCreateParams (server/.../core/runtime_rpc_params.py):
     //   { sessionId, content, title?, cwd?, selections?, attachments?,
     //     clientMessageId?, runtimeOptions? }
@@ -1177,7 +1181,7 @@ export class ReverseDispatch {
       metadata: { title: p.title ?? '', cwd },
     });
 
-    console.log(`[aa.reverseDispatch] session.create: ${p.sessionId} → zai=${actualZaiSessionId} on port=${port}`);
+    logHttp(`[aa.reverseDispatch] session.create: ${p.sessionId} → zai=${actualZaiSessionId} on port=${port}`);
     return childResp;
   }
 
@@ -1498,7 +1502,7 @@ export class ReverseDispatch {
     for (const port of candidates) {
       if (await this.isPortListening(port)) {
         if (port !== ownerPort) {
-          console.log(
+          logHttp(
             `[aa.reverseDispatch] resolveChildPort: aa=${aaSessionId} ownerPort=${ownerPort} (stale) → livePort=${port}`,
           );
         }

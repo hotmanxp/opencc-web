@@ -45,6 +45,7 @@ import {
   initChildEventReporter,
   resetChildEventReporterForTests,
 } from './childEventReporter.js';
+import { logHttp } from '../accessLog.js';
 
 /**
  * Initialize the AA client. Returns a shutdown function or null when AA
@@ -132,7 +133,7 @@ export async function startAaRoot(config: import('./index.js').AaConfig): Promis
   // symmetric. We can't simply return null — the caller still holds a
   // reference and expects to be able to tear down.
   if (getAaConnection()) {
-    console.log('[aa.client] startAaRoot: connection already initialised, skipping double-init');
+    logHttp('[aa.client] startAaRoot: connection already initialised, skipping double-init');
     return existingShutdown();
   }
 
@@ -178,7 +179,7 @@ export async function startAaRoot(config: import('./index.js').AaConfig): Promis
   // they can be installed while the socket is still down.
   try {
     await conn.start();
-    console.log(
+    logHttp(
       `[aa.client] connected to ${config.serverUrl} as ${config.connectorId} (${config.connectorName})`,
     );
   } catch (err) {

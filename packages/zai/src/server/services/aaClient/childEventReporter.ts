@@ -19,6 +19,7 @@
  */
 import { eventBus } from '../eventBus.js';
 import { isAaEnabled } from './index.js';
+import { logHttp } from '../accessLog.js';
 
 const ROOT_URL = process.env.ZAI_AA_PARENT_URL ?? '';
 
@@ -40,7 +41,7 @@ export class ChildEventReporter {
       });
     });
     this.installed = true;
-    console.log('[aa.childReporter] installed; forwarding events to root');
+    logHttp('[aa.childReporter] installed; forwarding events to root');
   }
 
   stop(): void {

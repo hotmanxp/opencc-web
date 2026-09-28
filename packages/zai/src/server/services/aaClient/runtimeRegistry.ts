@@ -40,6 +40,7 @@ import {
   type RuntimeCapability,
 } from './rpc.js';
 import { isAaEnabled } from './index.js';
+import { logHttp } from '../accessLog.js';
 import type { RuntimeName } from './protocol.js';
 
 // ─── Persisted shape ─────────────────────────────────────────────────────
@@ -215,7 +216,7 @@ export class RuntimeRegistry {
     const mapping = this.mappings[portKey];
     if (!mapping) return false;
     if (mapping.runtimeId === trimmed) return false;
-    console.log(
+    logHttp(
       `[aa.runtimeRegistry] port ${port}: adopting server runtime_id ` +
         `${trimmed} (was ${mapping.runtimeId})`,
     );
