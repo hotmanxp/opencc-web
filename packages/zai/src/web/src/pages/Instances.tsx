@@ -90,6 +90,17 @@ export function effectiveState(s: InstanceSnapshot): InstanceState {
 }
 
 /**
+ * 实例子服务的打开地址:host 沿用当前页面所在的 host,只换端口。
+ * 写死 `localhost` 会让从局域网 IP 进来的人(手机 / 另一台电脑)点开
+ * 子实例时落到「他自己机器」的 127.0.0.1,表现为打不开。
+ * 协议固定 http:子实例本身就是明文端口,跟随外层协议反而会在
+ * https 反代下触发混合内容拦截。
+ */
+function instanceUrl(port: number): string {
+  return `http://${window.location.hostname}:${port}`
+}
+
+/**
  * 轮询 GET /api/instances/:id,直到实例进入 running(且端口已知)才 resolve;
  * 进入 down 立即 reject(带 lastError.message,供 message.error 展示);
  * 超时兜底 reject。每轮把最新 snapshot 经 `apply` 写进 store,让卡片状态
@@ -376,12 +387,12 @@ export default function Instances(): JSX.Element {
       // waitForRunningInstance 只在 state==='running' && port!==null 时返回,
       // 这里再做一次防御性检查以满足 TS 收窄 + 兜底(避免假设实现细节)。
       if (started.port == null) throw new Error('实例已启动但端口未知')
-      // LAN 实例绑 0.0.0.0 同时含 127.0.0.1,浏览器端 localhost:<port>
-      // 总可达。仅在实例确认 running 且端口可用之后才打开新标签页,
+      // LAN 实例绑 0.0.0.0 同时含 127.0.0.1,沿用当前页面的 host 总可达。
+      // 仅在实例确认 running 且端口可用之后才打开新标签页,
       // 避免用户在 supervisor ready IPC 等待期间看到一个 about:blank
       // 空白标签 — 这就是用户报告的"创建后默认弹出 about:blank 空白页"
       // bug 的真正来源。
-      window.open(`http://localhost:${started.port}`, '_blank', 'noopener,noreferrer')
+      window.open(instanceUrl(started.port), '_blank', 'noopener,noreferrer')
     } catch (err) {
       message.error(err instanceof Error ? err.message : '创建失败')
     }
@@ -435,7 +446,7 @@ export default function Instances(): JSX.Element {
           <Button
             size="small"
             icon={<ExternalLinkIcon />}
-            href={`http://localhost:${row.port}`}
+            href={instanceUrl(row.port)}
             target="_blank"
             rel="noreferrer"
           >

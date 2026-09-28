@@ -144,6 +144,28 @@ describe('Instances page', () => {
     expect(preOpen).toBeUndefined()
   })
 
+  it('opens sub-instances on the host the page was served from, not localhost', async () => {
+    // 从局域网 IP 进来的人(手机 / 另一台电脑)点「打开」时,子实例地址
+    // 必须用同一个 IP —— 写死 localhost 会落到「他自己机器」的 127.0.0.1。
+    // happy-dom 的 location 是只读的,replaceState 换 origin 会抛
+    // SecurityError,只能走 happyDOM.setURL。
+    const w = window as unknown as { happyDOM?: { setURL(url: string): void } }
+    const originalHref = window.location.href
+    w.happyDOM?.setURL('http://192.168.1.20:9987/instances')
+    try {
+      seed([running])
+      render(<MemoryRouter><Instances /></MemoryRouter>)
+      await waitFor(() => {
+        expect(screen.getByRole('link', { name: '打开' })).toHaveAttribute(
+          'href',
+          'http://192.168.1.20:9202',
+        )
+      })
+    } finally {
+      w.happyDOM?.setURL(originalHref)
+    }
+  })
+
   it('does not open a new tab and surfaces the error when the instance goes down', async () => {
     seed([])
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
