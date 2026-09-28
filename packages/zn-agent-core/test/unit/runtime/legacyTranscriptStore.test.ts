@@ -157,6 +157,77 @@ describe('TranscriptStore.patch — model/providerId persistence', () => {
 
 })
 
+// zai patch (2026-09-28): effort 的落盘 / 回读。
+//
+// 这三处曾经全是空的, 于是 effort 从 PATCH 进去后只改了内存: patchSession
+// 的落盘条件只认 model/providerId/mainAgent, findLatestSessionMeta 不取
+// effort, list() 也不投影。表现是「API 收下了、transcript 里没有、会话列表
+// 恒为 undefined」—— 用户设什么强度, 刷新即丢, 且上游拿不到 reasoning.effort。
+describe('TranscriptStore — effort persistence', () => {
+  const EFFORTS = ['xhigh', 'max', 'off', 'high'] as const
+
+  it('effort-only patch writes a session-meta line (落盘条件含 effort)', async () => {
+    const cwd = '/Users/test/effort-write'
+    const sessionId = 'sess-effort-write'
+    directWriteJsonl(dataDir, cwd, sessionId, [
+      { type: 'user', message: { role: 'user', content: 'x' }, uuid: 'u', timestamp: 1 },
+    ])
+    const store = new TranscriptStore(dataDir)
+    // 只带 effort —— model/providerId/mainAgent 全为 undefined, 旧的
+    // 落盘条件不成立。
+    await store.patch(sessionId, { effort: 'xhigh' }, { cwd })
+
+    const { messages } = await store.read(sessionId, { cwd })
+    const metaLines = messages.filter((m: any) => m?.type === 'session-meta')
+    expect(metaLines).toHaveLength(1)
+    expect(metaLines[0].effort).toBe('xhigh')
+  })
+
+  it.each(EFFORTS)('read() restores effort=%s after restart (REGISTRY empty)', async (effort) => {
+    const cwd = '/Users/test/effort-read'
+    const sessionId = `sess-effort-read-${effort}`
+    directWriteJsonl(dataDir, cwd, sessionId, [
+      { type: 'user', message: { role: 'user', content: 'hi' }, uuid: 'u1', timestamp: 1 },
+      { type: 'session-meta', effort, uuid: 'm1', timestamp: 3 },
+    ])
+
+    // 新实例 = 重启后 REGISTRY 为空
+    const reader = new TranscriptStore(dataDir)
+    const { meta } = await reader.read(sessionId, { cwd })
+    expect((meta as any).effort).toBe(effort)
+  })
+
+  it('list() projects effort so the picker can highlight it (sidebar after restart)', async () => {
+    const cwd = '/Users/test/effort-list'
+    const sessionId = 'sess-effort-list'
+    directWriteJsonl(dataDir, cwd, sessionId, [
+      { type: 'user', message: { role: 'user', content: 'hi' }, uuid: 'u1', timestamp: 1 },
+      { type: 'session-meta', model: 'MiniMax-M3.1-Flash-Preview', effort: 'max', uuid: 'm1', timestamp: 3 },
+    ])
+
+    const reader = new TranscriptStore(dataDir)
+    const list = await reader.list({ cwd })
+    const entry = list.find((s) => s.sessionId === sessionId)
+    expect((entry as any)?.effort).toBe('max')
+  })
+
+  it('takes the latest session-meta line when effort is patched repeatedly', async () => {
+    const cwd = '/Users/test/effort-latest'
+    const sessionId = 'sess-effort-latest'
+    directWriteJsonl(dataDir, cwd, sessionId, [
+      { type: 'user', message: { role: 'user', content: 'x' }, uuid: 'u', timestamp: 1 },
+    ])
+    const store = new TranscriptStore(dataDir)
+    for (const effort of EFFORTS) {
+      await store.patch(sessionId, { effort }, { cwd })
+    }
+
+    const reader = new TranscriptStore(dataDir)
+    const list = await reader.list({ cwd })
+    expect((list.find((s) => s.sessionId === sessionId) as any)?.effort).toBe('high')
+  })
+})
+
 describe('TranscriptStore.read — model/providerId rebuild from disk', () => {
   it('returns persisted model when REGISTRY is empty (post-restart scenario)', async () => {
     // 模拟"server 重启后,REGISTRY 空,但 JSONL 还在"。store.append()

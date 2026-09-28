@@ -352,3 +352,17 @@ export { wrapCliAgentToolAsOpencc } from './compat/tools/opencc/CliAgentTool.js'
 // dist/compat/commands/pluginCommands.d.ts, so the generated bundle-entry.d.ts
 // re-export target resolves without a DTS_PATH_REWRITE entry.
 export { getLoadedPluginCommands } from './compat/commands/pluginCommands.js'
+
+// zai patch (2026-09-28): per-model reasoning effort levels. zai's model
+// picker needs the *wire* vocabulary (low/medium/high/xhigh/max) declared per
+// integration catalog entry, which `utils/effort.ts::getAvailableEffortLevels`
+// does not expose — that returns opencc's internal EffortLevel and collapses
+// xhigh into max. MiniMax-M3.1-Flash-Preview ships five levels with max as the
+// default, so the four-level view silently both under-offers and mislabels.
+// Leaf export with no internal callers, so pin it explicitly (same tree-shaking
+// invariant as the pluginCommands block above).
+export {
+  getReasoningEffortLevelsForModel,
+  getDefaultReasoningEffortLevelForModel,
+} from './compat/model/reasoningEffortLevels.js'
+export type { ReasoningEffortLevel } from './compat/model/reasoningEffortLevels.js'

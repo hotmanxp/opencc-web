@@ -11,6 +11,10 @@ import { getDefaultMode } from '../services/permissionMode.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import { profilesToModelEntries } from '../../shared/profileProjection.js'
 import {
+  getReasoningEffortLevelsForModel,
+  getDefaultReasoningEffortLevelForModel,
+} from '@zn-ai/zn-agent-core'
+import {
   isValidAutoDreamEnabled,
   isValidAutoUpdate,
   isValidDefaultSplitScreen,
@@ -78,6 +82,38 @@ function buildAvailableModels(settings: ZaiSettings): ModelEntry[] {
   return [...userEntries, ...fromSavedProfiles, ...fromBuiltins]
 }
 
+/**
+ * zai patch (2026-09-28): attach per-model effort metadata to each entry.
+ *
+ * The levels are NOT uniform — MiniMax-M3.1-Flash-Preview ships five
+ * (low/medium/high/xhigh/max, default max), GLM on Z.AI accepts only
+ * low/high/max, most others the three classics. Resolved here, server-side,
+ * from the core's integration catalog so the browser can render the picker
+ * from plain data.
+ *
+ * Only reasoning-capable models get the fields: offering levels to a model
+ * that rejects `reasoning.effort` is a guaranteed 400. Entries whose
+ * capabilities are already present are merged in place; entries with none
+ * (a hand-added model in a custom profile) are left alone rather than
+ * conjured into existence, since `supportsReasoning` is what gates the UI.
+ */
+function attachEffortLevels(entries: ModelEntry[]): ModelEntry[] {
+  return entries.map((entry) => {
+    if (entry.capabilities?.supportsReasoning !== true) return entry
+    const levels = getReasoningEffortLevelsForModel(entry.model)
+    if (!levels.length) return entry
+    const defaultLevel = getDefaultReasoningEffortLevelForModel(entry.model)
+    return {
+      ...entry,
+      capabilities: {
+        ...entry.capabilities,
+        effortLevels: levels,
+        ...(defaultLevel ? { defaultEffortLevel: defaultLevel } : {}),
+      },
+    }
+  })
+}
+
 const router: IRouter = Router()
 
 /**
@@ -102,7 +138,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
     const env = settings.env ?? {}
     const { model: defaultModel } = resolveModel({ sessionModel: null, cwd: '' })
     const baseURL = env.ANTHROPIC_BASE_URL ?? null
-    const models = buildAvailableModels(settings)
+    const models = attachEffortLevels(buildAvailableModels(settings))
     const outputStyle = resolveOutputStyle(settings)
     const theme = resolveTheme(settings)
     const workMode = resolveWorkMode(settings)

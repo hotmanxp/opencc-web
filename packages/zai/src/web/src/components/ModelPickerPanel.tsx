@@ -4,6 +4,30 @@ import { CheckIcon, ChevronDownIcon, EyeIcon, WrenchIcon } from 'lucide-react';
 import { useAgentStoreOrCtx } from '../store/useAgentStore.js'
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
 import type { ModelEntry, ModelCapabilities } from '../../../shared/settings.js'
+import type { EffortLevel } from '../../../shared/types.js'
+
+/**
+ * zai patch (2026-09-28): 档位按模型解析, 不写死 —— MiniMax-M3.1-Flash-Preview
+ * 是五档(low/medium/high/xhigh/max, 默认 max), GLM on Z.AI 只收 low/high/max,
+ * 其余多为三档。写死四档既少给了五档模型, 又会给 GLM 塞一个必然 400 的 medium。
+ *
+ * 真相在服务端: `routes/agentSettings.ts` 用 core 的
+ * `getReasoningEffortLevelsForModel` 把 `capabilities.effortLevels` /
+ * `capabilities.defaultEffortLevel` 挂到每个 ModelEntry 上随 `/api/agent/settings`
+ * 下发。这里刻意**不**从 '@zn-ai/zn-agent-core' 取值 —— 那会把整个 vendor
+ * bundle(含可选原生依赖)拖进浏览器构建。
+ *
+ * 'off' 排第一 —— 它是「不下发 reasoning 字段」的显式选择, adaptive
+ * thinking 模型拒收显式 none(见 shared/types.ts 的 EffortLevel 注释)。
+ */
+const DEFAULT_EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high']
+
+const EFFORT_LEVELS_FOR = (
+  capabilities: ModelCapabilities | undefined,
+): readonly EffortLevel[] => {
+  const declared = capabilities?.effortLevels
+  return ['off', ...(declared?.length ? declared : DEFAULT_EFFORT_LEVELS)]
+}
 
 /**
  * Canonical (providerId, model) tuple key for a ModelEntry.
@@ -71,6 +95,7 @@ export default function ModelPickerPanel() {
   const availableModels = useAgentStoreOrCtx((s) => s.availableModels)
   const sessions = useAgentStoreOrCtx((s) => s.sessions)
   const patchSessionModel = useAgentStoreOrCtx((s) => s.patchSessionModel)
+  const patchSessionEffort = useAgentStoreOrCtx((s) => s.patchSessionEffort)
 
   const [searchQuery, setSearchQuery] = useState('')
   const searchInputRef = useRef<any>(null)
@@ -80,6 +105,50 @@ export default function ModelPickerPanel() {
     const sess = sessionId ? sessions.find((s) => s.sessionId === sessionId) : undefined
     return sess?.providerId
   }, [sessionId, sessions])
+
+  // 当前会话模型对应的那条 ModelEntry(优先 providerId 精确匹配)。
+  //
+  // capability 是「模型」的属性, 不是「哪个 profile 提供它」的属性, 所以
+  // 精确匹配命中的一条可能没有 capabilities —— 用户自建 profile 常常不带
+  // (实测 provider_1790414326756 就给 MiniMax-M3 标了 supportsReasoning,
+  // 却漏了同 profile 下的 MiniMax-M3.1-Flash-Preview), 而内置目录那份是齐的。
+  // 同一个模型名因此在 availableModels 里有好几条, 能力要从「任意一条声明了
+  // true / 有档位」的那条取, 否则控件会凭空消失。
+  const currentEntry = useMemo<ModelEntry | undefined>(() => {
+    if (!currentModel) return undefined
+    const sameName = availableModels.filter((m) => m.model === currentModel)
+    const exact = currentProviderId
+      ? sameName.find((m) => m.providerId === currentProviderId)
+      : undefined
+    const withReasoning = [...(exact ? [exact] : []), ...sameName].find(
+      (m) => m.capabilities?.supportsReasoning === true,
+    )
+    return withReasoning ?? exact ?? sameName[0]
+  }, [currentModel, currentProviderId, availableModels])
+
+  // 只给「声明支持推理」的模型显示强度控件 —— 对不支持的模型下发
+  // reasoning.effort 会被拒 (MiniMax 2013), 让用户去调一个必然失败的
+  // 档位没有意义。
+  const currentSupportsReasoning = currentEntry?.capabilities?.supportsReasoning === true
+
+  // 展示用的档位集合 + 选中的档位。
+  //
+  // 会话里存的 effort 未必属于当前模型支持的档位 —— 换模型时不会重写
+  // transcript.meta.effort, 典型场景是 medium → 切到只收 low/high/max 的
+  // GLM。此时若直接拿存储值去比对, 按钮全不亮, 用户看不出当前是什么。
+  // 所以展示层做一次钳制: 存储值不在集合内就退回「模型默认档 → off」。
+  // 只影响高亮, 不回写 store —— 真正发出去的是 modelCaller 白名单校验后的值。
+  const { effortLevels, currentEffort } = useMemo(() => {
+    const levels = EFFORT_LEVELS_FOR(currentEntry?.capabilities)
+    const sess = sessionId ? sessions.find((s) => s.sessionId === sessionId) : undefined
+    const stored = sess?.effort
+    if (stored && levels.includes(stored)) return { effortLevels: levels, currentEffort: stored }
+    const modelDefault = currentEntry?.capabilities?.defaultEffortLevel
+    if (modelDefault && levels.includes(modelDefault)) {
+      return { effortLevels: levels, currentEffort: modelDefault }
+    }
+    return { effortLevels: levels, currentEffort: 'off' as EffortLevel }
+  }, [currentEntry, sessionId, sessions])
 
   // Derived: recent models from sessions, recency-weighted, deduped, max 5.
   // zai patch: dedup key is (providerId, model) instead of model alone —
@@ -267,6 +336,39 @@ export default function ModelPickerPanel() {
         </div>
       ) : (
         <>
+          {/* zai patch (2026-09-28): 强度控件放在顶部而不是模型列表末尾。
+              放末尾时它要滚过 Recent + 全部分组才看得到, 而这是模型名旁边
+              唯一的调参入口 —— 打开弹框第一眼就该看见当前档位。 */}
+          {currentSupportsReasoning && sessionId && (
+            <div className="mb-2">
+              <div className="text-[10px] font-semibold text-[var(--text-dim-55)] uppercase tracking-wider mb-1.5">
+                Reasoning effort
+              </div>
+              <div className="flex gap-1">
+                {effortLevels.map((level) => {
+                  const active = level === currentEffort
+                  return (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => {
+                        if (level === currentEffort) return
+                        void patchSessionEffort(sessionId, level)
+                      }}
+                      className={
+                        active
+                          ? 'flex-1 text-[11px] py-1 rounded-[3px] border border-[#a78bfa] text-[#a78bfa] bg-[#a78bfa]/10'
+                          : 'flex-1 text-[11px] py-1 rounded-[3px] border border-[var(--border-mid)] text-[var(--text-dim-45)] hover:text-[var(--text-dim-65)] hover:border-[var(--border-strong)]'
+                      }
+                    >
+                      {level}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <Input
             ref={searchInputRef}
             value={searchQuery}

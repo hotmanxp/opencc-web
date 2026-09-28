@@ -26,11 +26,14 @@ import {
 } from './modelCapabilities.js'
 
 // zai patch (2026-09-28): effort levels we forward as `reasoning.effort`.
+// The five wire levels — `xhigh` and `max` included, both of which
+// MiniMax-M3.1-Flash-Preview advertises (zn-nova catalog entry; see
+// `compat/model/reasoningEffortLevels.ts` in @zn-ai/zn-agent-core).
 // `off` / `none` are deliberately absent: endpoints that require adaptive
 // thinking reject an explicit `none` (MiniMax returns 2013 for both
 // `thinking.type=disabled` and `reasoning.effort=none`). "Off" is expressed
 // by omitting the field entirely.
-const ZAI_REQUEST_EFFORT_LEVELS = ['low', 'medium', 'high'] as const
+const ZAI_REQUEST_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
 // 流式事件类型 — Anthropic SDK 返回的 RawMessageStreamEvent 本身就是 snake_case,
 // 这里只用作 yield 的最小契约, 实际结构由 queryEngine 的 streamAdapter 识别.

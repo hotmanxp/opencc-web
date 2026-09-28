@@ -2058,7 +2058,8 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
         : undefined
     // zai patch (2026-09-28): 会话级推理强度,随创建一起冻结,首轮就能用。
     const effort =
-      typeof body?.effort === 'string' && ['off', 'low', 'medium', 'high'].includes(body.effort)
+      typeof body?.effort === 'string'
+      && ['off', 'low', 'medium', 'high', 'xhigh', 'max'].includes(body.effort)
         ? body.effort
         : undefined
     // zai patch (2026-09-02, task-intake): 可选 mainAgent —— 建会话时直接
@@ -2202,7 +2203,9 @@ const PatchSessionRequest = z.object({
   providerId: z.string().min(1).max(256).optional(),
   // zai patch (2026-09-28): 会话级推理强度。'off' 是合法取值,表示
   // 不下发 reasoning 字段(adaptive thinking 模型拒收显式 none)。
-  effort: z.enum(['off', 'low', 'medium', 'high']).optional(),
+  // 这五个是 wire 档位的全集 — 单个模型支持哪几档由 core 的
+  // getReasoningEffortLevelsForModel 决定,这里只做语法校验。
+  effort: z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
   permissionMode: z.enum(EXTERNAL_PERMISSION_MODES as readonly [UserFacingPermissionMode, ...UserFacingPermissionMode[]]).optional(),
 });
 

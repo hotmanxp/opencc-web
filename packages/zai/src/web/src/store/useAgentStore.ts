@@ -4,6 +4,7 @@ import { createContext, useContext } from 'react'
 import type { ServerEvent } from '../../../shared/events.js'
 import type { FilePreviewPayload } from '../../../shared/fs.js'
 import type { ModelEntry } from '../../../shared/settings.js'
+import type { EffortLevel } from '../../../shared/types.js'
 import type { PermissionMode } from '@zn-ai/zn-agent-core'
 import type { BashTaskInfo, BackgroundTask, TaskStatus } from '../lib/taskApi.js'
 
@@ -246,6 +247,13 @@ interface AgentState {
      * absence as "no preference" and uses the legacy first-match path.
      */
     providerId?: string
+    /**
+     * zai patch (2026-09-28): 会话级推理强度 (from transcript.meta.effort),
+     * 在 model picker 底部设置。'off' 是显式的「不下发 reasoning 字段」,
+     * 与 undefined(从未设过)语义不同但对上游行为一致。详见 shared/types.ts
+     * 的 EffortLevel。
+     */
+    effort?: EffortLevel
     /** Per-session permission mode (default/acceptEdits/plan/bypassPermissions/dontAsk). */
     permissionMode?: PermissionMode
     cwd?: string
@@ -444,6 +452,12 @@ interface AgentState {
   patchSessionModel: (sid: string, payload: string | { model: string; providerId?: string }) => Promise<void>
   /** Optimistic PATCH /api/agent/sessions/:id + local session mode update. */
   patchSessionMode: (sid: string, mode: PermissionMode) => Promise<void>
+  /**
+   * zai patch (2026-09-28): 只改会话的推理强度,不碰 model/providerId。
+   * 独立于 patchSessionModel 是因为后端 PATCH 按「字段缺省即跳过」语义处理
+   * —— 借 patchSessionModel 发 {model} 会顺带重写 model,所以拆开。
+   */
+  patchSessionEffort: (sid: string, effort: EffortLevel) => Promise<void>
   sendMessage: (prompt: string) => Promise<void>
   stop: () => Promise<void>
   setAskAnswer: (questionText: string, label: string) => void
@@ -1223,6 +1237,18 @@ export function createAgentStore() {
         break
       }
     }
+    // zai patch (2026-09-28): 同样带上用户最近手动选过的推理强度。独立扫
+    // 一遍而不是复用上面 break 出来的那个 session —— 强度是逐会话设的,
+    // 最近改过强度的会话未必是最近改过模型的会话, 复用会让「我刚把强度调成
+    // high,开新会话又变回 medium」。没设过(effort 为 undefined)就不带字段,
+    // 服务端维持未设置。
+    let lastSelectedEffort: EffortLevel | null = null
+    for (const s of sortedSessions) {
+      if (s.effort) {
+        lastSelectedEffort = s.effort
+        break
+      }
+    }
     // 同步在 server 端建一条空 transcript, 让 sidebar 立即多一条
     // '新会话' 占位条目 (而不是等第一条消息发出去才出现).
     try {
@@ -1231,12 +1257,13 @@ export function createAgentStore() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
         body: JSON.stringify(
-          lastSelectedModel
-            ? {
-                model: lastSelectedModel,
-                ...(lastSelectedProviderId ? { providerId: lastSelectedProviderId } : {}),
-              }
-            : {},
+          // effort 与 model 各判各的: model 从没手动选过(lastSelectedModel
+          // 为 null)时, 用户仍可能设过强度, 不能让它跟着 model 一起被丢掉。
+          {
+            ...(lastSelectedModel ? { model: lastSelectedModel } : {}),
+            ...(lastSelectedProviderId ? { providerId: lastSelectedProviderId } : {}),
+            ...(lastSelectedEffort ? { effort: lastSelectedEffort } : {}),
+          },
         ),
       })
       if (!res.ok) return
@@ -1343,6 +1370,30 @@ export function createAgentStore() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
         body: JSON.stringify({ permissionMode: mode }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch {
+      // Revert the optimistic update.
+      set({ sessions: prev })
+    }
+  },
+
+  patchSessionEffort: async (sid, effort) => {
+    // Snapshot for revert on failure.
+    const prev = get().sessions
+    set({
+      sessions: prev.map((x) =>
+        x.sessionId === sid ? { ...x, effort } : x,
+      ),
+    })
+    try {
+      const token = localStorage.getItem('zai-token') || ''
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
+        // 只发 effort —— model / providerId 缺省时后端按「跳过」处理,
+        // 不会把已持久化的选择擦掉。
+        body: JSON.stringify({ effort }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch {

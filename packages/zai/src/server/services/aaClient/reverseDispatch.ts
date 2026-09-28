@@ -45,6 +45,10 @@ import { upsertTimelineItem } from './rpc.js';
 import { nextTimelineOrderSeq } from './timelineOrder.js';
 import { getNotice, listNoticesForSession, resolveNotice } from './noticeStore.js';
 import { logHttp } from '../accessLog.js';
+import {
+  getReasoningEffortLevelsForModel,
+  getDefaultReasoningEffortLevelForModel,
+} from '@zn-ai/zn-agent-core';
 
 /** zai's real permission modes — what PATCH /api/agent/sessions/:id accepts. */
 const ZAI_PERMISSION_MODES = [
@@ -55,7 +59,35 @@ const ZAI_PERMISSION_MODES = [
 ] as const;
 
 /**
- * Effort levels offered for models that advertise reasoning support.
+ * Effort level display names. The ids themselves are the five wire levels
+ * from `@zn-ai/zn-agent-core`'s `ReasoningEffortLevel`, plus zai's
+ * pseudo-level 'off'.
+ *
+ * 'off' is deliberately not 'none': endpoints that require adaptive
+ * thinking reject an explicit `reasoning.effort=none` (MiniMax answers
+ * 2013), so "off" has to mean "send nothing at all".
+ */
+const ZAI_EFFORT_DISPLAY_NAMES: Record<string, string> = {
+  off: '关闭',
+  low: '低',
+  medium: '中',
+  high: '高',
+  xhigh: '超高',
+  max: '最高',
+};
+
+/**
+ * Effort levels offered for a specific model.
+ *
+ * The wire levels are resolved per model from the core's integration catalog
+ * (`getReasoningEffortLevelsForModel`), because they are not uniform:
+ * MiniMax-M3.1-Flash-Preview ships five (low/medium/high/xhigh/max, default
+ * max), GLM on Z.AI takes only low/high/max, and most others take the three
+ * classics. A flat list would either under-offer the five-tier models or offer
+ * GLM a `medium` it answers 400 for.
+ *
+ * `off` is prepended rather than coming from the catalog — it means "omit the
+ * field", which is a zai-side concept, not an API level.
  *
  * The selectionId is scoped to the model it belongs to. AA's clients treat
  * the model slot as "model, or the reasoning item the user picked for that
@@ -67,23 +99,31 @@ const ZAI_PERMISSION_MODES = [
  * collide across every model, so the client would send `"medium"` with no
  * way to tell which model the user was looking at.
  */
-const ZAI_EFFORT_LEVELS = [
-  // 'off' is deliberately not 'none': endpoints that require adaptive
-  // thinking reject an explicit `reasoning.effort=none` (MiniMax answers
-  // 2013), so "off" has to mean "send nothing at all".
-  { id: 'off', displayName: '关闭', default: false },
-  { id: 'low', displayName: '低', default: false },
-  { id: 'medium', displayName: '中', default: true },
-  { id: 'high', displayName: '高', default: false },
-] as const;
-
-function effortItemsFor(modelSelectionId: string): Record<string, unknown>[] {
-  return ZAI_EFFORT_LEVELS.map((e) => ({
-    id: e.id,
-    selectionId: encodeSelectionId(undefined, `${modelSelectionId}::${e.id}`),
-    displayName: e.displayName,
-    default: e.default,
-  }));
+function effortItemsFor(modelSelectionId: string, modelId: string): Record<string, unknown>[] {
+  const levels = getReasoningEffortLevelsForModel(modelId);
+  const defaultLevel = getDefaultReasoningEffortLevelForModel(modelId);
+  // 'off' gets a selectionId like every other level: the client sends the
+  // picked reasoning item's id back in the MODEL slot, and decodeSelectionId
+  // recovers the effort from it — an item without one is unrecoverable.
+  const items: Record<string, unknown>[] = [
+    {
+      id: 'off',
+      selectionId: encodeSelectionId(undefined, `${modelSelectionId}::off`),
+      displayName: ZAI_EFFORT_DISPLAY_NAMES.off,
+      default: false,
+    },
+  ];
+  for (const level of levels) {
+    items.push({
+      id: level,
+      selectionId: encodeSelectionId(undefined, `${modelSelectionId}::${level}`),
+      displayName: ZAI_EFFORT_DISPLAY_NAMES[level] ?? level,
+      // Catalog default wins when declared (M3.1-Flash-Preview → max);
+      // otherwise 'medium', matching the previous flat list.
+      default: level === (defaultLevel ?? 'medium'),
+    });
+  }
+  return items;
 }
 
 /** A provider profile as `/api/config/zai/provider` returns it. */
@@ -139,8 +179,12 @@ function decodeSelectionId(selectionId: string): {
   const parts = selectionId.split('::');
   if (parts[0] === undefined) return { model: selectionId };
   // A trailing segment that is a known effort level is the reasoning pick.
+  // The key set of the display-name map IS the union of every level zai can
+  // round-trip (the five wire levels plus 'off'), so it doubles as the
+  // decoder's vocabulary — a decode must accept any level an encode could
+  // have produced, including 'xhigh' / 'max'.
   const looksLikeEffort = (v: string | undefined): boolean =>
-    v !== undefined && ZAI_EFFORT_LEVELS.some((e) => e.id === v);
+    v !== undefined && Object.hasOwn(ZAI_EFFORT_DISPLAY_NAMES, v);
   if (parts.length >= 3 && looksLikeEffort(parts[2])) {
     return {
       providerId: parts.length >= 4 ? parts.slice(0, -2).join('::') : undefined,
@@ -920,7 +964,7 @@ export class ReverseDispatch {
           default: false,
           // AA renders 推理强度 from `reasoningItems`; only offer it for
           // models that actually advertise reasoning support.
-          reasoningItems: supportsReasoning ? effortItemsFor(selectionId) : [],
+          reasoningItems: supportsReasoning ? effortItemsFor(selectionId, modelId) : [],
           metadata: {
             providerId: p.id ?? null,
             providerName: p.name ?? null,

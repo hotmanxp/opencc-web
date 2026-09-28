@@ -148,11 +148,57 @@ export interface ModelCapabilities {
   supportsFunctionCalling?: boolean;
   /** Supports extended thinking / reasoning_effort control. */
   supportsReasoning?: boolean;
+  /**
+   * zai patch (2026-09-28): the wire effort levels this model accepts.
+   * Per-model and NOT uniform — MiniMax-M3.1-Flash-Preview ships five
+   * (low/medium/high/xhigh/max), GLM on Z.AI takes only low/high/max, most
+   * others take the three classics. Populated server-side from the core's
+   * integration catalog (`routes/agentSettings.ts`) so the browser never
+   * has to import the vendor bundle to render the picker. Absent means
+   * "unknown", not "none".
+   */
+  effortLevels?: ReasoningEffortLevel[];
+  /**
+   * The model's own default effort level, when its catalog entry declares
+   * one (M3.1-Flash-Preview → max). Falls back to the API-side default
+   * otherwise.
+   */
+  defaultEffortLevel?: ReasoningEffortLevel;
   /** Supports server-side JSON mode / structured outputs. */
   supportsJsonMode?: boolean;
   /** Supports token-by-token streaming responses. */
   supportsStreaming?: boolean;
 }
+
+/**
+ * Session-scoped reasoning effort.
+ *
+ * `'off'` is the explicit "don't send the field at all" choice, not a
+ * level: endpoints with adaptive thinking reject an explicit `none`
+ * (MiniMax answers 2013 for both `thinking.type=disabled` and
+ * `reasoning.effort=none`), so "off" is expressed by omission — see
+ * `routes/agent.ts` prompt path and `services/modelCaller.ts`
+ * `ZAI_REQUEST_EFFORT_LEVELS`, which whitelists only the real levels.
+ *
+ * The five real levels are the *wire* vocabulary
+ * (`ReasoningEffortLevel` in @zn-ai/zn-agent-core), NOT opencc's internal
+ * `EffortLevel` — that one collapses `xhigh` into `max` and adds `ultracode`
+ * (a session orchestration mode). Which subset a given model actually accepts
+ * is per-model: ask `getReasoningEffortLevelsForModel` from the core rather
+ * than assuming this union. MiniMax-M3.1-Flash-Preview takes all five;
+ * GLM on Z.AI takes only low/high/max.
+ *
+ * Kept in lockstep with the `PatchSessionRequest` enum in `routes/agent.ts`.
+ */
+export type EffortLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/**
+ * The five wire levels a model can actually be sent, without zai's 'off'
+ * pseudo-level. Mirrors `ReasoningEffortLevel` from @zn-ai/zn-agent-core;
+ * redeclared rather than imported so `shared/` stays dependency-free (it is
+ * compiled into the browser bundle, which must not pull in the vendor core).
+ */
+export type ReasoningEffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface ProviderProfile {
   id?: string;
