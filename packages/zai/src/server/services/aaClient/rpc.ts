@@ -21,7 +21,7 @@
 import { z } from 'zod';
 import type { AaConnection } from './connection.js';
 import {
-  type RuntimeName,
+  type AaRuntimeType,
   type ServerToZaiMethod,
   type ZaiToServerNotification,
 } from './protocol.js';
@@ -38,7 +38,7 @@ import {
 export interface RuntimeCapability {
   capabilityId: string;
   scope: 'runtime' | 'session';
-  runtime?: RuntimeName;
+  runtime?: AaRuntimeType;
   sessionId?: string;
   supported: boolean;
   available: boolean;
@@ -71,7 +71,7 @@ export async function publishCapabilities(
  */
 export async function announceRuntimeInventory(
   conn: AaConnection,
-  runtime: RuntimeName,
+  runtime: AaRuntimeType,
   runtimeId: string,
   capabilities: RuntimeCapability[],
 ): Promise<void> {
@@ -94,7 +94,7 @@ export async function createSession(
   conn: AaConnection,
   input: {
     runtimeId: string;
-    runtime: RuntimeName;
+    runtime: AaRuntimeType;
     metadata?: Record<string, unknown>;
     externalSessionId?: string;
   },
@@ -158,7 +158,7 @@ export function upsertSessionMeta(
   payload: {
     runtimeId: string;
     sessionId: string;
-    runtime: RuntimeName;
+    runtime: AaRuntimeType;
     title?: string;
     cwd?: string;
     externalSessionId?: string;
@@ -208,7 +208,7 @@ export function upsertSessionState(
   payload: {
     runtimeId: string;
     sessionId: string;
-    runtime: RuntimeName;
+    runtime: AaRuntimeType;
     status?: string;
     selections?: Record<string, string | null>;
     error?: Record<string, unknown>;
@@ -247,7 +247,7 @@ export function upsertNotice(
   payload: {
     runtimeId: string;
     sessionId?: string;
-    runtime: RuntimeName;
+    runtime: AaRuntimeType;
     notice: Record<string, unknown>;
   },
 ): void {

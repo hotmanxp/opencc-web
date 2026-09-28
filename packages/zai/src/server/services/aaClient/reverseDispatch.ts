@@ -39,6 +39,7 @@ import type { AaConnection } from './connection.js';
 import { readAaConfig } from './config.js';
 import type { RuntimeRegistry } from './runtimeRegistry.js';
 import { getRuntimeRegistry, isAaaAssignedRuntimeId } from './runtimeRegistry.js';
+import { buildRuntimeTypeMap, isLegalRuntimeType, LEGACY_RUNTIME_TYPES } from './runtimeType.js';
 import { getSessionMap } from './sessionMap.js';
 import { AaNetworkError, AaServerError } from './pairing.js';
 import { upsertTimelineItem } from './rpc.js';
@@ -578,30 +579,35 @@ export class ReverseDispatch {
 
   private async handleRuntimeStart(params: unknown): Promise<unknown> {
     // AA's WS layer flattens RuntimeStartParams before sending over WS:
-    //   { runtime: 'codex', runtimeId: 'rti_...', name, config, configRevision }
+    //   { runtime: 'zai-opencc-web', runtimeId: 'rti_...', name, config, configRevision }
     // (built in server/agent_server/services/device_runtimes.py::_start_locked)
-    const p = (params ?? {}) as { runtimeId?: string; name?: string; config?: unknown };
+    const p = (params ?? {}) as {
+      runtimeId?: string;
+      runtime?: string;
+      name?: string;
+      config?: unknown;
+    };
     const runtimeId = p?.runtimeId;
     if (!runtimeId) {
       throw new AaServerError('runtime.start: missing runtimeId', 400, null);
     }
     // runtime.start is the AUTHORITATIVE source of the id AA assigned
     // this runtime, AND the only RPC that says *which* zai instance it
-    // means: `name` is the AA-side display name and `config` is what
-    // our configSchema asked the create form to collect (the workspace
-    // `cwd`). Resolve those to a child, starting it if needed, then
-    // bind the id to the port it came up on.
+    // means. With per-instance runtime types, `runtime` alone names the
+    // workspace exactly — `name` and `config.cwd` are only needed for the
+    // legacy single-type case, where the type identifies nothing.
     const wantCwd = readCwdFromConfig(p.config);
-    const port = await this.bindRuntimeStart(runtimeId, p.name, wantCwd);
+    const port = await this.bindRuntimeStart(runtimeId, p.name, wantCwd, p.runtime);
     if (port !== null) {
       logHttp(
         `[aa.reverseDispatch] runtime.start: ${runtimeId} → port ${port} ` +
-          `(name=${p.name ?? '<none>'} cwd=${wantCwd ?? '<none>'})`,
+          `(runtime=${p.runtime ?? '<none>'} name=${p.name ?? '<none>'} cwd=${wantCwd ?? '<none>'})`,
       );
     } else {
       console.warn(
         `[aa.reverseDispatch] runtime.start: ${runtimeId} — no zai instance matched ` +
-          `(name=${p.name ?? '<none>'} cwd=${wantCwd ?? '<none>'}); session.create will 404`,
+          `(runtime=${p.runtime ?? '<none>'} name=${p.name ?? '<none>'} cwd=${wantCwd ?? '<none>'}); ` +
+          `session.create will 404`,
       );
     }
     return { runtimeId, status: 'started' };
@@ -621,23 +627,26 @@ export class ReverseDispatch {
     runtimeId: string,
     instanceName?: string,
     wantCwd?: string,
+    runtimeType?: string,
   ): Promise<number | null> {
     // 1. Already bound — reconnect / reconcile re-sends runtime.start.
     const bound = this.registry.getMappingByRuntimeId(runtimeId);
     if (bound && bound.port > 0 && (await this.isPortListening(bound.port))) {
       return bound.port;
     }
-    // 2. Match against live mappings, guessing disabled.
+    // 2. Match against live mappings, guessing disabled. With a runtime type
+    //    this is an exact lookup — no cwd or name inference involved.
     const matched = await this.portFromRuntime(runtimeId, wantCwd, {
       allowGuess: false,
       instanceName,
+      ...(runtimeType ? { runtimeType } : {}),
     });
     if (matched !== null) {
       await this.adoptServerRuntimeId(matched, runtimeId);
       return matched;
     }
     // 3. Nothing live matches → start the instance this runtime means.
-    const started = await this.startInstanceForRuntime(instanceName, wantCwd);
+    const started = await this.startInstanceForRuntime(instanceName, wantCwd, runtimeType);
     if (started !== null) {
       await this.adoptServerRuntimeId(started, runtimeId);
       return started;
@@ -655,14 +664,15 @@ export class ReverseDispatch {
   private async startInstanceForRuntime(
     instanceName?: string,
     wantCwd?: string,
+    runtimeType?: string,
   ): Promise<number | null> {
     const candidates = (await this.instanceInventory()).filter((i) => i.aaVisible);
     if (candidates.length === 0) return null;
-    const target = await this.selectInstance(candidates, instanceName, wantCwd);
+    const target = await this.selectInstance(candidates, instanceName, wantCwd, runtimeType);
     if (!target) {
       console.warn(
         `[aa.reverseDispatch] no zai instance matches this AA runtime ` +
-          `(name=${instanceName ?? '<none>'} cwd=${wantCwd ?? '<none>'}; ` +
+          `(runtime=${runtimeType ?? '<none>'} name=${instanceName ?? '<none>'} cwd=${wantCwd ?? '<none>'}; ` +
           `candidates: ${candidates.map((c) => `${c.name}@${c.cwd}`).join(', ')})`,
       );
       return null;
@@ -672,7 +682,7 @@ export class ReverseDispatch {
     }
     logHttp(
       `[aa.reverseDispatch] starting zai instance "${target.name}" (${target.id}) on demand ` +
-        `for AA runtime name=${instanceName ?? '<none>'} cwd=${wantCwd ?? '<none>'}`,
+        `for AA runtime type=${runtimeType ?? '<none>'} name=${instanceName ?? '<none>'} cwd=${wantCwd ?? '<none>'}`,
     );
     const { getInstanceSupervisor } = await loadSupervisor();
     try {
@@ -690,17 +700,18 @@ export class ReverseDispatch {
   /**
    * Which instance does this AA runtime mean?
    *
-   * Ordered by how specific the signal is: an exact workspace beats a
-   * display-name match (names collide across projects, and the user is
-   * free to rename the AA-side instance anyway). The weixin profile is
-   * never auto-selected — that process answers to
-   * `settings.weixinBot` and holds the 微信 channel, not to whoever
-   * taps "Start" in a remote client.
+   * Ordered by how specific the signal is: the runtime type (exact — it is
+   * derived from that one instance) beats an exact workspace, which beats a
+   * display-name match (names collide across projects, and the user is free to
+   * rename the AA-side instance anyway). The weixin profile is never
+   * auto-selected — that process answers to `settings.weixinBot` and holds the
+   * 微信 channel, not to whoever taps "Start" in a remote client.
    */
   private async selectInstance(
     candidates: InstanceCandidate[],
     instanceName?: string,
     wantCwd?: string,
+    runtimeType?: string,
   ): Promise<InstanceCandidate | null> {
     const selectable = candidates.filter((i) => i.app !== 'weixin');
     // Only weixin-profile instances exist → nothing is startable on AA's
@@ -708,6 +719,17 @@ export class ReverseDispatch {
     // to whoever happened to tap "Start" remotely.
     if (selectable.length === 0) return null;
     const pool = selectable;
+    // Exact hit: AA named a runtime type we publish, and that type belongs
+    // to exactly one instance. No cwd inference, no name guessing.
+    if (runtimeType) {
+      const types = buildRuntimeTypeMap(pool.map((i) => ({ id: i.id, name: i.name, cwd: i.cwd })));
+      const match = pool.find((i) => types.get(i.id) === runtimeType);
+      if (match) return match;
+      // A type we don't publish (e.g. the legacy `codex`, or one for an
+      // instance that has since been deleted). Fall through to the weaker
+      // signals rather than failing outright — the user may still have a
+      // usable cwd or name on this request.
+    }
     if (wantCwd) {
       const wanted = await this.canonicalCwd(wantCwd);
       const bases = await Promise.all(pool.map((i) => this.canonicalCwd(i.cwd)));
@@ -816,7 +838,7 @@ export class ReverseDispatch {
    * the two views can't drift.
    */
   private async handleRuntimeCapabilities(params: unknown): Promise<unknown> {
-    const p = (params ?? {}) as { runtimeId?: string };
+    const p = (params ?? {}) as { runtimeId?: string; runtime?: string };
     const runtimeId = p?.runtimeId;
     if (!runtimeId) {
       throw new AaServerError('runtime.capabilities: missing runtimeId', 400, null);
@@ -831,12 +853,18 @@ export class ReverseDispatch {
     // `capabilities` key made the server raise invalid_runtime_capabilities
     // (HTTP 502), which the app surfaces verbatim.
     await this.adoptIfUnambiguous(runtimeId);
+    const runtimeType = await this.resolveRuntimeType(p, runtimeId);
     return {
       runtimeId,
-      runtime: 'codex',
+      runtime: runtimeType,
       capabilitySet: {
         revision: 0,
-        capabilities: this.registry.capabilitiesForRuntime(),
+        // Stamped with THIS runtime's type: the server filters stored
+        // capabilities by `capability.runtime != session.runtime`
+        // (`SessionCapabilityIndex.__init__`), so answering with another
+        // instance's type (or the legacy one) makes every capability
+        // unresolvable — the client then refuses to send messages.
+        capabilities: this.registry.capabilitiesForRuntime(runtimeType),
       },
     };
   }
@@ -851,11 +879,12 @@ export class ReverseDispatch {
    * the effort list, which is what `catalog.effort` advertises.
    */
   private async handleRuntimeModelCatalog(params: unknown): Promise<unknown> {
-    const p = (params ?? {}) as { runtimeId?: string };
+    const p = (params ?? {}) as { runtimeId?: string; runtime?: string };
     if (p?.runtimeId) await this.adoptIfUnambiguous(p.runtimeId);
-    const port = await this.portForRuntime(p?.runtimeId);
+    const runtimeType = await this.resolveRuntimeType(p, p?.runtimeId);
+    const port = await this.portForRuntime(p?.runtimeId, runtimeType);
     const models = port === null ? [] : await this.readChildModels(port);
-    return { catalog: { runtime: 'codex', revision: 0, models } };
+    return { catalog: { runtime: runtimeType, revision: 0, models } };
   }
 
   /**
@@ -866,11 +895,12 @@ export class ReverseDispatch {
    * already accepts for `permissionMode`.
    */
   private async handleRuntimePermissionCatalog(params: unknown): Promise<unknown> {
-    const p = (params ?? {}) as { runtimeId?: string };
+    const p = (params ?? {}) as { runtimeId?: string; runtime?: string };
     if (p?.runtimeId) await this.adoptIfUnambiguous(p.runtimeId);
+    const runtimeType = await this.resolveRuntimeType(p, p?.runtimeId);
     return {
       catalog: {
-        runtime: 'codex',
+        runtime: runtimeType,
         revision: 0,
         permissions: ZAI_PERMISSION_MODES.map((m, i) => ({
           id: m.id,
@@ -883,29 +913,91 @@ export class ReverseDispatch {
     };
   }
 
-  private async portForRuntime(runtimeId: string | undefined): Promise<number | null> {
+  /**
+   * The runtime type to answer with on a `runtime.*` RPC.
+   *
+   * AA sends `runtime` on essentially every request
+   * (`device_runtimes.py::_start_locked`, `connector_runtimes.py` for the
+   * catalog endpoints), so the rule is: echo what AA sent, and only derive
+   * when it didn't. Re-deriving would risk answering about a different
+   * instance than the one being asked about.
+   *
+   * "Only when it didn't" means: not sent at all, OR not a type AA would
+   * itself accept. An illegal value echoed straight back comes straight
+   * back as a validation failure on our response, which the client reads as
+   * "this runtime has no models / no permissions" — pointing at the wrong
+   * problem entirely. Falling through to the registry's own type still
+   * answers about the right runtime.
+   *
+   * The type-equal legacy convention (AA passing a type where an instance
+   * id belongs) needs no separate branch: a bare type like `codex` is
+   * itself legal, and a mapping whose `runtimeId` IS a type is resolved by
+   * the registry lookup below.
+   */
+  private async resolveRuntimeType(
+    p: { runtime?: string },
+    runtimeId?: string,
+    opts: { port?: number } = {},
+  ): Promise<string> {
+    const sent = p?.runtime;
+    if (sent && isLegalRuntimeType(sent)) return sent;
+    if (sent) {
+      console.warn(
+        `[aa.reverseDispatch] AA sent an illegal runtime type, falling back to the ` +
+          `registered one: ${JSON.stringify(sent.slice(0, 80))}`,
+      );
+    }
+    const fromRegistry = this.registry.runtimeTypeForRuntimeId(runtimeId);
+    if (fromRegistry) return fromRegistry;
+    if (opts.port) {
+      const fromPort = this.registry.runtimeTypeForPort(opts.port);
+      if (fromPort) return fromPort;
+    }
+    return this.registry.defaultRuntimeType();
+  }
+
+  private async portForRuntime(
+    runtimeId: string | undefined,
+    runtimeType?: string,
+  ): Promise<number | null> {
     if (runtimeId) {
-      const port = await this.portFromRuntime(runtimeId);
+      const port = await this.portFromRuntime(runtimeId, undefined, { allowGuess: false, runtimeType });
       // Probe the listener even on a direct hit. The registry survives
       // restarts (runtime-map.json on disk), so a mapping can name a port
       // whose child is long gone — and a dead port reads as "no models"
       // (`模型: 不可用`) rather than as an error.
       if (port !== null && (await this.isPortListening(port))) return port;
     }
-    // Fall back to the single live child.
+    // No exact hit, but we may still know WHICH runtime was asked about.
+    // Prefer a live mapping published under that type over any live child:
+    // with several instances up, "the last registered port" is arbitrary,
+    // and the catalog would then list another workspace's models. Only when
+    // the type matches nothing live do we widen to "any live child" — a
+    // guess, but a better one than an empty model picker.
     const mappings = this.registry.listAll();
+    const live = async (m: (typeof mappings)[number]): Promise<boolean> =>
+      m.port > 0 && (await this.isPortListening(m.port));
+
+    if (runtimeType) {
+      for (const m of [...mappings].reverse()) {
+        if (m.runtimeType === runtimeType && (await live(m))) return m.port;
+      }      console.warn(
+        `[aa.reverseDispatch] portForRuntime: no live child under runtime type ` +
+          `"${runtimeType}" — answering from an arbitrary live instance instead`,
+      );
+    }
     for (const m of [...mappings].reverse()) {
-      if (m.port > 0 && (await this.isPortListening(m.port))) return m.port;
+      if (await live(m)) return m.port;
     }
     // Nothing is listening: bring the matching instance back before
     // answering, so the model picker isn't permanently empty. Same
     // self-heal the 微信 channel does via `supervisor.startInstance`,
     // except the instance is now chosen from the instance definitions
-    // (bound runtime id first, then a deterministic default) rather than
+    // (runtime type first, then the bound runtime id) rather than
     // "whatever the last registry entry happened to be".
-    await this.startInstanceForRuntime(await this.instanceNameForRuntime(runtimeId));
+    await this.startInstanceForRuntime(await this.instanceNameForRuntime(runtimeId), undefined, runtimeType);
     for (const m of [...mappings].reverse()) {
-      if (m.port > 0 && (await this.isPortListening(m.port))) return m.port;
+      if (await live(m)) return m.port;
     }
     return null;
   }
@@ -1094,7 +1186,11 @@ export class ReverseDispatch {
   private async portFromRuntime(
     runtimeId: string,
     requestCwd?: string,
-    opts: { allowGuess?: 'if-single-live' | false; instanceName?: string } = {},
+    opts: {
+      allowGuess?: 'if-single-live' | false;
+      instanceName?: string;
+      runtimeType?: string;
+    } = {},
   ): Promise<number | null> {
     const allowGuess = opts.allowGuess !== false;
     // 同 adoptAaaRuntimeId:静态 import 已在文件顶部,无需 require()。
@@ -1106,8 +1202,8 @@ export class ReverseDispatch {
     const mappings = reg.listAll();
     logHttp(
       `[aa.reverseDispatch] portFromRuntime lookup ${runtimeId} cwd=${requestCwd} ` +
-        `name=${opts.instanceName ?? '<none>'} ` +
-        `mappings=${JSON.stringify(mappings.map(m => ({ rid: m.runtimeId, name: m.name, port: m.port, cwd: m.cwd })))}`,
+        `name=${opts.instanceName ?? '<none>'} type=${opts.runtimeType ?? '<none>'} ` +
+        `mappings=${JSON.stringify(mappings.map(m => ({ rid: m.runtimeId, name: m.name, port: m.port, cwd: m.cwd, type: m.runtimeType })))}`,
     );
     // Exact match first. Probing liveness here too, not just on the
     // fallback path: runtime-map.json keeps entries for children that
@@ -1133,6 +1229,35 @@ export class ReverseDispatch {
       );
       return null;
     }
+    // Runtime type match — the strongest signal now that each instance has
+    // its own type. AA's legacy "type-equal" convention lets it pass a
+    // runtimeId that IS the runtime type, and `runtime.*` RPCs carry the
+    // type separately; either way the type names exactly one workspace.
+    // Tried before the name fallback because it is exact, whereas names
+    // collide across projects.
+    if (opts.runtimeType) {
+      const byType: number[] = [];
+      for (const m of mappings) {
+        if (m.runtimeType !== opts.runtimeType) continue;
+        if (m.port > 0 && (await this.isPortListening(m.port))) byType.push(m.port);
+      }
+      if (byType.length === 1) return byType[0]!;
+      if (byType.length > 1) {
+        console.warn(
+          `[aa.reverseDispatch] portFromRuntime: runtimeType="${opts.runtimeType}" matches ` +
+            `${byType.length} live ports (${byType.join(', ')}) — refusing to guess.`,
+        );
+        return null;
+      }
+    }
+    // The id may itself BE the type (type-equal legacy), so try matching the
+    // id against registered runtime types before falling back to names.
+    if (isLegalRuntimeType(runtimeId)) {
+      for (const m of mappings) {
+        if (m.runtimeType !== runtimeId) continue;
+        if (m.port > 0 && (await this.isPortListening(m.port))) return m.port;
+      }
+    }
     // AA's legacy "type-equal" convention allows runtimeId == runtimeType.
     // Match by instance name too (sometimes AA passes the name), and by
     // the name it sent alongside the id in `runtime.start`.
@@ -1144,9 +1269,10 @@ export class ReverseDispatch {
     }
     // Workspace match. `runtimeId` / `name` are AA-side identifiers and
     // routinely fail to identify the instance (AA allocates opaque
-    // `rti_*` ids, and `session.create` may carry only the runtime *type*
-    // "codex"), but the client always knows which workspace it is talking
-    // about. Matching on cwd is the one signal that comes from the user.
+    // `rti_*` ids, and a session created against a runtime AA has since
+    // deleted carries a type-equal id), but the client always knows which
+    // workspace it is talking about. Matching on cwd is the one signal that
+    // comes from the user.
     //
     // Semantics: the requested cwd may be a directory *inside* the
     // instance's workspace, so prefix-match (not equality) is what we
@@ -1437,6 +1563,10 @@ export class ReverseDispatch {
       title?: string;
       cwd?: string;
       runtimeId?: string;
+      // AA sends the runtime TYPE as `runtime` (see
+      // services/session_run.py::_request_runtime_id); `runtimeType` is
+      // kept only because older payloads used that spelling.
+      runtime?: string;
       runtimeType?: string;
       selections?: Record<string, string | null>;
       runtimeOptions?: { runtimeId?: string; runtimeType?: string; name?: string };
@@ -1444,11 +1574,13 @@ export class ReverseDispatch {
     if (!p.sessionId) throw new AaServerError('session.create: sessionId required', 400, null);
     if (!p.content) throw new AaServerError('session.create: content required', 400, null);
 
+    const runtimeType = p.runtime ?? p.runtimeType ?? p.runtimeOptions?.runtimeType;
+
     // Prefer top-level runtimeId (AA's flattened WS payload), then
-    // runtimeOptions.runtimeId (legacy fallback), then runtimeType as
+    // runtimeOptions.runtimeId (legacy fallback), then the runtime type as
     // last resort (the legacy type-equal convention where instance ==
     // type).
-    const runtimeId = p.runtimeId ?? p.runtimeOptions?.runtimeId ?? p.runtimeType;
+    const runtimeId = p.runtimeId ?? p.runtimeOptions?.runtimeId ?? runtimeType;
     if (!runtimeId) throw new AaServerError('session.create: runtimeId required', 400, null);
 
     // Canonicalise the requested workspace ONCE and use it for both
@@ -1456,7 +1588,9 @@ export class ReverseDispatch {
     // guess) and the child's session cwd.
     const cwd = await this.canonicalCwd(p.cwd);
 
-    let port = await this.portFromRuntime(runtimeId, cwd);
+    let port = await this.portFromRuntime(runtimeId, cwd, {
+      ...(runtimeType ? { runtimeType } : {}),
+    });
     if (port === null) {
       // Nothing live owns that workspace — start it on demand rather than
       // failing the whole create. AA clients hit this whenever the user
@@ -1464,20 +1598,29 @@ export class ReverseDispatch {
       const started = await this.startInstanceForRuntime(
         await this.instanceNameForRuntime(runtimeId),
         cwd || undefined,
+        runtimeType,
       );
       if (started !== null) {
         // Re-resolve through the registry so the id → port binding is the
         // one every later RPC will use; fall back to the port we just
         // started if the child's registration event hasn't landed yet.
-        port = (await this.portFromRuntime(runtimeId, cwd)) ?? started;
+        port = (await this.portFromRuntime(runtimeId, cwd, {
+          ...(runtimeType ? { runtimeType } : {}),
+        })) ?? started;
       }
     }
     if (port === null) throw new AaServerError(`session.create: unknown runtime ${runtimeId}`, 404, null);
+
+    // The runtime type this session is bound to. Everything published for
+    // it (timeline items, state, notices) must carry the same value or AA
+    // rejects the ingest with `session_runtime_mismatch`.
+    const sessionRuntimeType = runtimeType ?? this.registry.runtimeTypeForPort(port) ?? this.registry.defaultRuntimeType();
 
     // The opening message is a user turn too — publish it for the same
     // reason as handleSendMessage (supersede the client's optimistic item).
     this.pushUserMessage(
       this.runtimeIdForPort(port),
+      sessionRuntimeType,
       p.sessionId,
       p.content,
       (params as { clientMessageId?: string } | undefined)?.clientMessageId,
@@ -1500,7 +1643,7 @@ export class ReverseDispatch {
       title: p.title ?? '',
       cwd,
       runtimeId,
-      runtimeType: p.runtimeType ?? p.runtimeOptions?.runtimeType ?? 'codex',
+      runtimeType: sessionRuntimeType,
       ...(selectionPatch.model ? { model: selectionPatch.model as string } : {}),
       ...(selectionPatch.providerId ? { providerId: selectionPatch.providerId as string } : {}),
       ...(selectionPatch.permissionMode
@@ -1562,7 +1705,13 @@ export class ReverseDispatch {
     // push only assistant/system/tool items, so the optimistic entry
     // was never superseded and stayed `optimistic && running` forever —
     // which is what kept the "zai-code 正在处理" spinner up.
-    this.pushUserMessage(this.runtimeIdForPort(childPort), p.sessionId, p.content, p.clientMessageId);
+    this.pushUserMessage(
+      this.runtimeIdForPort(childPort),
+      this.registry.runtimeTypeForPort(childPort) ?? this.registry.defaultRuntimeType(),
+      p.sessionId,
+      p.content,
+      p.clientMessageId,
+    );
     const contentBlocks = await this.attachmentContentBlocks(p.attachments);
     return forwardToChild(childPort, 'sendMessage', zaiSid, {
       content: p.content,
@@ -1640,6 +1789,7 @@ export class ReverseDispatch {
    */
   private pushUserMessage(
     runtimeId: string,
+    runtimeType: string,
     aaSessionId: string,
     content: string,
     clientMessageId: string | undefined,
@@ -1659,7 +1809,7 @@ export class ReverseDispatch {
         status: 'done',
         content: { kind: 'text', text: content },
         source: {
-          runtime: 'codex',
+          runtime: runtimeType,
           itemType: 'user_message',
           ...(clientMessageId ? { clientMessageId } : {}),
         },
@@ -1738,47 +1888,99 @@ export class ReverseDispatch {
   /**
    * Build the RuntimeTypeDescriptor list for runtime.discover.
    *
-   * Still ONE descriptor — AA's `RuntimeDiscoveryResponse` validates
-   * `runtimeTypes` for uniqueness (`_validate_unique_runtime_types`,
-   * server/agent_server/core/device_runtime.py), so per-instance
-   * descriptors of the same `runtimeType` are rejected outright. The
-   * many-instances case is expressed through the descriptor's policy
-   * instead:
+   * ONE descriptor per AA-visible zai instance, each with its own
+   * `runtimeType` (`zai-opencc-web`, `zai-lan-agent`, …).
    *
-   *   - `instancePolicy: 'multiple'` + `maxInstances: null` (unlimited).
-   *     Previously 'single'/1, which capped the server at one instance
-   *     and is why the server could only ever mint one opaque `rti_*` —
-   *     with N zai instances behind it, that id could not identify
-   *     which one, and every downstream lookup degraded to "guess a
-   *     live port".
-   *   - `configSchema` declaring `cwd`. The instance-create form in AA
-   *     renders these properties, and whatever it collects comes back
-   *     to us on `runtime.start` as `config` — that is the ONE signal
-   *     that names the workspace the user picked, which is what
-   *     `runtime.start` resolves against the instance definitions and
-   *     starts on demand.
-   *   - `metadata.instances` — the instance inventory from the
-   *     supervisor. Free-form by schema (`Mapping[str, Any]`), so it is
-   *     informational for clients that surface it, and it is the same
-   *     list `runtime.start` selects from.
+   * AA rejects duplicate types within one response
+   * (`_validate_unique_runtime_types`, core/device_runtime.py), but it has
+   * no opinion on distinct ones — and `validate_runtime_type` accepts any
+   * normalised key, so a per-instance type is legal. That is what makes the
+   * AA Web list self-describing: each entry is one workspace, named after it,
+   * instead of N copies of "zai (Codex-compatible)" that only a typed cwd
+   * could tell apart.
+   *
+   * Per descriptor:
+   *   - `instancePolicy: 'single'` + `maxInstances: 1` — one AA runtime
+   *     instance per workspace. Sessions are orthogonal: several AA sessions
+   *     can share one runtime instance, so this does not limit how many
+   *     conversations a workspace can hold.
+   *   - `configSchema` with `defaults.cwd` pre-filled — the create form
+   *     renders the properties and seeds them from `defaults`
+   *     (`runtimeCreationDefaults`), so the workspace is already correct and
+   *     the user only overrides it deliberately.
+   *   - the schema must stay non-null: AA Web's
+   *     `runtimeTypeCanCreateInstance` filters types with `schema === null`
+   *     out of the "可添加" list entirely.
+   *
+   * A legacy `codex` descriptor is appended (unavailable) so runtime
+   * instances AA created before this change remain present in AA's
+   * `runtime_types` table — dropping it flips `present=0` via
+   * `replace_connector_runtime_types` and makes those instances
+   * unstartable.
+   *
+   * TYPE SOURCE OF TRUTH: for an instance the registry has already
+   * registered, the descriptor reports the type PERSISTED on its mapping,
+   * not a freshly derived one. The registry stamps that same persisted
+   * value on every outgoing notification, so the two must agree by
+   * construction — deriving here would let them diverge on an `aa: false`
+   * name-clashing sibling or on a rename, and AA would reject the whole
+   * ingest with `session_runtime_mismatch`. Derivation is the fallback for
+   * instances that have not been registered yet.
    */
   private async runtimeDescriptors(): Promise<unknown[]> {
     const mappings = this.registry.listAll();
     const instances = await this.instanceInventory();
     const aaVisible = instances.filter((i) => i.aaVisible);
-    return [
-      {
-        runtimeType: 'codex',
-        displayName: 'zai (Codex-compatible)',
-        description: 'Local zai instance; one AA runtime instance per zai InstanceDefinition.',
-        available: aaVisible.length > 0,
-        // `reason` is required by AA's RuntimeTypeDescriptor (no default,
-        // min_length=1). pydantic rejects undefined / null / empty-string.
-        reason: aaVisible.length > 0
-          ? `${aaVisible.length} zai instance(s) available to AA`
-          : 'no AA-visible InstanceDefinitions',
-        recommended: true,
-        recommendationRank: 0,
+
+    // Fallback derivation for instances the registry hasn't registered yet.
+    // It is NOT the source of truth for registered ones — see the per-descriptor
+    // lookup below.
+    const types = buildRuntimeTypeMap(aaVisible.map((i) => ({ id: i.id, name: i.name, cwd: i.cwd })));
+
+    // AA rejects the whole response past `max_length=64` on runtimeTypes.
+    // Far above any realistic instance count, but a truncated response is
+    // still a valid one; log loudly so the shortfall is never silent.
+    const MAX_RUNTIME_TYPES = 64;
+    const roomForLegacy = MAX_RUNTIME_TYPES - LEGACY_RUNTIME_TYPES.length;
+    const described = aaVisible.length > roomForLegacy ? aaVisible.slice(0, roomForLegacy) : aaVisible;
+    if (described.length < aaVisible.length) {
+      console.warn(
+        `[aa.reverseDispatch] runtime.discover: ${aaVisible.length} AA-visible instances exceeds AA's ` +
+          `max_length=${MAX_RUNTIME_TYPES} on runtimeTypes — describing the first ${described.length}`,
+      );
+    }
+
+    const descriptors = described.map((inst) => {
+      // The registry's persisted type wins over a fresh derivation. AA
+      // stores runtime types in its own database, so a type that changes
+      // orphans every runtime instance created under the old name — and,
+      // worse, the registry stamps the PERSISTED type on every outgoing
+      // notification, so a discover-time type that disagrees with the
+      // mapping makes AA reject the whole ingest
+      // (`session_runtime_mismatch`), which surfaces as a session stuck
+      // "running" / "当前运行时状态下不可发送消息".
+      //
+      // Re-deriving here would drift on two real inputs:
+      //   - an `aa: false` sibling sharing this instance's name, whose id
+      //     sorts first, claims the bare slug and pushes us onto a
+      //     disambiguated one the mapping never got;
+      //   - a renamed instance keeps its old type in the mapping (correct
+      //     — AA already knows it) while a fresh derivation flips to the
+      //     new name.
+      // Derivation is only the fallback for instances not yet registered.
+      const runtimeType = this.registry.getMappingByInstanceId(inst.id)?.runtimeType ?? types.get(inst.id)!;
+      return {
+        runtimeType,
+        // The instance's own name: it is what the user recognises, and AA
+        // prefills the runtime instance name from it
+        // (`suggestedRuntimeInstanceName`). Deliberately NOT prefixed with
+        // "zai" — that would leak into every created instance's name.
+        displayName: inst.name,
+        description: `zai instance at ${inst.cwd}`,
+        available: true,
+        reason: `workspace ${inst.cwd}`,
+        recommended: false,
+        recommendationRank: null,
         implementationType: 'zai-local',
         capabilities: {
           session_send_message: true,
@@ -1789,27 +1991,13 @@ export class ReverseDispatch {
         },
         metadata: {
           zaiVersion: '0.12.0',
-          activeRuntimes: mappings.length,
-          instances: instances.map((i) => ({
-            instanceId: i.id,
-            name: i.name,
-            cwd: i.cwd,
-            state: i.state,
-            port: i.port,
-            aaVisible: i.aaVisible,
-          })),
+          instanceId: inst.id,
+          cwd: inst.cwd,
+          state: inst.state,
+          port: inst.port,
         },
-        // One zai process serves many instances, so AA must be allowed
-        // to create more than one. `null` = server-side unlimited
-        // (`effective_max_instances` returns max_instances as-is);
-        // both the connector dataclass and the server's pydantic model
-        // only reject `multiple` with `maxInstances === 1`.
-        instancePolicy: 'multiple',
-        maxInstances: null,
-        // AA Web's runtimeTypeCanCreateInstance filters types with
-        // `schema === null` out of the "可添加" (addable) list, so the
-        // schema stays present — it now doubles as the workspace picker
-        // that makes `runtime.start` able to identify its target.
+        instancePolicy: 'single',
+        maxInstances: 1,
         configSchema: {
           revision: 0,
           schema: {
@@ -1818,20 +2006,39 @@ export class ReverseDispatch {
               cwd: {
                 type: 'string',
                 title: 'Workspace',
-                description:
-                  'zai instance working directory. Selects which local instance this runtime drives; ' +
-                  'leave empty to use the AA-side runtime instance name.',
+                description: `Working directory for the "${inst.name}" zai instance.`,
               },
             },
           },
           uiSchema: null,
-          defaults: {},
-          metadata: {
-            instances: instances.map((i) => ({ name: i.name, cwd: i.cwd, state: i.state })),
-          },
+          // Pre-fill the form with the workspace this type already means.
+          defaults: { cwd: inst.cwd },
+          metadata: { instanceId: inst.id },
         },
-      },
-    ];
+      };
+    });
+
+    const legacyDescriptors = LEGACY_RUNTIME_TYPES.map((runtimeType) => ({
+      runtimeType,
+      displayName: 'zai (legacy single-workspace runtime)',
+      description: 'Superseded by the per-workspace zai runtime types.',
+      // Unavailable, but still PRESENT: AA's `present` column is what
+      // `create_runtime` gates on, and it is set from the discover response
+      // rather than from `available`. Keeping the row lets AA-side runtime
+      // instances created before per-instance types keep working.
+      available: false,
+      reason: 'legacy runtime type — create a per-workspace runtime instead',
+      recommended: false,
+      recommendationRank: null,
+      implementationType: 'zai-local',
+      capabilities: {},
+      metadata: { zaiVersion: '0.12.0', activeRuntimes: mappings.length, legacy: true },
+      instancePolicy: 'multiple',
+      maxInstances: null,
+      configSchema: null,
+    }));
+
+    return [...descriptors, ...legacyDescriptors];
   }
 
   /** Every instance definition the supervisor knows, flattened for selection. */
@@ -2013,7 +2220,10 @@ export class ReverseDispatch {
         sessions.push({
           sessionId: aaSid,
           runtimeId: mapping.runtimeId,
-          runtime: 'codex',
+          // The type this child's sessions are bound to. AA compares it
+          // against the stored session runtime, so projecting the wrong one
+          // makes the session unroutable.
+          runtime: this.registry.runtimeTypeOf(mapping),
           title: (s.title as string | undefined) ?? '',
           cwd: (s.cwd as string | undefined) ?? '',
           createdAt: s.createdAt ?? new Date().toISOString(),
@@ -2199,11 +2409,17 @@ export class ReverseDispatch {
    * the session is known (404 otherwise).
    */
   private async handleSessionCapabilities(params: unknown): Promise<unknown> {
-    const p = (params ?? {}) as { sessionId?: string };
+    const p = (params ?? {}) as { sessionId?: string; runtime?: string; runtimeId?: string };
     if (!p.sessionId) throw new AaServerError('session.capabilities: sessionId required', 400, null);
     // Verify ownership but don't fail on missing — capability set is
     // identical across sessions, only the validation matters.
-    try { await this.resolveAaSession(p.sessionId); } catch { /* unknown id is fine */ }
+    let runtimeId: string | undefined;
+    let port: number | undefined;
+    try {
+      const resolved = await this.resolveAaSession(p.sessionId);
+      port = resolved.port;
+      runtimeId = this.runtimeIdForPort(resolved.port) || undefined;
+    } catch { /* unknown id is fine */ }
     // Same contract as `runtime.capabilities`, and this one gates ACTION
     // ADMISSION, not just display: the server reads `capabilitySet` in
     // `services/effective_capabilities.py::read_session_capability_facts`
@@ -2215,11 +2431,30 @@ export class ReverseDispatch {
     // The ids must be dot-separated (`session.send_message`), matching
     // the official Android client's SESSION_SEND_MESSAGE_CAPABILITY
     // constant, which is matched verbatim by EffectiveCapabilities.find.
+    //
+    // The stamp must be the type of the runtime this session is bound to:
+    // `SessionCapabilityIndex` drops every entry whose
+    // `capability.runtime != session.runtime`, so answering with another
+    // instance's type (or the legacy one) silently empties the index.
+    //
+    // `p.runtime` IS `session.runtime` — the server builds its params from
+    // the session (`read_session_capability_facts`) and then filters on
+    // exactly that value. So it outranks every lookup we could do locally.
+    //
+    // The port's registered type used to win here, which broke every
+    // pre-existing session the moment per-instance types landed: AA holds
+    // those under `runtime='codex'`, but the port they resolve to is
+    // registered as e.g. `zai-opencc-web`. Stamping the port's type made
+    // the server drop the whole set, so `session.send_message` came back
+    // `supported=False` and every send died with "session capability is
+    // unavailable: session.send_message" — while the response looked
+    // perfectly healthy in the `[aa.inbound]` logs.
+    const runtimeType = await this.resolveRuntimeType(p, runtimeId, port ? { port } : {});
     return {
       sessionId: p.sessionId,
       capabilitySet: {
         revision: 0,
-        capabilities: this.registry.capabilitiesForSession(p.sessionId),
+        capabilities: this.registry.capabilitiesForSession(p.sessionId, runtimeType),
       },
     };
   }

@@ -77,7 +77,10 @@ const SessionCreatePayloadSchema = z.object({
   title: z.string().optional().default(''),
   cwd: z.string().optional().default(''),
   runtimeId: z.string().min(1),
-  runtimeType: z.string().optional().default('codex'),
+  // Carried for completeness; nothing in the child reads it. No default —
+  // the old `.default('codex')` implied a fixed provider that per-instance
+  // runtime types made untrue, and a defaulted value hides that.
+  runtimeType: z.string().optional(),
   // zai patch (2026-09-28): the model / provider / permission the user
   // picked on AA's new-session screen travel in `session.create`'s
   // `selections`. They must be part of CREATE, not a follow-up PATCH:

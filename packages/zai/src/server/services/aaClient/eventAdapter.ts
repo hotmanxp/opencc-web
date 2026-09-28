@@ -51,6 +51,7 @@ import {
   createSession,
 } from './rpc.js';
 import { getRuntimeRegistry } from './runtimeRegistry.js';
+import { LEGACY_RUNTIME_TYPES } from './runtimeType.js';
 import { getSessionMap } from './sessionMap.js';
 import { isAaEnabled } from './index.js';
 import { createHash } from 'node:crypto';
@@ -150,12 +151,21 @@ export class EventAdapter {
     }
     if (!runtimeId) return; // no runtime mapping; cannot forward to AA
 
+    // Every outbound notification must carry the runtime type this runtime is
+    // bound to, NOT a constant: AA's `_require_session_binding`
+    // (server/agent_server/services/connector_notifications.py) raises
+    // `session_runtime_mismatch` when `session.runtime != runtime`, which
+    // rejects the whole ingest — a stale type on `session.state.updated` means
+    // the active run is never cleared and the client shows "当前运行时状态下
+    // 不可发送消息", with no error pointing at the real cause.
+    const runtimeType = this.runtimeTypeFor(runtimeId, childPort);
+
     switch (event.type) {
       case 'session.created':
-        this.handleSessionCreated(runtimeId, event);
+        this.handleSessionCreated(runtimeId, runtimeType, event);
         return;
       case 'session.renamed':
-        this.handleSessionRenamed(runtimeId, event);
+        this.handleSessionRenamed(runtimeId, runtimeType, event);
         return;
       case 'session.deleted':
         // No-op — AA reaps when connector disconnects. We DO delete the
@@ -165,10 +175,10 @@ export class EventAdapter {
       case 'prompt.ask':
       case 'prompt.approve':
       case 'prompt.permission':
-        await this.handlePromptNotice(runtimeId, childPort, event);
+        await this.handlePromptNotice(runtimeId, runtimeType, childPort, event);
         return;
       case 'agent_task.changed':
-        await this.handleAgentTaskChanged(runtimeId, childPort, event);
+        await this.handleAgentTaskChanged(runtimeId, runtimeType, childPort, event);
         return;
       // Runtime timeline events — forwarded by childEventReporter from
       // each child's own eventBus (was: only the 7 above were forwarded,
@@ -187,7 +197,7 @@ export class EventAdapter {
       case 'runtime.error':
       case 'runtime.aborted':
       case 'runtime.notification':
-        await this.handleRuntimeTimeline(runtimeId, childPort, event);
+        await this.handleRuntimeTimeline(runtimeId, runtimeType, childPort, event);
         return;
       default:
         // Unmapped event type — silently ignore. T6 follow-up will map more.
@@ -195,9 +205,27 @@ export class EventAdapter {
     }
   }
 
+  /**
+   * The runtime type a runtime is published under.
+   *
+   * Falls back to the legacy type when the mapping predates per-instance
+   * types (the field is optional in `RuntimeMappingSchema` so old
+   * `runtime-map.json` files still parse). Falling back keeps those sessions
+   * working; the registry backfills the real type on its next `start()`.
+   */
+  private runtimeTypeFor(runtimeId: string, childPort?: number): string {
+    const reg = getRuntimeRegistry();
+    if (!reg) return LEGACY_RUNTIME_TYPES[0]!;
+    return (
+      reg.runtimeTypeForRuntimeId(runtimeId) ??
+      (childPort !== undefined ? reg.runtimeTypeForPort(childPort) : null) ??
+      reg.defaultRuntimeType()
+    );
+  }
+
   // ─── Per-event handlers ──────────────────────────────────────────────
 
-  private handleSessionCreated(runtimeId: string, event: Record<string, unknown>): void {
+  private handleSessionCreated(runtimeId: string, runtimeType: string, event: Record<string, unknown>): void {
     const sessionId = event.sessionId as string | undefined;
     const title = (event.title as string | undefined) ?? '';
     const cwd = (event.cwd as string | undefined) ?? '';
@@ -235,7 +263,7 @@ export class EventAdapter {
     upsertSessionMeta(this.conn, {
       runtimeId,
       sessionId,
-      runtime: 'codex',
+      runtime: runtimeType,
       title,
       cwd,
       metadata: { zaiSessionId: sessionId },
@@ -256,14 +284,14 @@ export class EventAdapter {
     return null;
   }
 
-  private handleSessionRenamed(runtimeId: string, event: Record<string, unknown>): void {
+  private handleSessionRenamed(runtimeId: string, runtimeType: string, event: Record<string, unknown>): void {
     const sessionId = event.sessionId as string | undefined;
     const title = event.title as string | undefined;
     if (!sessionId || !title) return;
     upsertSessionMeta(this.conn, {
       runtimeId,
       sessionId,
-      runtime: 'codex',
+      runtime: runtimeType,
       title,
       metadata: { zaiSessionId: sessionId },
     });
@@ -278,6 +306,7 @@ export class EventAdapter {
 
   private async handlePromptNotice(
     runtimeId: string,
+    runtimeType: string,
     childPort: number | undefined,
     event: Record<string, unknown>,
   ): Promise<void> {
@@ -362,7 +391,7 @@ export class EventAdapter {
         ...(toolUseId ? { toolUseId } : {}),
         ...(isAsk && questions.length > 0 ? { questions } : {}),
       },
-      source: { runtime: 'codex', ...(toolUseId ? { operationId: toolUseId } : {}) },
+      source: { runtime: runtimeType, ...(toolUseId ? { operationId: toolUseId } : {}) },
       metadata: { zaiEventType: event.type, toolUseId },
     };
 
@@ -376,13 +405,14 @@ export class EventAdapter {
     upsertNotice(this.conn, {
       runtimeId,
       sessionId: aaSessionId,
-      runtime: 'codex',
+      runtime: runtimeType,
       notice,
     });
   }
 
   private async handleAgentTaskChanged(
     runtimeId: string,
+    runtimeType: string,
     childPort: number | undefined,
     event: Record<string, unknown>,
   ): Promise<void> {
@@ -399,7 +429,7 @@ export class EventAdapter {
     upsertSessionState(this.conn, {
       runtimeId,
       sessionId: aaSessionId,
-      runtime: 'codex',
+      runtime: runtimeType,
       status,
       metadata: { taskKind: task?.kind },
     });
@@ -428,6 +458,7 @@ export class EventAdapter {
    */
   private async handleRuntimeTimeline(
     runtimeId: string,
+    runtimeType: string,
     childPort: number | undefined,
     event: Record<string, unknown>,
   ): Promise<void> {
@@ -484,7 +515,7 @@ export class EventAdapter {
                 blockType: 'thinking',
                 content: { text: next },
               },
-          source: { runtime: 'codex', itemType: channel, derivedKey: channel },
+          source: { runtime: runtimeType, itemType: channel, derivedKey: channel },
           revision,
         },
         now,
@@ -506,7 +537,7 @@ export class EventAdapter {
       upsertSessionState(this.conn, {
         runtimeId,
         sessionId: aaSessionId,
-        runtime: 'codex',
+        runtime: runtimeType,
         status: 'running',
       });
       return;
@@ -559,7 +590,7 @@ export class EventAdapter {
                   blockType: 'thinking',
                   content: { text: content },
                 },
-            source: { runtime: 'codex', itemType: channel, derivedKey: channel },
+            source: { runtime: runtimeType, itemType: channel, derivedKey: channel },
             revision,
             completedAt: now,
           },
@@ -573,7 +604,7 @@ export class EventAdapter {
       upsertSessionState(this.conn, {
         runtimeId,
         sessionId: aaSessionId,
-        runtime: 'codex',
+        runtime: runtimeType,
         status: 'idle',
       });
       return;
@@ -596,7 +627,7 @@ export class EventAdapter {
           // `content.title` for the label and `content.kind` to pick a
           // renderer, so a tool without them degrades to a bare marker.
           content: { kind: 'tool_call', title: toolName, input, toolUseId },
-          source: { runtime: 'codex', itemType: 'tool_call', itemId: toolUseId, derivedKey: toolUseId },
+          source: { runtime: runtimeType, itemType: 'tool_call', itemId: toolUseId, derivedKey: toolUseId },
           metadata: { toolName, toolUseId, input },
           revision: 1,
         },
@@ -625,7 +656,7 @@ export class EventAdapter {
             toolUseId,
             isError,
           },
-          source: { runtime: 'codex', itemType: 'tool_result', itemId: toolUseId, derivedKey: toolUseId },
+          source: { runtime: runtimeType, itemType: 'tool_result', itemId: toolUseId, derivedKey: toolUseId },
           metadata: { toolUseId, output, isError },
           revision: 1,
         },
@@ -646,7 +677,7 @@ export class EventAdapter {
       upsertSessionState(this.conn, {
         runtimeId,
         sessionId: aaSessionId,
-        runtime: 'codex',
+        runtime: runtimeType,
         status: isErr ? 'error' : 'idle',
         ...(isErr && event.error ? { error: event.error as Record<string, unknown> } : {}),
       });
@@ -660,7 +691,7 @@ export class EventAdapter {
           status: isErr ? 'failed' : 'cancelled',
           text: message,
           content: { content: { text: message }, text: message },
-          source: { runtime: 'codex', itemType: t },
+          source: { runtime: runtimeType, itemType: t },
           metadata: isErr ? { error: event.error } : { reason: event.reason },
           revision: 1,
         },

@@ -64,25 +64,35 @@ describe('timeline.itemUpsert', () => {
 });
 
 describe('capability projection', () => {
-  it('every capability carries a runtime, or the server filters it all out', () => {
+  it('every capability carries the runtime type it was asked about', () => {
     // SessionCapabilityIndex groups by (capability.runtime, scope, sessionId,
     // runtimeId) and then drops `capability.runtime != session.runtime`.
     // A missing `runtime` lands the entry in a (None, …) bucket no lookup
     // key reaches → supported=False → client renders the session as unusable.
+    // The same filter rejects a runtime type belonging to ANOTHER instance,
+    // so the stamp must follow the runtime being answered for.
     const { conn } = fakeConn();
     const registry = new RuntimeRegistry(conn as never);
-    const caps = (
-      registry as unknown as {
-        capabilitiesFor(m: unknown): Array<{ capabilityId: string; runtime?: string; scope: string }>;
-      }
-    ).capabilitiesFor({});
 
-    expect(caps.length).toBeGreaterThan(0);
-    for (const cap of caps) {
-      expect(cap.runtime, `${cap.capabilityId} must carry a runtime`).toBe('codex');
+    for (const type of ['zai-opencc-web', 'zai-lan-agent']) {
+      const caps = registry.capabilitiesForRuntime(type);
+      expect(caps.length).toBeGreaterThan(0);
+      for (const cap of caps) {
+        expect(cap.runtime, `${cap.capabilityId} must carry the runtime type`).toBe(type);
+      }
+      // session.send_message is what gates the composer.
+      expect(caps.some((c) => c.capabilityId === 'session.send_message')).toBe(true);
     }
-    // session.send_message is what gates the composer.
-    expect(caps.some((c) => c.capabilityId === 'session.send_message')).toBe(true);
+  });
+
+  it('capabilitiesForAll keeps the legacy type so pre-existing sessions work', () => {
+    // AA sessions created before per-instance types carry runtime='codex'.
+    // Dropping them from the announced set makes every one of them
+    // unsendable, so the union must always include the legacy types.
+    const { conn } = fakeConn();
+    const registry = new RuntimeRegistry(conn as never);
+    const runtimes = new Set(registry.capabilitiesForAll().map((c) => c.runtime));
+    expect(runtimes.has('codex')).toBe(true);
   });
 });
 
@@ -95,7 +105,7 @@ describe('session.capabilities admission', () => {
     // 提交 button disabled and would have the server reject the response.
     const { conn } = fakeConn();
     const registry = new RuntimeRegistry(conn as never);
-    const caps = registry.capabilitiesForSession('sess-aa-1');
+    const caps = registry.capabilitiesForSession('sess-aa-1', 'zai-opencc-web');
     const byId = new Map(caps.map((c) => [c.capabilityId, c]));
 
     for (const id of [

@@ -20,12 +20,27 @@ import { z } from 'zod';
 // ─── Common helpers ───────────────────────────────────────────────────────
 
 /**
- * AA's runtime identifier literals. zai is added as a new value here for T4+
- * when we register runtimes. Keep in sync with AA's
- * `connector/server/protocol.py::RuntimeName`.
+ * AA's protocol-1.0 runtime identifier literals. Kept for the export surface
+ * and for tests that pin protocol-1.0 names, but NOT the type any live
+ * runtime uses — AA's Runtime Control 2.0 accepts new normalized provider
+ * keys, and zai now emits one per instance (`zai-opencc-web`, …).
+ *
+ * See `AaRuntimeType` below and `runtimeType.ts` for derivation.
  */
 export const RuntimeNameSchema = z.enum(['codex', 'claude', 'opencode', 'acp', 'dsh']);
 export type RuntimeName = z.infer<typeof RuntimeNameSchema>;
+
+/**
+ * The runtime type actually carried on the wire.
+ *
+ * AA validates this as an open string (`validate_runtime_type`: regex
+ * `^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`, ≤64 chars, no `rti_` prefix), not
+ * against a closed enum — `models.py::RuntimeName` is `Annotated[str,
+ * AfterValidator(...)]` with the enum only in its OpenAPI JSON schema. So a
+ * plain `string` is the honest type here; `runtimeType.ts::isLegalRuntimeType`
+ * is the runtime-side guard for values we did not derive ourselves.
+ */
+export type AaRuntimeType = string;
 
 /** Single character JSON-RPC protocol version. AA v2 uses "1.0". */
 export const PROTOCOL_VERSION_1 = '1.0' as const;

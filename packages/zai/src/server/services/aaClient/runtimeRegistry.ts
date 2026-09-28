@@ -41,7 +41,8 @@ import {
 } from './rpc.js';
 import { isAaEnabled } from './index.js';
 import { logHttp } from '../accessLog.js';
-import type { RuntimeName } from './protocol.js';
+import type { AaRuntimeType } from './protocol.js';
+import { buildRuntimeTypeMap, LEGACY_RUNTIME_TYPES } from './runtimeType.js';
 
 // ─── Persisted shape ─────────────────────────────────────────────────────
 
@@ -58,6 +59,16 @@ const RuntimeMappingSchema = z.object({
   cwd: z.string().min(1),
   registeredAt: z.string().datetime(),
   app: z.enum(['task-factory', 'weixin']).optional(),
+  // The AA runtime type this instance is published as (`zai-opencc-web`).
+  //
+  // MUST stay optional: `runtime-map.json` entries written before per-instance
+  // types have no such field, and making it required would fail `safeParse`
+  // for the WHOLE file — the registry would load as empty and every
+  // `portFromRuntime` lookup would short-circuit. That exact trap
+  // ("relaxed the writer, forgot the schema → registry empty after restart")
+  // has been hit once already. Missing values are backfilled in `start()`
+  // from the current instance definitions.
+  runtimeType: z.string().min(1).optional(),
 });
 
 export type RuntimeMapping = z.infer<typeof RuntimeMappingSchema>;
@@ -114,21 +125,15 @@ async function writeRuntimeMap(map: RuntimeMapFile): Promise<void> {
 
 export interface RuntimeRegistryOptions {
   conn: AaConnection;
-  /** Runtime name to report to AA. Currently always 'codex' as placeholder;
-   *  zai's agents aren't yet first-class in AA's protocol (T4+ may add a
-   *  dedicated literal). For now we use 'codex' so AA's UI doesn't reject. */
-  runtime?: RuntimeName;
 }
 
 export class RuntimeRegistry {
   private readonly conn: AaConnection;
-  private readonly runtime: RuntimeName;
   private mappings: RuntimeMapFile = {};
   private listenerInstalled = false;
 
   constructor(opts: RuntimeRegistryOptions) {
     this.conn = opts.conn;
-    this.runtime = opts.runtime ?? 'codex';
   }
 
   async start(): Promise<void> {
@@ -138,12 +143,44 @@ export class RuntimeRegistry {
     // opted out of AA (`def.aa === false`) while the connector was down
     // still has an entry here. Drop them before anything can route to them.
     await this.pruneDisabledMappings();
+    // Entries written before per-instance types existed carry no
+    // `runtimeType`. Fill them in from the same derivation `runtime.discover`
+    // uses, so the type a mapping advertises is always the type AA knows it
+    // by — a mismatch here is exactly what silently drops notifications
+    // (see `_require_session_binding` in AA's connector_notifications.py).
+    await this.backfillRuntimeTypes();
     eventBus.subscribe((event) => {
       if (event.type === 'instance.changed') this.handleInstanceChanged(event).catch((err) => {
         console.warn('[aa.runtimeRegistry] handler error:', err);
       });
     });
     this.listenerInstalled = true;
+  }
+
+  /**
+   * Give every mapping the runtime type its instance derives to.
+   *
+   * Derived from the live instance inventory rather than stored per entry, so
+   * a type can never drift from what `runtime.discover` advertised. Only
+   * mappings that genuinely lack a type are touched; an adopted AA id stays
+   * put.
+   */
+  private async backfillRuntimeTypes(): Promise<boolean> {
+    const missing = Object.entries(this.mappings).filter(([, m]) => !m.runtimeType);
+    if (missing.length === 0) return false;
+    let changed = false;
+    for (const [key, mapping] of missing) {
+      const type = await this.deriveTypeFor(mapping.instanceId, mapping.name, mapping.cwd);
+      if (!type) continue;
+      mapping.runtimeType = type;
+      this.mappings[key] = mapping;
+      changed = true;
+      logHttp(
+        `[aa.runtimeRegistry] backfilled runtimeType ${type} for port ${mapping.port} (${mapping.name})`,
+      );
+    }
+    if (changed) await writeRuntimeMap(this.mappings);
+    return changed;
   }
 
   /**
@@ -356,6 +393,25 @@ export class RuntimeRegistry {
     const runtimeId = existing?.runtimeId ?? `rti_${event.instanceId}`;
     const now = new Date().toISOString();
 
+    // The type this instance is published as. `existing?.runtimeType` wins so
+    // the type AA has already persisted never changes under it — a rename
+    // must not orphan the runtime instances created under the old name.
+    //
+    // On first registration it is derived from the FULL snapshot inventory
+    // rather than this instance alone: `buildRuntimeTypeMap` only
+    // disambiguates when it can see the colliding siblings, so a
+    // single-instance derivation would hand two same-named workspaces the
+    // same `zai-app` and AA would reject the whole discover response.
+    //
+    // NOTE that pool is deliberately WIDER than `runtimeDescriptors()`'s
+    // (this one includes `aa: false` instances, discover filters them out).
+    // That is only safe because discover reports a registered instance's
+    // PERSISTED type instead of re-deriving it, so the two never have to
+    // agree on the pool — only the persisted value is authoritative. Making
+    // discover re-derive reintroduces a type drift that makes AA reject
+    // every notification with `session_runtime_mismatch`.
+    const runtimeType = existing?.runtimeType ?? (await this.deriveTypeFor(event.instanceId, name, cwd));
+
     const mapping: RuntimeMapping = existing ?? {
       runtimeId,
       instanceId: event.instanceId,
@@ -364,12 +420,14 @@ export class RuntimeRegistry {
       cwd,
       registeredAt: now,
       app,
+      ...(runtimeType ? { runtimeType } : {}),
     };
 
     // Always overwrite name/cwd in case they were patched via updateInstance.
     mapping.name = name;
     mapping.cwd = cwd;
     mapping.app = app;
+    if (runtimeType) mapping.runtimeType = runtimeType;
     // `existing` may have been carried over from the instance's previous
     // port (a restart moves it), and the map is keyed by the *current* port —
     // so the entry we're writing under portKey must report that same port.
@@ -383,9 +441,20 @@ export class RuntimeRegistry {
 
   /** Push this runtime's inventory + capabilities to AA. */
   private async announce(mapping: RuntimeMapping): Promise<void> {
-    const capabilities = this.capabilitiesFor(mapping);
-    await announceRuntimeInventory(this.conn, this.runtime, mapping.runtimeId, capabilities);
-    await publishCapabilities(this.conn, capabilities);
+    const runtimeType = this.runtimeTypeOf(mapping);
+    const capabilities = this.capabilitiesFor(runtimeType);
+    await announceRuntimeInventory(this.conn, runtimeType, mapping.runtimeId, capabilities);
+    // The union, NOT this instance's set. `protocol.capabilitiesUpdated` is a
+    // full replace server-side (`connector_notifications.py::_update_capabilities`
+    // → `update_protocol_capabilities`), whereas `runtime.capability.updated`
+    // merges per `capability_identity_key`. Announcing per instance and then
+    // replacing with only that instance's set would make the last announce
+    // erase every other instance's capabilities.
+    //
+    // It can't simply be dropped either: the merge path no-ops on a connector
+    // with no stored set yet (`except KeyError` just logs), so on a fresh
+    // connector the replace is what seeds the base set.
+    await publishCapabilities(this.conn, this.capabilitiesForAll());
   }
 
   private async deregister(mapping: RuntimeMapping): Promise<void> {
@@ -404,9 +473,17 @@ export class RuntimeRegistry {
    * Exposed because `runtime.capabilities` RPC must answer with the same
    * data the registry announces — two shapes drifting is what made the
    * server 502 with invalid_runtime_capabilities.
+   *
+   * `runtimeType` must be the type AA has bound this runtime to. The server
+   * filters stored capabilities by `capability.runtime != session.runtime`
+   * (`effective_capabilities.py::SessionCapabilityIndex.__init__`), so a
+   * capability stamped with the wrong type vanishes from the index and the
+   * client shows "当前运行时状态下不可发送消息" — the same symptom a missing
+   * `runtime` field produces, which is why this is a parameter and not a
+   * constant. Omit it and the legacy type is used.
    */
-  capabilitiesForRuntime(): RuntimeCapability[] {
-    return this.capabilitiesFor(this.anyMapping());
+  capabilitiesForRuntime(runtimeType?: string): RuntimeCapability[] {
+    return this.capabilitiesFor(runtimeType ?? this.defaultRuntimeType());
   }
 
   /**
@@ -432,25 +509,76 @@ export class RuntimeRegistry {
    * `SessionCapabilityIndex.__init__` drops session-scope capabilities
    * whose `sessionId` is not this session's.
    */
-  capabilitiesForSession(sessionId: string): RuntimeCapability[] {
-    return this.capabilitiesFor(this.anyMapping()).map((c) =>
+  capabilitiesForSession(sessionId: string, runtimeType?: string): RuntimeCapability[] {
+    return this.capabilitiesFor(runtimeType ?? this.defaultRuntimeType()).map((c) =>
       c.scope === 'session' ? { ...c, sessionId } : c,
     );
   }
 
-  private anyMapping(): RuntimeMapping {
-    const first = Object.values(this.mappings)[0];
-    return first ?? {
-      runtimeId: '',
-      instanceId: '',
-      name: '',
-      port: 0,
-      cwd: '',
-      registeredAt: new Date(0).toISOString(),
-    };
+  /**
+   * Every runtime type this connector currently answers for, each with its
+   * own stamped capability set.
+   *
+   * Includes the legacy types unconditionally so sessions AA created before
+   * per-instance types (`sessions.runtime == 'codex'`) keep resolving their
+   * capabilities — dropping them makes every pre-existing session
+   * unsendable. See `runtimeType.ts::LEGACY_RUNTIME_TYPES`.
+   */
+  capabilitiesForAll(): RuntimeCapability[] {
+    const types = new Set<string>(LEGACY_RUNTIME_TYPES);
+    for (const m of Object.values(this.mappings)) {
+      if (m.runtimeType) types.add(m.runtimeType);
+    }
+    const out: RuntimeCapability[] = [];
+    for (const type of types) out.push(...this.capabilitiesFor(type));
+    return out;
   }
 
-  private capabilitiesFor(mapping: RuntimeMapping): RuntimeCapability[] {
+  /** The type a mapping is published under, falling back to the legacy type. */
+  runtimeTypeOf(mapping: RuntimeMapping | null | undefined): string {
+    return mapping?.runtimeType ?? LEGACY_RUNTIME_TYPES[0]!;
+  }
+
+  /**
+   * Derive the runtime type for one instance, disambiguating against every
+   * other instance the supervisor knows about.
+   *
+   * `fallbackName`/`fallbackCwd` stand in for an instance the supervisor
+   * can't see yet (boot race) so registration still gets a usable type
+   * rather than skipping the entry.
+   */
+  async deriveTypeFor(
+    instanceId: string,
+    fallbackName?: string,
+    fallbackCwd?: string,
+  ): Promise<string | null> {
+    const defs = await this.instanceDefinitions();
+    const sources = [...defs.values()].map((d) => ({ id: d.id, name: d.name, cwd: d.cwd }));
+    const known = defs.has(instanceId);
+    if (!known) {
+      sources.push({ id: instanceId, name: fallbackName ?? instanceId, cwd: fallbackCwd ?? '' });
+    }
+    return buildRuntimeTypeMap(sources).get(instanceId) ?? null;
+  }
+
+  /** Legacy type, used when nothing better identifies the runtime. */
+  defaultRuntimeType(): string {
+    return LEGACY_RUNTIME_TYPES[0]!;
+  }
+
+  /** Look up a mapping's runtime type by the id AA assigned it. */
+  runtimeTypeForRuntimeId(runtimeId: string | undefined | null): string | null {
+    if (!runtimeId) return null;
+    return this.getMappingByRuntimeId(runtimeId)?.runtimeType ?? null;
+  }
+
+  /** Look up a mapping's runtime type by child port. */
+  runtimeTypeForPort(port: number | undefined | null): string | null {
+    if (!port || port <= 0) return null;
+    return this.getMappingByPort(port)?.runtimeType ?? null;
+  }
+
+  private capabilitiesFor(runtimeType: string): RuntimeCapability[] {
     // `runtime` is NOT optional in practice: the server groups every
     // stored capability by `(capability.runtime, scope, sessionId,
     // runtimeId)` in `services/effective_capabilities.py::
@@ -464,7 +592,7 @@ export class RuntimeRegistry {
     // The ids below are the ones the server inherits onto a session
     // (`_INHERITED_RUNTIME_CAPABILITY_IDS` in core/capabilities.py) —
     // spellings must match exactly.
-    const runtime: RuntimeName = 'codex';
+    const runtime: AaRuntimeType = runtimeType;
     const cap = (
       capabilityId: string,
       scope: 'runtime' | 'session',
@@ -507,14 +635,39 @@ export class RuntimeRegistry {
     app?: 'task-factory' | 'weixin';
     aa?: boolean;
   } | null> {
+    const snap = (await this.supervisorSnapshots()).find((s) => s.id === instanceId);
+    if (!snap) return null;
+    return { name: snap.name, cwd: snap.cwd, app: snap.app, aa: snap.aa };
+  }
+
+  /** Every instance definition the supervisor knows, keyed by id. */
+  private async instanceDefinitions(): Promise<
+    Map<string, { id: string; name: string; cwd: string; app?: 'task-factory' | 'weixin'; aa?: boolean }>
+  > {
+    const out = new Map<
+      string,
+      { id: string; name: string; cwd: string; app?: 'task-factory' | 'weixin'; aa?: boolean }
+    >();
+    for (const s of await this.supervisorSnapshots()) {
+      out.set(s.id, { id: s.id, name: s.name, cwd: s.cwd, app: s.app, aa: s.aa });
+    }
+    return out;
+  }
+
+  /**
+   * Supervisor snapshots, or an empty list when the supervisor isn't up.
+   *
+   * The dynamic import keeps the whole supervisor/spawner/heartbeat module
+   * graph out of unit tests that only exercise the registry.
+   */
+  private async supervisorSnapshots(): Promise<
+    Array<{ id: string; name: string; cwd: string; app?: 'task-factory' | 'weixin'; aa?: boolean }>
+  > {
     try {
       const { getInstanceSupervisor } = await import('../instanceSupervisor.js');
-      const snapshots = getInstanceSupervisor().getSnapshots();
-      const snap = snapshots.find((s) => s.id === instanceId);
-      if (!snap) return null;
-      return { name: snap.name, cwd: snap.cwd, app: snap.app, aa: snap.aa };
+      return getInstanceSupervisor().getSnapshots();
     } catch {
-      return null;
+      return [];
     }
   }
 }
