@@ -61,6 +61,12 @@ type Meta = {
   // findProfileForModel() can disambiguate when several saved
   // providerProfiles share the same model name.
   providerId?: string
+  // zai patch (2026-09-28): 会话当时的推理强度档位(per-session 落盘)。
+  // 与 model / providerId 同一条持久化通道:create() 从请求体写入,
+  // read() / list() 从 JSONL 的 session-meta 回读并投影给调用方。
+  // 声明为 string 而非档位联合 —— 落盘数据跨版本可读, 真正的白名单
+  // 校验在 modelCaller 的 ZAI_REQUEST_EFFORT_LEVELS 那一侧。
+  effort?: string
   // zai patch (2026-08-20): 会话当时选的主 Agent name(per-session 落盘)。
   mainAgent?: string
   permissionMode?: string
