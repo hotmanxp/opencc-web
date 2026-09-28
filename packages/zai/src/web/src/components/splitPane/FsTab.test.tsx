@@ -5,13 +5,14 @@ import { render, screen, fireEvent, waitFor, act, within } from '@testing-librar
 beforeEach(() => {
   // 清掉拖动宽度 / lock 状态, 避免测试间 localStorage 泄漏导致初始值非默认.
   localStorage.clear();
-  seenThemes.length = 0;
+  revealCalls.length = 0;
   delete document.documentElement.dataset.theme;
 });
 
-// 记录每次 SyntaxHighlighter 收到的 style(具体是哪个主题对象)。vi.hoisted
-// 保证数组在 vi.mock 工厂(提升到 import 之前)执行时已存在。
-const seenThemes = vi.hoisted(() => [] as unknown[]);
+// 记录 MonacoCodeView api.revealPosition 的调用(内容搜索点行跳转的观测点)。
+const revealCalls = vi.hoisted(
+  () => [] as Array<{ lineNumber: number; column: number }>,
+);
 
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
@@ -48,22 +49,27 @@ vi.mock('../documentPreview/index.js', async (importOriginal) => {
 // the dynamic-import promise resolves on the next microtask with
 // our test stub, which FsTab's lazy load() then mounts.
 //
-// 2026-09-27:从 ./TextEditor.js(CodeMirror)迁移到 ./MonacoCodeView.js;mock
-// 暴露 onReady/onChange/content 接口,fs-editor / fs-editor-mod-s 测试钩子
-// 保留,供既有测试继续工作。
+// c8da5035 抽出 lazy wrapper 后 FsTab import 的是 LazyMonacoCodeView,而非
+// 底层的 MonacoCodeView —— mock 只导出旧名会让整个 FsTab 渲染期抛
+// "No \"LazyMonacoCodeView\" export is defined",所有用例连带空 DOM 失败。
+// 两个名字都导出:FsTab 只用 Lazy*,留 MonacoCodeView 是防回退。
 vi.mock('./MonacoCodeView.js', () => ({
-  MonacoCodeView: (props: any) => {
+  LazyMonacoCodeView: (props: any) => {
     const api = {
       getValue: () => props.content,
       focus: () => {},
       openSearch: () => {},
-      revealPosition: () => {},
+      revealPosition: (position: any) => { revealCalls.push(position); },
       destroy: () => {},
     };
     // 立即触发 onReady,与真实 MonacoCodeView 行为对齐(挂载即注入)。
     if (typeof props.onReady === 'function') props.onReady(api);
     return (
-      <div data-testid="fs-editor" data-editable={props.editable ? 'true' : 'false'}>
+      <div
+        data-testid="fs-editor"
+        data-editable={props.editable ? 'true' : 'false'}
+        data-language={props.language ?? ''}
+      >
         <pre>{props.content}</pre>
         <input
           data-testid="fs-editor-input"
@@ -79,6 +85,7 @@ vi.mock('./MonacoCodeView.js', () => ({
       </div>
     );
   },
+  MonacoCodeView: () => null,
 }));
 vi.mock('../markdown/syntaxHighlighter.js', () => ({
   // The real SyntaxHighlighter (with showLineNumbers + wrapLines +
@@ -94,14 +101,11 @@ vi.mock('../markdown/syntaxHighlighter.js', () => ({
     children,
     showLineNumbers,
     lineProps,
-    style,
   }: {
     children?: unknown;
-    showLineNumbers?: boolean;
-    lineProps?: (n: number) => Record<string, string>;
-    style?: unknown;
+    showLineNumbers?: boolean
+    lineProps?: (n: number) => Record<string, string>
   }) => {
-    seenThemes.push(style);
     const text = typeof children === 'string' ? children : String(children ?? '');
     const lines = text.split('\n');
     // Drop the trailing empty line that .split('\n') adds for trailing
@@ -294,6 +298,7 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({
       data: {
         ok: true,
+        kind: 'text',
         path: '/repo/src/foo.ts',
         name: 'foo.ts',
         size: 42,
@@ -314,7 +319,11 @@ describe('FsTab', () => {
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
   });
 
-  it('uses fs-preview-code test-id for .ts files (syntax highlighted)', async () => {
+  it('renders .ts files through the Monaco editor with language=typescript', async () => {
+    // a64c8ac4「port AA Web code-editor UX — Monaco」把代码预览从
+    // FilePreview(SyntaxHighlighter,testid fs-preview-code)换成
+    // LazyMonacoCodeView。断言随之改为「挂了 Monaco 且语言由 extToLanguage
+    // 从扩展名推出」,这才是当前契约。
     mockList.mockReturnValue({
       data: {
         ok: true,
@@ -329,6 +338,7 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({
       data: {
         ok: true,
+        kind: 'text',
         path: '/repo/foo.ts',
         name: 'foo.ts',
         size: 42,
@@ -340,68 +350,18 @@ describe('FsTab', () => {
     });
     render(<FsTab cwd="/repo" />);
     fireEvent.click(screen.getByText('foo.ts'));
-    expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
+    const editor = await screen.findByTestId('fs-editor');
+    expect(editor.getAttribute('data-language')).toBe('typescript');
+    // 代码预览不再走 FilePreview 的 SyntaxHighlighter 分支。
+    expect(screen.queryByTestId('fs-preview-code')).toBeNull();
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
-    // Component-level dynamic import of syntaxHighlighter resolves
-    // asynchronously; once it lands, our stub renders a <pre><code>
-    // pair which replaces the synchronous fallback `<pre>` markup.
-    await waitFor(() => {
-      const codeBlock = screen.getByTestId('fs-preview-code');
-      expect(codeBlock.querySelector('code')).toBeTruthy();
-      // The fallback <pre data-testid="fs-preview-code-fallback">
-      // unmounts when the highlighted branch takes over.
-      expect(codeBlock.querySelector('[data-testid="fs-preview-code-fallback"]')).toBeNull();
-    });
   });
 
-  it('picks oneLight / oneDark for the code preview from <html data-theme>', async () => {
-    // 回归(2026-09-24):此前这里恒传 oneDark。浅色主题下不仅是「浅底 +
-    // 浅色 token」糊成一片 —— oneDark 主题对象自带
-    // `text-shadow: 0 1px rgba(0,0,0,.3)`,会被 react-syntax-highlighter
-    // 并进 <pre> 的行内样式并被所有 token 继承,白底上就是每个字形下方
-    // 一道深色重影(暗底上不可见,所以只在浅色主题暴露)。
-    // 这里守住「选中了哪个主题对象」这一层;真实配色/重影需浏览器验收。
-    mockList.mockReturnValue({
-      data: {
-        ok: true,
-        entries: [{ name: 'foo.ts', path: 'foo.ts', type: 'file', size: 42 }],
-      },
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-    mockFile.mockReturnValue({
-      data: {
-        ok: true,
-        path: '/repo/foo.ts',
-        name: 'foo.ts',
-        size: 42,
-        mtime: '2026-07-21T00:00:00Z',
-        content: 'export const x: number = 1;',
-      },
-      loading: false,
-      error: null,
-    });
-
-    document.documentElement.dataset.theme = 'light';
-    render(<FsTab cwd="/repo" />);
-    fireEvent.click(screen.getByText('foo.ts'));
-    await waitFor(() => expect(seenThemes.length).toBeGreaterThan(0));
-    expect(seenThemes.at(-1)).toEqual({ __theme: 'light' });
-
-    // 切到暗色主题:同一份文件,应改用 oneDark。
-    act(() => {
-      document.documentElement.dataset.theme = 'dark';
-    });
-    await waitFor(() => expect(seenThemes.at(-1)).toEqual({ __theme: 'dark' }));
-  });
-
-  it('renders .md files via MarkdownText (fs-preview-md test-id)', () => {
+  it('renders .md files via MarkdownText (fs-md-preview test-id)', () => {
     // Selecting a .md file should mount the MarkdownText wrapper
-    // (data-testid="fs-preview-md") so the markdown source is rendered
+    // (data-testid="fs-md-preview") so the markdown source is rendered
     // as proper markdown — heading elements, lists, tables — NOT a
-    // raw <pre>. This is the new behavior introduced by the FsTab
-    // MD rendering refactor.
+    // raw <pre>. preview 态走 MarkdownText,源码/编辑态挂 Monaco。
     mockList.mockReturnValue({
       data: {
         ok: true,
@@ -416,6 +376,7 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({
       data: {
         ok: true,
+        kind: 'text',
         path: '/repo/README.md',
         name: 'README.md',
         size: 12,
@@ -427,8 +388,7 @@ describe('FsTab', () => {
     });
     render(<FsTab cwd="/repo" />);
     fireEvent.click(screen.getByText('README.md'));
-    // The new MD branch wrapper:
-    expect(screen.getByTestId('fs-preview-md')).toBeTruthy();
+    expect(screen.getByTestId('fs-md-preview')).toBeTruthy();
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
     expect(screen.queryByTestId('fs-preview-code')).toBeNull();
     // Markdown was actually rendered (heading element appeared).
@@ -454,6 +414,7 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({
       data: {
         ok: true,
+        kind: 'text',
         path: '/repo/NOTES.markdown',
         name: 'NOTES.markdown',
         size: 5,
@@ -465,7 +426,7 @@ describe('FsTab', () => {
     });
     render(<FsTab cwd="/repo" />);
     fireEvent.click(screen.getByText('NOTES.markdown'));
-    expect(screen.getByTestId('fs-preview-md')).toBeTruthy();
+    expect(screen.getByTestId('fs-md-preview')).toBeTruthy();
     expect(screen.getByRole('heading', { level: 2, name: 'Section' })).toBeTruthy();
   });
 
@@ -535,8 +496,8 @@ describe('FsTab', () => {
     expect(screen.getByTestId('document-preview-stub').getAttribute('data-kind')).toBe('legacy-office');
   });
 
-  it('still renders .txt files via plain <pre> (regression guard)', () => {
-    // .txt files should NOT hit the new MD branch.
+  it('still renders .txt files as plain text (regression guard)', async () => {
+    // .txt files should NOT hit the MD branch.
     mockList.mockReturnValue({
       data: {
         ok: true,
@@ -551,6 +512,7 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({
       data: {
         ok: true,
+        kind: 'text',
         path: '/repo/notes.txt',
         name: 'notes.txt',
         size: 4,
@@ -562,14 +524,17 @@ describe('FsTab', () => {
     });
     render(<FsTab cwd="/repo" />);
     fireEvent.click(screen.getByText('notes.txt'));
-    expect(screen.getByTestId('fs-preview-text')).toBeTruthy();
-    expect(screen.queryByTestId('fs-preview-md')).toBeNull();
+    // Monaco 迁移后 .txt 也走编辑器(extToLanguage 不认 txt → language 为空,
+    // Monaco 回退纯文本高亮),不再有 fs-preview-text 这个 <pre> 分支。
+    const editor = await screen.findByTestId('fs-editor');
+    expect(editor.getAttribute('data-language')).toBe('');
+    expect(screen.queryByTestId('fs-preview-text')).toBeNull();
+    expect(screen.queryByTestId('fs-md-preview')).toBeNull();
   });
 
-  it('uses fs-preview-code test-id for .json files (Prism JSON highlighting)', async () => {
-    // .json / .jsonc / .json5 all map to the Prism 'json' language
-    // in extToLanguage, so the preview should mount the same
-    // SyntaxHighlighter wrapper as code files — not the plain <pre>.
+  it('renders .json files through the Monaco editor with language=json', async () => {
+    // .json / .jsonc / .json5 在 extToLanguage 里都映射到 Prism 'json'。
+    // Monaco 迁移后 JSON 配置也走 Monaco 编辑器(见 a64c8ac4)。
     mockList.mockReturnValue({
       data: {
         ok: true,
@@ -584,6 +549,7 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({
       data: {
         ok: true,
+        kind: 'text',
         path: '/repo/package.json',
         name: 'package.json',
         size: 32,
@@ -595,14 +561,11 @@ describe('FsTab', () => {
     });
     render(<FsTab cwd="/repo" />);
     fireEvent.click(screen.getByText('package.json'));
-    expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
+    const editor = await screen.findByTestId('fs-editor');
+    expect(editor.getAttribute('data-language')).toBe('json');
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
-    expect(screen.queryByTestId('fs-preview-md')).toBeNull();
-    await waitFor(() => {
-      const codeBlock = screen.getByTestId('fs-preview-code');
-      expect(codeBlock.querySelector('code')).toBeTruthy();
-      expect(codeBlock.querySelector('[data-testid="fs-preview-code-fallback"]')).toBeNull();
-    });
+    expect(screen.queryByTestId('fs-md-preview')).toBeNull();
+    expect(screen.queryByTestId('fs-preview-code')).toBeNull();
   });
 
   it('renders .png files via <img> with the dataUrl (fs-preview-image branch)', () => {
@@ -644,7 +607,7 @@ describe('FsTab', () => {
     expect(img?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
     expect(screen.queryByTestId('fs-preview-code')).toBeNull();
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
-    expect(screen.queryByTestId('fs-preview-md')).toBeNull();
+    expect(screen.queryByTestId('fs-md-preview')).toBeNull();
   });
 
   it('renders .jpg / .gif / .webp via the same image branch', () => {
@@ -719,7 +682,7 @@ describe('FsTab', () => {
     expect(img?.getAttribute('src')?.startsWith('data:image/svg+xml;base64,')).toBe(true);
     // Critically: the markup must NOT leak into the code/md/text branches.
     expect(screen.queryByTestId('fs-preview-code')).toBeNull();
-    expect(screen.queryByTestId('fs-preview-md')).toBeNull();
+    expect(screen.queryByTestId('fs-md-preview')).toBeNull();
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
   });
 
@@ -883,6 +846,7 @@ it('clicking a search row invokes setSelected + reuse right-side preview', () =>
   mockFile.mockReturnValue({
     data: {
       ok: true,
+      kind: 'text',
       path: '/repo/src/foo.ts',
       name: 'foo.ts',
       size: 42,
@@ -908,7 +872,7 @@ it('clicking a search row invokes setSelected + reuse right-side preview', () =>
   fireEvent.change(input, { target: { value: 'foo' } });
   fireEvent.keyDown(input, { key: 'Enter' });
   fireEvent.click(screen.getByTestId('fs-search-row'));
-  expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
+  expect(screen.getByTestId('fs-editor')).toBeTruthy();
 });
 
 // --- HTML preview (sandboxed iframe) ---
@@ -958,7 +922,7 @@ it('renders .html files via a sandboxed iframe (fs-preview-html branch)', () => 
   // Negative branches must not mount.
   expect(screen.queryByTestId('fs-preview-code')).toBeNull();
   expect(screen.queryByTestId('fs-preview-text')).toBeNull();
-  expect(screen.queryByTestId('fs-preview-md')).toBeNull();
+  expect(screen.queryByTestId('fs-md-preview')).toBeNull();
   expect(screen.queryByTestId('fs-preview-image')).toBeNull();
 });
 
@@ -1025,17 +989,18 @@ it('HTML preview shows a preview/source Segmented toggle in the header', () => {
   });
   render(<FsTab cwd="/repo" />);
   fireEvent.click(screen.getByText('index.html'));
-  const seg = screen.getByTestId('fs-html-mode');
+  const seg = screen.getByTestId('fs-view-mode');
   expect(seg).toBeTruthy();
-  // Two option labels: 预览 / 源码
+  // Three option labels: 预览 / 源码 / 编辑
+  // (2026-09-27 从 htmlMode 2 态扩成 viewMode 3 态,并把 .md 也拉进来)
   expect(screen.getByText('预览')).toBeTruthy();
   expect(screen.getByText('源码')).toBeTruthy();
+  expect(screen.getByText('编辑')).toBeTruthy();
 });
 
-it('HTML preview source toggle decodes base64 back to raw markup', () => {
-  // Default mode is 'preview' (iframe). Clicking the '源码' option
-  // should switch to the source <pre> and the markup must be a faithful
-  // round-trip of the bytes encoded on the server. The test payload
+it('HTML preview source toggle shows raw markup in the editor', async () => {
+  // Default mode is 'preview' (iframe). Clicking the '源码' option switches
+  // to the Monaco editor with the decoded markup. The test payload
   // `PGgxPkhlbGxvPC9oMT4=` is base64 for `<h1>Hello</h1>`.
   mockList.mockReturnValue({
     data: {
@@ -1058,6 +1023,8 @@ it('HTML preview source toggle decodes base64 back to raw markup', () => {
       kind: 'html',
       mime: 'text/html',
       dataUrl: 'data:text/html;charset=utf-8;base64,PGgxPkhlbGxvPC9oMT4=',
+      // 源码/编辑态走 Monaco,要 content;服务端同时回传这两个字段。
+      content: '<h1>Hello</h1>',
     },
     loading: false,
     error: null,
@@ -1066,20 +1033,21 @@ it('HTML preview source toggle decodes base64 back to raw markup', () => {
   fireEvent.click(screen.getByText('index.html'));
   // Iframe is mounted in preview mode.
   expect(screen.getByTestId('fs-preview-html')).toBeTruthy();
-  // Switch to source.
+  // Switch to source. Monaco 迁移后 .html 源码态也走 Monaco(language='html'),
+  // 不再是旧的 fs-preview-html-source <pre>。
   fireEvent.click(screen.getByText('源码'));
-  const source = screen.getByTestId('fs-preview-html-source');
-  expect(source).toBeTruthy();
-  expect(source.textContent).toBe('<h1>Hello</h1>');
+  const editor = await screen.findByTestId('fs-editor');
+  expect(editor.getAttribute('data-language')).toBe('html');
+  expect(editor.textContent).toContain('<h1>Hello</h1>');
   // And the iframe should unmount.
   expect(screen.queryByTestId('fs-preview-html')).toBeNull();
 });
 
-it('does NOT show HTML preview/source toggle for non-HTML files', () => {
-  // Regression: the Segmented control is gated on `showHtmlToggle`.
-  // For .ts / .md / .png files it must not mount — otherwise the
-  // header would gain a phantom toggle that does nothing for the
-  // active preview.
+it('does NOT show the view-mode toggle for non-HTML/non-MD files', () => {
+  // Regression: the Segmented control is gated on `showViewModeToggle`
+  // (= isMd || isHtml). For .ts / .png files it must not mount —
+  // otherwise the header would gain a phantom toggle that does nothing
+  // for the active preview.
   mockList.mockReturnValue({
     data: {
       ok: true,
@@ -1094,6 +1062,7 @@ it('does NOT show HTML preview/source toggle for non-HTML files', () => {
   mockFile.mockReturnValue({
     data: {
       ok: true,
+      kind: 'text',
       path: '/repo/foo.ts',
       name: 'foo.ts',
       size: 32,
@@ -1105,8 +1074,8 @@ it('does NOT show HTML preview/source toggle for non-HTML files', () => {
   });
   render(<FsTab cwd="/repo" />);
   fireEvent.click(screen.getByText('foo.ts'));
-  expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
-  expect(screen.queryByTestId('fs-html-mode')).toBeNull();
+  expect(screen.getByTestId('fs-editor')).toBeTruthy();
+  expect(screen.queryByTestId('fs-view-mode')).toBeNull();
 });
 
 // --- Task 6: Edit/Save/Cancel integration ---
@@ -1209,7 +1178,10 @@ it('toggling the Switch renders FsContentSearchList when query is non-empty', ()
   expect(screen.getByTestId('fs-content-list')).toBeTruthy();
 });
 
-it('clicking a content search row passes pendingLine to FilePreview', async () => {
+it('clicking a content search row reveals the matched line in Monaco', async () => {
+  // 回归:a64c8ac4 Monaco 迁移时,pendingLine 只接到了 FilePreview 的
+  // data-line 锚点跳转,代码文件这条主路径没有任何消费者 —— 跳转静默失效。
+  // 现在 FsTab 直接调 editorRef.current.revealPosition。
   mockList.mockReturnValue({ data: { ok: true, entries: [] }, loading: false, error: null, refetch: vi.fn() });
   mockFile.mockReturnValue({
     data: {
@@ -1242,144 +1214,8 @@ it('clicking a content search row passes pendingLine to FilePreview', async () =
   fireEvent.click(screen.getByTestId('fs-search-mode'));
   fireEvent.click(screen.getByTestId('fs-content-row'));
 
-  // 预览里的 data-line 锚点由 SyntaxHighlighter chunk 异步挂载, 所以要等.
-  // 断言必须限定在 fs-preview-code 内部: FsContentSearchList 自己的行也带
-  // data-line, 而旧的分栏布局下检索列表一直挂载在左栏 —— 只查 document 的话
-  // 命中的是搜索结果行, 断言会"假通过".
-  await waitFor(() => {
-    const codeBlock = screen.getByTestId('fs-preview-code');
-    expect(codeBlock.querySelector('[data-line="2"]')).toBeTruthy();
-  });
-});
-
-it('code preview renders a line-number gutter and per-line data-line anchors', async () => {
-  // Regression: previously FsTab passed showLineNumbers={false} to the
-  // SyntaxHighlighter, so the code preview had no line numbers and the
-  // content-search jump-to-line effect had to fall back to a brittle
-  // `lineHeight * (N-1)` scroll math. Now showLineNumbers + wrapLines +
-  // lineProps are all on, the gutter is visible, and per-line
-  // <span data-line={N}> anchors let the jump effect use querySelector.
-  // The stub mirrors that contract (see vi.mock above) so this test
-  // exercises the same DOM shape happy-dom would synthesize from a
-  // real SyntaxHighlighter with these props.
-  mockList.mockReturnValue({
-    data: {
-      ok: true,
-      entries: [{ name: 'foo.ts', path: 'foo.ts', type: 'file', size: 42 }],
-    },
-    loading: false,
-    error: null,
-    refetch: vi.fn(),
-  });
-  mockFile.mockReturnValue({
-    data: {
-      ok: true,
-      path: '/repo/foo.ts',
-      name: 'foo.ts',
-      size: 42,
-      mtime: '2026-07-21T00:00:00Z',
-      content: 'line1\nTODO\nline3',
-    },
-    loading: false,
-    error: null,
-  });
-  render(<FsTab cwd="/repo" />);
-  fireEvent.click(screen.getByText('foo.ts'));
-  await waitFor(() => {
-    const codeBlock = screen.getByTestId('fs-preview-code');
-    // The stub adds a data-testid for the gutter <code>. The real
-    // library uses a similar <code style="float:left;..."> with no
-    // testid, but the visual line-number <span> per line is what
-    // we actually assert on below.
-    expect(codeBlock.querySelector('.react-syntax-highlighter-line-number')).toBeTruthy();
-  });
-  // Gutter must contain a line number for each non-empty source line.
-  // `content` has 3 newline-separated lines → 3 gutter spans.
-  const codeBlock = screen.getByTestId('fs-preview-code');
-  const gutter = codeBlock.querySelector('[data-testid="fs-line-gutter"]') as HTMLElement | null;
-  expect(gutter).toBeTruthy();
-  expect(gutter!.querySelectorAll('.react-syntax-highlighter-line-number').length).toBe(3);
-  // Per-line data-line anchors — one per non-empty source line.
-  // The jump effect (pendingLine=2) needs [data-line="2"] to exist
-  // before scrollIntoView is called; the click-content-search-row
-  // test below covers the actual scroll path.
-  const dataLines = codeBlock.querySelectorAll('[data-line]');
-  expect(dataLines.length).toBe(3);
-  expect(codeBlock.querySelector('[data-line="1"]')).toBeTruthy();
-  expect(codeBlock.querySelector('[data-line="2"]')).toBeTruthy();
-  expect(codeBlock.querySelector('[data-line="3"]')).toBeTruthy();
-});
-
-it('content-search row click on .ts file scrolls to the matched line via data-line anchor', async () => {
-  // End-to-end of the jump effect: switch to content mode, click the
-  // first match at line=2, and verify the data-line="2" span is the
-  // one the effect calls scrollIntoView on. The previous "brittle
-  // lineHeight * (N-1) math" path is gone — the effect should hit
-  // the [data-line="2"] anchor via querySelector. We spy on
-  // Element.prototype.scrollIntoView so we don't have to assert
-  // against happy-dom's specific style-string serialization (it
-  // varies across versions and we're not testing the renderer).
-  const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
-  try {
-    mockList.mockReturnValue({
-      data: { ok: true, entries: [] },
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-    mockFile.mockReturnValue({
-      data: {
-        ok: true, kind: 'text', path: '/repo/src/foo.ts', name: 'foo.ts',
-        size: 42, mtime: '', content: 'line1\nTODO\nline3',
-      },
-      loading: false,
-      error: null,
-    });
-    mockContentSearch.mockReturnValue({
-      data: {
-        ok: true,
-        entries: [
-          {
-            path: 'src/foo.ts', name: 'foo.ts',
-            matches: [{ line: 2, text: 'TODO', submatch: { text: 'TODO', start: 0, end: 4 } }],
-          },
-        ],
-        truncated: false,
-        durationMs: 5,
-      },
-      loading: false,
-      error: null,
-      durationMs: 5,
-    });
-    render(<FsTab cwd="/repo" />);
-    const input = screen.getByTestId('fs-search-input') as HTMLInputElement;
-    fireEvent.change(input, { target: { value: 'TODO' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    fireEvent.click(screen.getByTestId('fs-search-mode'));
-    fireEvent.click(screen.getByTestId('fs-content-row'));
-    await waitFor(() => {
-      // fs-preview-code mounts once SyntaxHighlighter chunk resolves,
-      // and the effect calls scrollIntoView on the matched data-line.
-      // We don't assert against the data-line here because the
-      // existing "clicking a content search row passes pendingLine"
-      // test already covers that; this one is about the integration:
-      // did the effect fire at all when the chunk is syntax-highlighted
-      // (which is the regression we're guarding against — the old
-      // fallback math was the broken path).
-      expect(scrollSpy).toHaveBeenCalled();
-      const calls = scrollSpy.mock.calls;
-      expect(calls.length).toBeGreaterThan(0);
-      // The element that was scrolled into view should be the line-2
-      // span (the data-line="2" anchor, not the wrapper).
-      const target = calls[0]?.[0] as Element | undefined;
-      // `this` is the element that scrollIntoView was called on.
-      // vi.fn() captures `this` in mock.instances[0].
-      const calledEl = (scrollSpy.mock.instances[0] ?? target) as HTMLElement | undefined;
-      expect(calledEl?.getAttribute('data-line')).toBe('2');
-    });
-  } finally {
-    scrollSpy.mockRestore();
-  }
+  await waitFor(() => expect(revealCalls.length).toBeGreaterThan(0));
+  expect(revealCalls.at(-1)).toEqual({ lineNumber: 2, column: 1 });
 });
 
 it('cwd change resets mode and pendingLine', () => {
@@ -1484,7 +1320,7 @@ it('点击文件树节点会在 tab 条里新开一个文件 tab 并显示内容
   expect(tab.getAttribute('aria-selected')).toBe('true');
   expect(screen.getByTestId('fs-tab-files').getAttribute('aria-selected')).toBe('false');
   // 文件 tab 上渲染的是内容面板, 文件树让位.
-  expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
+  expect(screen.getByTestId('fs-editor')).toBeTruthy();
   expect(screen.queryByTestId('fs-tree')).toBeNull();
   // 头部路径行换成该文件的绝对路径.
   expect(screen.getByTestId('fs-path').textContent).toBe('/repo/foo.ts');

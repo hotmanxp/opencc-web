@@ -692,7 +692,26 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   // onReady:MonacoCodeView api 注入到 editorRef;同时把 baseline 锁定。
   const handleEditorReady = (api: typeof editorRef.current) => {
     editorRef.current = api;
+    setEditorReady(true);
   };
+
+  // 内容搜索点行 → 让 Monaco 跳到该行。
+  //
+  // a64c8ac4 把代码预览从 FilePreview(SyntaxHighlighter)换成 Monaco 时,
+  // pendingLine 只接到了 FilePreview 的 data-line 锚点跳转(见上方
+  // FilePreview 内的 useEffect),代码文件这条主路径没有任何消费者 ——
+  // MonacoCodeView 明明暴露了 revealPosition,却一次都没被调用,跳转功能
+  // 静默失效。这里补上:editorRef 由 onReady 注入,effect 依赖 pendingLine
+  // + editorReady,保证 api 就绪(晚于挂载)后仍会补跳一次。
+  //
+  // 消费后清空 pendingLine:同一文件在多次检索里被点中同一行时,setPendingLine(2)
+  // 因值未变不会触发 effect 重跑,保留旧值会让后续点击静默无反应。
+  const [editorReady, setEditorReady] = useState(false);
+  useEffect(() => {
+    if (pendingLine == null || !editorReady) return;
+    editorRef.current?.revealPosition({ lineNumber: pendingLine, column: 1 });
+    setPendingLine(null);
+  }, [pendingLine, editorReady]);
 
   // 目录树 / 两个搜索列表共用的右键菜单打开器。path 为相对 cwd 的路径,
   // 与「复制相对路径」同值;absPath 由 buildAbsPath 还原绝对路径;kind 供
