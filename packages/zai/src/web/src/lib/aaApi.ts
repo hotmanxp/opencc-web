@@ -61,38 +61,57 @@ function tokenHeaders(): HeadersInit {
   return token ? { 'X-Zai-Token': token } : {};
 }
 
+// `toResult` 接收一个 Promise 并返回 `Promise<Result<T>>`,所以必须
+// `toResult(api.get(...))` 直接调用。曾经的写法是
+// `api.get(...).then(toResult).catch(...)` —— 把 toResult 当成 .then 的
+// 回调,此时它收到的参数是**已 resolve 的数据对象**而非 Promise,内部
+// `promise.then` 立刻抛 `TypeError: e.then is not a function`。该异常被
+// 末尾的 .catch 吞成 `{ ok: false }`,于是 AASettings 的轮询永远拿到
+// ok:false,state 停在初始值 'disabled' —— 表现为「后端返回 unpaired,
+// 但 UI 一直显示 Disabled」。`api.get` 丢 init 只是叠加问题(GET 拿不到
+// token),不是这个症状的根因。
 export const aaApi = {
   getStatus: () =>
-    api.get<AaStatusResponse>('/api/aa/status', { headers: tokenHeaders() } as RequestInit)
-      .then(toResult)
-      .catch((e) => ({ ok: false as const, error: e })),
+    toResult(
+      api.get<AaStatusResponse>('/api/aa/status', { headers: tokenHeaders() } as RequestInit),
+    ).catch((e) => ({ ok: false as const, error: e })),
 
   getConfig: () =>
-    api.get<{ status: 'paired'; config: AaConfigPublic } | { status: 'unpaired' }>(
-      '/api/aa/config', { headers: tokenHeaders() } as RequestInit,
-    ).then(toResult).catch((e) => ({ ok: false as const, error: e })),
+    toResult(
+      api.get<{ status: 'paired'; config: AaConfigPublic } | { status: 'unpaired' }>(
+        '/api/aa/config', { headers: tokenHeaders() } as RequestInit,
+      ),
+    ).catch((e) => ({ ok: false as const, error: e })),
 
   startPairing: (serverUrl: string, ttlSeconds?: number) =>
-    api.post<PairingStartResponse>(
-      '/api/aa/pairing/start',
-      { serverUrl, ...(ttlSeconds ? { ttlSeconds } : {}) },
-      { headers: tokenHeaders() },
-    ).then(toResult).catch((e) => ({ ok: false as const, error: e })),
+    toResult(
+      api.post<PairingStartResponse>(
+        '/api/aa/pairing/start',
+        { serverUrl, ...(ttlSeconds ? { ttlSeconds } : {}) },
+        { headers: tokenHeaders() },
+      ),
+    ).catch((e) => ({ ok: false as const, error: e })),
 
   getPairingStatus: () =>
-    api.get<PairingStartResponse | { status: 'unpaired' | 'expired' }>(
-      '/api/aa/pairing/status', { headers: tokenHeaders() } as RequestInit,
-    ).then(toResult).catch((e) => ({ ok: false as const, error: e })),
+    toResult(
+      api.get<PairingStartResponse | { status: 'unpaired' | { status: 'expired' } }>(
+        '/api/aa/pairing/status', { headers: tokenHeaders() } as RequestInit,
+      ),
+    ).catch((e) => ({ ok: false as const, error: e })),
 
   pollPairing: () =>
-    api.post<PairingClaimResponse>(
-      '/api/aa/pairing/poll', {}, { headers: tokenHeaders() },
-    ).then(toResult).catch((e) => ({ ok: false as const, error: e })),
+    toResult(
+      api.post<PairingClaimResponse>(
+        '/api/aa/pairing/poll', {}, { headers: tokenHeaders() },
+      ),
+    ).catch((e) => ({ ok: false as const, error: e })),
 
   cancelPairing: () =>
-    api.post<{ status: 'cancelled' }>(
-      '/api/aa/pairing/cancel', {}, { headers: tokenHeaders() },
-    ).then(toResult).catch((e) => ({ ok: false as const, error: e })),
+    toResult(
+      api.post<{ status: 'cancelled' }>(
+        '/api/aa/pairing/cancel', {}, { headers: tokenHeaders() },
+      ),
+    ).catch((e) => ({ ok: false as const, error: e })),
 };
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: unknown };

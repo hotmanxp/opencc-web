@@ -43,6 +43,7 @@ import {
   writeAaConfigQueued,
   type AaConfig,
 } from './config.js';
+import { isAaEnabled } from './index.js';
 
 // ─── Pairing state (persisted between requests / restarts) ──────────────
 
@@ -322,6 +323,15 @@ export async function waitForPairingClaim(
  * Convert a successful poll into a persisted AaConfig. Idempotent — if the
  * config already exists with the same connectorId, this is a no-op (avoids
  * overwriting user-patched metadata like deviceOs).
+ *
+ * After persisting, kick off the AA root subsystem so the user sees
+ * "Connected" instead of being stuck at "Paired, initializing…" until the
+ * next zai restart. Gated on `isAaEnabled()` + non-child process role
+ * (init.ts has the same gate; we mirror it here to avoid touching the
+ * supervisor or a managed child's WS state).
+ *
+ * Fire-and-forget: failures are logged inside `startAaRoot` but never
+ * propagate, so a transient init error can't break the pairing response.
  */
 export async function finalizePairing(
   state: PairingState,
@@ -335,6 +345,19 @@ export async function finalizePairing(
   });
   await writeAaConfigQueued(config);
   await clearPairingState();
+  // Auto-bring-up after pairing: only root processes (not the supervisor,
+  // not managed children) should start an AaConnection. Children forward
+  // events via ChildEventReporter, and the supervisor has no Express so
+  // it never reaches here either.
+  const instanceId = process.env.ZAI_INSTANCE_ID ?? '';
+  const isChild = instanceId.startsWith('inst_');
+  if (isAaEnabled() && !isChild) {
+    const { startAaRoot } = await import('./init.js');
+    void startAaRoot(config).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+      console.warn('[aa.pairing] post-pair auto-init failed:', msg);
+    });
+  }
   return config;
 }
 

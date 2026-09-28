@@ -38,7 +38,7 @@ import { resolve as pathResolve, join, sep, dirname, basename } from 'node:path'
 import type { AaConnection } from './connection.js';
 import { readAaConfig } from './config.js';
 import type { RuntimeRegistry } from './runtimeRegistry.js';
-import { isAaaAssignedRuntimeId } from './runtimeRegistry.js';
+import { getRuntimeRegistry, isAaaAssignedRuntimeId } from './runtimeRegistry.js';
 import { getSessionMap } from './sessionMap.js';
 import { AaNetworkError, AaServerError } from './pairing.js';
 import { upsertTimelineItem } from './rpc.js';
@@ -479,8 +479,11 @@ export class ReverseDispatch {
    */
   private async adoptAaaRuntimeId(runtimeId: string): Promise<void> {
     if (!isAaaAssignedRuntimeId(runtimeId)) return;
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getRuntimeRegistry } = require('./runtimeRegistry.js') as typeof import('./runtimeRegistry.js');
+    // 用文件顶部的静态 import(`isAaaAssignedRuntimeId` 已从同模块导入)。
+    // 曾经的 `require('./runtimeRegistry.js')` 在 zai 的纯 ESM(type:module)
+    // 下抛 `require is not defined` —— 手机端表现为该 agent 卡在
+    // "Codex · require is not defined"。注释里说的 "circular-free" 顾虑
+    // 不成立:runtimeRegistry.ts 并不 import 本文件。
     const reg = getRuntimeRegistry();
     if (!reg) return;
     const port = await this.portFromRuntime(runtimeId);
@@ -772,9 +775,7 @@ export class ReverseDispatch {
   }
 
   private async portFromRuntime(runtimeId: string): Promise<number | null> {
-    // Lazy import via require() — circular-free across the AA bundle.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getRuntimeRegistry } = require('./runtimeRegistry.js') as typeof import('./runtimeRegistry.js');
+    // 同 adoptAaaRuntimeId:静态 import 已在文件顶部,无需 require()。
     const reg = getRuntimeRegistry();
     if (!reg) {
       console.warn('[aa.reverseDispatch] portFromRuntime: no registry');

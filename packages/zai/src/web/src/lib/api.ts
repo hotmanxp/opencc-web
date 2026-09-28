@@ -19,7 +19,15 @@ import { request } from './apiBase.js'
 
 // 兼容老 api.get/post/put 调用 — 迁移期间保留, 后续渐进迁移到 apiRpc。
 export const api = {
-  get: <T>(path: string) => request<T>('GET', path),
+  // init must stay symmetric with post — aaApi's whole pairing flow
+  // (getStatus / getConfig / getPairingStatus) passes a second
+  // `{ headers: tokenHeaders() } as RequestInit` argument. When get only
+  // accepted `path`, the `as` cast silenced the arity error at compile time
+  // and the header was dropped at runtime, so those GETs never sent
+  // `X-Zai-Token`. status happened to survive (no auth on that route) but
+  // getConfig / getPairingStatus could not.
+  get: <T>(path: string, init?: RequestInit) =>
+    request<T>('GET', path, undefined, init),
   // 加 init 参数让调用方能传 headers (e.g. X-Session-Id). 兼容老调用
   // (init 可选). body 优先用 body, headers 走 init.headers, Content-Type
   // 由 request() 内部合并 — 调用方传进来的 headers 不会覆盖 Content-Type.

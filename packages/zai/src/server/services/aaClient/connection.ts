@@ -43,6 +43,7 @@ import {
   type InboundFrame,
 } from './protocol.js';
 import type { AaConfig } from './config.js';
+import { logHttp } from '../accessLog.js';
 
 // ─── Public status shape (consumed by routes/aa/status.ts + UI) ───────────
 
@@ -576,6 +577,9 @@ export class AaConnection {
       console.log(
         `[aa.inbound] ${frame.method} NO_HANDLER params=${paramsPreview}`,
       );
+      // 也落盘:AA 侧的报错(如手机端显示的 "require is not defined")只能从
+      // 入站/出站 RPC 日志反推,而子进程 stdout 常常没人盯着。
+      logHttp(`[aa.inbound] ${frame.method} NO_HANDLER params=${paramsPreview}`, 'warn');
       this.sendFrame(buildResponseError(frame.id, 'method_not_implemented', `no handler for ${frame.method}`));
       return;
     }
@@ -585,12 +589,20 @@ export class AaConnection {
       console.log(
         `[aa.inbound] ${frame.method} → ok params=${paramsPreview} result=${resultPreview}`,
       );
+      logHttp(`[aa.inbound] ${frame.method} → ok result=${resultPreview}`, 'debug');
       this.sendFrame(buildResponse(frame.id, result));
     } catch (err) {
       const code = (err as { code?: string }).code ?? (err instanceof Error ? err.constructor.name : 'unknown');
       const message = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? (err.stack ?? '') : '';
       console.log(
         `[aa.inbound] ${frame.method} → ERROR ${code}: ${message} params=${paramsPreview}`,
+      );
+      // stack 必须一起落盘 —— "require is not defined" 这类错误光看 message
+      // 定位不到抛出点,得看调用栈。
+      logHttp(
+        `[aa.inbound] ${frame.method} → ERROR ${code}: ${message} params=${paramsPreview} stack=${stack}`,
+        'error',
       );
       this.sendFrame(buildResponseError(frame.id, code, message));
     }

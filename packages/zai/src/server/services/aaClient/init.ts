@@ -113,6 +113,29 @@ export async function initAaClient(): Promise<(() => Promise<void>) | null> {
     return null;
   }
 
+  return startAaRoot(config);
+}
+
+/**
+ * Build the AA root subsystem against an already-loaded config. Used by both
+ * `initAaClient` (boot path) and `finalizePairing` (post-pair path so the
+ * connection comes up without requiring a zai restart).
+ *
+ * Idempotent: if a previous `startAaRoot` already initialised the singletons
+ * we return its existing shutdown fn without re-binding. This matters because
+ * `initAaClient` runs at boot and `finalizePairing` may run shortly after on
+ * the same process; calling both with no guard would double-register eventBus
+ * listeners and double-WS-connect.
+ */
+export async function startAaRoot(config: import('./index.js').AaConfig): Promise<(() => Promise<void>) | null> {
+  // Already initialised? Return the existing shutdown fn so shutdown is
+  // symmetric. We can't simply return null — the caller still holds a
+  // reference and expects to be able to tear down.
+  if (getAaConnection()) {
+    console.log('[aa.client] startAaRoot: connection already initialised, skipping double-init');
+    return existingShutdown();
+  }
+
   const conn = initAaConnection(config);
 
   // T5: session map first — event adapter and reverse dispatch need it.
@@ -175,7 +198,7 @@ export async function initAaClient(): Promise<(() => Promise<void>) | null> {
   // Refresh subject to sessionMap so type-checker doesn't flag unused.
   void sessionMap;
 
-  return async () => {
+  const shutdown = async () => {
     await adapter.stop();
     resetEventAdapterForTests();
     buffer.stop();
@@ -186,7 +209,16 @@ export async function initAaClient(): Promise<(() => Promise<void>) | null> {
     await conn.stop();
     resetAaConnectionForTests();
   };
+  rememberShutdown(shutdown);
+  return shutdown;
 }
+
+// Module-local registry of the most-recently-installed shutdown fn, so a
+// re-entrant startAaRoot (e.g. boot init followed by finalizePairing on the
+// same process) can return the same shutdown fn without re-initialising.
+let installedShutdown: (() => Promise<void>) | null = null;
+function rememberShutdown(fn: () => Promise<void>): void { installedShutdown = fn; }
+function existingShutdown(): (() => Promise<void>) | null { return installedShutdown; }
 
 /** Convenience: get the live connection (null if not initialized). */
 export function getLiveAaConnection(): AaConnection | null {
