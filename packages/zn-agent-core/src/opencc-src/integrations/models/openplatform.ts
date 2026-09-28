@@ -1,9 +1,9 @@
 import { defineModel } from '../define.js'
 
-// All 13 model descriptors live under brandId 'openplatform'. The catalog
-// on the zn-nova gateway references all 13. Each defaultModel is the bare
-// apiName the 平安 Nova gateway expects (no zhiniao- prefix, unlike the
-// wizard-ai gateway).
+// All 18 model descriptors live under brandId 'openplatform'. The catalog
+// on the zn-nova gateway references all of them. Each defaultModel is the
+// bare apiName the 平安 Nova gateway expects (no zhiniao- prefix, unlike
+// the wizard-ai gateway).
 //
 // Context/output values are sourced from src/utils/model/openaiContextWindows.ts
 // (zhiniao-* entries for shared M2.7 / Qwen / GLM models; static table

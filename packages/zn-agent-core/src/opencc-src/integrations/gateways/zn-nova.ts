@@ -51,6 +51,21 @@ export default defineGateway({
         modelDescriptorId: 'openplatform-minimax-m3',
       },
       {
+        // M3.1 Flash Preview ships five reasoning tiers (low/medium/high/
+        // xhigh/max) and defaults to `max` per the vendor's launch notes —
+        // unlike MiniMax-M3, whose default here stays the API-side default.
+        id: 'zn-nova-minimax-m3.1-flash-preview',
+        apiName: 'MiniMax-M3.1-Flash-Preview',
+        label: 'MiniMax M3.1 Flash Preview (via 平安 novai)',
+        modelDescriptorId: 'openplatform-minimax-m3.1-flash-preview',
+        reasoning: {
+          mode: 'levels',
+          levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+          defaultLevel: 'max',
+          wireFormat: 'reasoning_effort',
+        },
+      },
+      {
         id: 'zn-nova-minimax-m2.7-highspeed',
         apiName: 'MiniMax-M2.7-highspeed',
         label: 'MiniMax M2.7 Highspeed (via 平安 novai)',
