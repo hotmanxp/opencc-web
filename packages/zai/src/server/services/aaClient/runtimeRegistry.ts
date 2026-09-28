@@ -134,6 +134,10 @@ export class RuntimeRegistry {
   async start(): Promise<void> {
     if (this.listenerInstalled) return;
     this.mappings = await readRuntimeMap();
+    // runtime-map.json is reloaded wholesale, so an instance that was
+    // opted out of AA (`def.aa === false`) while the connector was down
+    // still has an entry here. Drop them before anything can route to them.
+    await this.pruneDisabledMappings();
     eventBus.subscribe((event) => {
       if (event.type === 'instance.changed') this.handleInstanceChanged(event).catch((err) => {
         console.warn('[aa.runtimeRegistry] handler error:', err);
@@ -186,6 +190,22 @@ export class RuntimeRegistry {
     return null;
   }
 
+  /**
+   * Lookup by the id AA assigned us (`rti_…`).
+   *
+   * Distinct from `getMappingByPort` in the way that matters once more
+   * than one instance exists: the port changes every time zai restarts
+   * (auto-scan from INSTANCE_BASE_PORT), but `runtimeId` is stable for
+   * the whole AA-side session — so this is the key that survives a
+   * zai restart and lets `runtime.start` re-bind to the right child.
+   */
+  getMappingByRuntimeId(runtimeId: string): RuntimeMapping | null {
+    for (const m of Object.values(this.mappings)) {
+      if (m.runtimeId === runtimeId) return m;
+    }
+    return null;
+  }
+
   /** All currently-registered runtimes. */
   listAll(): RuntimeMapping[] {
     return Object.values(this.mappings);
@@ -215,13 +235,54 @@ export class RuntimeRegistry {
     const portKey = String(port);
     const mapping = this.mappings[portKey];
     if (!mapping) return false;
-    if (mapping.runtimeId === trimmed) return false;
+    // One AA runtime id must name exactly ONE child. The old
+    // any-live-port fallback could adopt the same `rti_*` onto two
+    // different ports (the on-disk map still had `rti_nJK4nB_…` on
+    // both 9399 and 9987), after which the exact-match lookup in
+    // `portFromRuntime` returned whichever the object iteration
+    // happened to reach first — i.e. sessions landed in whichever
+    // workspace. Evict the id from every other port before stamping it
+    // here so a duplicate can never outlive the next start.
+    let evicted = 0;
+    for (const [key, other] of Object.entries(this.mappings)) {
+      if (key === portKey) continue;
+      if (other.runtimeId !== trimmed) continue;
+      delete this.mappings[key];
+      evicted += 1;
+    }
+    if (mapping.runtimeId === trimmed && evicted === 0) return false;
     logHttp(
       `[aa.runtimeRegistry] port ${port}: adopting server runtime_id ` +
-        `${trimmed} (was ${mapping.runtimeId})`,
+        `${trimmed} (was ${mapping.runtimeId}${evicted > 0 ? `, evicted from ${evicted} stale port(s)` : ''})`,
     );
     mapping.runtimeId = trimmed;
     this.mappings[portKey] = mapping;
+    await writeRuntimeMap(this.mappings);
+    return true;
+  }
+
+  /**
+   * Drop mappings whose instance opted out of AA (`def.aa === false`).
+   *
+   * The per-instance opt-out is defined on `InstanceDefinition` and
+   * enforced at spawn time (no `--aa` on the child), but nothing kept
+   * it out of this map — so an opted-out child that was running before
+   * the flag was flipped stayed routable. Returns true when anything
+   * was removed.
+   */
+  private async pruneDisabledMappings(): Promise<boolean> {
+    const stale: RuntimeMapping[] = [];
+    for (const m of Object.values(this.mappings)) {
+      const snap = await this.loadInstanceDefinition(m.instanceId);
+      if (snap?.aa === false) stale.push(m);
+    }
+    if (stale.length === 0) return false;
+    for (const m of stale) {
+      delete this.mappings[String(m.port)];
+      logHttp(
+        `[aa.runtimeRegistry] dropping port ${m.port} (${m.name}): instance has aa=false`,
+      );
+    }
     await writeRuntimeMap(this.mappings);
     return true;
   }
@@ -238,6 +299,18 @@ export class RuntimeRegistry {
   }): Promise<void> {
     // Only `running` with a known port and `stopped` are actionable.
     if (event.state === 'running' && event.port !== null) {
+      // `def.aa === false` is the per-instance opt-out ("this workspace
+      // must not be visible to AA Cloud"). The supervisor honours it by
+      // not passing `--aa` to the child, but the child still boots and
+      // still emits `instance.changed` — so honour it here too, or the
+      // opt-out only stops the child's own WS client while root keeps
+      // routing AA traffic to it.
+      const def = await this.loadInstanceDefinition(event.instanceId);
+      if (def?.aa === false) {
+        const existing = this.findByInstanceId(event.instanceId);
+        if (existing) await this.deregister(existing);
+        return;
+      }
       await this.register({ instanceId: event.instanceId, port: event.port });
     } else if (event.state === 'stopped') {
       // Only deregister if we currently have a mapping for this instance
@@ -432,13 +505,14 @@ export class RuntimeRegistry {
     name: string;
     cwd: string;
     app?: 'task-factory' | 'weixin';
+    aa?: boolean;
   } | null> {
     try {
       const { getInstanceSupervisor } = await import('../instanceSupervisor.js');
       const snapshots = getInstanceSupervisor().getSnapshots();
       const snap = snapshots.find((s) => s.id === instanceId);
       if (!snap) return null;
-      return { name: snap.name, cwd: snap.cwd, app: snap.app };
+      return { name: snap.name, cwd: snap.cwd, app: snap.app, aa: snap.aa };
     } catch {
       return null;
     }
