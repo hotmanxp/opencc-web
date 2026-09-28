@@ -67,7 +67,10 @@ const ZAI_PERMISSION_MODES = [
  * way to tell which model the user was looking at.
  */
 const ZAI_EFFORT_LEVELS = [
-  { id: 'none', displayName: '关闭', default: false },
+  // 'off' is deliberately not 'none': endpoints that require adaptive
+  // thinking reject an explicit `reasoning.effort=none` (MiniMax answers
+  // 2013), so "off" has to mean "send nothing at all".
+  { id: 'off', displayName: '关闭', default: false },
   { id: 'low', displayName: '低', default: false },
   { id: 'medium', displayName: '中', default: true },
   { id: 'high', displayName: '高', default: false },
@@ -744,12 +747,12 @@ export class ReverseDispatch {
         patch.model = model;
         if (providerId) patch.providerId = providerId;
         if (effort) {
-          // zai has no per-session reasoning-effort knob wired into the
-          // agent loop. The model is what matters here; the effort travels
-          // only in the log so a "why didn't 高 apply" question is answerable.
-          console.log(
-            `[aa.reverseDispatch] selection carries reasoning effort=${effort} for model=${model} (not forwarded)`,
-          );
+          // zai patch (2026-09-28): 强度真正下发到模型。effort 的取值来自
+          // 我们目录里的 reasoningItems,已按模型限定过;这里转成 zai 会话级
+          // 字段,由 modelCaller 合并成请求体的 reasoning.effort。
+          // 'none'/'off' 表示不下发该字段 —— MiniMax 的 adaptive thinking
+          // 模型拒收显式 none(2013),由下游负责不合并。
+          patch.effort = effort;
         }
       } else {
         console.warn(
@@ -1088,6 +1091,7 @@ export class ReverseDispatch {
       ...(selectionPatch.permissionMode
         ? { permissionMode: selectionPatch.permissionMode as string }
         : {}),
+      ...(selectionPatch.effort ? { effort: selectionPatch.effort as string } : {}),
     });
 
     // Capture the ACTUAL zai sessionId returned by the child — the child

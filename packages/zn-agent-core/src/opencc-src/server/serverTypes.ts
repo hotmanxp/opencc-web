@@ -231,6 +231,14 @@ export type OpenccQueryInput = {
    * user chose when several profiles share the same model name.
    */
   providerId?: string
+  /**
+   * zai patch (2026-09-28): per-query reasoning effort level
+   * ('low' | 'medium' | 'high'). Merged into the request body as
+   * `reasoning.effort` by zai's anthropic-side model caller. Omitted when
+   * the session's effort is "off" — endpoints that require adaptive
+   * thinking (e.g. MiniMax-M3.1-Flash-Preview) reject an explicit `none`.
+   */
+  effort?: string
 }
 
 /**

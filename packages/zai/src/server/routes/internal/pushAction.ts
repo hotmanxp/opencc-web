@@ -86,6 +86,7 @@ const SessionCreatePayloadSchema = z.object({
   model: z.string().optional(),
   providerId: z.string().optional(),
   permissionMode: z.string().optional(),
+  effort: z.string().optional(),
 });
 
 const ApprovePayloadSchema = z.object({

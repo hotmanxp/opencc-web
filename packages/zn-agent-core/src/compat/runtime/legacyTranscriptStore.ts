@@ -202,7 +202,17 @@ export class TranscriptStore {
   }
 
   async create(
-    meta: { cwd: string; model: string; permissionMode?: string; sessionId?: string },
+    meta: {
+      cwd: string
+      model: string
+      permissionMode?: string
+      sessionId?: string
+      // zai patch (2026-09-28): these two were accepted by the create route
+      // but silently dropped here, so a session created with a picked model
+      // / effort started on the default until a follow-up PATCH landed.
+      providerId?: string
+      effort?: string
+    },
     opts?: { cwd?: string },
   ): Promise<string> {
     // zai patch (2026-09-27, AA integration): accept an external sessionId
@@ -218,6 +228,8 @@ export class TranscriptStore {
       model: meta.model,
       sessionId,
       createdAt: Date.now(),
+      ...(meta.providerId ? { providerId: meta.providerId } : {}),
+      ...(meta.effort ? { effort: meta.effort } : {}),
       ...(meta.permissionMode ? { permissionMode: meta.permissionMode } : {}),
     })
     // 落盘空文件占位, 让 list 扫目录时能立即看到这条会话 (sidebar 新建即出现)。

@@ -964,6 +964,14 @@ let initialMessages: Message[] | undefined
           // model to the exact provider the user picked when several
           // provider profiles share the same model name.
           ...(input.providerId ? { providerId: input.providerId } : {}),
+          // zai patch (2026-09-28): per-query reasoning effort (from
+          // transcript.meta.effort). Same channel as providerId; read by
+          // zai's createAnthropicModelCaller, which merges it into the
+          // request body as `reasoning.effort`. Third-party Anthropic-
+          // compatible endpoints (MiniMax) need this — the vendor's own
+          // effort path targets Anthropic's first-party output_config +
+          // beta header, which those endpoints reject.
+          ...(input.effort ? { effort: input.effort } : {}),
         })
         // zai patch: 绑定 vendor SDK context, 让 vendor 的 getSessionId()
         // 在本 query 的异步链上返回 input.sessionId, 从而 transcript 文件

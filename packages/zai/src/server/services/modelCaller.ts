@@ -25,6 +25,13 @@ import {
   getThinkingBudgetTokens,
 } from './modelCapabilities.js'
 
+// zai patch (2026-09-28): effort levels we forward as `reasoning.effort`.
+// `off` / `none` are deliberately absent: endpoints that require adaptive
+// thinking reject an explicit `none` (MiniMax returns 2013 for both
+// `thinking.type=disabled` and `reasoning.effort=none`). "Off" is expressed
+// by omitting the field entirely.
+const ZAI_REQUEST_EFFORT_LEVELS = ['low', 'medium', 'high'] as const
+
 // 流式事件类型 — Anthropic SDK 返回的 RawMessageStreamEvent 本身就是 snake_case,
 // 这里只用作 yield 的最小契约, 实际结构由 queryEngine 的 streamAdapter 识别.
 type StreamEvent = {
@@ -448,6 +455,17 @@ export function createAnthropicModelCaller(): ModelCaller {
     const zaiSettings = getCachedZaiSettingsSync()
     const env = zaiSettings.env ?? {}
 
+    // zai patch (2026-09-28): per-query reasoning effort, same channel as
+    // providerId. Whitelisted rather than forwarded verbatim: the value
+    // ends up in the request body, and an unexpected string from a stale
+    // client should be dropped, not sent upstream.
+    const effortLevel = (() => {
+      const raw = (req as { options?: { effort?: unknown } })?.options?.effort
+      if (typeof raw !== 'string') return null
+      const level = raw.trim().toLowerCase()
+      return (ZAI_REQUEST_EFFORT_LEVELS as readonly string[]).includes(level) ? level : null
+    })()
+
     const rawModel =
       model && model !== 'default'
         ? model
@@ -480,7 +498,8 @@ export function createAnthropicModelCaller(): ModelCaller {
     // 匹配到了别的 profile 还是 providerId 没透传进来。
     logHttp(
       `[zai.modelCaller] call model=${resolvedModel} providerId=${providerId ?? '(none)'}` +
-        ` profile=${resolvedProfile?.id ?? '(none)'} kind=${resolvedProfile?.provider ?? '(default anthropic)'}`,
+        ` profile=${resolvedProfile?.id ?? '(none)'} kind=${resolvedProfile?.provider ?? '(default anthropic)'}` +
+        ` reasoningEffort=${effortLevel ?? '(unset)'}`,
       'debug',
     )
 
@@ -588,6 +607,24 @@ export function createAnthropicModelCaller(): ModelCaller {
         // fields here since OpenAIClient's body builder reads from
         // `this.extraParams`, not from messages.create params).
         ...(resolvedProfile?.extraParams ?? {}),
+        // zai patch (2026-09-28): 会话级推理强度 → `reasoning.effort`。
+        // AA 的推理强度选择(threaded through transcript.meta.effort →
+        // createOpenccRuntime input → req.options) lands here.
+        //
+        // Deliberately NOT the vendor's effort path: that writes
+        // `output_config.effort` plus a beta header, which is Anthropic's
+        // first-party shape. Third-party Anthropic-compatible endpoints use
+        // a flat `reasoning.effort` — verified live against
+        // https://api.minimaxi.com/anthropic/v1/messages, which names the
+        // field in its own error text:
+        //   "model \"MiniMax-M3.1-Flash-Preview\" requires adaptive thinking;
+        //    thinking.type=\"disabled\" (including reasoning.effort=none) is
+        //    not allowed (2013)"
+        //
+        // 'off' / 'none' must NOT be sent — the same message shows the
+        // endpoint refuses an explicit `none`. The caller omits `effort`
+        // entirely for that level, so nothing is merged here.
+        ...(effortLevel ? { reasoning: { effort: effortLevel } } : {}),
         // Cast to the streaming variant (not the wide MessageCreateParams
         // union) so TS resolves the create() overload that returns a
         // Stream<RawMessageStreamEvent>; the union would make `for await`

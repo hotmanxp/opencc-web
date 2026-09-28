@@ -584,6 +584,91 @@ describe('session.create selections', () => {
     const effortScoped = captured[captured.length - 1];
     expect(effortScoped.model).toBe('MiniMax-M2.7-highspeed');
     expect(effortScoped.providerId).toBe('provider_mm');
+    // …and the effort rides along, so the first turn already has it.
+    expect(effortScoped.effort).toBe('medium');
+  });
+
+  it("maps the '关闭' level to an explicit off, never to a sent 'none'", async () => {
+    // MiniMax's adaptive-thinking models reject an explicit none — the
+    // endpoint's own error text says so:
+    //   requires adaptive thinking; thinking.type="disabled"
+    //   (including reasoning.effort=none) is not allowed (2013)
+    // Omitting the field entirely is accepted, so "off" has to travel as a
+    // distinct level that the request builder knows not to send.
+    const { ReverseDispatch } = await import(
+      '../../src/server/services/aaClient/reverseDispatch.js'
+    );
+    const handlers = new Map<string, (p: unknown) => Promise<unknown>>();
+    const conn = {
+      onRequest: (method: string, handler: (p: unknown) => Promise<unknown>) => {
+        handlers.set(method, handler);
+      },
+      sendNotification: () => {},
+    };
+    const { conn: registryConn } = fakeConn();
+    const { RuntimeRegistry: Registry } = await import(
+      '../../src/server/services/aaClient/runtimeRegistry.js'
+    );
+    const registry = new Registry(registryConn as never);
+    (registry as unknown as { mappings: Record<string, unknown> }).mappings = {
+      '9451': {
+        runtimeId: 'rti_test',
+        instanceId: 'inst_test',
+        name: 'AA Test Project',
+        port: 9451,
+        cwd: '/tmp/x',
+        registeredAt: '2026-09-27T00:00:00.000Z',
+      },
+    };
+    const dispatch = new ReverseDispatch({ conn: conn as never, registry: registry as never });
+    (dispatch as unknown as { portFromRuntime(id: string): Promise<number | null> })
+      .portFromRuntime = async () => 9451;
+    (dispatch as unknown as { portForRuntime(id: string | undefined): Promise<number | null> })
+      .portForRuntime = async () => 9451;
+    dispatch.install();
+
+    const { initSessionMap } = await import('../../src/server/services/aaClient/sessionMap.js');
+    await initSessionMap().put(9451, {
+      aaSessionId: 'sess-new',
+      runtimeId: 'rti_test',
+      zaiSessionId: 'sess-sess-new',
+      createdAt: '2026-09-27T00:00:00.000Z',
+      metadata: {},
+    });
+
+    const captured: Record<string, unknown>[] = [];
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+      if (String(url).includes('/api/config/zai/provider')) {
+        return new Response(
+          JSON.stringify({
+            profiles: [
+              { id: 'p1', name: 'P', model: 'M3', capabilities: {} },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      captured.push(
+        (JSON.parse(String(init?.body ?? '{}')) as { payload: Record<string, unknown> }).payload,
+      );
+      return new Response('{"sessionId":"sess-sess-new"}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      await handlers.get('session.create')!({
+        sessionId: 'sess-new',
+        runtimeId: 'rti_test',
+        content: 'hi',
+        cwd: '/tmp/x',
+        selections: { model: 'p1::M3::off' },
+      });
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+    expect(captured[captured.length - 1]?.effort).toBe('off');
   });
 });
 

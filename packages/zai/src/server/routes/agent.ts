@@ -1262,6 +1262,11 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // modelCaller via resolveModel + OpenccQueryInput.providerId so the
     // matcher routes the model to the exact provider the user chose.
     let sessionProviderId: string | null = null;
+    // zai patch (2026-09-28): 会话级推理强度。AA 的推理强度选择落在
+    // transcript.meta.effort,经 createOpenccRuntime input → req.options →
+    // modelCaller 合并成请求体的 reasoning.effort。'off'/空 表示不下发该
+    // 字段(MiniMax 的 adaptive thinking 模型拒收 reasoning.effort=none)。
+    let sessionEffort: string | null = null;
     // zai patch (2026-08-20): 会话当时选的主 Agent(per-session 落盘)。
     // 有记录 → 本会话固定用该 agent;无记录(新会话/旧会话)→ 首次 query
     // 用全局设置并落盘,之后固定。
@@ -1283,6 +1288,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       const metaProviderId = (existing.meta as { providerId?: string }).providerId;
       if (typeof metaProviderId === 'string' && metaProviderId.length > 0) {
         sessionProviderId = metaProviderId;
+      }
+      const metaEffort = (existing.meta as { effort?: string }).effort;
+      if (typeof metaEffort === 'string' && metaEffort.length > 0) {
+        sessionEffort = metaEffort;
       }
       const metaMainAgent = (existing.meta as { mainAgent?: string }).mainAgent;
       if (typeof metaMainAgent === 'string' && metaMainAgent.length > 0) {
@@ -1469,6 +1478,9 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
           // zai's createAnthropicModelCaller instead of vendor's
           // openai-shim. See plan §阶段 2 vendor 透传 chain.
           ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
+          // zai patch (2026-09-28): 会话级推理强度,与 providerId 同一条
+          // 通道。'off' 不下发,避免 adaptive thinking 模型收 400。
+          ...(sessionEffort && sessionEffort !== 'off' ? { effort: sessionEffort } : {}),
           // zai patch (2026-08-20): 会话恢复的主 Agent。首次 query 用全局设置
           // (并已落盘),后续从 transcript meta 恢复 → 会话级固定。
           ...(sessionMainAgent ? { mainAgent: sessionMainAgent } : {}),
@@ -2020,7 +2032,7 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     // 可选 model: 前端在 createNewSession 时会把"用户最近手动选过的模型"
     // 传过来, 让新建会话默认继承. 缺省/'unknown'/空串都视为不指定, 维持
     // 旧行为 (useConversationInfo 看到 'unknown' 就会回退到 runtime.defaultModel).
-    const body = req.body as { model?: unknown; providerId?: unknown; mainAgent?: unknown; cwd?: unknown; sessionId?: unknown } | undefined
+    const body = req.body as { model?: unknown; providerId?: unknown; mainAgent?: unknown; cwd?: unknown; sessionId?: unknown; effort?: unknown } | undefined
     const requested = body?.model
     const model =
       typeof requested === 'string' && requested.length > 0 && requested !== 'unknown'
@@ -2043,6 +2055,11 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     const providerId =
       typeof requestedProviderId === 'string' && requestedProviderId.length > 0
         ? requestedProviderId
+        : undefined
+    // zai patch (2026-09-28): 会话级推理强度,随创建一起冻结,首轮就能用。
+    const effort =
+      typeof body?.effort === 'string' && ['off', 'low', 'medium', 'high'].includes(body.effort)
+        ? body.effort
         : undefined
     // zai patch (2026-09-02, task-intake): 可选 mainAgent —— 建会话时直接
     // 冻结该会话的主 Agent(任务工厂调度器引导用 'task-factory'、新建任务
@@ -2077,6 +2094,7 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
       // loose about this new optional field (OpenccTranscriptMeta is
       // vendor-owned and only widened in serverTypes.ts).
       ...(providerId ? { providerId } : {}),
+      ...(effort ? { effort } : {}),
       permissionMode: getDefaultMode(),
       // zai patch (2026-09-27, AA integration): accept a client-provided
       // sessionId so AA's session.create RPC maps to the same id in zai.
@@ -2182,6 +2200,9 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
 const PatchSessionRequest = z.object({
   model: z.string().min(1).max(256).optional(),
   providerId: z.string().min(1).max(256).optional(),
+  // zai patch (2026-09-28): 会话级推理强度。'off' 是合法取值,表示
+  // 不下发 reasoning 字段(adaptive thinking 模型拒收显式 none)。
+  effort: z.enum(['off', 'low', 'medium', 'high']).optional(),
   permissionMode: z.enum(EXTERNAL_PERMISSION_MODES as readonly [UserFacingPermissionMode, ...UserFacingPermissionMode[]]).optional(),
 });
 
@@ -2212,6 +2233,17 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
       const found = await store.patch(
         sid,
         { providerId: parsed.data.providerId } as { providerId: string },
+        { cwd: ctx.cwd },
+      );
+
+      if (found === null) return res.status(404).json({ error: "session not found" });
+    }
+    // zai patch (2026-09-28): 会话级推理强度落盘。'off' 也要写,它是
+    // 「不下发 reasoning 字段」的显式选择,读侧据此不加 effort。
+    if (parsed.data.effort) {
+      const found = await store.patch(
+        sid,
+        { effort: parsed.data.effort } as { effort: string },
         { cwd: ctx.cwd },
       );
       if (found === null) return res.status(404).json({ error: "session not found" });
