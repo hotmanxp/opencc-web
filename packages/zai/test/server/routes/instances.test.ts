@@ -166,6 +166,81 @@ describe('routes/instances', () => {
     expect(bad.body.error).toMatch(/lan/)
   })
 
+  // ───────── AA per-instance 开关 ─────────
+  // 路由层职责只到"收窄 + 透传":`aa` 走 `parseBoolField`,与 `lan` 同一口径。
+  // spawn 决策(root 硬门禁 / def.aa 三态)由 instanceSupervisor 的单测覆盖。
+  it('POST /api/instances accepts aa=true and persists it on the snapshot', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', aa: true })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.aa).toBe(true)
+  })
+
+  it('POST /api/instances leaves aa undefined when absent (auto)', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp' })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.aa).toBeUndefined()
+  })
+
+  it('POST /api/instances rejects non-boolean aa with 400', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', aa: 'yes' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/aa/)
+  })
+
+  it('PATCH /api/instances/:id toggles aa and returns the updated snapshot', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    const on = await request(app).patch('/api/instances/inst_seed').send({ aa: true })
+    expect(on.status).toBe(200)
+    expect(on.body.instance.aa).toBe(true)
+    const off = await request(app).patch('/api/instances/inst_seed').send({ aa: false })
+    expect(off.status).toBe(200)
+    expect(off.body.instance.aa).toBe(false)
+  })
+
+  it('PATCH /api/instances/:id rejects non-boolean aa with 400', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    const res = await request(app).patch('/api/instances/inst_seed').send({ aa: 1 })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/aa/)
+  })
+
+  it('POST /api/instances/:id/start rejects non-boolean aa with 400', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances/inst_does_not_matter/start')
+      .send({ aa: 'maybe' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/aa/)
+  })
+
+  it('POST /api/instances/:id/restart rejects non-boolean aa with 400', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances/inst_does_not_matter/restart')
+      .send({ aa: 'maybe' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/aa/)
+  })
+
   // ───────── port 配置相关 ─────────
   // POST 创建:接受数字,持久化到定义;拒绝 null / 字符串 / 越界 / 浮点。
   it('POST /api/instances accepts port and persists it on the definition', async () => {

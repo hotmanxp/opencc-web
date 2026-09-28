@@ -53,6 +53,24 @@ export interface InstanceDefinition {
    * `undefined` 是默认(无 profile),行为与既有实例一致。
    */
   app?: 'task-factory' | 'weixin'
+  /**
+   * Per-instance override of the AA bridge flag.
+   *   - `undefined` (默认) = auto:跟随 root 的 `--aa` 决策(行为与既有实例一致)。
+   *   - `true` = 请求启用:在 root 已启 AA 的前提下给该子进程 spawn 加 `--aa`。
+   *   - `false` = 强制禁用:即便 root 启了 AA,该子进程 spawn 也不带 `--aa`,
+   *     适合"同一台机器上某项目不该被 AA Cloud 看到"的场景。
+   *
+   * **root 是硬门禁**:root 没启 AA(`ZAI_AA_ENABLED!=1`)时,子实例一定不带
+   * `--aa` —— 即便 `aa === true`。child 端的 AA 桥必须靠 supervisor 注入的
+   * `ZAI_AA_PARENT_URL` 才能把事件转发给 AA Cloud;没有 parent URL 时
+   * `childEventReporter.start()` early return,child 会白挂一个 WS 客户端
+   * 却不产出任何转发。因此 `aa=true` + root 没开 = 静默降级为关 + 一条 warn,
+   * root 启 AA 后下次 start/restart 自动生效。
+   *
+   * UI 表面目前只暴露 2 态开关(关=auto、开=请求启用);`false` 仅 API 层
+   * 可设置,保留给"per-instance 关掉"的用例。
+   */
+  aa?: boolean
 }
 
 export interface InstanceStatus {

@@ -128,6 +128,10 @@ router.post('/instances', async (req, res) => {
   if (rawApp !== undefined && rawApp !== 'task-factory' && rawApp !== 'weixin') {
     return badRequest(res, 'app must be "task-factory" or "weixin" when present')
   }
+  // AA per-instance 覆盖:`undefined` = auto(跟随 root);`true` = 强制开;`false`
+  // = 强制关。`parseBoolField` 与 `lan` 走同一收窄,非布尔值 400。
+  const aa = parseBoolField((req.body ?? {}).aa, 'aa')
+  if (!aa.ok) return badRequest(res, aa.error)
   try {
     const instance = await getInstanceSupervisor().createInstance({
       name: name.trim(),
@@ -135,6 +139,7 @@ router.post('/instances', async (req, res) => {
       lan: lan.value === true,
       port: port.value as number | undefined,
       app: rawApp as InstanceDefinition['app'],
+      aa: aa.value,
     })
     res.status(201).json({ instance })
   } catch (err) {
@@ -149,14 +154,19 @@ router.post('/instances/:id/start', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  // Per-call `aa` override 与 `lan` 对齐:body 显式给 `true` / `false` 临时覆盖
+  // def.aa(不影响落盘),`undefined` 走 persisted value。
+  const aa = parseBoolField((req.body ?? {}).aa, 'aa')
+  if (!aa.ok) return badRequest(res, aa.error)
   try {
-    // Per-call `lan` / `port` override the persisted definition so the
-    // UI can "start this one with --lan / on port X just this once"
+    // Per-call `lan` / `port` / `aa` override the persisted definition so the
+    // UI can "start this one with --lan / on port X / with --aa just this once"
     // without rewriting the definition. `value === undefined` means
     // "use the persisted value".
-    const overrides: { lan?: boolean; port?: number | null } = {}
+    const overrides: { lan?: boolean; port?: number | null; aa?: boolean } = {}
     if (lan.value !== undefined) overrides.lan = lan.value
     if (port.value !== undefined) overrides.port = port.value
+    if (aa.value !== undefined) overrides.aa = aa.value
     const instance = await getInstanceSupervisor().startInstance(
       req.params.id,
       Object.keys(overrides).length > 0 ? overrides : undefined,
@@ -185,10 +195,13 @@ router.post('/instances/:id/restart', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  const aa = parseBoolField((req.body ?? {}).aa, 'aa')
+  if (!aa.ok) return badRequest(res, aa.error)
   try {
-    const overrides: { lan?: boolean; port?: number | null } = {}
+    const overrides: { lan?: boolean; port?: number | null; aa?: boolean } = {}
     if (lan.value !== undefined) overrides.lan = lan.value
     if (port.value !== undefined) overrides.port = port.value
+    if (aa.value !== undefined) overrides.aa = aa.value
     const instance = await getInstanceSupervisor().restartInstance(
       req.params.id,
       Object.keys(overrides).length > 0 ? overrides : undefined,
@@ -206,14 +219,20 @@ router.patch('/instances/:id', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  // PATCH aa:落盘到 def.aa,下次 start/restart 立即生效。`undefined` 透传保持
+  // 现有值(PATCH 没有"清除"语义 —— 用户想切回 auto 就显式传 `undefined`,
+  // 但前端 v1 只暴露 2 态 Switch,语义上 auto = Switch OFF / force-on = Switch ON)。
+  const aa = parseBoolField((req.body ?? {}).aa, 'aa')
+  if (!aa.ok) return badRequest(res, aa.error)
   try {
     // `cwd` is intentionally absent from the HTTP surface: the only caller
     // that mutates it is the weixin orchestration (which validates the
     // directory itself, see weixinDedicatedInstance.ts). `name` is not
     // patchable at all.
-    const patch: { lan?: boolean; port?: number | null } = {}
+    const patch: { lan?: boolean; port?: number | null; aa?: boolean } = {}
     if (lan.value !== undefined) patch.lan = lan.value
     if (port.value !== undefined) patch.port = port.value
+    if (aa.value !== undefined) patch.aa = aa.value
     const instance = await getInstanceSupervisor().updateInstance(req.params.id, patch)
     res.json({ instance })
   } catch (err) {

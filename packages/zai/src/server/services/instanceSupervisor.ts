@@ -70,17 +70,18 @@ type Entry = { def: InstanceDefinition; status: InstanceStatus; child: ChildProc
 
 export interface InstanceSupervisor {
   getSnapshots: () => InstanceSnapshot[]
-  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null; app?: InstanceDefinition['app'] }) => Promise<InstanceSnapshot>
-  startInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null; app?: InstanceDefinition['app']; aa?: boolean }) => Promise<InstanceSnapshot>
+  startInstance: (id: string, opts?: { lan?: boolean; port?: number | null; aa?: boolean }) => Promise<InstanceSnapshot>
   stopInstance: (id: string) => Promise<InstanceSnapshot>
-  restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null; aa?: boolean }) => Promise<InstanceSnapshot>
   removeInstance: (id: string) => Promise<void>
   /**
-   * Patch definition fields that can change after creation: `lan`, `port`
-   * and `cwd`. `lan` is a boolean toggle; `port` follows the tri-state
+   * Patch definition fields that can change after creation: `lan`, `port`,
+   * `cwd` and `aa`. `lan` is a boolean toggle; `port` follows the tri-state
    * contract — `number` persists, `null` clears back to auto, `undefined`
    * is a no-op; `cwd` is a plain replacement (the caller validates that
-   * the directory exists — same contract as `createInstance`).
+   * the directory exists — same contract as `createInstance`); `aa` is a
+   * boolean toggle taking effect on the next start/restart.
    *
    * `cwd` is patchable because the weixin panel treats the dedicated
    * instance's working directory as a *saved setting* rather than a
@@ -94,7 +95,7 @@ export interface InstanceSupervisor {
    * re-run the duplicate-name check, which the definition layer does not
    * model.
    */
-  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null; cwd?: string }) => Promise<InstanceSnapshot>
+  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null; cwd?: string; aa?: boolean }) => Promise<InstanceSnapshot>
   shutdown: () => Promise<void>
 }
 
@@ -295,7 +296,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       })
     }
 
-    const doStart = async (id: string, opts?: { lan?: boolean; port?: number | null }) => {
+    const doStart = async (id: string, opts?: { lan?: boolean; port?: number | null; aa?: boolean }) => {
       const entry = getEntry(id)
       if (entry.status.state === 'starting' || entry.status.state === 'running') return snapshotOf(entry)
       setStatus(entry, { state: 'starting', lastError: null })
@@ -335,20 +336,40 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         //     （其余进程一律不碰通道，见 weixinDedicatedInstance.ts）。
         // 值域已在 `routes/instances.ts` 收窄；这里原样透传。
         if (entry.def.app) args.push('--app', entry.def.app)
-        // `--aa` 透传到 child:root 启用了 AA(从 process.env.ZAI_AA_ENABLED
-        // 读)时,child 也启 AA,这样 child 端 isAaEnabled() 返回 true,
-        // 才会向 root POST 事件(T4.5 childEventGateway)。
-        // root 不启用 → child 也不启用,事件全本地化,跟现状一致。
-        // 详见 docs/2026-09-27-zai-aa-integration.md §架构总览。
+        // AA 决策(三态 def.aa × per-call override × root 门禁):
+        //   - def.aa=undefined  → auto:跟随 root 当前是否带 --aa
+        //   - def.aa=true       → force-on:仅在 root 启 AA 时生效
+        //   - def.aa=false      → force-off:即便 root 启 AA,该 child 也不带 --aa
+        // opts.aa 一旦给出就完全覆盖 def.aa,与 lan 的 per-call override 一致。
+        //
+        // **root 是硬门禁**:`ZAI_AA_ENABLED=1` 且 rootPort 已知才可能给 child
+        // 加 `--aa`。child 端 AA 桥依赖 `ZAI_AA_PARENT_URL` 才能把事件转发给
+        // AA Cloud;没有 parent URL 时 childEventReporter.start() 会 early
+        // return(child 会白挂一个 WS 客户端却什么都发不出去)。所以 root 没开
+        // → 子实例一定关,哪怕 def.aa=true 也不给 `--aa`。
+        //
         // ZAI_AA_PARENT_URL must point to the ROOT process (the user's
         // `zai start`), NOT the child itself — otherwise child events loop
         // back to the child's own Express and fail (no RuntimeRegistry
         // there). The supervisor captured this via initInstanceSupervisor().
         const rootPort = getRootPort();
-        const aaParentUrl =
-          process.env.ZAI_AA_ENABLED === '1' && rootPort
-            ? `http://127.0.0.1:${rootPort}`
-            : undefined;
+        const rootHasAa = process.env.ZAI_AA_ENABLED === '1' && !!rootPort;
+        const defEffective = entry.def.aa === undefined
+          ? rootHasAa
+          : entry.def.aa === true;
+        const useAa = opts?.aa !== undefined ? opts.aa === true : defEffective;
+        if (useAa && !rootHasAa) {
+          // 用户显式要求 force-on,但 root 没开 AA —— warn 提示这次不会生效。
+          // root 启 AA 后下次 start/restart 自动接上,无需重设 def.aa。
+          console.warn(
+            `[instanceSupervisor] instance ${entry.def.id} (${entry.def.name}) ` +
+            `wants --aa but root has no AA (ZAI_AA_ENABLED!=1); ` +
+            `child will start WITHOUT --aa. Enable --aa on the root, then restart.`,
+          );
+        }
+        const aaParentUrl = useAa && rootHasAa && rootPort
+          ? `http://127.0.0.1:${rootPort}`
+          : undefined;
         if (aaParentUrl) args.push('--aa');
         // 进程标题:让 ps / top / macOS Activity Monitor 在 spawn 后立即
         // 显示 `zai[name]:port` 而不是 `node .../bin/zai.js`。`argv0` 改
@@ -459,7 +480,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       // assertions can observe the latest persisted snapshot deterministically.
       // Production callers should never invoke this.
       __flushPendingWrites: async () => { await writeChain },
-      async createInstance({ name, cwd, lan, port, app }: { name: string; cwd: string; lan?: boolean; port?: number | null; app?: InstanceDefinition['app'] }) {
+      async createInstance({ name, cwd, lan, port, app, aa }: { name: string; cwd: string; lan?: boolean; port?: number | null; app?: InstanceDefinition['app']; aa?: boolean }) {
         const trimmed = name.trim(); for (const entry of entries.values()) if (entry.def.name === trimmed) throw new InstanceSupervisorError('DUPLICATE_NAME', `duplicate name: ${trimmed}`)
         const def: InstanceDefinition = {
           id: `inst_${randomUUID().slice(0, 8)}`,
@@ -474,6 +495,10 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
           // 应用 profile；同样 undefined → "无 profile"，旧 reader 无感。
           // 路由层已经收窄到 `undefined | 'task-factory'`，此处不再校验。
           app,
+          // AA per-instance 覆盖:路由层已用 `parseBoolField` 收窄到 boolean;
+          // 落盘保留 `true | false | undefined` 三态 —— `undefined` 表示"跟随
+          // root"(默认),旧 JSON 文件无此字段时 hydrate 出来也是 undefined。
+          aa: typeof aa === 'boolean' ? (aa === true) : undefined,
         }
         const entry: Entry = { def, status: { ...EMPTY_INSTANCE_STATUS }, child: null, childState: null }
         entries.set(def.id, entry)
@@ -481,11 +506,11 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         emit(def.id, entry.status)
         return doStart(def.id)
       },
-      startInstance: async (id: string, opts?: { lan?: boolean; port?: number | null }) => { ensureNotCurrent(id); return doStart(id, opts) },
+      startInstance: async (id: string, opts?: { lan?: boolean; port?: number | null; aa?: boolean }) => { ensureNotCurrent(id); return doStart(id, opts) },
       stopInstance: async (id: string) => { ensureNotCurrent(id); return doStop(id) },
-      restartInstance: async (id: string, opts?: { lan?: boolean; port?: number | null }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
+      restartInstance: async (id: string, opts?: { lan?: boolean; port?: number | null; aa?: boolean }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
       removeInstance: async (id: string) => doRemove(id),
-      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null; cwd?: string }) {
+      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null; cwd?: string; aa?: boolean }) {
         ensureNotCurrent(id)
         const entry = getEntry(id)
         // Refuse unknown / no-op patches explicitly so a typo in the
@@ -503,6 +528,9 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         // spawn time). A running child keeps its old cwd until restarted —
         // callers that need it live must stop/restart explicitly.
         if (patch.cwd !== undefined) next.cwd = patch.cwd
+        // AA per-instance 覆盖(`undefined` 透传保持「跟随 root」;`true` / `false`
+        // 显式落地)。下一次 start/restart 立即生效 —— 与 `lan` 行为对齐。
+        if (patch.aa !== undefined) next.aa = patch.aa === true
         if (Object.keys(next).length === 0) throw new InstanceSupervisorError('INVALID_STATE', 'no patchable fields supplied')
         entry.def = { ...entry.def, ...next }
         await persist()

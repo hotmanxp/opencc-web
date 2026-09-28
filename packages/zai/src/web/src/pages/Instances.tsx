@@ -132,6 +132,11 @@ export default function Instances(): JSX.Element {
   const [open, setOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [lanBusyId, setLanBusyId] = useState<string | null>(null)
+  // Per-row AA toggle busy tracking: same shape as `lanBusyId`, separate
+  // state so the two Switches don't share a disabled window. `null` means
+  // no AA toggle is in flight; otherwise the id of the instance whose
+  // PATCH is currently being awaited.
+  const [aaBusyId, setAaBusyId] = useState<string | null>(null)
   // Instance whose pinned port is currently being edited in the per-row
   // modal. `null` means the modal is closed. We open the modal with the
   // snapshot we already have so the form can pre-fill from `def.port`
@@ -141,6 +146,15 @@ export default function Instances(): JSX.Element {
     name: string
     cwd: string
     lan?: boolean
+    /**
+     * Per-instance AA override on creation. UI v1 exposes 2 states only:
+     *   - `false` / undefined → `auto`(跟随 root);后端走 `parseBoolField` 收窄,
+     *     `undefined` 直接透传成 `def.aa = undefined`。
+     *   - `true` → `force-on`:supervisor 给 child spawn 时无条件加 `--aa`,
+     *     若 root 没启 AA 则打 warn + child 端 AA 启用但无 parent 可转发
+     *     (safe no-op)。详见 `instanceSupervisor.ts::doStart` 的 AA 决策段。
+     */
+    aa?: boolean
     /**
      * 实例类型:标准实例(`'standard'`,默认)或任务工厂实例(`'task-factory'`)。
      * 任务工厂实例创建后由 supervisor spawn `--app task-factory` 传给子进程,
@@ -252,6 +266,47 @@ export default function Instances(): JSX.Element {
     }
   }
 
+  // Patch the persisted `aa` flag on a definition. Same optimistic
+  // pattern as `setLan`: flip the local snapshot first so the Switch
+  // animates without waiting for the round trip, PATCH, then roll back
+  // on failure. Turning the Switch OFF sends `aa: undefined` (absent from
+  // the body) — that is a no-op server-side, so the row stays "auto"
+  // rather than being pinned to force-off.
+  async function setAa(id: string, aa: boolean): Promise<void> {
+    const before = instances.find((s) => s.id === id)
+    if (!before) return
+    // `undefined` is the "auto / follow root" state, which is exactly
+    // what a freshly-created instance has. Optimistically clear the field
+    // so the Switch and the next spawn agree.
+    const optimistic: InstanceSnapshot = { ...before, aa: aa ? true : undefined }
+    applyInstanceSnapshot(optimistic)
+    setAaBusyId(id)
+    try {
+      // Only send the key when enabling. Omitting it on disable is
+      // intentional — see the note above about force-off not being
+      // reachable from the v1 UI.
+      const body: { aa?: boolean } = aa ? { aa: true } : {}
+      const res = await fetch(`/api/instances/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        applyInstanceSnapshot(before)
+        message.error(data.error ?? '切换 AA 失败')
+      } else {
+        const data = (await res.json()) as { instance: InstanceSnapshot }
+        applyInstanceSnapshot(data.instance)
+      }
+    } catch (err) {
+      applyInstanceSnapshot(before)
+      message.error(err instanceof Error ? err.message : '切换 AA 失败')
+    } finally {
+      setAaBusyId(null)
+    }
+  }
+
   // Patch the persisted `port` field on a definition. Same optimistic
   // pattern as `setLan`: write the intended value to the local store
   // first, PATCH the server, and roll back on failure. `null` clears
@@ -298,10 +353,15 @@ export default function Instances(): JSX.Element {
       // InstanceDefinition.app = 'task-factory';`undefined`(Radio 默认值
       // `'standard'` 或表单未填)走标准实例,服务端不写 app 字段。
       const app = values.app === 'task-factory' ? ('task-factory' as const) : undefined
+      // AA per-instance override:Checkbox 勾上才发 `aa: true`,未勾完全省略
+      // 字段(让后端 parseBoolField 拿到 undefined → 落 def.aa = undefined →
+      // 后续 start 走 auto,跟随 root)。强发 false 会让 def 永久变成
+      // force-off,UI v1 不需要这个语义。
+      const aa = values.aa === true ? true : undefined
       const res = await fetch('/api/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: values.name, cwd: values.cwd, lan: values.lan === true, port, app }),
+        body: JSON.stringify({ name: values.name, cwd: values.cwd, lan: values.lan === true, port, app, aa }),
       })
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -411,6 +471,35 @@ export default function Instances(): JSX.Element {
     )
   }
 
+  function renderAaToggle(row: InstanceSnapshot): JSX.Element | null {
+    if (row.isCurrent) return null
+    // `undefined` = auto(跟随 root),`true` = 请求启用。UI v1 不暴露 force-off,
+    // 所以关态就是 auto,与 Switch 的 unchecked 天然对应。
+    const on = row.aa === true
+    const busy = aaBusyId === row.id
+    return (
+      <Tooltip
+        title={on
+          ? '已请求启用 AA:下次启动时,若 root 启了 --aa,该实例会带 --aa 并把事件转发给 AA Cloud'
+          : 'AA 跟随 root(默认):root 启 --aa 时该实例自动带上,root 没启则一定不带'}
+      >
+        <Space size={8}>
+          <span className="text-xs text-[var(--text-dim-65)]">AA</span>
+          <Switch
+            size="small"
+            checked={on}
+            disabled={busy}
+            loading={busy}
+            aria-label="AA 启动"
+            data-testid={`aa-switch-${row.id}`}
+            onChange={(next) => void setAa(row.id, next)}
+          />
+          {on ? <Tag color="purple" className="mr-0">--aa</Tag> : <Tag color="default" className="mr-0">auto</Tag>}
+        </Space>
+      </Tooltip>
+    )
+  }
+
   return (
     <div className="p-6">
       <Card
@@ -457,6 +546,7 @@ export default function Instances(): JSX.Element {
               extra={
                 <Space size={8} align="center">
                   {renderLanToggle(inst)}
+                  {renderAaToggle(inst)}
                   <Tag color={STATE_TAG_COLOR[effectiveState(inst)]}>{stateLabel(effectiveState(inst))}</Tag>
                 </Space>
               }
@@ -517,7 +607,7 @@ export default function Instances(): JSX.Element {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ cwd: currentCwd, lan: false, portEnabled: false, app: 'standard' }}
+          initialValues={{ cwd: currentCwd, lan: false, aa: false, portEnabled: false, app: 'standard' }}
         >
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="例如 demo" />
@@ -583,6 +673,20 @@ export default function Instances(): JSX.Element {
             data-testid="lan-checkbox"
           >
             <Checkbox>LAN 模式启动 (--lan)</Checkbox>
+          </Form.Item>
+          {/*
+            AA per-instance 开关 — 2 态,与 per-row Switch 语义一致:
+            不勾 = auto(跟随 root,后端落 def.aa=undefined);
+            勾上 = 请求启用(后端落 def.aa=true,root 启 --aa 时下次启动生效)。
+            注意 root 是硬门禁:root 没启 --aa 时即便勾了也不会带 --aa(会打 warn)。
+          */}
+          <Form.Item
+            name="aa"
+            valuePropName="checked"
+            tooltip="勾选后请求为该实例启用 AA 桥。下次启动时,若 root 以 --aa 运行,该实例会带 --aa 并把事件转发给 AA Cloud;root 没启则不会生效(会打 warn)。不勾选 = 跟随 root"
+            data-testid="aa-checkbox"
+          >
+            <Checkbox>请求启用 AA (--aa)</Checkbox>
           </Form.Item>
           {/*
             端口配置:Switch 切 auto / 手动;手动时 InputNumber 必填。

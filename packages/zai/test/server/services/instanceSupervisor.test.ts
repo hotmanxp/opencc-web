@@ -68,6 +68,9 @@ async function initSup(deps: Deps, cwd = '/tmp/current', dataDir = '/tmp/x') {
 describe('instanceSupervisor (4a — state machine)', () => {
   beforeEach(() => {
     delete process.env.ZAI_DATA_DIR
+    // AA 相关用例各自显式 set/delete `ZAI_AA_ENABLED`。这里先清一次防止
+    // 上一个用例残留影响下一个(doStart 在 spawn 时读 env,不缓存)。
+    delete process.env.ZAI_AA_ENABLED
     vi.resetModules()
   })
   afterEach(() => { vi.restoreAllMocks() })
@@ -368,6 +371,165 @@ describe('instanceSupervisor (4a — state machine)', () => {
     const idx = last.indexOf('--app')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(last[idx + 1]).toBe('task-factory')
+  })
+
+  // ───────── AA(Agents Anywhere)per-instance 开关 ─────────
+  // 契约(def.aa 三态 × root 门禁):
+  //   - def.aa=undefined → auto:跟随 root 是否带 --aa
+  //   - def.aa=true      → 请求启用:仅 root 启 AA 时才真的加 --aa
+  //   - def.aa=false     → 强制禁用:即便 root 启 AA 也不加 --aa
+  // **root 是硬门禁**:ZAI_AA_ENABLED!=='1' 时子实例一定不带 --aa(哪怕
+  // def.aa=true),因为 child 端要靠 ZAI_AA_PARENT_URL 才能转发事件,没有
+  // parent 就会白挂一个发不出去的 WS 客户端。
+  //
+  // `initRootPort` 永远有值(默认 '9201'),所以「root 没开 AA」在测试里
+  // 等价于 `process.env.ZAI_AA_ENABLED !== '1'`。
+
+  it('createInstance with def.aa=undefined follows root --aa (root on → child gets --aa)', async () => {
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, spawnArgs, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    expect(snap.aa).toBeUndefined()
+    expect(spawnArgs[0]).toContain('--aa')
+    const env = (spawnOptions[0] as SpawnOptions & { env: NodeJS.ProcessEnv }).env
+    // root port 来自 `initRootPort(process.env.ZAI_PORT ?? '9201')`,测试环境
+    // 可能继承机器上的 ZAI_PORT(比如本机跑着 9987 的实例),所以按 env 推导
+    // 而不硬编码 —— 断言的契约是"指向 root 自己",不是某个具体数字。
+    const rootPort = process.env.ZAI_PORT ?? '9201'
+    expect(env.ZAI_AA_PARENT_URL).toBe(`http://127.0.0.1:${rootPort}`)
+    expect(env.ZAI_AA_PARENT_PORT).toBe(rootPort)
+  })
+
+  it('createInstance with def.aa=undefined follows root --aa (root off → no --aa)', async () => {
+    delete process.env.ZAI_AA_ENABLED
+    delete process.env.ZAI_AA_PARENT_URL
+    delete process.env.ZAI_AA_PARENT_PORT
+    const { deps, spawnArgs, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const env = (spawnOptions[0] as SpawnOptions & { env: NodeJS.ProcessEnv }).env
+    expect(env.ZAI_AA_PARENT_URL).toBeUndefined()
+    expect(env.ZAI_AA_PARENT_PORT).toBeUndefined()
+  })
+
+  it('createInstance with aa=true spawns --aa when root has AA', async () => {
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: true })
+    expect(snap.aa).toBe(true)
+    expect(spawnArgs[0]).toContain('--aa')
+  })
+
+  it('createInstance with aa=true is IGNORED when root has no AA (root is a hard gate)', async () => {
+    // 这条锁死用户明确要求的语义:「如果 root 没开启,那么子实例就一定是关的」。
+    // 换回旧写法(仍传 --aa,只靠 childEventReporter early return 兜底)会红。
+    delete process.env.ZAI_AA_ENABLED
+    const { deps, spawnArgs, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: true })
+    // def.aa 仍如实落盘为 true(root 启 AA 后下次 restart 会自动生效)
+    expect(snap.aa).toBe(true)
+    // 但这次 spawn 不带 --aa —— root 没开,子实例一定关
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const env = (spawnOptions[0] as SpawnOptions & { env: NodeJS.ProcessEnv }).env
+    expect(env.ZAI_AA_PARENT_URL).toBeUndefined()
+  })
+
+  it('createInstance with aa=false suppresses --aa even when root has AA', async () => {
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: false })
+    expect(snap.aa).toBe(false)
+    expect(spawnArgs[0]).not.toContain('--aa')
+  })
+
+  it('restartInstance keeps honouring persisted def.aa=true after updateInstance', async () => {
+    // UI 开关走的正是这条路径:PATCH updateInstance({aa:true}) 落盘 → 下次
+    // restart 生效,不需要 per-call override。
+    // 用 aa:false 起步(root 已开 AA),让 before/after 的 --aa 差异可观测 ——
+    // 若用 def.aa=undefined 起步,auto 模式下首次 spawn 本来就带 --aa,
+    // 无法区分"patch 生效"与"auto 跟随"。
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: false })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const patched = await getInstanceSupervisor().updateInstance(snap.id, { aa: true })
+    expect(patched.aa).toBe(true)
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(spawnArgs[1]).toContain('--aa')
+  })
+
+  it('restartInstance({aa:false}) per-call override strips --aa from persisted def.aa=true', async () => {
+    // 与 lan 的 per-call override 对称:override 只作用于这一次 spawn,
+    // 不改落盘的 def.aa。
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: true })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id, { aa: false })
+    expect(spawnArgs[0]).toContain('--aa')
+    expect(spawnArgs[1]).not.toContain('--aa')
+    // def 未被 per-call override 污染
+    expect(getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)?.aa).toBe(true)
+  })
+
+  it('startInstance({aa:true}) per-call override is still gated by root', async () => {
+    // per-call override 不能绕过 root 硬门禁。
+    delete process.env.ZAI_AA_ENABLED
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().startInstance(snap.id, { aa: true })
+    expect(spawnArgs[1]).not.toContain('--aa')
+  })
+
+  it('warns when def.aa=true but root has no AA (def persists, no --aa on this spawn)', async () => {
+    // warn 是给用户的可观测信号:告诉他们设置没生效以及怎么修(root 加 --aa
+    // 后 restart)。断言 warn 文本里的关键信息,避免以后误改文案到无法定位。
+    delete process.env.ZAI_AA_ENABLED
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: true })
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const joined = warn.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(joined).toMatch(/wants --aa but root has no AA/)
+    expect(joined).toMatch(/WITHOUT --aa/)
+  })
+
+  it('hydrate from an old instances.json without `aa` leaves def.aa undefined (auto)', async () => {
+    // 旧 JSON 无 aa 字段 → JSON.parse 自然缺 key → 读出 undefined → auto。
+    // 换回 "hydrate 时强制补 aa: false" 之类的写法会让 root-AA-on 场景下的
+    // 老实例全部静默关掉 AA,这条锁住向后兼容。
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, spawnArgs } = makeSupervisor({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_legacy', name: 'legacy', cwd: '/tmp/x', createdAt: '2026-01-01T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = getInstanceSupervisor().getSnapshots().find((s) => s.id === 'inst_legacy')!
+    expect(snap.aa).toBeUndefined()
+    await getInstanceSupervisor().startInstance('inst_legacy')
+    expect(spawnArgs[spawnArgs.length - 1]).toContain('--aa')
   })
 
   // ───────── port 配置相关 ─────────
