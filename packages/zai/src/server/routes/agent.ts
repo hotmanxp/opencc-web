@@ -1479,8 +1479,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
           // openai-shim. See plan §阶段 2 vendor 透传 chain.
           ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
           // zai patch (2026-09-28): 会话级推理强度,与 providerId 同一条
-          // 通道。'off' 不下发,避免 adaptive thinking 模型收 400。
-          ...(sessionEffort && sessionEffort !== 'off' ? { effort: sessionEffort } : {}),
+          // 通道。'off' 原样透传:modelCaller 要区分「用户显式选了 off」
+          // (不下发字段) 与「从未设置」(兜底 ZAI_DEFAULT_EFFORT_LEVEL),
+          // 在这里提前丢掉 'off' 会让两者无法分辨。
+          ...(sessionEffort ? { effort: sessionEffort } : {}),
           // zai patch (2026-08-20): 会话恢复的主 Agent。首次 query 用全局设置
           // (并已落盘),后续从 transcript meta 恢复 → 会话级固定。
           ...(sessionMainAgent ? { mainAgent: sessionMainAgent } : {}),

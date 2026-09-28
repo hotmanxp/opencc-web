@@ -4,7 +4,7 @@ import { CheckIcon, ChevronDownIcon, EyeIcon, WrenchIcon } from 'lucide-react';
 import { useAgentStoreOrCtx } from '../store/useAgentStore.js'
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
 import type { ModelEntry, ModelCapabilities } from '../../../shared/settings.js'
-import type { EffortLevel } from '../../../shared/types.js'
+import { ZAI_DEFAULT_EFFORT_LEVEL, type EffortLevel } from '../../../shared/types.js'
 
 /**
  * zai patch (2026-09-28): 档位按模型解析, 不写死 —— MiniMax-M3.1-Flash-Preview
@@ -136,16 +136,19 @@ export default function ModelPickerPanel() {
   // 会话里存的 effort 未必属于当前模型支持的档位 —— 换模型时不会重写
   // transcript.meta.effort, 典型场景是 medium → 切到只收 low/high/max 的
   // GLM。此时若直接拿存储值去比对, 按钮全不亮, 用户看不出当前是什么。
-  // 所以展示层做一次钳制: 存储值不在集合内就退回「模型默认档 → off」。
+  // 所以展示层做一次钳制: 存储值不在集合内就退回服务端兜底档。
   // 只影响高亮, 不回写 store —— 真正发出去的是 modelCaller 白名单校验后的值。
   const { effortLevels, currentEffort } = useMemo(() => {
     const levels = EFFORT_LEVELS_FOR(currentEntry?.capabilities)
     const sess = sessionId ? sessions.find((s) => s.sessionId === sessionId) : undefined
     const stored = sess?.effort
     if (stored && levels.includes(stored)) return { effortLevels: levels, currentEffort: stored }
-    const modelDefault = currentEntry?.capabilities?.defaultEffortLevel
-    if (modelDefault && levels.includes(modelDefault)) {
-      return { effortLevels: levels, currentEffort: modelDefault }
+    // 会话没设过 → 高亮服务端兜底档,与 modelCaller 实际下发的值一致。
+    // 这里刻意不用 capabilities.defaultEffortLevel:那描述的是厂商自己的
+    // 默认(MiniMax-M3.1-Flash-Preview 声明 max),不是 zai 选去下发的值,
+    // 拿它高亮会显示「Max」而线上跑的是 high。
+    if (levels.includes(ZAI_DEFAULT_EFFORT_LEVEL)) {
+      return { effortLevels: levels, currentEffort: ZAI_DEFAULT_EFFORT_LEVEL }
     }
     return { effortLevels: levels, currentEffort: 'off' as EffortLevel }
   }, [currentEntry, sessionId, sessions])

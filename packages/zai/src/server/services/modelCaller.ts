@@ -24,6 +24,7 @@ import {
   getModelMaxOutputTokens,
   getThinkingBudgetTokens,
 } from './modelCapabilities.js'
+import { ZAI_DEFAULT_EFFORT_LEVEL } from '../../shared/types.js'
 
 // zai patch (2026-09-28): effort levels we forward as `reasoning.effort`.
 // The five wire levels — `xhigh` and `max` included, both of which
@@ -79,6 +80,15 @@ export interface ClaudeProviderProfile {
    * routed through this profile. Optional.
    */
   extraParams?: Record<string, unknown>
+  /**
+   * zai patch: per-model capability flags as authored in `~/.zai.json`,
+   * keyed by the same model string that appears in `model` (comma- or
+   * semicolon-separated). Declared here because the effort fallback needs
+   * `supportsReasoning` to decide whether sending `reasoning.effort` at all
+   * is safe; the same field drives the picker's control via
+   * `shared/profileProjection.ts`.
+   */
+  capabilities?: Record<string, { supportsReasoning?: boolean }>
 }
 
 /** Read ~/.zai.json and return providerProfiles (or empty). */
@@ -459,16 +469,7 @@ export function createAnthropicModelCaller(): ModelCaller {
     const env = zaiSettings.env ?? {}
 
     // zai patch (2026-09-28): per-query reasoning effort, same channel as
-    // providerId. Whitelisted rather than forwarded verbatim: the value
-    // ends up in the request body, and an unexpected string from a stale
-    // client should be dropped, not sent upstream.
-    const effortLevel = (() => {
-      const raw = (req as { options?: { effort?: unknown } })?.options?.effort
-      if (typeof raw !== 'string') return null
-      const level = raw.trim().toLowerCase()
-      return (ZAI_REQUEST_EFFORT_LEVELS as readonly string[]).includes(level) ? level : null
-    })()
-
+    // providerId. Resolved further down, after the provider profile is known.
     const rawModel =
       model && model !== 'default'
         ? model
@@ -495,6 +496,31 @@ export function createAnthropicModelCaller(): ModelCaller {
     // receives extraParams via OpenAIClientOptions and handles it inside
     // openaiClient.ts; anthropic SDK has no equivalent hook).
     const { client, profile: resolvedProfile } = await getAnthropicClientForModel(resolvedModel, providerId)
+
+    // zai patch (2026-09-28): per-query reasoning effort, same channel as
+    // providerId. Whitelisted rather than forwarded verbatim: the value ends
+    // up in the request body, and an unexpected string from a stale client
+    // should be dropped, not sent upstream.
+    //
+    // Resolved here rather than earlier so the "never picked" fallback can be
+    // gated on the profile the request is actually going to. Sending
+    // `reasoning.effort` to a model that rejects it is a guaranteed 400
+    // (MiniMax answers 2013), so an unrecognised profile gets nothing — the
+    // same fail-safe the picker relies on to decide whether to draw the
+    // control at all.
+    const effortLevel = (() => {
+      const raw = (req as { options?: { effort?: unknown } })?.options?.effort
+      if (typeof raw === 'string') {
+        const level = raw.trim().toLowerCase()
+        // 'off' is zai's explicit "send no field" choice, not a level.
+        if (level === 'off') return null
+        return (ZAI_REQUEST_EFFORT_LEVELS as readonly string[]).includes(level) ? level : null
+      }
+      if (resolvedProfile?.capabilities?.[resolvedModel]?.supportsReasoning !== true) {
+        return null
+      }
+      return ZAI_DEFAULT_EFFORT_LEVEL
+    })()
 
     // 诊断: 记录本轮实际匹配到的 provider/profile — 用户选了 openai
     // provider 却看不到 openaiClient 请求日志时, 这一行直接告诉我们是

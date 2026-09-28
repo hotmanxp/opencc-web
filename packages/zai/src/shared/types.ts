@@ -200,6 +200,24 @@ export type EffortLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
  */
 export type ReasoningEffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+/**
+ * Effort applied to sessions that never picked one (`transcript.meta.effort`
+ * absent). Sent as a real `reasoning.effort` so an unconfigured session still
+ * gets a deterministic level instead of whatever the upstream defaults to on
+ * its own — the mobile surface has no effort control, so "never picked" is its
+ * normal state rather than an edge case.
+ *
+ * `'high'` rather than the catalog's `defaultLevel` (MiniMax-M3.1-Flash-Preview
+ * declares `max`) so the picker's highlight and the wire value agree; a
+ * catalog `defaultLevel` describes the vendor's own default, which is a
+ * different question from what zai chooses to send.
+ *
+ * Explicit `'off'` is NOT overridden — it still means "send no field".
+ * Applied only to models whose provider profile declares
+ * `capabilities[model].supportsReasoning` (see `modelCaller.ts`).
+ */
+export const ZAI_DEFAULT_EFFORT_LEVEL: ReasoningEffortLevel = 'high';
+
 export interface ProviderProfile {
   id?: string;
   name: string;
