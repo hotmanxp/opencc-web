@@ -53,16 +53,19 @@ import { logHttp } from '../accessLog.js';
  *
  * Two distinct paths based on process role:
  *
- *   ROOT process (no ZAI_SUPERVISOR_PID):
+ *   ROOT process (ZAI_INSTANCE_ID unset, or `__current__`):
  *     - Opens the AA WS connection
  *     - Owns runtime registry + event adapter + reverse dispatch
  *     - Subscribes to its own eventBus (children forward via /api/internal/child-event)
  *
- *   CHILD process (ZAI_SUPERVISOR_PID set):
+ *   CHILD process (ZAI_INSTANCE_ID starts with `inst_`):
  *     - Does NOT open its own AA WS (root owns it)
  *     - Subscribes to its own eventBus and POSTs to root's /api/internal/child-event
  *     - Receives push-action from root via /api/internal/push-action (the route
  *       lives on the child's own Express)
+ *     - Needs ZAI_AA_PARENT_URL to know where root is. Without it (instance
+ *       spawned with def.aa=false) the child has no AA bridge at all and must
+ *       NOT fall through to the ROOT path.
  *
  * Why this split: AA server allows ONE active WS connection per connector.
  * If every child tried to connect independently, only one would win and
@@ -94,9 +97,17 @@ export async function initAaClient(): Promise<(() => Promise<void>) | null> {
   // root. We distinguish by ZAI_INSTANCE_ID prefix — that's set by the
   // supervisor and is the only stable signal of "who am I".
   const instanceId = process.env.ZAI_INSTANCE_ID ?? '';
-  const isChild = instanceId.startsWith('inst_') && !!process.env.ZAI_AA_PARENT_URL;
+  const isChild = instanceId.startsWith('inst_');
 
   if (isChild) {
+    if (!process.env.ZAI_AA_PARENT_URL) {
+      // 子实例没有 parent URL = supervisor 没给它下发 AA(def.aa=false,或 root
+      // 没开 AA)。此时**不能**落到下面的 ROOT 分支:AA 云端一个 connector 只
+      // 允许一条 WS,第二个握手会被 403 拒掉,并每 5s 重试到永远 —— 还会把整个
+      // error 对象连 cause 栈打进终端(supervisor 的 stdio 是 'inherit')。
+      // 这个实例本来就没开 AA 桥,直接不初始化。
+      return null;
+    }
     // CHILD PATH: forward own events to root. No AA WS, no runtime registry.
     initChildEventReporter();
     return async () => {
@@ -183,7 +194,13 @@ export async function startAaRoot(config: import('./index.js').AaConfig): Promis
       `[aa.client] connected to ${config.serverUrl} as ${config.connectorId} (${config.connectorName})`,
     );
   } catch (err) {
-    console.warn('[aa.client] initial connect failed; reconnecting in background:', err);
+    // 只打 message:错误对象带 `cause`(ws 客户端的握手栈),Node 会连着 cause
+    // 一起展开成 25 行。而这条路径本来就是自愈的(下面会调度重连),瞬时被拒
+    // 不值得一屏栈 —— supervisor 的 stdio 是 'inherit',这些行会直接糊在用户
+    // 终端上。
+    console.warn(
+      `[aa.client] initial connect failed; reconnecting in background: ${(err as Error).message}`,
+    );
     // Don't return null — the connection schedules its own reconnects. The
     // caller can still shut down via the returned function.
   }

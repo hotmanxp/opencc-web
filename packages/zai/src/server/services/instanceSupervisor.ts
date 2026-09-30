@@ -386,6 +386,27 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         // 也设上,补 macOS Activity Monitor / Linux `top` 取 `comm` 字段
         // 的路径。entry.def.name 由 createInstance 校验非空,这里直接拼。
         const title = `zai[${entry.def.name}]:${port}`
+        const childEnv: NodeJS.ProcessEnv = {
+          ...process.env,
+          ZAI_INSTANCE_ID: id,
+          ZAI_SUPERVISOR_PID: String(process.pid),
+          ZAI_INSTANCE_HEARTBEAT_MS: '5000',
+          ZAI_PROCESS_TITLE: title,
+          ...(aaParentUrl
+            ? { ZAI_AA_PARENT_URL: aaParentUrl, ZAI_AA_PARENT_PORT: rootPort ?? undefined }
+            : {}),
+        }
+        // `isAaEnabled()` 只读 env、不读 argv,而上面是 `...process.env` 全量
+        // 继承 —— root 带 `--aa` 时 `ZAI_AA_ENABLED=1` 会原样传给每个子实例。
+        // 于是 def.aa=false 的实例(没拿到 `--aa`、也没拿到 ZAI_AA_PARENT_URL)
+        // 仍然 isAaEnabled()=true,在 init.ts 的 isChild 判定里落进 ROOT 分支,
+        // 拿同一个 connectorId 去连 AA 云 → 403 + 每 5s 无限重连。
+        // 不变式:子进程 env 说开 AA ⟺ argv 里有 `--aa`,即 aaParentUrl 有值。
+        if (!aaParentUrl) {
+          delete childEnv.ZAI_AA_ENABLED
+          delete childEnv.ZAI_AA_PARENT_URL
+          delete childEnv.ZAI_AA_PARENT_PORT
+        }
         const child = deps.spawn(
           process.execPath,
           args,
@@ -394,16 +415,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
             stdio: ['ipc', 'inherit', 'inherit'],
             detached: false,
             argv0: title,
-            env: {
-              ...process.env,
-              ZAI_INSTANCE_ID: id,
-              ZAI_SUPERVISOR_PID: String(process.pid),
-              ZAI_INSTANCE_HEARTBEAT_MS: '5000',
-              ZAI_PROCESS_TITLE: title,
-              ...(aaParentUrl
-                ? { ZAI_AA_PARENT_URL: aaParentUrl, ZAI_AA_PARENT_PORT: rootPort ?? undefined }
-                : {}),
-            },
+            env: childEnv,
           },
         )
         attachChild(entry, child)

@@ -447,6 +447,25 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(spawnArgs[0]).not.toContain('--aa')
   })
 
+  it('def.aa=false child env does NOT inherit root ZAI_AA_ENABLED', async () => {
+    // 回归:`isAaEnabled()` 只读 env 不读 argv,而 child env 是 `...process.env`
+    // 全量继承 —— root 带 --aa 时 ZAI_AA_ENABLED=1 会漏给 def.aa=false 的子实例,
+    // 让它在 init.ts 的 isChild 判定里落进 ROOT 分支,拿同一个 connectorId 去
+    // 连 AA 云 → 403 + 每 5s 无限重连(现场 9399/9987 各刷 13~15 次)。
+    // 不变式:child env 说开 AA ⟺ argv 里有 `--aa`。
+    process.env.ZAI_AA_ENABLED = '1'
+    process.env.ZAI_AA_PARENT_URL = 'http://127.0.0.1:9999'
+    const { deps, spawnArgs, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: false })
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const env = (spawnOptions[0] as SpawnOptions & { env: NodeJS.ProcessEnv }).env
+    expect(env.ZAI_AA_ENABLED).toBeUndefined()
+    // 继承来的旧值也不能带过去 —— 同样会让子实例误判自己是 AA root
+    expect(env.ZAI_AA_PARENT_URL).toBeUndefined()
+    expect(env.ZAI_AA_PARENT_PORT).toBeUndefined()
+  })
+
   it('restartInstance keeps honouring persisted def.aa=true after updateInstance', async () => {
     // UI 开关走的正是这条路径:PATCH updateInstance({aa:true}) 落盘 → 下次
     // restart 生效,不需要 per-call override。
