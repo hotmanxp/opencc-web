@@ -189,7 +189,10 @@ describe('runtime.start — binding by name / config', () => {
       configRevision: 0,
     })) as { runtimeId: string; status: string };
 
-    expect(res).toMatchObject({ runtimeId: 'rti_new_1', status: 'started' });
+    // `started` is not in AA's RuntimeStatus enum
+    // (`core/device_runtime.py`); the server coerced it to `running`.
+    // zai now sends the legal value itself.
+    expect(res).toMatchObject({ runtimeId: 'rti_new_1', status: 'running' });
     expect(registry.getMappingByRuntimeId('rti_new_1')?.port).toBe(9987);
     // The other instance keeps its own id — one AA id, one child.
     expect(registry.getMappingByRuntimeId('rti_old_1')?.port).toBe(9399);
@@ -219,13 +222,18 @@ describe('runtime.start — binding by name / config', () => {
   it('never auto-starts the weixin dedicated instance', async () => {
     // It owns the 微信 channel and answers to settings.weixinBot — an AA
     // "Start" must not boot it just because it happens to be the only
-    // candidate left.
+    // candidate left. With only a weixin instance on the machine there
+    // is nothing startable, so the start fails loudly.
     snapshots.push(
       { id: 'inst_wx', name: 'weixin-bot', cwd: '/Users/ethan', state: 'stopped', port: null, app: 'weixin' },
     );
     const { rd, handlers } = await makeRig({});
     (rd as unknown as { isPortListening: (p: number) => Promise<boolean> }).isPortListening = async () => true;
-    await handlers.get('runtime.start')!({ runtimeId: 'rti_x', name: 'unknown-name', config: {} });
+    const err = await handlers
+      .get('runtime.start')!({ runtimeId: 'rti_x', name: 'unknown-name', config: {} })
+      .then(() => null, (e: unknown) => e as Error & { code?: string });
+    expect((err as { code?: string } | null)?.code).toBe('runtime_not_routable');
+    expect(err?.message).toContain('no zai instance matches');
     expect(started).toEqual([]);
   });
 
@@ -234,18 +242,25 @@ describe('runtime.start — binding by name / config', () => {
     // instance's cwd. Falling back to "the first candidate
     // alphabetically" would silently run the conversation in an unrelated
     // workspace — the same class of wrong-workspace bug as the port
-    // guess, so the answer has to be "start nothing" + a loud warning.
+    // guess. The answer is "start nothing" + an error the client can show.
     snapshots.push(
       { id: 'inst_a', name: 'AAA Project', cwd: '/tmp/a', state: 'stopped', port: null },
       { id: 'inst_b', name: 'BBB Project', cwd: '/tmp/b', state: 'stopped', port: null },
     );
     const { rd, handlers } = await makeRig({});
     (rd as unknown as { isPortListening: (p: number) => Promise<boolean> }).isPortListening = async () => true;
-    await handlers.get('runtime.start')!({
-      runtimeId: 'rti_unmatched',
-      name: 'some AA-side name',
-      config: { cwd: '/tmp/does-not-belong-to-anyone' },
-    });
+    const err = await handlers
+      .get('runtime.start')!({
+        runtimeId: 'rti_unmatched',
+        name: 'some AA-side name',
+        config: { cwd: '/tmp/does-not-belong-to-anyone' },
+      })
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err?.message).toContain('no zai instance matches');
+    // The message has to name the instances that DO exist, or the user
+    // has no way to act on it.
+    expect(err?.message).toContain('AAA Project@/tmp/a');
+    expect(err?.message).toContain('BBB Project@/tmp/b');
     expect(started).toEqual([]);
   });
 
@@ -256,8 +271,41 @@ describe('runtime.start — binding by name / config', () => {
     );
     const { rd, handlers } = await makeRig({});
     (rd as unknown as { isPortListening: (p: number) => Promise<boolean> }).isPortListening = async () => true;
-    await handlers.get('runtime.start')!({ runtimeId: 'rti_x', name: 'never-heard-of-it', config: {} });
+    await expect(
+      handlers.get('runtime.start')!({ runtimeId: 'rti_x', name: 'never-heard-of-it', config: {} }),
+    ).rejects.toThrow(/no zai instance matches/);
     expect(started).toEqual([]);
+  });
+
+  it('fails a stale legacy runtime that carries no workspace at all', async () => {
+    // The live failure this locks down: a `codex`-era runtime left over
+    // from before per-workspace types, with `config: {}`. It used to get
+    // `{status:'started'}` back — bound to nothing — and every later
+    // session.create 404'd, so tapping Start looked like a dead button.
+    snapshots.push(
+      { id: 'inst_home', name: 'ethan', cwd: '/Users/ethan', state: 'running', port: 9201 },
+      { id: 'inst_code', name: 'Code-AA', cwd: '/Users/ethan/code', state: 'running', port: 9233 },
+    );
+    const { rd, registry, handlers } = await makeRig({
+      '9201': mapping({ port: 9201, runtimeId: 'rti_home', name: 'ethan', cwd: '/Users/ethan' }),
+      '9233': mapping({ port: 9233, runtimeId: 'rti_code', name: 'Code-AA', cwd: '/Users/ethan/code' }),
+    });
+    allListening(rd);
+
+    const err = await handlers
+      .get('runtime.start')!({
+        runtimeId: 'rti_nJK4nB_g0dapspAZ',
+        runtime: 'codex',
+        name: 'zai-code',
+        config: {},
+      })
+      .then(() => null, (e: unknown) => e as Error & { code?: string });
+    expect((err as { code?: string } | null)?.code).toBe('runtime_not_routable');
+    expect(err?.message).toContain('no zai instance matches');
+    // Neither live child may be handed the id as a consolation prize.
+    expect(registry.getMappingByRuntimeId('rti_nJK4nB_g0dapspAZ')).toBeNull();
+    expect(registry.getMappingByRuntimeId('rti_home')?.port).toBe(9201);
+    expect(registry.getMappingByRuntimeId('rti_code')?.port).toBe(9233);
   });
 
   it('accepts the validateConfig call AA makes before accepting an instance', async () => {
@@ -266,15 +314,60 @@ describe('runtime.start — binding by name / config', () => {
     // the AA UI shows `error: no handler for runtime.validateConfig` and
     // the instance is never created — even though the schema it was
     // validating came from our own runtime.discover.
+    snapshots.push(
+      { id: 'inst_web', name: 'opencc-web', cwd: '/Users/ethan/code/opencc-web', state: 'running', port: 9987 },
+    );
     const { handlers } = await makeRig({});
     const res = (await handlers.get('runtime.validateConfig')!({
-      runtime: 'codex',
+      runtime: 'zai-opencc-web',
       runtimeId: 'rti_new',
-      name: 'whatever',
+      name: 'opencc-web',
       config: { cwd: '/Users/ethan/code/opencc-web' },
       configRevision: 1,
     })) as { runtimeId: string; valid: boolean };
     expect(res).toEqual({ runtimeId: 'rti_new', valid: true });
+  });
+
+  it('rejects a config that could never be routed, with a 422-mapped code', async () => {
+    // zai can only route onto an existing InstanceDefinition, so a config
+    // that resolves to nothing is dead on arrival — every later
+    // `runtime.start` on it fails. Catching it here keeps the user in the
+    // form instead of leaving behind another silent runtime.
+    //
+    // The code matters: `device_runtimes.py::_request_validate` maps
+    // `runtime_config_invalid` to 422 (a correctable form error) and
+    // every other code to 502 (connector fault).
+    snapshots.push(
+      { id: 'inst_web', name: 'opencc-web', cwd: '/Users/ethan/code/opencc-web', state: 'running', port: 9987 },
+    );
+    const { handlers } = await makeRig({});
+    const err = await handlers
+      .get('runtime.validateConfig')!({
+        runtime: 'codex',
+        runtimeId: 'rti_stale',
+        name: 'zai-code',
+        config: {},
+        configRevision: 1,
+      })
+      .then(() => null, (e: unknown) => e as Error & { code?: string });
+    expect((err as { code?: string } | null)?.code).toBe('runtime_config_invalid');
+    expect(err?.message).toContain('opencc-web@/Users/ethan/code/opencc-web');
+  });
+
+  it('rejects a config when the machine exposes no AA-visible instance', async () => {
+    // Distinct advice from "nothing matched": there is nothing to match
+    // against, so pointing the runtime anywhere would be a guess.
+    const { handlers } = await makeRig({});
+    const err = await handlers
+      .get('runtime.validateConfig')!({
+        runtime: 'codex',
+        runtimeId: 'rti_new',
+        name: 'whatever',
+        config: { cwd: '/Users/ethan/code/opencc-web' },
+        configRevision: 1,
+      })
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err?.message).toContain('no zai instance that AA can see');
   });
 });
 

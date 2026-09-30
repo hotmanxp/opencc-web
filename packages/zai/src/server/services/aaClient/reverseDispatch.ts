@@ -437,6 +437,20 @@ function readCwdFromConfig(config: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * An inbound-handler failure that reaches AA with a chosen `code`.
+ *
+ * `connection.ts::handleRequest` reads `err.code` straight into the
+ * response's `error.code`, so a bare `Error` would arrive labelled with
+ * its constructor name. The code is not cosmetic: `device_runtimes.py`
+ * maps some of them to HTTP statuses — `runtime_config_invalid` and
+ * `invalid_config` become 422 (a user-correctable form error), anything
+ * else becomes 502.
+ */
+function aaError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { code });
+}
+
 export interface ReverseDispatchOptions {
   conn: AaConnection;
   registry: RuntimeRegistry;
@@ -500,16 +514,31 @@ export class ReverseDispatch {
     // for runtime.validateConfig`, even though the schema itself came from
     // us on `runtime.discover`.
     //
-    // zai's schema declares an optional `cwd` string. Type validation is
-    // already done server-side (pydantic + our schema), so this method
-    // only confirms there is a config payload to act on. Anything else
-    // (existence of the directory, etc.) is `runtime.start`'s problem —
-    // returning valid:true here lets a user create an AA runtime instance
-    // pointing at a workspace that doesn't exist yet, and the actual
-    // start will fail with a useful warning instead of a hard 422 at
-    // create time.
+    // This is also the earliest point at which we can catch a runtime
+    // that could never start. AA's `cwd` is a free string and the
+    // official connector allows it to name a directory that does not
+    // exist yet — zai cannot: routing only ever lands on an existing
+    // InstanceDefinition, so a config that resolves to nothing is dead on
+    // arrival and every later `runtime.start` on it fails. Rejecting it
+    // here, with a code the server maps to 422 rather than 502
+    // (`device_runtimes.py::_request_validate`), shows the reason while
+    // the user is still looking at the form instead of leaving behind one
+    // more runtime that starts as a no-op.
     this.conn.onRequest('runtime.validateConfig', async (params) => {
-      const p = (params ?? {}) as { runtimeId?: string; config?: unknown };
+      const p = (params ?? {}) as {
+        runtimeId?: string;
+        runtime?: string;
+        name?: string;
+        config?: unknown;
+      };
+      const wantCwd = readCwdFromConfig(p.config);
+      const candidates = await this.aaVisibleCandidates();
+      if (!(await this.selectInstance(candidates, p.name, wantCwd, p.runtime))) {
+        throw aaError(
+          'runtime_config_invalid',
+          await this.explainUnroutable(p.name, wantCwd, p.runtime, candidates),
+        );
+      }
       return { runtimeId: p.runtimeId ?? '', valid: true };
     });
     // Session creation is the entrypoint for the conversation flow: AA Web
@@ -598,19 +627,27 @@ export class ReverseDispatch {
     // legacy single-type case, where the type identifies nothing.
     const wantCwd = readCwdFromConfig(p.config);
     const port = await this.bindRuntimeStart(runtimeId, p.name, wantCwd, p.runtime);
-    if (port !== null) {
-      logHttp(
-        `[aa.reverseDispatch] runtime.start: ${runtimeId} → port ${port} ` +
-          `(runtime=${p.runtime ?? '<none>'} name=${p.name ?? '<none>'} cwd=${wantCwd ?? '<none>'})`,
-      );
-    } else {
-      console.warn(
-        `[aa.reverseDispatch] runtime.start: ${runtimeId} — no zai instance matched ` +
-          `(runtime=${p.runtime ?? '<none>'} name=${p.name ?? '<none>'} cwd=${wantCwd ?? '<none>'}); ` +
-          `session.create will 404`,
+    if (port === null) {
+      // Returning `{status:'started'}` anyway is what turned a routing
+      // miss into a silent no-op: AA believed the runtime was up, went
+      // on to `session.create`, found no session bound to this id and
+      // 404'd — so the client rendered nothing at all. Throwing is the
+      // designed failure path (`device_runtimes.py::_start_locked`
+      // catches ConnectorRpcError, stores `error` on the runtime and
+      // surfaces it), which puts the actual reason in front of the user.
+      throw aaError(
+        'runtime_not_routable',
+        await this.explainUnroutable(p.name, wantCwd, p.runtime),
       );
     }
-    return { runtimeId, status: 'started' };
+    logHttp(
+      `[aa.reverseDispatch] runtime.start: ${runtimeId} → port ${port} ` +
+        `(runtime=${p.runtime ?? '<none>'} name=${p.name ?? '<none>'} cwd=${wantCwd ?? '<none>'})`,
+    );
+    // `started` is not a member of AA's RuntimeStatus enum
+    // (`core/device_runtime.py`); the server coerces it to `running`
+    // today, but send the legal value rather than lean on that.
+    return { runtimeId, status: 'running' };
   }
 
   /**
@@ -666,17 +703,12 @@ export class ReverseDispatch {
     wantCwd?: string,
     runtimeType?: string,
   ): Promise<number | null> {
-    const candidates = (await this.instanceInventory()).filter((i) => i.aaVisible);
+    const candidates = await this.aaVisibleCandidates();
     if (candidates.length === 0) return null;
     const target = await this.selectInstance(candidates, instanceName, wantCwd, runtimeType);
-    if (!target) {
-      console.warn(
-        `[aa.reverseDispatch] no zai instance matches this AA runtime ` +
-          `(runtime=${runtimeType ?? '<none>'} name=${instanceName ?? '<none>'} cwd=${wantCwd ?? '<none>'}; ` +
-          `candidates: ${candidates.map((c) => `${c.name}@${c.cwd}`).join(', ')})`,
-      );
-      return null;
-    }
+    // No target: `handleRuntimeStart` turns this null into an error whose
+    // message names the candidates, so there is nothing to log here.
+    if (!target) return null;
     if (target.state === 'running' && target.port && (await this.isPortListening(target.port))) {
       return target.port;
     }
@@ -695,6 +727,55 @@ export class ReverseDispatch {
       return null;
     }
     return this.waitForInstancePort(target.id, target.port);
+  }
+
+  /** Every instance the AA bridge is allowed to route a runtime onto. */
+  private async aaVisibleCandidates(): Promise<InstanceCandidate[]> {
+    return (await this.instanceInventory()).filter((i) => i.aaVisible);
+  }
+
+  /**
+   * Why an AA runtime could not be bound, phrased for the person who
+   * clicked Start.
+   *
+   * Shared by `runtime.start` and `runtime.validateConfig` so the two
+   * always agree on the diagnosis — otherwise a config accepted at create
+   * time can still fail at start time with a different story. Re-runs
+   * `selectInstance` rather than threading the selection back out of the
+   * routing chain, because the chain has two distinct null paths (nothing
+   * matched / matched but would not come up) and they need different
+   * advice; the check only runs on the failure path, so the extra
+   * snapshot read costs nothing that matters.
+   */
+  private async explainUnroutable(
+    instanceName?: string,
+    wantCwd?: string,
+    runtimeType?: string,
+    knownCandidates?: InstanceCandidate[],
+  ): Promise<string> {
+    const candidates = knownCandidates ?? (await this.aaVisibleCandidates());
+    if (candidates.length === 0) {
+      return (
+        'this machine has no zai instance that AA can see, so there is nothing to run this runtime on. ' +
+        'Turn AA on for an instance in zai\'s instance manager, then configure the runtime again.'
+      );
+    }
+    const inventory = candidates.map((c) => `${c.name}@${c.cwd}`).join(', ');
+    const target = await this.selectInstance(candidates, instanceName, wantCwd, runtimeType);
+    // A target here means the chain got past selection and died on the
+    // start itself (supervisor refused, or the port never came up).
+    if (target) {
+      return (
+        `matched zai instance "${target.name}" (${target.cwd}) but it did not start; ` +
+        'check its lastError in zai\'s instance manager, then try again.'
+      );
+    }
+    return (
+      `no zai instance matches this runtime (type=${runtimeType ?? '<none>'}, ` +
+      `name=${instanceName ?? '<none>'}, workspace=${wantCwd ?? '<unset>'}). ` +
+      `AA-visible instances: ${inventory}. ` +
+      'Set the runtime\'s Workspace to one of those paths, or re-create it from a per-workspace zai-* runtime type.'
+    );
   }
 
   /**
