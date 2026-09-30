@@ -33,6 +33,7 @@ import {
   RocketIcon,
 } from 'lucide-react';
 import { useInstanceStore } from '../store/useInstanceStore.js'
+import { useAppStore } from '../store/useAppStore.js'
 import type { InstanceSnapshot, InstanceState } from '../../../shared/instances.js'
 import DirectoryPicker from '../components/common/DirectoryPicker.js'
 
@@ -140,6 +141,10 @@ async function waitForRunningInstance(
 
 export default function Instances(): JSX.Element {
   const { instances, loading, loadInstances, applyInstanceSnapshot } = useInstanceStore()
+  // 进程级 `--aa` 总开关(Layout 从 GET /api/system hydrate)。关掉时每行的
+  // AA 开关不渲染,见 renderAaToggle。fail-open:见 useAppStore 注释,
+  // undefined(老后端)按启用处理,只有显式 false 才藏。
+  const aaEnabled = useAppStore((s) => s.instanceContext?.aaEnabled !== false)
   const [open, setOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [lanBusyId, setLanBusyId] = useState<string | null>(null)
@@ -484,6 +489,10 @@ export default function Instances(): JSX.Element {
 
   function renderAaToggle(row: InstanceSnapshot): JSX.Element | null {
     if (row.isCurrent) return null
+    // 本次进程没带 `--aa` 启动(后端 GET /api/system 的 aaEnabled)时,子实例的
+    // AA 开关一律没有意义 —— supervisor 不会给它们传 `--aa`。连开关带说明
+    // 一起藏掉,免得用户在这里勾了以为生效了(实际要重启 root 加 flag)。
+    if (!aaEnabled) return null
     // `undefined` = auto(跟随 root),`true` = 请求启用。UI v1 不暴露 force-off,
     // 所以关态就是 auto,与 Switch 的 unchecked 天然对应。
     const on = row.aa === true

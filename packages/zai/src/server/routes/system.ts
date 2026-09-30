@@ -6,6 +6,7 @@ import { getSystemInfo } from '../services/detect.js';
 import { eventBus } from '../services/eventBus.js';
 import { isManagedChild } from '../../cli/managedChild.js';
 import { readManagedState } from '../../cli/managedState.js';
+import { isAaEnabled } from '../services/aaClient/index.js';
 import { requestRestart, requestStop } from '../services/restartCoordinator.js';
 import { createRestartHooks } from '../services/restartHooks.js';
 import {
@@ -112,6 +113,12 @@ router.get('/system', async (req, res) => {
       // 这里把同样的值回给前端（task-factory UI 用它决定要不要把 /super-tasks
       // 设为默认页）。无 profile / 非受管实例返回 null。
       app: process.env.ZAI_APP ?? null,
+      // AA (Agents Anywhere) 桥是否随本次启动开启(CLI `--aa` → ZAI_AA_ENABLED)。
+      // 前端据此把 AA 配置入口整体藏起来:/manage 的「AA 桥」tab、实例管理里
+      // 每行的 AA 开关,以及 AASettings 页本身。没带 --aa 时这些入口一律不渲染
+      // ——绝大多数用户永远不接 AA,常驻一个「未启用,去重启加 flag」的提示卡
+      // 只是噪音(真要接时重启即可,入口会在 AA 实例上出现)。
+      aaEnabled: isAaEnabled(),
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });

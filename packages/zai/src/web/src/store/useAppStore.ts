@@ -66,6 +66,13 @@ interface AppState {
   // 当前仅支持 'task-factory'):router.tsx 的 TaskFactoryRedirect 据此把
   // / 与 /agent 重定向到 /super-tasks。`null` 表示未识别 / 未配置(profile
   // 为空),undefined 表示字段未回传(向后兼容旧的 GET /api/system 响应)。
+  // aaEnabled 是本次进程是否带 `--aa` 启动(后端 isAaEnabled());AA 配置入口
+  // (/manage「AA 桥」tab、实例管理每行的 AA 开关、AASettings 页)一律按它门控。
+  // **fail-open**:undefined 与 true 同义 —— 旧版后端(`/api/system` 没回
+  // aaEnabled 字段)滚动时,前端拿不到信号,这时按「启用」处理,避免把 AA
+  // 实例上的入口误藏。只有显式 false 才藏。等所有 zai 实例都升级完、关闭
+  // 这台机器上的旧版 dist 后,可以把这个 fail-open 收紧回 `=== true`,
+  // 同时把 Layout / MobileLayout 里 `!== false` 改回 `=== true`。
   instanceContext: {
     cwd: string;
     cwdName: string;
@@ -77,6 +84,7 @@ interface AppState {
     supervisorPid?: number | null;
     instanceId?: string | null;
     app?: string | null;
+    aaEnabled?: boolean;
   } | null;
   setConnected: (v: boolean) => void;
   setInstanceContext: (ctx: {
@@ -90,6 +98,7 @@ interface AppState {
     supervisorPid?: number | null;
     instanceId?: string | null;
     app?: string | null;
+    aaEnabled?: boolean;
   }) => void;
   applyJobEvent: (event: ServerEvent) => void;
   applySystemEvent: (event: ServerEvent) => void;

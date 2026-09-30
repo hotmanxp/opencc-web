@@ -16,8 +16,9 @@
  *   - Token redacted server-side; this page never sees cxt_*.
  *
  * Disabled state: when zai started without `--aa`, all backend routes
- * return 503 with `aa_disabled`. The page renders a clear "restart with
- * --aa" message instead of letting the user think pairing is broken.
+ * return 503 with `aa_disabled`. The page renders nothing at all — the AA
+ * config surface (this tab, the per-instance AA switch, the page itself)
+ * is only meant to exist on a process that actually has the AA bridge on.
  */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -98,6 +99,9 @@ export default function AASettings() {
         setLastError(s.connection?.lastError ?? null);
         setReconnectAttempts(s.connection?.reconnectAttempts ?? 0);
         setLoading(false);
+        // `disabled` = 本次进程没带 `--aa`,它只能靠重启进程改变。停掉轮询,
+        // 页面本身也返回 null(见下),没必要再每 5s 打一次 /api/aa/status。
+        if (s.status === 'disabled') return;
         // Schedule next tick. Shorter interval while pairing or reconnecting
         // so user sees live updates; longer when stable.
         const fast = s.status === 'reconnecting' || pairingCode != null;
@@ -193,6 +197,11 @@ export default function AASettings() {
     );
   }
 
+  // 没带 `--aa` 启动:整页不渲染。AA 配置入口在 /manage(「AA 桥」tab)和
+  // 实例管理(每行 AA 开关)都已按同一个开关藏掉,这里只是兜底 —— 万一有人
+  // 停在旧书签 /manage?tab=aa,也不会看到一页「请重启加 --aa」的空提示。
+  if (state === 'disabled') return null;
+
   return (
     <div className="max-w-3xl" data-testid="aa-settings">
       <Title level={3} className="flex items-center gap-2">
@@ -228,15 +237,6 @@ export default function AASettings() {
               刷新
             </Button>
           </div>
-
-          {state === 'disabled' && (
-            <Alert
-              type="info"
-              showIcon
-              message="AA 桥未启用"
-              description={<>zai 当前进程以不带 <Text code>--aa</Text> 的方式启动,所有 AA 相关功能已停用。请停止当前 zai,然后用 <Text code>zai start --aa</Text> 重启。</>}
-            />
-          )}
 
           {state === 'unpaired' && !pairingCode && (
             <Form form={form} layout="vertical" initialValues={{ serverUrl: pairingServerUrl }}>

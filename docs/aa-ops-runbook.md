@@ -70,12 +70,18 @@ rm ~/.zai/aa/config.json
 
 ## Troubleshooting
 
-### "AA 桥未启用" badge after I added `--aa`
+### "AA 桥" tab is missing from `/manage`
 
-Possible causes:
+Since 2026-09-30 the whole AA config surface (`/manage` 的「AA 桥」tab、实例管理里每行的 AA 开关、AASettings 页面)只在**带 `--aa` 启动**的进程上渲染。没带 `--aa` 时入口整个不显示,不再有「未启用,去重启加 flag」的提示卡。
 
-1. **Token hot-reload didn't take.** Stop zai (Ctrl+C) and restart `zai start --aa` — the flag is read at process start, not at runtime.
+So a missing tab means the running process doesn't have AA on:
+
+1. **Token hot-reload doesn't exist.** Stop zai (Ctrl+C) and restart `zai start --aa` — the flag is read at process start, not at runtime.
 2. **CLI flag typo.** Check with `zai start --help | grep aa` — should show `--aa  Enable Agents Anywhere`.
+3. **Verify what the server thinks:**
+   ```bash
+   curl -s localhost:9201/api/system | jq .aaEnabled   # 期望 true
+   ```
 
 ### "Reconnecting (attempt N)" stuck at large N
 

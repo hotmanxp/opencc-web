@@ -6,6 +6,7 @@ import Config from './Config';
 import Directory from './Directory';
 import Tools from './Tools';
 import AASettings from './AASettings';
+import { useAppStore } from '../store/useAppStore';
 
 // 合并三个原独立页面(/resources /config /dirs)到 /manage 入口;另外把
 // Tools 工具检测页和 Agents Anywhere (AA) 设置也收进来。
@@ -21,8 +22,17 @@ function isTabKey(value: string | null): value is TabKey {
 
 export default function Manage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  // 「AA 桥」tab 只在本次进程带 `--aa` 启动时存在(后端 GET /api/system 的
+  // aaEnabled,Layout hydrate 进 instanceContext)。没带 --aa 就不渲染这个 tab ——
+  // AA 对绝大多数用户是无关功能,常驻一个入口只会让人以为漏配了什么。
+  // fail-open:见 useAppStore 注释 —— undefined(老后端)按启用处理,只有显式
+  // false 才藏,避免滚动期把 AA 实例上的入口误藏。
+  const aaEnabled = useAppStore((s) => s.instanceContext?.aaEnabled !== false);
   const rawTab = searchParams.get('tab');
-  const activeTab: TabKey = isTabKey(rawTab) ? rawTab : 'config';
+  // 老书签 / 旧链接 (?tab=aa) 落在未启用 AA 的进程上时回落到「配置」,
+  // 否则 activeKey 指向不存在的 tab,AntD 会渲染一片空白。
+  const activeTab: TabKey =
+    !aaEnabled && rawTab === 'aa' ? 'config' : isTabKey(rawTab) ? rawTab : 'config';
 
   const items = useMemo(
     () => [
@@ -30,9 +40,9 @@ export default function Manage() {
       { key: 'config', label: '配置', children: <Config /> },
       { key: 'dirs', label: '目录', children: <Directory /> },
       { key: 'tools', label: '工具', children: <Tools /> },
-      { key: 'aa', label: 'AA 桥', children: <AASettings /> },
+      ...(aaEnabled ? [{ key: 'aa', label: 'AA 桥', children: <AASettings /> }] : []),
     ],
-    [],
+    [aaEnabled],
   );
 
   return (

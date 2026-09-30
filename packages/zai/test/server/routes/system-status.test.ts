@@ -10,6 +10,7 @@ const TEST_DIR = '/tmp/zai-test-system-status'
 afterEach(async () => {
   delete process.env.ZAI_SUPERVISOR_PID
   delete process.env.ZAI_INSTANCE_ID
+  delete process.env.ZAI_AA_ENABLED
   delete process.env.ZAI_DATA_DIR
   try { await rm(TEST_DIR, { recursive: true, force: true }) } catch {}
 })
@@ -104,5 +105,37 @@ describe('GET /api/system supervisor 关系字段', () => {
     expect(res.body.isManagedChild).toBe(true)
     expect(res.body.supervisorPid).toBe(9999)
     expect(res.body.instanceId).toBe('inst_abc')
+  })
+})
+
+describe('GET /api/system aaEnabled 字段', () => {
+  // 前端按 aaEnabled 决定要不要渲染 AA 配置入口(/manage「AA 桥」tab、
+  // 实例管理每行的 AA 开关、AASettings 页本身)。它必须忠实反映
+  // `ZAI_AA_ENABLED`(CLI `--aa` 落到 env 的那个值),不能是 undefined ——
+  // undefined 在前端和 false 同义(都按「未启用」处理),字段缺失等于
+  // AA 实例上也会丢入口。
+  function bootApp(): express.Express {
+    const app = express()
+    app.locals.instanceContext = {
+      cwd: '/tmp/x',
+      cwdName: 'x',
+      host: '127.0.0.1',
+    }
+    app.use('/api', systemRouter)
+    return app
+  }
+
+  it('没带 --aa 时 aaEnabled=false', async () => {
+    delete process.env.ZAI_AA_ENABLED
+    const res = await request(bootApp()).get('/api/system')
+    expect(res.status).toBe(200)
+    expect(res.body.aaEnabled).toBe(false)
+  })
+
+  it('带 --aa 时 aaEnabled=true', async () => {
+    process.env.ZAI_AA_ENABLED = '1'
+    const res = await request(bootApp()).get('/api/system')
+    expect(res.status).toBe(200)
+    expect(res.body.aaEnabled).toBe(true)
   })
 })
