@@ -1,5 +1,24 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { ServerEventBus } from '../../../services/eventBus.js'
+import { ServerEventBus, isGlobalEvent } from '../../../services/eventBus.js'
+import { ServerEvent as ServerEventSchema } from '../../../../shared/events.js'
+import type { ServerEvent } from '../../../../shared/events.js'
+
+// 与前端 useEventStream.ts 的 GLOBAL_ONLY_TOPICS 逐项对应。改一边必须改
+// 另一边 —— 「无会话页面收哪些事件」是前后端契约,不是单端实现细节。
+// queue / agent_task / state.* 刻意不在其中:它们在 isGlobalEvent 里是 false。
+const GLOBAL_ONLY_TOPICS = [
+  'system', 'instance', 'task_factory', 'skills',
+  'app_update', 'command', 'session', 'job',
+]
+
+// 从 zod discriminatedUnion 里枚举出所有真实存在的 event type,避免手抄
+// 清单漏项 —— 新增事件类型时这条断言会自动把它纳进来。
+function allEventTypes(): string[] {
+  return (ServerEventSchema as unknown as {
+    options: Array<{ shape: { type: { value: string } } }>
+  }).options.map((o) => o.shape.type.value)
+}
+
 
 describe('ServerEventBus topic filter', () => {
   let bus: ServerEventBus
@@ -27,6 +46,78 @@ describe('ServerEventBus topic filter', () => {
     expect(ServerEventBus.topicMatches('job.started', ['job'])).toBe(true)
     expect(ServerEventBus.topicMatches('prompt.ask', ['prompt'])).toBe(true)
     expect(ServerEventBus.topicMatches('server.connected', ['system'])).toBe(true)
+  })
+
+  it('topicMatches: 无会话订阅依赖的全局 group (2026-09-30 /instances 不刷新修复)', () => {
+    // 前端 GLOBAL_ONLY_TOPICS 逐项对应这里。少登记一个,对应的全局事件
+    // 就会在无会话页面(实例管理 / 管理 / 仪表盘)静默收不到。
+    expect(ServerEventBus.topicMatches('instance.changed', ['instance'])).toBe(true)
+    expect(ServerEventBus.topicMatches('task_factory', ['task_factory'])).toBe(true)
+    expect(ServerEventBus.topicMatches('skills.changed', ['skills'])).toBe(true)
+    expect(ServerEventBus.topicMatches('command.run', ['command'])).toBe(true)
+    expect(ServerEventBus.topicMatches('command.done', ['command'])).toBe(true)
+    expect(ServerEventBus.topicMatches('app.update.complete', ['app_update'])).toBe(true)
+    expect(ServerEventBus.topicMatches('app.update.failed', ['app_update'])).toBe(true)
+    // 'system' group 扩成了 GLOBAL_TOPIC_SYSTEM,覆盖 restart/stopping
+    expect(ServerEventBus.topicMatches('system.restarting', ['system'])).toBe(true)
+    expect(ServerEventBus.topicMatches('system.stopping', ['system'])).toBe(true)
+  })
+
+  it('topicMatches: 全局 group 不误收会话级事件 (串台防护)', () => {
+    // 无会话时最怕的是把别的会话的流式输出 / 待确认卡片收进来。
+    for (const topic of ['system', 'instance', 'task_factory', 'skills', 'app_update', 'command']) {
+      expect(ServerEventBus.topicMatches('runtime.delta', [topic])).toBe(false)
+      expect(ServerEventBus.topicMatches('prompt.ask', [topic])).toBe(false)
+      expect(ServerEventBus.topicMatches('prompt.approve', [topic])).toBe(false)
+      expect(ServerEventBus.topicMatches('cwd.changed', [topic])).toBe(false)
+      // queue / agent_task 是 sid-scoped,任何全局 group 都不能放行
+      expect(ServerEventBus.topicMatches('queue.changed', [topic])).toBe(false)
+      expect(ServerEventBus.topicMatches('agent_task.changed', [topic])).toBe(false)
+    }
+  })
+
+  it('topicMatches: 前端 GLOBAL_ONLY_TOPICS 整组只命中全局事件', () => {
+    // 应当命中:实例管理页 / 看板 / 顶栏连接态真正依赖的那批
+    expect(ServerEventBus.topicMatches('instance.changed', GLOBAL_ONLY_TOPICS)).toBe(true)
+    expect(ServerEventBus.topicMatches('task_factory', GLOBAL_ONLY_TOPICS)).toBe(true)
+    expect(ServerEventBus.topicMatches('server.connected', GLOBAL_ONLY_TOPICS)).toBe(true)
+    // 绝不能命中:会让 applyPromptAsk 串台的会话级事件
+    expect(ServerEventBus.topicMatches('prompt.ask', GLOBAL_ONLY_TOPICS)).toBe(false)
+    expect(ServerEventBus.topicMatches('runtime.delta', GLOBAL_ONLY_TOPICS)).toBe(false)
+  })
+
+  it('漂移守护: 每个全局事件 type 都被 GLOBAL_ONLY_TOPICS 覆盖', () => {
+    // 契约:isGlobalEvent() === true 的 type,必须能被 topics 白名单命中 ——
+    // 否则「无活跃会话」的页面(实例管理 / 管理 / 仪表盘)收不到它, 而这些
+    // 页面恰恰是最需要全局事件的。isGlobalEvent 是 switch, GLOBAL_TOPIC_*
+    // 是若干 Set, 两份清单靠人力同步必然漂移, 这里逐 type 断言兜住。
+    //
+    // 新增全局事件类型时:isGlobalEvent 加 case → 这里会红 → 补对应
+    // GLOBAL_TOPIC_* Set + 前端 GLOBAL_ONLY_TOPICS 列表。
+    const types = allEventTypes()
+    expect(types.length).toBeGreaterThan(20) // 枚举没取到就说明 schema 结构变了
+    const uncovered = types.filter((type) => {
+      const isGlobal = isGlobalEvent({ type } as unknown as ServerEvent)
+      return isGlobal && !ServerEventBus.topicMatches(type, [...GLOBAL_ONLY_TOPICS])
+    })
+    expect(
+      uncovered,
+      `这些全局事件没有被 topics 白名单覆盖,无会话页面收不到: ${uncovered.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('漂移守护: GLOBAL_ONLY_TOPICS 不命中任何非全局事件', () => {
+    // 反向断言:白名单只能放行 isGlobalEvent === true 的 type。收窄 isGlobalEvent
+    // 不会让某条白名单变成串台后门。
+    const leaking = allEventTypes().filter(
+      (type) =>
+        !isGlobalEvent({ type } as unknown as ServerEvent) &&
+        ServerEventBus.topicMatches(type, [...GLOBAL_ONLY_TOPICS]),
+    )
+    expect(
+      leaking,
+      `这些非全局事件被白名单放行了,会把别的会话事件串到无会话页面: ${leaking.join(', ')}`,
+    ).toEqual([])
   })
 
   it('subscribeTopics filters events by topic', () => {

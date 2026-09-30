@@ -23,13 +23,58 @@ function isDebugSse(): boolean {
 }
 const DEBUG_SSE = isDebugSse()
 
+// 无活跃会话时订阅的 topic 白名单 (传给 /api/event?topics=...)。
+//
+// 收录标准 = 服务端 isGlobalEvent() === true,即「与具体 session 解耦,任何
+// 订阅者都该收到」。eventBus-topics.test.ts 有一条漂移守护断言双向锁死这个
+// 列表:新增全局事件忘了加进来会红, 误收非全局事件也会红。
+//
+//   - system      → server.connected / server.error / toast / branch.changed
+//                   / system.restarting|stopping|restart.canceled
+//   - instance    → instance.changed      (实例管理页的核心)
+//   - task_factory→ task_factory         (任务工厂看板)
+//   - skills      → skills.changed       (skill 目录热更新)
+//   - app_update  → app.update.*         (版本升级通知)
+//   - command     → command.run|done     (命令生命周期)
+//   - session     → session.created|deleted|renamed (侧边栏)
+//   - job         → job.started|progress|done|failed (后台任务 dock;
+//                   applyJobEvent 按 jobId 存, 客户端再按 sessionId 切分)
+//
+// 刻意**不**收录的:
+//   - runtime / prompt — 这些 reducer 不按 sid 过滤(applyPromptAsk 直接覆盖
+//     pendingAsk, applyQueueChanged 直接 set queuedPrompts), 收全量会把
+//     别的会话的流式输出和待确认卡片串到当前页。
+//   - queue / agent_task / state.* — 虽然 reducer 大多按 sid 存取, 但它们
+//     在 isGlobalEvent 里是 false(有明确 sessionId 归属), 收进来等于让
+//     无会话页面持有别的会话的状态。
+const GLOBAL_ONLY_TOPICS = [
+  'system',
+  'instance',
+  'task_factory',
+  'skills',
+  'app_update',
+  'command',
+  'session',
+  'job',
+] as const
+
 // 订阅 useAgentStore.sessionId 变化 — sessionId 改变时 React 会重跑 effect,
 // 关掉旧 EventSource + 拿新 sid 开新连接. 新连接走 ?sid=xxx 让后端按 sid
 // filter 事件流, 旧 sid 的 runtime.* / job.* / prompt.ask 不再穿透到当前 tab.
 //
-// 设计: 不在 sessionId=null 时主动 unsubscribe, 让 useAgentStore 的初始化
-// 流程 (createNewSession → setSessionId) 自然触发重建. 仅当 sid 已经从
-// "非空" 切到 "非空" 时重建, sid=null 时维持旧连接, 给冷启动留一个缓冲.
+// **sid 为 null 时也要连**(2026-09-30 修复): 此前是 `if (!sessionId) return`,
+// 于是「没有活跃会话」的页面一条事件都收不到。/instances 只在 mount 时拉一次
+// /api/instances (Instances.tsx), 之后完全依赖 instance.changed 推进 —— 机器
+// 上一个会话都没有时 (loadSessions 见 sessions.length === 0 就留 null, 只有
+// Agent / MobileAgent / Desktop / SuperTasks 才会建会话), 实例管理页就永久卡在
+// 首次拉取的快照上, 别的 tab 启停实例这边纹丝不动。
+//
+// 无 sid 时**不能**退回「全量流」(subscribeServerEvents(sid=null) 不带 topics):
+// runtime.* / prompt.* 的 reducer 并不按 sid 过滤 —— applyPromptAsk 直接覆盖
+// pendingAsk (useAgentStore.ts:1971), applyQueueChanged 直接 set queuedPrompts
+// (同文件 1041) —— 全量流会把别的会话的待确认卡片 / 队列串到当前页。
+// 正确姿势是走 GLOBAL_ONLY_TOPICS 白名单: 这些 topic 展开后全是 isGlobalEvent
+// 里为 true 的 type, 与具体会话解耦, 收下来安全。
 //
 // 为什么不挂 url?/X-Session-Id header 给 EventSource:
 // - EventSource 不支持自定义 header (HTML 规范), 只能走 URL. 这就是为什么
@@ -40,13 +85,17 @@ const DEBUG_SSE = isDebugSse()
 export function useEventStream(): void {
   const sessionId = useAgentStore((s) => s.sessionId)
   useEffect(() => {
-    if (!sessionId) return
-    const handle = subscribeServerEvents(sessionId, enqueue, (state, attempt) => {
-      // 连接状态机 → useAppStore, UI 顶栏据此显示连接指示。
-      // server.connected 事件到达时 applyBatch 还会再次置 connected (覆盖
-      // EventSource onopen 的时序差 — 见 applyBatch 顶部特殊处理)。
-      useAppStore.getState().setStreamState(state, attempt)
-    })
+    const handle = subscribeServerEvents(
+      sessionId,
+      enqueue,
+      (state, attempt) => {
+        // 连接状态机 → useAppStore, UI 顶栏据此显示连接指示。
+        // server.connected 事件到达时 applyBatch 还会再次置 connected (覆盖
+        // EventSource onopen 的时序差 — 见 applyBatch 顶部特殊处理)。
+        useAppStore.getState().setStreamState(state, attempt)
+      },
+      sessionId ? undefined : GLOBAL_ONLY_TOPICS,
+    )
     return () => {
       handle.close()
     }

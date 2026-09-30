@@ -55,6 +55,28 @@ describe('subscribeServerEvents', () => {
     )
   })
 
+  test('无 sid + topics 时 URL 带 topics 白名单 (无会话页面收全局事件)', () => {
+    // 2026-09-30: /instances 在没有活跃会话时也要收 instance.changed,
+    // 走的是 /api/event?topics=... 而不是全量流(全量会串 prompt.ask)。
+    MockEventSource.instances = []
+    subscribeServerEvents(null, () => {}, undefined, ['system', 'instance'])
+    expect(MockEventSource.instances[0].url).toBe(
+      '/api/event?topics=system%2Cinstance',
+    )
+  })
+
+  test('有 sid 时忽略 topics 参数 (sid 切片已够,叠加白名单会误杀会话事件)', () => {
+    MockEventSource.instances = []
+    subscribeServerEvents('s1', () => {}, undefined, ['instance'])
+    expect(MockEventSource.instances[0].url).toBe('/api/event?sid=s1')
+  })
+
+  test('无 sid 且 topics 为空数组时退回全量流 (旧行为不变)', () => {
+    MockEventSource.instances = []
+    subscribeServerEvents(null, () => {}, undefined, [])
+    expect(MockEventSource.instances[0].url).toBe('/api/event')
+  })
+
   test('dispatches named SSE events (runtime.delta) to onEvent', () => {
     // Regression: server writes `event: runtime.delta`, only addEventListener
     // ('runtime.delta', ...) fires. onmessage must NOT receive these.

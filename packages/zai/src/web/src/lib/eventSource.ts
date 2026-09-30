@@ -108,7 +108,12 @@ const NAMED_EVENT_TYPES = [
 // 打开一条 SSE 连接到 /api/event. 后端按 sid 过滤:
 // - sid 非空: server 只推 sid 匹配 + 全局事件 (session.* / system.*),
 //   防止多个 tab / 同一 tab 切会话时消息互串.
-// - sid 为 null: 维持旧行为 (全量), 给未绑定会话的页面用.
+// - sid 为 null 且带 topics: 只推命中 topics 白名单的全局事件。
+//   给「没有活跃会话」的页面 (实例管理 / 管理 / 仪表盘) 用 —— 它们不需要
+//   runtime.* / prompt.* ,但确实需要 instance.changed / task_factory。
+// - sid 为 null 且无 topics: 维持旧行为 (全量), 给未绑定会话的页面用。
+//   **不要**在新代码里用这一档做无会话订阅:runtime.* / prompt.* 的 reducer
+//   不按 sid 过滤,全量流会把别的会话的待确认卡片串到当前页。
 //
 // 调用方在 sessionId 变化时 close 旧 handle 重新 subscribe, 让 EventSource
 // 用新 URL 重建连接 (新连接走 per-sid 切片 + Last-Event-ID 续读).
@@ -116,10 +121,22 @@ export function subscribeServerEvents(
   sid: string | null,
   onEvent: (event: ServerEvent) => void,
   onState?: (state: StreamState, attempt: number) => void,
+  topics?: readonly string[],
 ): StreamHandle {
-  const url = sid
-    ? `${API_BASE}/event?sid=${encodeURIComponent(sid)}`
-    : `${API_BASE}/event`
+  const params = new URLSearchParams()
+  // topics 只在无 sid 时有意义:有 sid 时后端已按 sid 切片,再叠 topic 白名单
+  // 会把本该收到的会话事件误杀。静默忽略而不是报错,让调用方少一个分支。
+  if (!sid && topics && topics.length > 0) params.set('topics', topics.join(','))
+  // sid 保持手写 encodeURIComponent 而不是交给 URLSearchParams:后者把空格
+  // 编成 '+' (application/x-www-form-urlencoded),而 sid 里的 '+' 会被服务端
+  // query parser 原样解回成 '+' 字符,与 encodeURIComponent 的 '%20' 语义不一致。
+  // sid 是 opaque id,两种编码都能到服务端,但保持单一编码方式避免调试时
+  // 看到两种 URL 误判为两个不同会话。
+  const qs = [
+    sid ? `sid=${encodeURIComponent(sid)}` : '',
+    params.toString(),
+  ].filter(Boolean).join('&')
+  const url = qs ? `${API_BASE}/event?${qs}` : `${API_BASE}/event`
   const es = new EventSource(url)
 
   let attempt = 0

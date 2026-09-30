@@ -32,7 +32,11 @@ export type ServerEventInput = {
 // 显式穷举: 未来新增事件类型时, 默认会被认为"跟 session 绑定", 不会自动
 // 跨 sid 转发. 想跨 sid 的新类型必须在这里显式登记 — 这是 by-design, 防止
 // 误把 sid-scoped 的事件 (比如未来的 `file.changed` 带 sid) 默认全局广播.
-function isGlobalEvent(event: ServerEvent): boolean {
+//
+// 导出供 eventBus-topics.test.ts 断言「GLOBAL_TOPIC_* 里列的每个 type 在
+// 这里也是 true」—— 两份清单靠人力同步必然漂移, 新增全局事件时忘了加进
+// topic group, 无会话页面就会静默收不到。
+export function isGlobalEvent(event: ServerEvent): boolean {
   switch (event.type) {
     case 'server.connected':
     case 'server.error':
@@ -92,6 +96,52 @@ const STATE_EVENT_TYPES = new Set<string>([
   'bash_task.changed',
   'v2_task.changed',
   'agent_task.changed',
+])
+
+// ─── 全局事件的 topic group 展开目标 ────────────────────────────────
+// 与 isGlobalEvent() 保持同源:这里列的每个 type 在 isGlobalEvent 里也必须是
+// true。语义是「与具体 session 解耦,任何订阅者都该收到」,因此可以在
+// **没有 sid** 的订阅(非会话页面)里安全放行 —— 无 sid + topics 的组合是
+// topicMatches 全局 group 唯一正确的使用姿势。
+//
+// 为什么要单独建集合而不是在 topicMatches 里散着写 if:
+// 1. isGlobalEvent 是 switch,topicMatches 是 if 链,两份清单必须同步;
+//    抽成集合后新增全局事件只要改一处(本块 + isGlobalEvent 的 case),
+//    且 eventBus-topics.test.ts 有一条一致性断言守着(见该文件)。
+// 2. 未来若有「全局事件但只允许特定 topic 消费」的需求,粒度也够细。
+
+// instance.* — 实例生命周期(start/stop/heartbeat 超时)。实例管理页
+// (/instances)自己不调 createNewSession,冷启动时 sessionId 为 null,
+// 全靠这个 group 拿实时状态。
+const GLOBAL_TOPIC_INSTANCE = new Set<string>(['instance.changed'])
+
+// task_factory — 任务工厂看板事件,不带 sid(见 isGlobalEvent 注释)。
+const GLOBAL_TOPIC_TASK_FACTORY = new Set<string>(['task_factory'])
+
+// skills.changed — skill 目录热更新,不带 sid,所有 tab 都要重拉 /api/slash。
+const GLOBAL_TOPIC_SKILLS = new Set<string>(['skills.changed'])
+
+// command.* — 命令生命周期埋点,所有 tab 都该看见(调试 / 日志 / 耗时分析)。
+const GLOBAL_TOPIC_COMMAND = new Set<string>(['command.run', 'command.done'])
+
+// app.update.* — zai 自身版本升级通道,所有打开的 tab 都应收,否则只有
+// 最先连上的那个 tab 能看到「升级完成」。
+const GLOBAL_TOPIC_APP_UPDATE = new Set<string>([
+  'app.update.checking',
+  'app.update.installing',
+  'app.update.complete',
+  'app.update.failed',
+])
+
+// system.* + server.* — 连接态 / 错误 / toast / 分支变更 / 重启通知。
+const GLOBAL_TOPIC_SYSTEM = new Set<string>([
+  'server.connected',
+  'server.error',
+  'toast',
+  'branch.changed',
+  'system.restarting',
+  'system.stopping',
+  'system.restart.canceled',
 ])
 
 // 流式事件 — 已经持久化在 transcript jsonl 的 [thinking + text + tool_use] blocks 里,
@@ -221,8 +271,17 @@ export class ServerEventBus {
    * - 'state' → 4 个 state.* type 全匹配
    * - 'cwd' / 'bash' / 'v2' / 'agent_task' → 单 type 匹配
    * - 'runtime' / 'session' / 'job' / 'prompt' / 'system' → 各自已有 type group 匹配
+   * - 'instance' / 'task_factory' / 'skills' / 'command' / 'app_update' →
+   *   与 isGlobalEvent 同源的全局事件 group(见下方 GLOBAL_TOPIC_*)
    *
    * 未知 group/type 一律 false,白名单 semantics。
+   *
+   * 全局 group 的意义:「当前没有活跃会话」的页面(实例管理 / 管理 / 仪表盘)
+   * 也需要收 instance.* / task_factory 这类**不依赖 sid** 的事件,否则
+   * 那些页面永远收不到推送。这类订阅不能用「无 sid 全量流」代替 ——
+   * runtime.* / prompt.* 的 reducer 并不按 sid 过滤(applyPromptAsk 直接
+   * 覆盖 pendingAsk),全量流会把别的会话的待确认卡片串到当前页。必须走
+   * topics 白名单,只放行真正全局的 type。
    */
   static topicMatches(type: string, topics: string[]): boolean {
     for (const t of topics) {
@@ -235,15 +294,12 @@ export class ServerEventBus {
       if (t === 'session' && type.startsWith('session.')) return true
       if (t === 'job' && type.startsWith('job.')) return true
       if (t === 'prompt' && type === 'prompt.ask') return true
-      if (t === 'system' && (
-        type === 'server.connected' ||
-        type === 'server.error' ||
-        type === 'toast' ||
-        type === 'branch.changed' ||
-        type === 'system.restarting' ||
-        type === 'system.stopping' ||
-        type === 'system.restart.canceled'
-      )) return true
+      if (t === 'instance' && GLOBAL_TOPIC_INSTANCE.has(type)) return true
+      if (t === 'task_factory' && GLOBAL_TOPIC_TASK_FACTORY.has(type)) return true
+      if (t === 'skills' && GLOBAL_TOPIC_SKILLS.has(type)) return true
+      if (t === 'command' && GLOBAL_TOPIC_COMMAND.has(type)) return true
+      if (t === 'app_update' && GLOBAL_TOPIC_APP_UPDATE.has(type)) return true
+      if (t === 'system' && GLOBAL_TOPIC_SYSTEM.has(type)) return true
     }
     return false
   }
