@@ -106,7 +106,17 @@ async function readRuntimeMap(): Promise<RuntimeMapFile> {
     const raw = await readFile(path, 'utf-8');
     const parsed = JSON.parse(raw);
     const result = RuntimeMapFileSchema.safeParse(parsed);
-    return result.success ? result.data : {};
+    if (result.success) return result.data;
+    // Whole-file discard: `RuntimeMapFileSchema` is a `z.record`, so ONE
+    // bad entry fails the parse for every entry, and returning {} here
+    // silently unregisters all of them. Say so — the symptom otherwise
+    // presents as "AA stopped seeing my instances" with nothing in the log.
+    logHttp(
+      `[aa.runtimeRegistry] ${path} failed schema validation; loading an EMPTY map ` +
+      `(${result.error.issues.length} issue(s), first: ` +
+      `${result.error.issues[0]?.path.join('.') ?? '?'} ${result.error.issues[0]?.message ?? ''})`,
+    );
+    return {};
   } catch {
     return {};
   }
@@ -367,9 +377,17 @@ export class RuntimeRegistry {
   /**
    * Register a runtime for a newly-running InstanceDefinition.
    *
-   * Idempotent: if we already have a mapping for this port+instanceId,
-   * the announcement is re-sent (so AA server refreshes its view) but
-   * the mapping file isn't rewritten.
+   * Idempotent: re-registering an already-known instance is a no-op — no
+   * map write, no announce. That matters because the supervisor re-emits
+   * `instance.changed` on every child heartbeat (5s per child), and the
+   * only field that moves in those is `lastHeartbeatAt`. Announcing those
+   * shipped two byte-identical capability frames per child per 5s; the
+   * `protocol.capabilitiesUpdated` one is a full replace server-side, so
+   * it cost a WS frame to write identical state.
+   *
+   * A genuine change (new instance, port moved by a restart, renamed or
+   * re-pointed by updateInstance, runtimeType derived for the first time)
+   * falls through to the full write + announce below.
    */
   private async register(event: {
     instanceId: string;
@@ -379,11 +397,27 @@ export class RuntimeRegistry {
     const existing = this.mappings[portKey] ?? this.findByInstanceId(event.instanceId);
 
     // Get the InstanceDefinition for richer metadata (name, cwd, app).
-    // Falls back to bare instanceId if the supervisor isn't reachable yet.
+    //
+    // If the supervisor can't be reached yet, DEFER rather than write a
+    // minimal mapping. `cwd` is the field that breaks: with no definition
+    // there is no cwd, and the old fallback wrote `''` — which
+    // `RuntimeMappingSchema` rejects (`min(1)`). One such entry makes
+    // `readRuntimeMap`'s whole-file `safeParse` fail, so the ENTIRE map
+    // loads as `{}` on the next zai start: every runtime vanishes from AA
+    // and every `portFromRuntime` lookup short-circuits, silently. The
+    // heartbeat retries in 5s, so deferring costs a few seconds of a boot
+    // race and buys a map that is still there tomorrow.
     const def = await this.loadInstanceDefinition(event.instanceId);
-    const name = def?.name ?? event.instanceId;
-    const cwd = def?.cwd ?? '';
-    const app = def?.app;
+    if (def === null) {
+      logHttp(
+        `[aa.runtimeRegistry] definition for ${event.instanceId} (port ${event.port}) ` +
+        `not available from the supervisor yet; deferring registration`,
+      );
+      return;
+    }
+    const name = def.name;
+    const cwd = def.cwd;
+    const app = def.app;
 
     // Provisional id until AA assigns a real one. Once
     // adoptServerRuntimeId() has converged on the server's id, that wins —
@@ -412,6 +446,37 @@ export class RuntimeRegistry {
     // every notification with `session_runtime_mismatch`.
     const runtimeType = existing?.runtimeType ?? (await this.deriveTypeFor(event.instanceId, name, cwd));
 
+    // Every OTHER key this instance occupies. A restart re-keys the map entry
+    // to the new port, and the old key is not otherwise removed — it lingers
+    // pointing at an object that now reports the new port, so
+    // `getMappingByPort(<dead port>)` keeps resolving. The map is persisted,
+    // so such duplicates can also outlive the process that created them.
+    //
+    // Computed before the early return below, and folded into the guard, so
+    // that a no-op heartbeat still repairs a stale map instead of skipping
+    // the repair forever (the guard is the common path — it runs every 5s).
+    const foreignKeys = Object.keys(this.mappings).filter(
+      (key) => key !== portKey && this.mappings[key]?.instanceId === event.instanceId,
+    );
+
+    // Nothing AA can observe differs → return before touching disk or the
+    // socket. `this.mappings[portKey] === existing` is what makes a moved
+    // port fall through: a restart re-keys the entry, so `existing` is then
+    // found by instanceId under the OLD port key and the map has no entry
+    // for the new one yet. Likewise `existing.runtimeType === runtimeType`
+    // fails on first derivation, when `existing` has no type yet.
+    if (
+      existing !== undefined &&
+      foreignKeys.length === 0 &&
+      this.mappings[portKey] === existing &&
+      existing.name === name &&
+      existing.cwd === cwd &&
+      existing.app === app &&
+      existing.runtimeType === runtimeType
+    ) {
+      return;
+    }
+
     const mapping: RuntimeMapping = existing ?? {
       runtimeId,
       instanceId: event.instanceId,
@@ -434,6 +499,13 @@ export class RuntimeRegistry {
     mapping.port = event.port;
 
     this.mappings[portKey] = mapping;
+    for (const key of foreignKeys) {
+      delete this.mappings[key];
+      logHttp(
+        `[aa.runtimeRegistry] dropped stale port key ${key} for ${mapping.name} ` +
+        `(instance ${event.instanceId} now on port ${event.port})`,
+      );
+    }
     await writeRuntimeMap(this.mappings);
 
     await this.announce(mapping);
