@@ -32,6 +32,7 @@ import { getWeixinSessionMap, conversationKeyOf, type WeixinSessionMap } from '.
 import { getWeixinPairingStore, type WeixinPairingStore } from './WeixinPairingStore.js'
 import { getWeixinPendingStore, type WeixinPendingStore, type PendingInbound } from './WeixinPendingStore.js'
 import { parseWeixinCommand, findWeixinCommand } from './weixinCommands.js'
+import { seedSessionModel } from './sessionModel.js'
 import { isValidDir } from './cwdValidity.js'
 import {
   loadMemorySnapshot,
@@ -290,6 +291,11 @@ export class WeixinInboundBridge {
       cwd,
     )
     seedSessionCwd(binding.sessionId, binding.cwd || cwd)
+    // 渠道配置的模型(面板设置 → settings.weixinBot.model)打进会话标记。
+    // 必须在注入 agent 之前完成 —— 新会话的 transcript 此刻还不存在,
+    // 但 store.patch 会重建条目写盘,下一轮 resolveModel 就能命中最高优先级层。
+    // 这一处同时覆盖普通入站 / TTL 轮转 / `/new` 轮转后的首条消息。
+    await seedSessionModel(binding.sessionId, binding.cwd || cwd)
 
     const readableMedia = await this.mirrorMedia(msg, binding.cwd || cwd)
     const key = conversationKeyOf(msg)
@@ -500,6 +506,7 @@ export class WeixinInboundBridge {
           createdAt: this.deps.now(),
         }
         seedSessionCwd(binding.sessionId, binding.cwd || this.deps.getCwd())
+        await seedSessionModel(binding.sessionId, binding.cwd || this.deps.getCwd())
         this.deps.inboxFor(binding.sessionId).followup(binding.sessionId, inboxMessage)
         this.config?.onInjected?.(binding.sessionId, item.chatId)
         this.metricsState.inbound += 1

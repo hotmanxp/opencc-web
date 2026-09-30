@@ -840,11 +840,15 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // 同时注册 serverCwd provider:入站桥据此把微信会话绑定到本实例的
   // project cwd,Web UI 里才能在该 project 的会话列表看到它。
   try {
-    const [{ setWeixinServerCwdProvider }, { maybeAutoStartWeixinBot }] = await Promise.all([
+    const [{ setWeixinServerCwdProvider }, { maybeAutoStartWeixinBot }, { setWeixinTranscriptStoreProvider }] = await Promise.all([
       import('./weixinBot/weixinInboundBridge.js'),
       import('./weixinBot/weixinRuntimeBoot.js'),
+      import('./weixinBot/sessionModel.js'),
     ])
     setWeixinServerCwdProvider(() => getServerCwd())
+    // 渠道模型配置靠这个注册点落地:入站桥不能静态 import agentRuntime
+    // (上面那条链路已成环),只能由 agentRuntime 反向把 store 递过去。
+    setWeixinTranscriptStoreProvider(() => getTranscriptStore())
     await maybeAutoStartWeixinBot()
   } catch (err) {
     console.warn('[initAgentRuntime] weixin boot failed:', err)

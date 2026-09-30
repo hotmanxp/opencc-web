@@ -57,6 +57,34 @@ export const WeixinBotSettingsSchema = z.object({
    * 不落进任何一个具体工程。
    */
   instanceCwd: z.string().default(''),
+  /**
+   * 微信会话固定使用的模型(全模型 ID,如 `MiniMax-M3`)。空串 = 跟随
+   * zai 全局默认(`resolveModel` 的 env / settings 层级)。
+   *
+   * 落地方式是**打会话标记**而不是改进程默认:入站时由 `sessionModel.ts`
+   * 写进该 session 的 `transcript.meta.model`,而 `resolveModel` 把
+   * sessionModel 当最高优先级层(lib/resolveModel.ts)。所以它天然
+   * 带 `providerId` / `effort` 一起生效,跨 provider 同名模型也能正确
+   * 路由 —— 这是它优于"注入进程 env"的关键差别。
+   *
+   * 生效时机:下一条微信入站消息。已有会话若 transcript 里已有 model
+   * (用户在 9199 Web UI 上用模型按钮手动选过),不会被覆盖。
+   */
+  model: z.string().optional(),
+  /** 与 `model` 配套:同一模型名挂在多条 provider 线路上时锁定走哪条。 */
+  providerId: z.string().optional(),
+  /**
+   * 会话级推理强度。'off' = 不下发 reasoning 字段(adaptive thinking 模型会拒收
+   * 显式 none)。
+   *
+   * **空串必须合法**,且取值必须与 `routes/weixin.ts` 的
+   * `WeixinSettingsPatch` 保持一致:面板用空串表达"清除 / 跟随模型默认"。
+   * 这里若不认空串,`safeParse` 失败会让**整段 weixinBot 归零** ——
+   * `GET /settings`、专用实例编排(`readWeixinBotSettings`)、入站 seeding
+   * 全部拿到 null 并回落默认值,表现为"面板所有配置莫名重置、保存不生效",
+   * 而且不抛任何错。这是踩过的坑,改这个枚举前先看上面三处消费者。
+   */
+  effort: z.union([z.literal(''), z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max'])]).optional(),
 })
 
 export type WeixinBotSettings = z.infer<typeof WeixinBotSettingsSchema>

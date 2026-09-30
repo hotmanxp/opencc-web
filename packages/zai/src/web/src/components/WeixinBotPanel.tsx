@@ -17,10 +17,11 @@
  * 数据来源:apiRpc.weixin.* 类型化 RPC stub。
  * SSE 订阅:沿用现有 useEventStream hook,filter event.sessionId.startsWith('weixin:')。
  */
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { Modal, Button, Input, Select, message, Spin, Alert, Tag, Switch, InputNumber } from 'antd'
 import { apiRpc } from '../lib/api.js'
 import { DEFAULT_WEIXIN_INSTANCE_PORT } from '../../../shared/weixinInstance.js'
+import type { ModelEntry } from '../../../shared/settings.js'
 import DirectoryPicker from './common/DirectoryPicker.js'
 
 interface WeixinStatus {
@@ -156,6 +157,14 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
   const [instancePort, setInstancePort] = useState<number>(DEFAULT_WEIXIN_INSTANCE_PORT)
   const [instanceCwd, setInstanceCwd] = useState<string>('')
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false)
+  // 渠道模型。model 空串 = 跟随全局默认;providerId / effort 空串 = 不带该字段
+  // (模型自己 / provider 自己的默认)。三者在服务端被 seedSessionModel 写进
+  // 每个微信会话的 transcript.meta,见 services/weixinBot/sessionModel.ts。
+  const [model, setModel] = useState<string>('')
+  const [providerId, setProviderId] = useState<string>('')
+  const [effort, setEffort] = useState<string>('')
+  // 可选模型列表,复用 GET /api/agent/settings(与 Web 端模型按钮同一个数据源)。
+  const [modelOptions, setModelOptions] = useState<ModelEntry[]>([])
   // polling handle 走 ref 而不是 state,避免 stale 闭包 + 每次 setInterval 重启
   // 时拿到旧的 interval id。
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -200,6 +209,22 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
     }
   }, [])
 
+  /**
+   * 拉可选模型列表。与 Web 端模型按钮共用 GET /api/agent/settings ——
+   * 那边已经把 per-model 的 effortLevels / providerId 挂好
+   * (server attachEffortLevels),这里只消费不再算。
+   */
+  const loadModelOptions = useCallback(async () => {
+    try {
+      const r = await fetch('/api/agent/settings')
+      if (!r.ok) return
+      const s = (await r.json()) as { models?: ModelEntry[] }
+      if (Array.isArray(s.models)) setModelOptions(s.models)
+    } catch {
+      // 拿不到就只显示已保存的模型名,不阻塞面板其余部分
+    }
+  }, [])
+
   const loadBotSettings = useCallback(async () => {
     try {
       const r = await fetch('/api/weixin/settings')
@@ -211,6 +236,9 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
         dmPolicy?: string
         groupPolicy?: string
         allowFrom?: string[]
+        model?: string
+        providerId?: string
+        effort?: string
       }
       if (typeof s.enabled === 'boolean') setAutoConnect(s.enabled)
       if (typeof s.instancePort === 'number') setInstancePort(s.instancePort)
@@ -218,6 +246,9 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
       if (typeof s.dmPolicy === 'string') setDmPolicy(s.dmPolicy)
       if (typeof s.groupPolicy === 'string') setGroupPolicy(s.groupPolicy)
       if (Array.isArray(s.allowFrom)) setAllowFrom(s.allowFrom.join(','))
+      if (typeof s.model === 'string') setModel(s.model)
+      if (typeof s.providerId === 'string') setProviderId(s.providerId)
+      if (typeof s.effort === 'string') setEffort(s.effort)
     } catch {
       // 观测面失败不打扰用户
     }
@@ -239,7 +270,8 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
     void loadPairings()
     void loadDiagnostics()
     void loadBotSettings()
-  }, [open, refresh, loadPairings, loadDiagnostics, loadBotSettings])
+    void loadModelOptions()
+  }, [open, refresh, loadPairings, loadDiagnostics, loadBotSettings, loadModelOptions])
 
   const handleAutoConnectChange = useCallback(
     async (next: boolean) => {
@@ -430,6 +462,89 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
       setLoading(false)
     }
   }, [instancePort, instanceCwd, refresh, loadDiagnostics])
+
+  /**
+   * 保存渠道模型。与实例配置分开保存,因为生效路径完全不同:模型写进
+   * settings.json 后,专用实例靠 fs.watch 热重载自己的缓存,**不需要重启**
+   * (改端口 / 目录才需要)。混在一起会让用户为了换个模型被打断正在处理的消息。
+   */
+  const handleSaveModelConfig = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await fetch('/api/weixin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, providerId, effort }),
+      })
+      if (!r.ok) throw new Error(await settingsErrorDetail(r))
+      message.success(
+        model
+          ? '已保存。下一条微信消息起使用该模型(已有会话若已手动选过模型则以手动选择为准,可用 /new 换新会话)。'
+          : '已保存,微信渠道恢复跟随全局默认模型。',
+      )
+      await refresh()
+      await loadBotSettings()
+    } catch (err) {
+      message.error(`保存失败: ${(err as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [model, providerId, effort, refresh, loadBotSettings])
+
+  // 当前选中的模型条目 —— effort 可选值从它的 capabilities.effortLevels 取。
+  // 服务端 attachEffortLevels 只给 supportsReasoning 的模型挂 effortLevels,
+  // 所以非推理模型这里天然是空数组,对应"不渲染 effort 控件"。
+  const selectedModelEntry = useMemo(
+    () => modelOptions.find((m) => m.model === model && (m.providerId ?? '') === providerId) ?? null,
+    [modelOptions, model, providerId],
+  )
+
+  /** 所有出现过 providerId 的去重列表。同名模型挂在多条线路时用它来显式选路。 */
+  const providerOptions = useMemo(() => {
+    const ids = new Set<string>()
+    for (const m of modelOptions) if (m.providerId) ids.add(m.providerId)
+    return [...ids]
+  }, [modelOptions])
+
+  /**
+   * 模型下拉的选项。
+   *
+   * 展示:**模型名 (provider 名)** —— 例如 `MiniMax-M3 (zn-nova)`。
+   * 不要用 `alias` 打头:provider 投影出来的 alias 是
+   * `${profileId}-${model}` 这种 provider ID 前缀的复合名
+   * (shared/profileProjection.ts:46),对用户是噪音。provider 的可读名
+   * 其实在 `description`(= profile.name),手写的 settings.models[] 条目
+   * 没有它,这时退回 providerId / 只显示模型名。
+   *
+   * value 用 `model::providerId` 组合:同一个模型名可能同时挂在多条 provider
+   * profile 上,只用 model 会让两个 option 的 value 相同 —— 选哪个都解析成
+   * 第一条,用户根本没法选线路。
+   */
+  const modelSelectValue = useMemo(
+    () => (model === '' ? '' : `${model}::${providerId}`),
+    [model, providerId],
+  )
+
+  const modelOptionsForSelect = useMemo(
+    () => [
+      { value: '', label: '跟随全局默认' },
+      ...modelOptions.map((m) => {
+        const providerName = m.description ?? m.providerId
+        const modelName = m.label ?? m.model
+        return {
+          value: `${m.model}::${m.providerId ?? ''}`,
+          label: providerName ? `${modelName} (${providerName})` : modelName,
+        }
+      }),
+    ],
+    [modelOptions],
+  )
+
+  /** effort 可选值。'off' 是"不下发 reasoning 字段",与 levels 并列。 */
+  const effortOptions = useMemo(() => {
+    const levels = selectedModelEntry?.capabilities?.effortLevels ?? []
+    return ['', 'off', ...levels]
+  }, [selectedModelEntry])
 
   /** 保存通道行为参数(dmPolicy / groupPolicy / allowFrom)。 */
   const handleSaveBotBehavior = useCallback(async () => {
@@ -707,6 +822,71 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
             <Button onClick={() => void handleSaveInstanceConfig()}>保存实例配置</Button>
             <p className="text-xs text-[#999] mt-2">
               微信会话会绑定到该目录对应的 project;保存后专用实例会按新端口 / 目录自动重启。
+            </p>
+
+            <div className="font-medium mb-1 mt-4">渠道模型</div>
+            <div className="mb-2 flex items-center">
+              <label className="w-[110px]">模型:&nbsp;</label>
+              <Select
+                aria-label="微信渠道模型"
+                value={modelSelectValue}
+                onChange={(v) => {
+                  const raw = typeof v === 'string' ? v : ''
+                  // 拆回 `model::providerId` —— 两者分开存盘,seeding 才写得进
+                  // transcript.meta 的两个字段。
+                  const sep = raw.lastIndexOf('::')
+                  const nextModel = sep === -1 ? raw : raw.slice(0, sep)
+                  const nextProvider = sep === -1 ? '' : raw.slice(sep + 2)
+                  setModel(nextModel)
+                  setProviderId(nextProvider)
+                  // effort 是 per-model 的,换模型后旧值未必被新模型接受。
+                  setEffort('')
+                }}
+                className="w-[240px]"
+                placeholder="跟随全局默认"
+                options={modelOptionsForSelect}
+              />
+            </div>
+            {providerOptions.length > 0 && (
+              <div className="mb-2 flex items-center">
+                <label className="w-[110px]">Provider:&nbsp;</label>
+                <Select
+                  aria-label="微信渠道 provider"
+                  value={providerId}
+                  onChange={(v) => setProviderId(typeof v === 'string' ? v : '')}
+                  className="w-[240px]"
+                  options={[
+                    { value: '', label: '自动' },
+                    ...providerOptions.map((p) => ({ value: p, label: p })),
+                  ]}
+                />
+              </div>
+            )}
+            {effortOptions.length > 0 && (
+              <div className="mb-2 flex items-center">
+                <label className="w-[110px]">推理强度:&nbsp;</label>
+                <Select
+                  aria-label="微信渠道推理强度"
+                  value={effort}
+                  onChange={(v) => setEffort(typeof v === 'string' ? v : '')}
+                  className="w-[240px]"
+                  options={effortOptions.map((lv) => ({
+                    value: lv,
+                    label:
+                      lv === ''
+                        ? '模型默认'
+                        : lv === 'off'
+                          ? '关闭(不下发)'
+                          : lv,
+                  }))}
+                />
+              </div>
+            )}
+            <Button onClick={() => void handleSaveModelConfig()}>保存模型配置</Button>
+            <p className="text-xs text-[#999] mt-2">
+              设定后每条微信消息入站时都会把模型写进该会话(模型 + provider + 强度一起锁),
+              下一条消息即生效,无需重启实例。已经手动选过模型的会话不会被覆盖 ——
+              微信里发 <code>/new</code> 可切到新会话,自动使用当前配置。
             </p>
 
             <div className="font-medium mb-1 mt-4">通道策略</div>

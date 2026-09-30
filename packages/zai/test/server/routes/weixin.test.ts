@@ -8,6 +8,31 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+/**
+ * 把 `homedir()` 指向临时目录 —— **必须在任何 import 之前**。
+ *
+ * `zaiSettingsPath()` 硬编码 `join(homedir(), '.zai', 'settings.json')`,不认
+ * `ZAI_DATA_DIR`。不隔离的话,这些 PUT 用例会**直接改写用户真实的
+ * ~/.zai/settings.json**:跑一次测试就把 instanceCwd / instancePort / 微信
+ * 凭据相关的段冲掉,而且不会报错。踩过一次(测试把用户的微信工作目录写成了
+ * /Users/me/wx),加这条 mock 之后所有 settings 写入都落在临时目录。
+ */
+const _fakeHome = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { mkdtempSync: mk } = require('node:fs') as typeof import('node:fs')
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { tmpdir: tmp } = require('node:os') as typeof import('node:os')
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { join: j } = require('node:path') as typeof import('node:path')
+  return mk(j(tmp(), 'zai-weixin-home-'))
+})
+
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>()
+  const patched = { ...actual, homedir: () => _fakeHome }
+  return { ...patched, default: patched }
+})
+
 // 隔离 ZAI_DATA_DIR
 const _tmpDir = mkdtempSync(join(tmpdir(), 'zai-weixin-api-'))
 process.env.ZAI_DATA_DIR = _tmpDir
@@ -46,6 +71,7 @@ vi.mock('../../../src/server/services/weixinBot/weixinDedicatedInstance.js', () 
 let mockManager: any
 
 import { weixinRouter } from '../../../src/server/routes/weixin.js'
+import { WeixinBotSettingsSchema } from '../../../src/shared/weixin.js'
 
 function makeApp() {
   const app = express()
@@ -423,5 +449,96 @@ describe('weixin routes', () => {
     expect(res.status).toBe(502)
     expect(res.body).toMatchObject({ detail: 'listen EADDRINUSE 9399' })
     expect(res.body.error).toContain('failed')
+  })
+
+  // ─── 渠道模型 ────────────────────────────────────────────────────
+
+  it('PUT /api/weixin/settings 改模型 → 落盘但**不重启**专用实例', async () => {
+    // 模型靠入站时的会话标记 + settings.json 的 fs.watch 热重载生效,
+    // 重启会打断正在处理中的微信消息,所以这条必须不碰 restart。
+    dedicated.find.mockReturnValue(dedicatedSnapshot)
+    dedicated.restart.mockClear()
+    const app = makeApp()
+    const res = await request(app)
+      .put('/api/weixin/settings')
+      .send({ model: 'MiniMax-M3', providerId: 'zhiniao', effort: 'high' })
+    expect(res.status).toBe(200)
+    expect(dedicated.restart).not.toHaveBeenCalled()
+
+    // 走 GET 回显断言,而不是直接读 ~/.zai/settings.json —— settings 的落点
+    // 硬编码 homedir() 且不认 ZAI_DATA_DIR,读文件会去碰用户真实配置。
+    const got = await request(app).get('/api/weixin/settings')
+    expect(got.body).toMatchObject({
+      model: 'MiniMax-M3',
+      providerId: 'zhiniao',
+      effort: 'high',
+    })
+  })
+
+  it('PUT /api/weixin/settings 清空模型 → 落盘空串(恢复跟随全局)', async () => {
+    dedicated.find.mockReturnValue(dedicatedSnapshot)
+    dedicated.restart.mockClear()
+    const app = makeApp()
+    const res = await request(app)
+      .put('/api/weixin/settings')
+      .send({ model: '', providerId: '', effort: '' })
+    expect(res.status).toBe(200)
+    expect(dedicated.restart).not.toHaveBeenCalled()
+    const got = await request(app).get('/api/weixin/settings')
+    expect(got.body).toMatchObject({ model: '', providerId: '', effort: '' })
+  })
+
+  it('PUT /api/weixin/settings 非法 effort → 400,不落盘', async () => {
+    dedicated.find.mockReturnValue(dedicatedSnapshot)
+    const app = makeApp()
+    const res = await request(app)
+      .put('/api/weixin/settings')
+      .send({ model: 'MiniMax-M3', effort: 'turbo' })
+    expect(res.status).toBe(400)
+  })
+
+  // ─── 回归:空串 effort 不能打挂整段配置 ──────────────────────────
+  //
+  // 踩过的坑:面板用空串表达"清除 effort",PUT schema 认了空串但存储用的
+  // WeixinBotSettingsSchema 只认 enum。空串落盘后 safeParse 失败 →
+  // `s = null` → GET 把 instancePort / instanceCwd / enabled 全部回落成默认值,
+  // 用户看到"所有配置莫名重置、保存不生效",且不报任何错。
+  // 下面两条锁死"PUT 写什么,GET 就能原样读回什么"。
+  it('PUT 空串 effort → 紧接着 GET 仍读得回既有配置(不被连带清零)', async () => {
+    dedicated.find.mockReturnValue(dedicatedSnapshot)
+    const app = makeApp()
+
+    // 先建立有辨识度的基线:非默认端口 + 模型
+    await request(app)
+      .put('/api/weixin/settings')
+      .send({ instancePort: 9399, instanceCwd: '/Users/me/wx', model: 'MiniMax-M3' })
+    // 再用面板的"清除"语义把 providerId / effort 写成空串
+    await request(app)
+      .put('/api/weixin/settings')
+      .send({ model: 'MiniMax-M3', providerId: '', effort: '' })
+
+    const got = await request(app).get('/api/weixin/settings')
+    // 关键断言:端口 / 目录没被空串 effort 连带清掉
+    expect(got.body).toMatchObject({
+      instancePort: 9399,
+      instanceCwd: '/Users/me/wx',
+      model: 'MiniMax-M3',
+      providerId: '',
+      effort: '',
+    })
+  })
+
+  it('WeixinBotSettingsSchema 自身接受空串 effort(与 PUT schema 对齐)', () => {
+    // 存储层 schema 是 GET /settings、专用实例编排(readWeixinBotSettings)、
+    // 入站 seeding 三处共同的入口 —— 这里不放行就是全线归零。
+    const r = WeixinBotSettingsSchema.safeParse({
+      enabled: true,
+      instancePort: 9399,
+      model: 'MiniMax-M3',
+      providerId: '',
+      effort: '',
+    })
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data.effort).toBe('')
   })
 })

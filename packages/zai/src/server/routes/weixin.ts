@@ -168,6 +168,11 @@ router.get('/settings', async (_req: Request, res: Response) => {
       // 专用实例编排参数(主实例用):端口 + 工作目录。
       instancePort: s?.instancePort ?? DEFAULT_WEIXIN_INSTANCE_PORT,
       instanceCwd: s?.instanceCwd ?? '',
+      // 渠道模型。model 空串 = 跟随全局默认;providerId / effort 缺失时
+      // 前端渲染成"自动",不写死值。
+      model: s?.model ?? '',
+      providerId: s?.providerId ?? '',
+      effort: s?.effort ?? '',
     })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -184,7 +189,29 @@ const WeixinSettingsPatch = z.object({
   dmPolicy: z.enum(['open', 'allowlist', 'pairing', 'disabled']).optional(),
   groupPolicy: z.enum(['open', 'allowlist', 'disabled']).optional(),
   allowFrom: z.array(z.string()).optional(),
+  // 渠道模型。跟上面几个不同:**不需要重启专用实例** —— 专用实例对
+  // ~/.zai/settings.json 装了 fs.watch(zaiSettingsCache.ts:88),写盘
+  // 50ms 后它自己的缓存就热更新了,下一条微信入站消息即生效。
+  model: z.string().optional(),
+  providerId: z.string().optional(),
+  /** 空串 = 清除(跟随模型自身默认);'off' 是合法取值,表示不下发 reasoning 字段。 */
+  effort: z.union([z.literal(''), z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max'])]).optional(),
 })
+
+/**
+ * 改这些字段必须重启专用实例才生效 —— 端口 / cwd / 通道行为都只在
+ * 启动时读一次 settings。
+ *
+ * 刻意**不含** model / providerId / effort:那三项走入站时的会话标记
+ * + fs.watch 热重载,重启反而会打断正在处理中的微信消息。
+ */
+const RESTART_REQUIRED_KEYS = [
+  'instancePort',
+  'instanceCwd',
+  'dmPolicy',
+  'groupPolicy',
+  'allowFrom',
+] as const
 
 /**
  * PUT /settings —— 改设置并热生效。
@@ -206,7 +233,7 @@ router.put('/settings', async (req: Request, res: Response) => {
     }
     const cur = await readZaiSettings()
     const weixinBot = { ...(cur.weixinBot ?? {}) }
-    for (const key of ['enabled', 'instancePort', 'instanceCwd', 'dmPolicy', 'groupPolicy', 'allowFrom'] as const) {
+    for (const key of ['enabled', 'instancePort', 'instanceCwd', 'dmPolicy', 'groupPolicy', 'allowFrom', 'model', 'providerId', 'effort'] as const) {
       const value = parsed.data[key]
       if (value !== undefined) (weixinBot as Record<string, unknown>)[key] = value
     }
@@ -218,9 +245,10 @@ router.put('/settings', async (req: Request, res: Response) => {
       await ensureDedicatedInstance()
     } else if (parsed.data.enabled === false) {
       await stopDedicatedInstance()
-    } else if (findDedicatedInstance()) {
+    } else if (findDedicatedInstance() && RESTART_REQUIRED_KEYS.some((k) => parsed.data[k] !== undefined)) {
       // 改的是编排参数(cwd / 端口)或通道行为参数 —— 专用实例只在启动时读
       // settings,重启才生效(重启前会把 cwd / 端口对齐进实例定义)。
+      // 模型三项走 fs.watch 热重载,不在 RESTART_REQUIRED_KEYS 里,不会走到这。
       // 实例不存在时不为了改配置凭空拉起一个(那是 enabled 开关的职责)。
       const result = await restartDedicatedInstance()
       // 配置已落盘但专用实例没跟上时必须报错 —— 否则面板弹「已保存」而实例还
