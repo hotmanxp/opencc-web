@@ -68,6 +68,27 @@ function parseBoolField(
 }
 
 /**
+ * Parse an optional boolean body field that also accepts an explicit
+ * `null` as "clear this override back to inherit / auto".
+ *
+ * Same strictness as {@link parseBoolField} for everything but `null`:
+ * only `undefined` (absent), `null` (clear) and a real `boolean` pass;
+ * JSON-truthy like `1` / `"yes"` still 400. Used by PATCH `aa`, where
+ * the UI genuinely needs a way to express "off = follow root again" —
+ * without `null` the only off-switch would be `false`, which pins the
+ * instance to force-off forever instead of returning it to auto.
+ */
+function parseNullableBoolField(
+  v: unknown,
+  field: string,
+): { ok: true; value: boolean | null | undefined } | { ok: false; error: string } {
+  if (v === undefined) return { ok: true, value: undefined }
+  if (v === null) return { ok: true, value: null }
+  if (typeof v !== 'boolean') return { ok: false, error: `${field} must be a boolean or null` }
+  return { ok: true, value: v }
+}
+
+/**
  * Parse an optional port body field. Tri-state contract:
  * - `undefined` (absent) → `{ value: undefined }` so callers can forward
  *   "no override" through to the supervisor (used by /start, /restart);
@@ -219,17 +240,23 @@ router.patch('/instances/:id', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
-  // PATCH aa:落盘到 def.aa,下次 start/restart 立即生效。`undefined` 透传保持
-  // 现有值(PATCH 没有"清除"语义 —— 用户想切回 auto 就显式传 `undefined`,
-  // 但前端 v1 只暴露 2 态 Switch,语义上 auto = Switch OFF / force-on = Switch ON)。
-  const aa = parseBoolField((req.body ?? {}).aa, 'aa')
+  // PATCH aa:落盘到 def.aa,下次 start/restart 立即生效。三态:
+  //   `true`  = 请求启用   `false` = 强制禁用   `null` = 清除,回到 auto(跟随 root)
+  // 字段缺省 = 不改。
+  //
+  // `null` 是后加的。之前这里走 `parseBoolField`(只收 `undefined | boolean`),
+  // 于是「清除回 auto」在 wire 上没法表达,客户端只能发空 body `{}`,撞上
+  // supervisor 的「空补丁守卫」400 `no patchable fields supplied` —— 真机上
+  // 的表现是 lan-agent 的 AA 开关点关不掉。UI 两态开关本身走 `true`/`false`
+  // (关 = force-off),`null` 供 API 侧把 force-off 掰回 auto。
+  const aa = parseNullableBoolField((req.body ?? {}).aa, 'aa')
   if (!aa.ok) return badRequest(res, aa.error)
   try {
     // `cwd` is intentionally absent from the HTTP surface: the only caller
     // that mutates it is the weixin orchestration (which validates the
     // directory itself, see weixinDedicatedInstance.ts). `name` is not
     // patchable at all.
-    const patch: { lan?: boolean; port?: number | null; aa?: boolean } = {}
+    const patch: { lan?: boolean; port?: number | null; aa?: boolean | null } = {}
     if (lan.value !== undefined) patch.lan = lan.value
     if (port.value !== undefined) patch.port = port.value
     if (aa.value !== undefined) patch.aa = aa.value

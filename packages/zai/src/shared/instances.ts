@@ -69,6 +69,11 @@ export interface InstanceDefinition {
    *
    * UI 表面目前只暴露 2 态开关(关=auto、开=请求启用);`false` 仅 API 层
    * 可设置,保留给"per-instance 关掉"的用例。
+   *
+   * **写侧**:`PATCH /api/instances/:id` 的 `aa` 是三态 —— `true` / `false`
+   * 显式落地,`null` **清除**(把 `def.aa` 删回 `undefined` = auto),字段缺省
+   * 则原样透传不改。UI 的两态开关走 `true` / `false`:关 = force-off,表达
+   * 「这个实例别被 AA Cloud 看到」;`null`(回 auto)只从 API 侧使用。
    */
   aa?: boolean
 }

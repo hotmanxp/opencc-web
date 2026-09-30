@@ -285,23 +285,28 @@ export default function Instances(): JSX.Element {
   // Patch the persisted `aa` flag on a definition. Same optimistic
   // pattern as `setLan`: flip the local snapshot first so the Switch
   // animates without waiting for the round trip, PATCH, then roll back
-  // on failure. Turning the Switch OFF sends `aa: undefined` (absent from
-  // the body) — that is a no-op server-side, so the row stays "auto"
-  // rather than being pinned to force-off.
+  // on failure. Turning the Switch OFF sends `aa: false` (force-off),
+  // ON sends `aa: true` (force-on).
   async function setAa(id: string, aa: boolean): Promise<void> {
     const before = instances.find((s) => s.id === id)
     if (!before) return
-    // `undefined` is the "auto / follow root" state, which is exactly
-    // what a freshly-created instance has. Optimistically clear the field
-    // so the Switch and the next spawn agree.
-    const optimistic: InstanceSnapshot = { ...before, aa: aa ? true : undefined }
+    // Optimistically write the exact value we're about to PATCH so the
+    // Switch, the roll-back path and the server response all agree —
+    // the row renders `aa === true` as ON, so `false` and `undefined`
+    // look the same either way, but keeping them distinct avoids a
+    // flicker if the request is slow.
+    const optimistic: InstanceSnapshot = { ...before, aa }
     applyInstanceSnapshot(optimistic)
     setAaBusyId(id)
     try {
-      // Only send the key when enabling. Omitting it on disable is
-      // intentional — see the note above about force-off not being
-      // reachable from the v1 UI.
-      const body: { aa?: boolean } = aa ? { aa: true } : {}
+      // `false` is the off-switch: force-off — even if the root runs with
+      // `--aa`, this instance is spawned without it. It used to be `{}` on
+      // disable, which the server rejected as an empty patch (400
+      // `no patchable fields supplied`) — the AA switch could never be
+      // turned off. `null` would instead clear the override back to auto
+      // (follow root), which is NOT what "this instance must not be seen
+      // by AA Cloud" means; that remains reachable from the API only.
+      const body: { aa: boolean } = { aa }
       const res = await fetch(`/api/instances/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -369,10 +374,12 @@ export default function Instances(): JSX.Element {
       // InstanceDefinition.app = 'task-factory';`undefined`(Radio 默认值
       // `'standard'` 或表单未填)走标准实例,服务端不写 app 字段。
       const app = values.app === 'task-factory' ? ('task-factory' as const) : undefined
-      // AA per-instance override:Checkbox 勾上才发 `aa: true`,未勾完全省略
-      // 字段(让后端 parseBoolField 拿到 undefined → 落 def.aa = undefined →
-      // 后续 start 走 auto,跟随 root)。强发 false 会让 def 永久变成
-      // force-off,UI v1 不需要这个语义。
+      // AA per-instance override(创建路径):Checkbox 勾上才发 `aa: true`,
+      // 未勾完全省略字段(后端 `parseBoolField` 拿到 undefined → 落
+      // `def.aa = undefined` → 后续 start 走 auto,跟随 root)。
+      // 创建**不**发 `false`:新建实例本来就没有 per-instance 偏好可言,
+      // force-off 只能通过之后 PATCH 显式设置(见 setAa),写在创建表单上
+      // 只会让用户误以为"未勾 = 永久禁用"。
       const aa = values.aa === true ? true : undefined
       const res = await fetch('/api/instances', {
         method: 'POST',
@@ -493,16 +500,26 @@ export default function Instances(): JSX.Element {
     // AA 开关一律没有意义 —— supervisor 不会给它们传 `--aa`。连开关带说明
     // 一起藏掉,免得用户在这里勾了以为生效了(实际要重启 root 加 flag)。
     if (!aaEnabled) return null
-    // `undefined` = auto(跟随 root),`true` = 请求启用。UI v1 不暴露 force-off,
-    // 所以关态就是 auto,与 Switch 的 unchecked 天然对应。
+    // 三态(见 shared/instances.ts 的 `InstanceDefinition.aa`):
+    //   `true`  = 请求启用(仅 root 带 --aa 时才真正生效)
+    //   `false` = 强制禁用 —— 即便 root 带 --aa 也不给它。**UI 的关态落在这里**,
+    //            表达「这个实例别被 AA Cloud 看到」,不是「放弃偏好」;
+    //   缺省    = auto(跟随 root),只有新建实例 / API 显式清空才是这个值。
+    // 关态发 `false` 而不是省略字段:省略等于不改,下次 start 又会带上 --aa。
     const on = row.aa === true
     const busy = aaBusyId === row.id
+    const tip = on
+      ? '已请求启用 AA:下次启动时,若 root 启了 --aa,该实例会带 --aa 并把事件转发给 AA Cloud'
+      : row.aa === false
+        ? '已强制禁用 AA:即便 root 带 --aa 启动,该实例也不会带 --aa(不会把事件转发给 AA Cloud)'
+        : 'AA 跟随 root(默认):root 启 --aa 时该实例自动带上,root 没启则一定不带'
+    const tag = on
+      ? <Tag color="purple" className="mr-0" data-testid={`aa-tag-${row.id}`}>--aa</Tag>
+      : row.aa === false
+        ? <Tag color="default" className="mr-0" data-testid={`aa-tag-${row.id}`}>已禁用</Tag>
+        : <Tag color="default" className="mr-0" data-testid={`aa-tag-${row.id}`}>auto</Tag>
     return (
-      <Tooltip
-        title={on
-          ? '已请求启用 AA:下次启动时,若 root 启了 --aa,该实例会带 --aa 并把事件转发给 AA Cloud'
-          : 'AA 跟随 root(默认):root 启 --aa 时该实例自动带上,root 没启则一定不带'}
-      >
+      <Tooltip title={tip}>
         <Space size={8}>
           <span className="text-xs text-[var(--text-dim-65)]">AA</span>
           <Switch
@@ -514,7 +531,7 @@ export default function Instances(): JSX.Element {
             data-testid={`aa-switch-${row.id}`}
             onChange={(next) => void setAa(row.id, next)}
           />
-          {on ? <Tag color="purple" className="mr-0">--aa</Tag> : <Tag color="default" className="mr-0">auto</Tag>}
+          {tag}
         </Space>
       </Tooltip>
     )

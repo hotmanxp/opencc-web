@@ -55,6 +55,20 @@ const running: InstanceSnapshot = {
   lastHeartbeatAt: new Date().toISOString(),
 }
 
+const aaOn: InstanceSnapshot = {
+  ...demo,
+  id: 'inst_aa',
+  name: 'aa-demo',
+  aa: true,
+}
+
+const aaOff: InstanceSnapshot = {
+  ...demo,
+  id: 'inst_aa_off',
+  name: 'aa-off-demo',
+  aa: false,
+}
+
 describe('Instances page', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"instances":[]}', { status: 200 })))
@@ -307,6 +321,106 @@ describe('Instances page', () => {
         }),
       )
     })
+  })
+
+  // ── AA 开关:关态必须发显式 `aa:false` ──
+  // 回归钉:关态曾发空 body `{}`,被 supervisor 的「空补丁守卫」400
+  // (`no patchable fields supplied`)拒掉 —— 开关怎么都关不掉。
+  // 省略字段也不行:那等于「不改」,def.aa 保持原值,下次 start 又带 --aa。
+  it('PATCHes {aa:false} when the AA switch is turned off (never an empty body)', async () => {
+    seed([current, aaOn])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances/inst_aa' && init?.method === 'PATCH') {
+        const body = JSON.parse(init.body as string) as { aa: boolean }
+        return new Response(
+          JSON.stringify({ instance: { ...aaOn, aa: body.aa } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+
+    const sw = screen.getByTestId('aa-switch-inst_aa') as HTMLElement
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(sw)
+
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.find(
+        (c) => c[0] === '/api/instances/inst_aa' && (c[1] as RequestInit)?.method === 'PATCH',
+      )
+      expect(patch).toBeDefined()
+      const body = (patch![1] as RequestInit).body as string
+      expect(JSON.parse(body)).toEqual({ aa: false })
+      // 关键:不能是空 body
+      expect(body).not.toBe('{}')
+    })
+  })
+
+  it('PATCHes {aa:true} when the AA switch is turned on', async () => {
+    seed([current, demo])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances/inst_1' && init?.method === 'PATCH') {
+        return new Response(
+          JSON.stringify({ instance: { ...demo, aa: true } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+
+    fireEvent.click(screen.getByTestId('aa-switch-inst_1'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/instances/inst_1',
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ aa: true }) }),
+      )
+    })
+  })
+
+  it('rolls the AA switch back to on when the PATCH fails', async () => {
+    seed([current, aaOn])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances/inst_aa' && init?.method === 'PATCH') {
+        return new Response(
+          JSON.stringify({ error: 'no patchable fields supplied' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+
+    fireEvent.click(screen.getByTestId('aa-switch-inst_aa'))
+
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId('aa-switch-inst_aa') as HTMLElement).getAttribute('aria-checked'),
+      ).toBe('true')
+    })
+  })
+
+  it('labels the three AA states distinctly', () => {
+    // auto(缺省) / 强制禁用(false) / --aa(true) 三种 Tag 都要能区分,
+    // 否则用户把开关关掉后会看到「auto」,以为回到了「跟随 root」,
+    // 实际落盘是 force-off —— 语义完全相反,必须说清楚。
+    seed([current, demo, aaOn, aaOff])
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+
+    // demo 缺 aa → auto
+    expect(screen.getByTestId('aa-tag-inst_1')).toHaveTextContent('auto')
+    // aaOn → --aa
+    expect(screen.getByTestId('aa-tag-inst_aa')).toHaveTextContent('--aa')
+    // aaOff → 已禁用(不是 auto)
+    expect(screen.getByTestId('aa-tag-inst_aa_off')).toHaveTextContent('已禁用')
+    // 两个 Switch 都在关态(unchecked),但 Tag 不同 —— 区分靠的是 Tag
+    expect((screen.getByTestId('aa-switch-inst_1') as HTMLElement).getAttribute('aria-checked')).toBe('false')
+    expect((screen.getByTestId('aa-switch-inst_aa_off') as HTMLElement).getAttribute('aria-checked')).toBe('false')
   })
 })
 

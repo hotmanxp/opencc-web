@@ -223,6 +223,53 @@ describe('routes/instances', () => {
     expect(res.body.error).toMatch(/aa/)
   })
 
+  // ── aa: null = 清除覆盖,回到 auto ──
+  // UI 两态开关走 true/false,`null` 只从 API 侧用。但它必须是**能用的**:
+  // 这是把 force-off 掰回 auto 的唯一途径(UI 拨不到),而且它曾经是
+  // 「关」态唯一能让客户端发出的东西 —— 发不出就被空补丁守卫 400 拒掉。
+  it('PATCH /api/instances/:id with aa null clears the override back to auto', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', aa: true, createdAt: '2026-08-04T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    const res = await request(app).patch('/api/instances/inst_seed').send({ aa: null })
+    expect(res.status).toBe(200)
+    // Key must be GONE (not `false`, not `null`): a spread-merge that kept
+    // the old value would silently pin the instance to force-on/force-off.
+    expect(res.body.instance.aa).toBeUndefined()
+  })
+
+  it('PATCH /api/instances/:id with aa null is a valid patch, not an empty one', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    // Regression guard for the reported bug: the "off" path used to send
+    // `{}`, which trips the supervisor's empty-patch guard (400
+    // `no patchable fields supplied`). `{ aa: null }` must NOT be treated
+    // as empty — it is a real mutation request.
+    const res = await request(app).patch('/api/instances/inst_seed').send({ aa: null })
+    expect(res.status).toBe(200)
+  })
+
+  it('PATCH /api/instances/:id still rejects a fully empty patch with 400', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    // The typo guard itself must stay: `aa: null` is special-cased, not a
+    // blanket "null is always fine" relaxation.
+    const res = await request(app).patch('/api/instances/inst_seed').send({})
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/no patchable fields/)
+  })
+
   it('POST /api/instances/:id/start rejects non-boolean aa with 400', async () => {
     const { app } = await bootstrap()
     const res = await request(app)

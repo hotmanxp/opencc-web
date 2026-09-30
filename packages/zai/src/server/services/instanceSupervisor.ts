@@ -94,8 +94,16 @@ export interface InstanceSupervisor {
    * `name` stays non-patchable: renames are cosmetic and would have to
    * re-run the duplicate-name check, which the definition layer does not
    * model.
+   *
+   * `aa: null` is the "clear" form: it **deletes** `def.aa` so the instance
+   * returns to `auto` (follow root). Distinct from `aa: false`, which pins
+   * the instance to force-off — that one is what the two-state UI switch
+   * sends for OFF. Mirrors `port: null` (clear the pin). Before this
+   * existed "auto" was unreachable over HTTP: the route's `parseBoolField`
+   * rejected a JSON `null`, so a client wanting it had to send an empty
+   * patch, which the no-op guard below then refused with a 400.
    */
-  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null; cwd?: string; aa?: boolean }) => Promise<InstanceSnapshot>
+  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null; cwd?: string; aa?: boolean | null }) => Promise<InstanceSnapshot>
   shutdown: () => Promise<void>
 }
 
@@ -510,7 +518,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       stopInstance: async (id: string) => { ensureNotCurrent(id); return doStop(id) },
       restartInstance: async (id: string, opts?: { lan?: boolean; port?: number | null; aa?: boolean }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
       removeInstance: async (id: string) => doRemove(id),
-      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null; cwd?: string; aa?: boolean }) {
+      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null; cwd?: string; aa?: boolean | null }) {
         ensureNotCurrent(id)
         const entry = getEntry(id)
         // Refuse unknown / no-op patches explicitly so a typo in the
@@ -518,6 +526,12 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         // stay in sync with the `InstanceSupervisor['updateInstance']`
         // signature; adding one forces the same narrowing in the route.
         const next: Partial<InstanceDefinition> = {}
+        // Tracked separately from `next`: clearing must REMOVE the key from
+        // the merged definition, and a spread-merge can't express "delete".
+        // Keeping it as a flag is also what makes `{ aa: null }` count as a
+        // non-empty patch below — otherwise the "clear" request would be
+        // rejected as an empty patch and the toggle could never be turned off.
+        let clearAa = false
         if (patch.lan !== undefined) next.lan = patch.lan === true
         if (patch.port !== undefined) {
           // `null` clears the pin back to auto (so the next start scans);
@@ -530,9 +544,15 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         if (patch.cwd !== undefined) next.cwd = patch.cwd
         // AA per-instance 覆盖(`undefined` 透传保持「跟随 root」;`true` / `false`
         // 显式落地)。下一次 start/restart 立即生效 —— 与 `lan` 行为对齐。
-        if (patch.aa !== undefined) next.aa = patch.aa === true
-        if (Object.keys(next).length === 0) throw new InstanceSupervisorError('INVALID_STATE', 'no patchable fields supplied')
-        entry.def = { ...entry.def, ...next }
+        // `null` = 删除 def.aa,回到 auto —— 与 `false`(force-off)是两件事。
+        if (patch.aa !== undefined) {
+          if (patch.aa === null) clearAa = true
+          else next.aa = patch.aa === true
+        }
+        if (Object.keys(next).length === 0 && !clearAa) throw new InstanceSupervisorError('INVALID_STATE', 'no patchable fields supplied')
+        const merged: InstanceDefinition = { ...entry.def, ...next }
+        if (clearAa) delete merged.aa
+        entry.def = merged
         await persist()
         emit(id, entry.status)
         return snapshotOf(entry)
