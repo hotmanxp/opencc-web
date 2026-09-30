@@ -189,11 +189,6 @@ async function runDirectServer(options: StartOptions): Promise<void> {
     const ips = detectLanIps();
     console.log(`[zai] Production server on http://localhost:${port}`);
     console.log(`[zai] LAN mode — listening on 0.0.0.0:${port}`);
-    // 反向代理暴露面提示(同 dev.ts:任何同 LAN 访客可访问任意本机端口)
-    console.log(
-      `[zai] WARNING: --lan enables reverse proxy at /proxy/<port>/* → 127.0.0.1:<port>.` +
-        `\n[zai]          Anyone on your LAN can reach any local port you have running.`,
-    );
     for (const ip of ips) {
       console.log(`[zai]   → http://${ip}:${port}`);
     }
