@@ -969,7 +969,10 @@ describe('instanceSupervisor (4d — fix round 2: stale-child + post-SIGKILL + c
     const { getInstanceSupervisor } = await initSup(deps, '/tmp/current', '/tmp/persist-data')
     const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
     await getInstanceSupervisor().startInstance(snap.id)
-    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    // Live pid: on re-init below there is no child, and `resetStaleActive`
+    // signal-0 probes the persisted pid — a dead one (222 → ESRCH) would be
+    // reset on sight, which is not what this round-trip case is about.
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: process.pid, port: 9205 })
     await (getInstanceSupervisor() as unknown as { __flushPendingWrites: () => Promise<void> }).__flushPendingWrites()
     // The last write must include `state: 'running'`.
     const running = writes.find((w) => (w.statuses[snap.id] as { state?: string } | undefined)?.state === 'running')
@@ -1083,11 +1086,17 @@ describe('instanceSupervisor (4f — stale running reset after supervisor restar
   afterEach(() => { vi.restoreAllMocks() })
 
   const STALE_MS = 30 * 60_000
+  // Hydrated entries have no child, so `resetStaleActive` signal-0 probes the
+  // persisted pid before falling through to the 30-min rule. A made-up pid
+  // (222) is ESRCH on the host, which would reset EVERY entry on sight and
+  // make these cases assert the dead-pid path instead of the 30-min window
+  // they are written to cover. Use the vitest worker's own pid — always alive.
+  const LIVE_PID = process.pid
   // Persisted status shape used by hydration: an "alive-looking" entry with
   // every runtime field set, so a reset must clear port/pid/lastError while
   // keeping lastHeartbeatAt.
   const makeStatus = (state: string, tsIso: string) => ({
-    state, port: 9205, pid: 222, startedAt: tsIso, lastHeartbeatAt: tsIso,
+    state, port: 9205, pid: LIVE_PID, startedAt: tsIso, lastHeartbeatAt: tsIso,
     lastError: { at: tsIso, message: 'boom' },
   })
 

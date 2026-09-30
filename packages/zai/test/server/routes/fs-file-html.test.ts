@@ -52,8 +52,13 @@ describe('GET /api/fs/file — HTML preview branch', () => {
     expect(res.body.mime).toBe('text/html');
     expect(typeof res.body.dataUrl).toBe('string');
     expect(res.body.dataUrl.startsWith('data:text/html;charset=utf-8;base64,')).toBe(true);
-    // content field is intentionally omitted for binary-ish payloads
-    expect(res.body.content).toBeUndefined();
+    // 2026-09-27 (7e759acf — 3-state preview/source/edit for .md/.html):
+    // the HTML branch also returns raw `content` + `sha256` so FsTab's
+    // source/edit modes can hand the original text to Monaco and do an
+    // optimistic-concurrency check. dataUrl alone would force the client
+    // to base64-decode just to reach the editor.
+    expect(res.body.content).toBe(payload);
+    expect(res.body.sha256).toMatch(/^[0-9a-f]{64}$/);
     // Round-trip: decode the base64 payload and assert byte equality.
     const b64 = res.body.dataUrl.slice('data:text/html;charset=utf-8;base64,'.length);
     const decoded = Buffer.from(b64, 'base64').toString('utf8');
@@ -92,8 +97,13 @@ describe('GET /api/fs/file — HTML preview branch', () => {
     // 'html', not 'text'. This guards against an accidental re-add.
     writeFileSync(join(cwd, 'note.html'), '<x/>', 'utf8');
     const res = await request(app).get('/api/fs/file').query({ path: 'note.html' });
-    expect(res.body.kind).not.toBe('text');
-    expect(res.body.content).toBeUndefined();
+    // `kind` is the discriminator: the html branch always stamps it, whereas
+    // the text branch it replaced left it off / set 'text'. `content` alone
+    // can no longer tell them apart — 7e759acf added it to the html branch
+    // too (FsTab source/edit needs the raw text).
+    expect(res.body.kind).toBe('html');
+    expect(res.body.content).toBe('<x/>');
+    expect(res.body.dataUrl.startsWith('data:text/html;charset=utf-8;base64,')).toBe(true);
   });
 
   it('returns 415 for extensions outside the preview allow-list (e.g. .zip)', async () => {

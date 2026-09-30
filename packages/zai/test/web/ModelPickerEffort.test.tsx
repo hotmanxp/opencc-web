@@ -123,17 +123,33 @@ describe('ModelPickerPanel — Reasoning effort 控件', () => {
     expect(screen.queryByRole('button', { name: 'max' })).toBeNull()
   })
 
-  it('未设过 effort 时, 选中的是模型声明的默认档(五档模型 → max)', () => {
+  it('未设过 effort 时, 选中的是 zai 兜底档 high, 不是模型声明的 max', () => {
+    // 2026-09-28 (4f721f1a): 兜底从 capabilities.defaultEffortLevel 改成
+    // ZAI_DEFAULT_EFFORT_LEVEL('high')。厂商声明的 max 是"它自己的默认",
+    // 不是 zai 实际下发的值 —— 拿它高亮会显示「Max」而线上跑的是 high。
     mount('MiniMax-M3.1-Flash-Preview', [
       modelEntry('MiniMax-M3.1-Flash-Preview', USER_PROFILE, true, FIVE_TIER),
     ])
-    expect(screen.getByRole('button', { name: 'max' }).className).toContain('#a78bfa')
+    expect(screen.getByRole('button', { name: 'high' }).className).toContain('#a78bfa')
+    expect(screen.getByRole('button', { name: 'max' }).className).not.toContain('#a78bfa')
     expect(offBtn().className).not.toContain('#a78bfa')
   })
 
-  it('换模型后存储档位不属于新模型 → 钳到该模型默认档, 不出现「全不亮」', () => {
+  it('未设过 effort 且模型不含 high 档 → 退回 off', () => {
+    // 钳制兜底的第二级:high 不在集合里时不能"全不亮"。
+    mount('only-max-model', [
+      modelEntry('only-max-model', USER_PROFILE, true, {
+        levels: ['low', 'max'],
+      }),
+    ])
+    expect(offBtn().className).toContain('#a78bfa')
+    expect(screen.getByRole('button', { name: 'max' }).className).not.toContain('#a78bfa')
+  })
+
+  it('换模型后存储档位不属于新模型 → 钳到 zai 兜底档, 不出现「全不亮」', () => {
     // medium → GLM(只收 low/high/max)。换模型不会重写 meta.effort,
-    // 若直接拿存储值比对, 四个按钮会一个都不亮。
+    // 若直接拿存储值比对, 四个按钮会一个都不亮。high 在集合内,所以
+    // 钳到 high(4f721f1a 起的 zai 兜底档),不是 off。
     mount('zhiniao-glm-5.1', [
       modelEntry('zhiniao-glm-5.1', USER_PROFILE, true, {
         levels: ['low', 'high', 'max'],
@@ -142,8 +158,8 @@ describe('ModelPickerPanel — Reasoning effort 控件', () => {
     const lit = ['off', 'low', 'medium', 'high', 'xhigh', 'max'].filter(
       (l) => screen.queryByRole('button', { name: l })?.className.includes('#a78bfa'),
     )
-    expect(lit).toHaveLength(1)
-    expect(offBtn().className).toContain('#a78bfa')
+    expect(lit).toEqual(['high'])
+    expect(offBtn().className).not.toContain('#a78bfa')
   })
 
   it('控件在弹框顶部 —— 排在搜索框之前, 不用滚过模型列表', () => {
@@ -159,15 +175,15 @@ describe('ModelPickerPanel — Reasoning effort 控件', () => {
     ).toBeTruthy()
   })
 
-  it('渲染三档 + off, 未设过时 off 为选中态', () => {
+  it('渲染三档 + off, 未设过时 high 为选中态', () => {
     mount('MiniMax-M3', [modelEntry('MiniMax-M3', USER_PROFILE, true, {
       levels: ['low', 'medium', 'high', 'max'],
     })])
     for (const level of ['off', 'low', 'medium', 'high', 'max']) {
       expect(screen.getByRole('button', { name: level })).toBeTruthy()
     }
-    expect(offBtn().className).toContain('#a78bfa')
-    expect(highBtn().className).not.toContain('#a78bfa')
+    expect(highBtn().className).toContain('#a78bfa')
+    expect(offBtn().className).not.toContain('#a78bfa')
   })
 
   it('会话已设 high 时 high 为选中态', () => {
@@ -185,16 +201,34 @@ describe('ModelPickerPanel — Reasoning effort 控件', () => {
     })])
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(patch)
 
-    highBtn().click()
+    // 点 max 而不是 high:会话没设过 effort 时高亮的是 zai 兜底档 high
+    // (4f721f1a),而 onClick 对已选中的档位是 no-op。
+    screen.getByRole('button', { name: 'max' }).click()
     await vi.waitFor(() => {
-      expect(useAgentStore.getState().sessions[0].effort).toBe('high')
+      expect(useAgentStore.getState().sessions[0].effort).toBe('max')
     })
     expect(fetchSpy).toHaveBeenCalledWith(
       '/api/agent/sessions/sess-1',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ effort: 'high' }),
+        body: JSON.stringify({ effort: 'max' }),
       }),
+    )
+  })
+
+  it('点已选中的档位 → no-op, 不发 PATCH', () => {
+    const patch = vi.fn().mockResolvedValue({ ok: true } as Response)
+    mount('MiniMax-M3', [modelEntry('MiniMax-M3', USER_PROFILE, true, {
+      levels: ['low', 'medium', 'high', 'max'],
+    })], 'high')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(patch)
+
+    highBtn().click()
+    // 档位没变,后端也没被叫醒。
+    expect(useAgentStore.getState().sessions[0].effort).toBe('high')
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      '/api/agent/sessions/sess-1',
+      expect.objectContaining({ method: 'PATCH' }),
     )
   })
 

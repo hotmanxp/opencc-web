@@ -44,6 +44,16 @@ vi.mock("../components/AttachmentStrip.js", () => ({
 vi.mock("../components/ConfigStatusBar.js", () => ({
   default: () => null,
 }))
+// MonacoCodeView 走 `import('monaco-editor')` 懒加载,但 monaco-editor 0.52
+// 没有 exports 字段,只认 module 入口 —— vite 8 的 import-analysis 在转译期
+// 就静态解析这个 dynamic import 并抛 "Failed to resolve import monaco-editor",
+// 整个 Agent suite 连带挂掉。生产构建有 vite.config.ts 的 manualChunks 处理,
+// vitest 没有,所以在这里 stub(同 SplitPane.test.tsx / FsTab.test.tsx 的做法)。
+// Agent 只断言顶层结构,不测编辑器内部。
+vi.mock("../components/splitPane/MonacoCodeView.js", () => ({
+  LazyMonacoCodeView: () => null,
+  MonacoCodeView: () => null,
+}))
 vi.mock("../components/ModeStatusButton.js", () => ({
   default: () => null,
   MODE_CYCLE_ORDER: [],
