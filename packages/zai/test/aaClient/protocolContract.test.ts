@@ -251,10 +251,16 @@ describe('session.send_message attachments', () => {
       '../../src/server/services/aaClient/runtimeRegistry.js'
     );
     const registry = new Registry(registryConn as never);
-    new ReverseDispatch({
+    const rd = new ReverseDispatch({
       conn: conn as never,
       registry: registry as never,
-    }).install();
+    });
+    // resolveChildPort TCP-probes the child before forwarding; nothing is
+    // really listening on 9451 here, so stub the probe (same pattern as
+    // runtimeStartRouting.test.ts) instead of standing up a real server.
+    (rd as unknown as { isPortListening: (p: number) => Promise<boolean> }).isPortListening =
+      async () => true;
+    rd.install();
     const { initSessionMap } = await import('../../src/server/services/aaClient/sessionMap.js');
     const sessionMap = initSessionMap();
     await sessionMap.put(9451, {
