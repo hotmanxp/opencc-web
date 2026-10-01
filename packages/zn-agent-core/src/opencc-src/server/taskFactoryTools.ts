@@ -57,7 +57,7 @@ const MOVE_DESC = 'Move a Task Factory task between lifecycle buckets (queue-tas
   '  - taskId / from / to / status / inPlace: structured fields for tool-result parsing. ' +
   '  - executorTaskId / verifierTaskId: present ONLY when a backfill was applied. ' +
   'Typical flows: ' +
-  '(a) SuperTasksMove(id, "queue-tasks", "processing-tasks") on dispatch — move the folder FIRST, capture taskDir from the return value, THEN CliAgent the executor with `<task_dir>/docs/spec.md` paths interpolated from taskDir. After CliAgent returns the subagent id, backfill via an in-place move (a2): ' +
+  '(a) SuperTasksMove(id, "queue-tasks", "processing-tasks") on dispatch — move the folder FIRST, capture taskDir from the return value, THEN spawn the executor with `<task_dir>/docs/spec.md` paths interpolated from taskDir. After CliAgent returns the subagent id, backfill via an in-place move (a2): ' +
   '(a2) SuperTasksMove(id, "processing-tasks", "processing-tasks", executorTaskId=<subTaskId>) — in-place backfill so the UI keeps the live event stream; taskDir is unchanged (still processing-tasks). ' +
   '(b) SuperTasksMove(id, "processing-tasks", "verifying-tasks") after the executor appends "## [DONE]" to process.md; ' +
   '(b2) SuperTasksMove(id, "verifying-tasks", "verifying-tasks", verifierTaskId=<verifierSubagentId>) — in-place backfill right after CliAgent returns the verifier task id (from == to means: no folder move, only patch the field; status stays verifying); ' +
@@ -75,8 +75,8 @@ const RESET_DESC = 'Reset a Task Factory task back to the runnable state for ret
   '(a) task in verifying-tasks → folder moves back to processing-tasks AND status is forced to "processing" with executorTaskId AND verifierTaskId cleared; ' +
   '(b) task in processing-tasks with status="paused" → folder stays in processing-tasks, status forced back to "processing" with executorTaskId AND verifierTaskId cleared (no bucket move); ' +
   '(c) task in queue-tasks / finished-tasks / processing-tasks with status!="paused" / not found anywhere → throws "task <id> cannot be reset (current state: bucket=..., status=...)". ' +
-  'Use this after a verifier FAIL on round N < 3 to put the task back into the runnable lane so the supervisor can re-CliAgent the executor with the verifier feedback path included in the prompt. ' +
-  'After Reset, the supervisor must re-CliAgent the executor — Reset does NOT cancel or pause any existing subagent; if the previous executor subagent is still alive, the supervisor should BackgroundRuntime.cancel it first.'
+  'Use this after a verifier FAIL on round N < 3 to put the task back into the runnable lane so the supervisor can re-spawn the executor with the verifier feedback path included in the prompt. ' +
+  'After Reset, the supervisor must re-spawn the executor — Reset does NOT cancel or pause any existing subagent; if the previous executor subagent is still alive, the supervisor should BackgroundRuntime.cancel it first.'
 
 const PAUSE_DESC = 'Pause a Task Factory task in place without moving it between buckets. ' +
   'Auto-detects the current bucket (no `from` argument needed): ' +
@@ -123,7 +123,7 @@ export const superTasksCreateTool = buildTool({
       // verification_scope 是枚举,非法值 fail loud;changed_files 是字符串数组,
       // 不做单元素校验(filter 非字符串由 createPoolTask 兜底)。
       changeType: z.enum(['docs', 'copy', 'style', 'logic', 'core', 'api', 'security']).optional()
-        .describe('Kind of change the executor will make (zhozh1 project-agnostic). One of docs|copy|style|logic|core|api|security. The supervisor writes this BEFORE CliAgent the executor; the executor reads it from TaskSummary and never re-decides. Optional — legacy tasks have no changeType.'),
+        .describe('Kind of change the executor will make (zhozh1 project-agnostic). One of docs|copy|style|logic|core|api|security. The supervisor writes this BEFORE spawning the executor; the executor reads it from TaskSummary and never re-decides. Optional — legacy tasks have no changeType.'),
       verificationScope: z.enum(['ts_files', 'test_files', 'visual', 'none', 'build_artifact']).optional()
         .describe('Which category of validation is appropriate for this change (project-agnostic). One of ts_files|test_files|visual|none|build_artifact. The verifier reads this and picks the right validation matrix entry. Optional.'),
       changedFiles: z.array(z.string().min(1)).optional()
@@ -467,7 +467,7 @@ const CREATE_WORKTREE_DESC =
   '(1) TASK mode (defaults): branch=task-<taskId>, path=~/.zai/task-factory/worktrees/<taskId>/ — one executor workspace per conflicting task; deterministic path — safe to re-call after a supervisor restart, and an existing worktree is returned as-is (FAIL-retry reuse). ' +
   '(2) INTEGRATION mode (verification lane): branch="integration-main" (create from the repo main branch via baseRef on first use), slot="integration-<repoDirName>" — one shared worktree per repo where accepted task branches are merged for verification. ' +
   'Task branches NEVER merge into the repo base branch from here — feature/bugfix branches land via PR review created by the user. ' +
-  'Use BEFORE CliAgent when the dispatch batch contains two or more tasks sharing the same repo cwd: dispatch those executors with cwd=<worktreePath> instead of the original repo path. ' +
+  'Use BEFORE dispatching when the batch contains two or more tasks sharing the same repo cwd: dispatch those executors with cwd=<worktreePath> instead of the original repo path. ' +
   'On task FAIL the supervisor reverts the integration lane (git reset --hard to the pre-merge sha recorded in process.md) so a broken branch never persists in integration-main; on PASS the branch stays in integration-main and keeps the task worktree/branch for PR.'
 
 export const createWorktreeTool = buildTool({
