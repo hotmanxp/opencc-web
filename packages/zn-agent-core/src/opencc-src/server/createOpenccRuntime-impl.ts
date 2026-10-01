@@ -1036,7 +1036,27 @@ let initialMessages: Message[] | undefined
         else (globalThis as any).__zaiBridgeCtx = prevBridge
         // zai patch: 本 query 结束, 释放该 session 的 abort controller。
         // engine 保留在 engines map 中——同 session 续传复用 mutableMessages。
+        //
+        // 必须 abort 而不只是 delete:query 正常收尾不 abort,挂在该 signal
+        // 上的 { once: true } listener 会永久滞留。StreamingToolExecutor 在
+        // query.ts:628 的 turn 循环里每轮重建,每次构造都
+        // createChildAbortController(toolUseContext.abortController)
+        // (StreamingToolExecutor.ts:69);这些 child 正常路径永不 abort,
+        // 于是 parent listener 逐轮累积,越过 createAbortController 的
+        // 阈值 50 后抛 MaxListenersExceededWarning("51 abort listeners
+        // added to [AbortSignal]")。
+        //
+        // 放 finally 而非 replaceAbortController:后者是 query *开始*时调用,
+        // 在那里 abort 上一轮 signal 会让残留的转发链
+        // (StreamingToolExecutor.ts:410-421 往 toolUseContext.abortController
+        // 冒泡的 handler)在下一轮 turn 命中 query.ts:1716 的 signal.aborted
+        // 短路,误判成用户中断并吐出一条假的 aborted_streaming。finally 处
+        // turn 循环已退出,该检查不会再跑。
         if (typeof input.sessionId === 'string') {
+          const finished = queryAbortControllers.get(input.sessionId)
+          if (finished && !finished.signal.aborted) {
+            finished.abort('query_finished')
+          }
           queryAbortControllers.delete(input.sessionId)
         }
       }
