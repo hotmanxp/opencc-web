@@ -22,6 +22,12 @@ export default defineConfig({
     // 兜底:`fileParallelism: false` 让所有 test 串行跑(同进程,共享
     // module cache,避开 happy-dom 资源竞争);testTimeout: 30s 给超慢用例
     // (rpc stub codegen / desktopFS 端到端 / desktop 页面)充足时间。
+    //
+    // vitest 5 升级后实测:撤回 fileParallelism 仍稳定复现 flaky —— 5 轮全量
+    // 并行下 PdfRenderer 翻页用例挂 3 轮(replHistory ?q= 前缀过滤 30s 超时
+    // 偶发 1 轮),隔离单跑都 100% 稳定,是全量并发下的资源争抢。两条测试本
+    // 身没问题,所以保留串行兜底是有理由的;要解只能抓出真正占资源的源头
+    // (可能是 16GB 内存下 happy-dom worker 数量撑爆),不在这次升级范围。
     fileParallelism: false,
     retry: 3,
     testTimeout: 30_000,
