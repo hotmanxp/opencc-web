@@ -11,10 +11,11 @@ import {
   message,
 } from 'antd';
 import {
-  CheckIcon,
   GitCommitIcon,
   GitForkIcon,
   LayersIcon,
+  MinusIcon,
+  PlusIcon,
   RotateCwIcon,
   Undo2Icon,
 } from 'lucide-react';
@@ -320,7 +321,7 @@ function ChangesList(props: ChangesListProps) {
                     <Button
                       size="small"
                       type="text"
-                      icon={<Undo2Icon size={12} />}
+                      icon={<MinusIcon size={12} />}
                       onClick={(e) => {
                         e.stopPropagation();
                         void onUnstage(entry.path);
@@ -344,31 +345,18 @@ function ChangesList(props: ChangesListProps) {
               selected={selectedPath === entry.path}
               onClick={() => onSelect(entry.path)}
               actions={
-                entry.xy === '??' ? (
+                <Tooltip title="暂存">
                   <Button
                     size="small"
                     type="text"
-                    icon={<CheckIcon size={12} />}
+                    icon={<PlusIcon size={12} />}
                     onClick={(e) => {
                       e.stopPropagation();
                       void onStage(entry.path);
                     }}
                     data-testid={`git-stage-${entry.path}`}
                   />
-                ) : (
-                  <>
-                    <Button
-                      size="small"
-                      type="text"
-                      icon={<CheckIcon size={12} />}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void onStage(entry.path);
-                      }}
-                      data-testid={`git-stage-${entry.path}`}
-                    />
-                  </>
-                )
+                </Tooltip>
               }
               onRevert={() => onRevert(entry.path)}
             />
