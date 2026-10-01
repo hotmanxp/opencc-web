@@ -568,15 +568,11 @@ export class AaConnection {
 
   private async handleRequest(frame: RequestFrame): Promise<void> {
     const handler = this.requestHandlers.get(frame.method);
-    // Every inbound RPC gets logged, including ones we have no handler
-    // for. AA Web navigates via read RPCs we may not have implemented
-    // yet; without this log there's no way to tell "AA asked for
-    // something we don't implement" from "AA never asked".
     const paramsPreview = JSON.stringify(frame.params ?? null).slice(0, 400);
     if (!handler) {
-      // 也落盘:AA 侧的报错(如手机端显示的 "require is not defined")只能从
-      // 入站/出站 RPC 日志反推,而子进程 stdout 常常没人盯着。
-      logHttp(`[aa.inbound] ${frame.method} NO_HANDLER params=${paramsPreview}`, 'warn');
+      // 未实现的方法静默回错:AA Web 会把 terminal.create 之类的探路 RPC
+      // 反复打过来,打 warn 会把子进程 stderr 刷满(手机端终端直接被日志淹)。
+      // 真要排查 AA 侧行为,看 /tmp/zai-http.log 里其他 inbound 记录。
       this.sendFrame(buildResponseError(frame.id, 'method_not_implemented', `no handler for ${frame.method}`));
       return;
     }
