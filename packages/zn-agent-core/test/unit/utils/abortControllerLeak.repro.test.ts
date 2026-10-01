@@ -1,16 +1,17 @@
 /**
- * 复现 MaxListenersExceededWarning: Possible EventTarget memory leak
- * detected. N abort listeners added to [AbortSignal]。
+ * MaxListenersExceededWarning: Possible EventTarget memory leak detected.
+ * N abort listeners added to [AbortSignal]。
  *
- * 机制(createOpenccRuntime-impl.ts:835 + QueryEngine.replaceAbortController):
- * 每次 query() 新建一个 createAbortController()(阈值 50)并塞进 per-session
- * 缓存复用的 QueryEngine。本 query 正常跑完不会 abort,所以挂在该 signal
- * 上的 { once: true } listener 永远不会被清掉。StreamingToolExecutor 在
- * query.ts 的 turn 循环里每轮 new 一个,每轮又给 toolUseContext.abortController
- * 挂一个 createChildAbortController 的 parent listener —— 该 listener 只在
- * child 被 abort 时才摘除,而 child 同样不会 abort。
+ * 机制：query() 每次新建一个 createAbortController()(阈值 50)当 per-query
+ * controller,StreamingToolExecutor 每个 turn 都以它为 parent 建一个
+ * createChildAbortController(兄弟 controller),per-tool 再从兄弟 controller
+ * 派生一层。旧实现每个 child 往 parent.signal 上 addEventListener 一个
+ * { once: true } handler,且只有 child 自己被 abort 时才摘 —— 正常跑完的
+ * turn 既不 abort 兄弟 controller 也不 abort per-tool controller,于是同一个
+ * query 的 controller 上线性堆积,第 51 个触发警告。
  *
- * 本测试只验证 listener 计数行为,不依赖完整 runtime 启动。
+ * 现实现:每个 parent 只挂 1 个共享 listener,内部用 WeakRef 集合跟踪所有
+ * child。所以不变量从"child 数个 listener"变成"恒定 1 个"。
  */
 import { describe, it, expect } from 'vitest'
 import { getEventListeners } from 'events'
@@ -19,58 +20,87 @@ import {
   createChildAbortController,
 } from '../../../src/opencc-src/utils/abortController.js'
 
-/** 模拟 StreamingToolExecutor 构造函数(query.ts:1129)在每轮 turn 的行为。 */
-function simulateOneTurn(queryController: AbortController): void {
-  // StreamingToolExecutor 构造:siblingAbortController = child(queryController)
-  // 该 child 永不 abort,所以它在 parent 上挂的 listener 也永不摘除。
-  createChildAbortController(queryController)
-  // 每个 tool:toolAbortController = child(siblingAbortController)
-  // 这里只需要 parent(queryController) 上那一个 listener 来演示累积。
+/**
+ * 模拟 query 的 turn 循环:每轮 new 一个 StreamingToolExecutor(兄弟
+ * controller = child(queryController)),该轮每个 tool 再派生一层。
+ */
+function simulateTurns(queryController: AbortController, toolsPerTurn = 2): void {
+  for (let turn = 0; turn < 60; turn++) {
+    const sibling = createChildAbortController(queryController)
+    for (let tool = 0; tool < toolsPerTurn; tool++) {
+      createChildAbortController(sibling)
+    }
+  }
 }
 
-describe('AbortSignal listener 累积复现', () => {
-  it('单次 query 内 N 轮 turn → querySignal 上 N 个 listener 且从不回收', () => {
+describe('createChildAbortController 不在 parent 上累积 listener', () => {
+  it('60 轮 turn × 2 tool → query controller 上恒定 1 个 listener', () => {
     const controller = createAbortController()
-    const TURNS = 60
+    simulateTurns(controller)
 
-    for (let i = 0; i < TURNS; i++) simulateOneTurn(controller)
-
-    const listeners = getEventListeners(controller.signal, 'abort')
-    // 关键断言:query 正常跑完(不 abort)后 listener 全部滞留。
-    expect(listeners.length).toBe(TURNS)
+    // 关键断言:listener 数与 child 数解耦,不再越过 50 阈值。
+    expect(getEventListeners(controller.signal, 'abort').length).toBe(1)
   })
 
-  it('阈值 50 的 createAbortController 在第 51 个 listener 处触发警告', async () => {
-    // 注意:Node 在超过阈值的**那一刻**同步 emit,而不是等到下一个 tick。
-    // 这里不能靠 process.on('warning') 捕获 —— vitest 运行时 warning 已经
-    // 打过一次(stderr 里可见,与线上一致的 "51 abort listeners added to
-    // [AbortSignal]. MaxListeners is 50."),自己的 handler 挂晚了。
-    // 因此改为直接断言 listener 计数越过阈值,警告文本的复现由 stderr 佐证。
-    const controller = createAbortController()
-    for (let i = 0; i < 60; i++) simulateOneTurn(controller)
+  it('parent abort → 所有层级的 child 都被 abort 并带上 parent 的 reason', () => {
+    const queryController = createAbortController()
+    const sibling = createChildAbortController(queryController)
+    const tool = createChildAbortController(sibling)
+    const grandTool = createChildAbortController(tool)
 
-    expect(getEventListeners(controller.signal, 'abort').length).toBeGreaterThan(50)
+    queryController.abort('query_finished')
+
+    for (const child of [sibling, tool, grandTool]) {
+      expect(child.signal.aborted).toBe(true)
+      expect(child.signal.reason).toBe('query_finished')
+    }
+    // { once: true } → 触发后共享 listener 自行摘除
+    expect(getEventListeners(queryController.signal, 'abort').length).toBe(0)
   })
 
-  it('对照:child 被 abort 时 parent listener 确实会被摘除(机制本身没坏)', () => {
+  it('单个 child 提前 abort 不影响 parent 及其兄弟 child', () => {
     const parent = createAbortController()
-    const child = createChildAbortController(parent)
+    const childA = createChildAbortController(parent)
+    const childB = createChildAbortController(parent)
+
+    childA.abort('tool_finished')
+
+    expect(parent.signal.aborted).toBe(false)
+    expect(childB.signal.aborted).toBe(false)
+    // parent 的共享 listener 仍在,后续 child 仍能被传播
     expect(getEventListeners(parent.signal, 'abort').length).toBe(1)
 
-    child.abort('tool_finished')
+    parent.abort('parent_done')
+    expect(childB.signal.reason).toBe('parent_done')
+  })
+
+  it('parent 已 aborted → child 立即 aborted,parent 不新增 listener', () => {
+    const parent = createAbortController()
+    parent.abort('already_done')
+
+    const child = createChildAbortController(parent)
+
+    expect(child.signal.aborted).toBe(true)
+    expect(child.signal.reason).toBe('already_done')
     expect(getEventListeners(parent.signal, 'abort').length).toBe(0)
   })
 
-  it('修复验证:query 结束时 abort 旧 controller → listener 全部清零', () => {
-    // 模拟 createOpenccRuntime-impl.ts 的修复形态:query finally 里 abort
-    // 本轮 controller,而不是只从 map 里 delete。
-    const queryController = createAbortController()
-    for (let i = 0; i < 60; i++) simulateOneTurn(queryController)
-    expect(getEventListeners(queryController.signal, 'abort').length).toBe(60)
+  it('child 只被 WeakRef 持有 → 不会被 parent 强引用住(可被 GC)', () => {
+    const parent = createAbortController()
+    createChildAbortController(parent)
+    createChildAbortController(parent)
+    // 不 abort,也不持有 child 引用 —— WeakRef 保证它们可回收,
+    // parent 上依旧只有 1 个 listener。
+    expect(getEventListeners(parent.signal, 'abort').length).toBe(1)
+  })
 
-    // 修复点:query 收尾时 abort,触发所有 { once: true } listener 集中清场。
-    queryController.abort('query_finished')
-
-    expect(getEventListeners(queryController.signal, 'abort').length).toBe(0)
+  it('WeakRef 集合不会无限增长(超过阈值时清理已回收的条目)', () => {
+    const parent = createAbortController()
+    // 建 200 个 child,大部分立刻被 abort(释放工具执行上下文)。
+    for (let i = 0; i < 200; i++) {
+      createChildAbortController(parent).abort('tool_finished')
+    }
+    // 关键行为:parent 的 listener 数不随 child 数增长。
+    expect(getEventListeners(parent.signal, 'abort').length).toBe(1)
   })
 })
