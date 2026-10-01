@@ -13,7 +13,7 @@
 | zai 前端 | React + Zustand + AntD + Vite | 18.3 / 4.5 / 5.22 / 8.1 |
 | zai 服务端 | Express + SSE | ^4.21 |
 | zn-agent-core vendor | opencc 0.20.0(Bun 兼容(un-stripped)) | — |
-| 测试 | Vitest | ^4.1(zai)/ ^2.1(zn-agent-core,跨包勿混引) |
+| 测试 | Vitest | ^5.0.3(两个包已统一;vitest 5 起 `vite` 是必需 peer dep) |
 
 > 两个 workspace 包当前均为 `0.12.0`(`@zn-ai/zai` / `@zn-ai/zn-agent-core`,版本号同步 bump)。
 

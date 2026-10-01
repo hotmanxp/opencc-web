@@ -22,7 +22,13 @@ describe('fetchV2Tasks', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     // 装一个内存版的 localStorage 让 brief 给的测试代码可直接跑通.
-    ;(globalThis as any).localStorage = memoryStorage
+    // 必须用 defineProperty: happy-dom 环境下 globalThis.localStorage 是
+    // 只读 getter(vitest 5 起), 直接赋值会抛 "which has only a getter"。
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: memoryStorage,
+      configurable: true,
+      writable: true,
+    })
     localStorage.clear()
   })
 

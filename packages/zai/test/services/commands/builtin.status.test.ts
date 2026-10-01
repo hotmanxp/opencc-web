@@ -1,10 +1,10 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-beforeEach(() => {
-  vi.mock('../../../src/server/services/agentRuntime.js', () => ({
-    getCurrentSessionId: () => 'sess-abc',
-  }))
-})
+// vi.mock 会被提升到模块顶层执行, 必须写在顶层(不能包在 beforeEach 里,
+// vitest 5 起会直接报 "defined outside of the module's top level scope")。
+vi.mock('../../../src/server/services/agentRuntime.js', () => ({
+  getCurrentSessionId: () => 'sess-abc',
+}))
 
 describe('statusCommand', () => {
   it('payload includes cwdName derived from cwd', async () => {
