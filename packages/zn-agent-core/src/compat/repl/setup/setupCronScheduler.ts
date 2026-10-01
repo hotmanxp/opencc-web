@@ -47,18 +47,38 @@ export function setupScheduledTasks(opts: SetupScheduledTasksOpts): SetupSchedul
     // 路由到最后活跃的 session,微信永远收不到。
     // 用 `||` 而非 `??`: v2 调用方传 sessionId: '' 时也该 fallback (空串
     // 不是有效 sessionId, 不能用作 inbox 路由 key)。
-    const routeFire = (prompt: string, taskSessionId?: string) => {
-      const sid: string =
+    const routeFire = async (prompt: string, taskSessionId?: string) => {
+      let sid: string =
         taskSessionId ||
         opts.sessionId ||
         (globalThis as { __zaiCurrentSessionId?: string }).__zaiCurrentSessionId ||
         ''
 
+      // zai patch: 上面三级全空时 sid 为空,第 1 步的 enqueue 抛错被
+      // catch 吞掉,而 scheduler 照常写 lastFiredAt —— 净效果是
+      // 「定时任务到点没反应」。durable 任务必然踩中:cronTasks.ts 的
+      // writeCronTasks 把 sessionId 当 runtime-only strip 掉,进程重启后
+      // 也没有活跃 session 可回落 __zaiCurrentSessionId。
+      // 这里问 zai-server 要一个落点(本实例 cwd 下最近更新的会话)。
+      if (!sid) {
+        const resolveCronSession = (
+          globalThis as {
+            __zaiResolveCronSession?: () => string | null | Promise<string | null>
+          }
+        ).__zaiResolveCronSession
+        if (typeof resolveCronSession === 'function') {
+          try {
+            sid = (await resolveCronSession()) ?? ''
+          } catch (err) {
+            console.warn('[cron] session resolver failed:', err)
+          }
+        }
+      }
+
       // 1) vendor commandQueue fallback —— 尝试注入 sessionId 后入队。
-      //    若 sessionId 完全无法解析 (zai-server 冷启动无 active session),
-      //    zaiEnqueuePendingNotification 抛错被此处 try/catch 静默吞,
-      //    vendor commandQueue 路径失效 —— 这是设计选择:冷启动无 session 时
-      //    inbox 也跳过,fire 完全 no-op 而非污染全局 session 路由。
+      //    sid 仍为空(没有活跃 session 且 __zaiResolveCronSession 未装
+      //    —— vendor 单测 / 裸 CLI),zaiEnqueuePendingNotification 抛错
+      //    被此处 catch 吞掉,fire 退化为 no-op 而非污染全局 session 路由。
       try {
         zaiEnqueuePendingNotification({
           value: prompt,
@@ -104,18 +124,25 @@ export function setupScheduledTasks(opts: SetupScheduledTasksOpts): SetupSchedul
         }
       }
 
-      for (const cb of subs) cb(prompt)
+      for (const cb of subs) {
+        // subscriber 抛错不该让 fire 整体变成 unhandledRejection。
+        try {
+          cb(prompt)
+        } catch (err) {
+          console.warn('[cron] subscriber threw:', err)
+        }
+      }
     }
 
     scheduler = createCronScheduler({
       // zai patch (2026-09-13, cron-fire-routing): 用 onFireTask 拿完整 task,
       // 路由优先 task.sessionId(创建 session)。opts.onFireTask 由调用方
       // (daemon 等)提供时仍优先透传,保持 vendor 语义。
-      onFireTask: opts.onFireTask ?? (task => routeFire(task.prompt, task.sessionId)),
+      onFireTask: opts.onFireTask ?? (task => void routeFire(task.prompt, task.sessionId)),
       onFire: prompt => {
         // 只剩 missed-task 通知路径(onMissed 未提供时 vendor 走这里)。
         // 通知没有"创建 session"语义,按旧优先级路由。
-        routeFire(prompt)
+        void routeFire(prompt)
       },
       onMissed: opts.onMissed,
       isLoading: opts.isLoading,

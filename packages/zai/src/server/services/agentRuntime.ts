@@ -124,6 +124,25 @@ const permissionRegistry = new PermissionRegistry()
   getSessionInbox(sid).followup(sid, msg as InboxMessage)
 }
 
+// zai patch: durable cron 任务的投递目标解析。setupCronScheduler 的
+// routeFire 按 task.sessionId > opts.sessionId > __zaiCurrentSessionId
+// 三级 fallback 取 sessionId,全空时 prompt 被静默丢弃而 scheduler 照写
+// lastFiredAt(用户侧表现为「定时任务到点没反应」)。durable 任务必然踩中:
+// writeCronTasks 把 sessionId 当 runtime-only strip 掉,进程重启后又没有
+// 活跃 session 可回落。此 seam 兜底为本实例 cwd 下最近更新的会话。
+// 读侧复用 TranscriptStore.list() —— 它已按 mtime 倒序,且与侧边栏
+// 会话列表同源,不会出现「cron 投到了 UI 看不到的会话」。
+;(globalThis as any).__zaiResolveCronSession = async (): Promise<string | null> => {
+  if (!transcriptStore || !serverCwd) return null
+  try {
+    const sessions = await transcriptStore.list({ cwd: serverCwd })
+    return sessions[0]?.sessionId ?? null
+  } catch (err) {
+    console.warn('[cron] __zaiResolveCronSession failed:', err)
+    return null
+  }
+}
+
 // zai patch (2026-09-06): register zai's per-session SessionInbox drain as
 // a vendor pre-API-call reminder provider. The vendor query loop calls
 // `runExtraReminderProviders(getSessionId())` before each LLM API call
