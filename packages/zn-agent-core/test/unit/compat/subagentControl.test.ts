@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { z } from 'zod'
 import {
   DefaultBackgroundRuntime,
   JsonTaskStore,
@@ -6,7 +7,10 @@ import {
 import {
   setBackgroundRuntime,
 } from '../../../src/compat/background/registry.js'
-import { subagentControlTool } from '../../../src/compat/tools/opencc/subagentControl.js'
+import {
+  subagentControlTool,
+  wrapSubagentControlAsOpencc,
+} from '../../../src/compat/tools/opencc/subagentControl.js'
 import type { BackgroundTask } from '../../../src/compat/background/types.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -66,17 +70,21 @@ afterEach(async () => {
 })
 
 describe('subagent_control 工具 schema', () => {
-  it('name/description/parameters 结构正确', () => {
+  it('name/description 结构正确', () => {
     expect(subagentControlTool.name).toBe('subagent_control')
     expect(typeof subagentControlTool.description).toBe('string')
-    expect(subagentControlTool.parameters.action.enum).toEqual([
-      'send_message',
-      'interrupt_agent',
-      'list_agents',
-    ])
-    expect(subagentControlTool.parameters.action.required).toBe(true)
-    expect(typeof subagentControlTool.parameters.task_id.description).toBe('string')
-    expect(typeof subagentControlTool.parameters.message.description).toBe('string')
+  })
+
+  it('inputSchema 是 zod 且接受三个 action', () => {
+    const schema = subagentControlTool.inputSchema as z.ZodTypeAny
+    for (const action of ['send_message', 'interrupt_agent', 'list_agents']) {
+      expect(schema.safeParse({ action }).success).toBe(true)
+    }
+  })
+
+  it('inputSchema 拒绝未知 action', () => {
+    const schema = subagentControlTool.inputSchema as z.ZodTypeAny
+    expect(schema.safeParse({ action: 'nope' }).success).toBe(false)
   })
 })
 
@@ -87,102 +95,95 @@ describe('subagent_control 无 BackgroundRuntime', () => {
     delete (globalThis as Record<string, unknown>)['__zaiBackgroundRuntime']
   })
 
-  it('send_message → {ok:false, error:...}', async () => {
-    const res = await subagentControlTool.execute(
+  it('send_message → [error] BackgroundRuntime 未初始化', async () => {
+    const { output } = await subagentControlTool.call(
       { action: 'send_message', task_id: 't1', message: 'hi' },
       {},
     )
-    expect(res.ok).toBe(false)
-    expect(res.error).toMatch(/BackgroundRuntime 未初始化/)
+    expect(output).toMatch(/BackgroundRuntime 未初始化/)
   })
 
-  it('interrupt_agent → {ok:false, error:...}', async () => {
-    const res = await subagentControlTool.execute(
+  it('interrupt_agent → [error] BackgroundRuntime 未初始化', async () => {
+    const { output } = await subagentControlTool.call(
       { action: 'interrupt_agent', task_id: 't1' },
       {},
     )
-    expect(res.ok).toBe(false)
-    expect(res.error).toMatch(/BackgroundRuntime 未初始化/)
+    expect(output).toMatch(/BackgroundRuntime 未初始化/)
   })
 
-  it('list_agents → {ok:false, error:...}', async () => {
-    const res = await subagentControlTool.execute(
+  it('list_agents → [error] BackgroundRuntime 未初始化', async () => {
+    const { output } = await subagentControlTool.call(
       { action: 'list_agents' },
       {},
     )
-    expect(res.ok).toBe(false)
-    expect(res.error).toMatch(/BackgroundRuntime 未初始化/)
+    expect(output).toMatch(/BackgroundRuntime 未初始化/)
   })
 })
 
 describe('subagent_control send_message', () => {
   it('正常调用 → 透传给 bg.sendMessageToTask', async () => {
-    const res = await subagentControlTool.execute(
+    const { output } = await subagentControlTool.call(
       { action: 'send_message', task_id: 't1', message: 'hello' },
       {},
     )
-    expect(res.ok).toBe(true)
+    expect(output).toBe('ok')
     expect(fake.sendMessageToTask).toHaveBeenCalledTimes(1)
     expect(fake.sendMessageToTask).toHaveBeenCalledWith('t1', 'hello')
   })
 
-  it('bg 返回 {ok:false} → 透传 {ok:false}', async () => {
+  it('bg 返回 {ok:false} → 不报成功', async () => {
     fake.sendMessageToTask.mockResolvedValueOnce({ ok: false })
-    const res = await subagentControlTool.execute(
+    const { output } = await subagentControlTool.call(
       { action: 'send_message', task_id: 't1', message: 'hi' },
       {},
     )
-    expect(res.ok).toBe(false)
+    expect(output).not.toBe('ok')
   })
 
-  it('缺 task_id → {ok:false, error}', async () => {
-    const res = await subagentControlTool.execute(
-      { action: 'send_message', message: 'hi' } as never,
+  it('缺 task_id → [error] 且不调 bg', async () => {
+    const { output } = await subagentControlTool.call(
+      { action: 'send_message', message: 'hi' },
       {},
     )
-    expect(res.ok).toBe(false)
-    expect(res.error).toMatch(/task_id/)
+    expect(output).toMatch(/task_id/)
     expect(fake.sendMessageToTask).not.toHaveBeenCalled()
   })
 
-  it('缺 message → {ok:false, error}', async () => {
-    const res = await subagentControlTool.execute(
-      { action: 'send_message', task_id: 't1' } as never,
+  it('缺 message → [error]', async () => {
+    const { output } = await subagentControlTool.call(
+      { action: 'send_message', task_id: 't1' },
       {},
     )
-    expect(res.ok).toBe(false)
-    expect(res.error).toMatch(/message/)
+    expect(output).toMatch(/message/)
   })
 
-  it('bg 抛错 → {ok:false, error}', async () => {
+  it('bg 抛错 → [error] 携带原始 message', async () => {
     fake.sendMessageToTask.mockRejectedValueOnce(new Error('boom'))
-    const res = await subagentControlTool.execute(
+    const { output } = await subagentControlTool.call(
       { action: 'send_message', task_id: 't1', message: 'hi' },
       {},
     )
-    expect(res.ok).toBe(false)
-    expect(res.error).toBe('boom')
+    expect(output).toMatch(/boom/)
   })
 })
 
 describe('subagent_control interrupt_agent', () => {
   it('正常调用 → 透传给 bg.cancel', async () => {
-    const res = await subagentControlTool.execute(
+    const { output } = await subagentControlTool.call(
       { action: 'interrupt_agent', task_id: 't1' },
       {},
     )
-    expect(res.ok).toBe(true)
+    expect(output).toBe('ok')
     expect(fake.cancel).toHaveBeenCalledTimes(1)
     expect(fake.cancel).toHaveBeenCalledWith('t1')
   })
 
-  it('缺 task_id → {ok:false, error}', async () => {
-    const res = await subagentControlTool.execute(
-      { action: 'interrupt_agent' } as never,
+  it('缺 task_id → [error]', async () => {
+    const { output } = await subagentControlTool.call(
+      { action: 'interrupt_agent' },
       {},
     )
-    expect(res.ok).toBe(false)
-    expect(res.error).toMatch(/task_id/)
+    expect(output).toMatch(/task_id/)
   })
 })
 
@@ -208,13 +209,15 @@ describe('subagent_control list_agents', () => {
         parentSessionId: 'sess-B', // 不同 session,被 filter 掉
       },
     ] as BackgroundTask[])
-    const res = await subagentControlTool.execute(
+    const { output } = await subagentControlTool.call(
       { action: 'list_agents' },
       {},
     )
-    expect(res.agents).toEqual([
-      { id: 't1', status: 'running', description: 'do thing' },
-    ])
+    expect(output).toContain('task_id=t1')
+    expect(output).toContain('status=running')
+    expect(output).toContain('do thing')
+    // 不同 session 的任务不应出现
+    expect(output).not.toContain('t-other')
     // bg.list 无 filter 参数;parentSessionId 在 client 端 filter
     expect(fake.list).toHaveBeenCalledWith()
   })
@@ -229,15 +232,25 @@ describe('subagent_control list_agents', () => {
         eventCount: 0,
       },
     ] as BackgroundTask[])
-    const res = await subagentControlTool.execute(
+    const { output } = await subagentControlTool.call(
       { action: 'list_agents' },
       {},
     )
-    expect(res.agents).toEqual([{ id: 't2', status: 'completed' }])
+    expect(output).toContain('task_id=t2')
+    expect(output).toContain('status=completed')
     expect(fake.list).toHaveBeenCalledWith()
   })
 
-  it('description 缺省时不输出该字段', async () => {
+  it('空列表 → 明确告知无后台 agent', async () => {
+    fake.list.mockResolvedValueOnce([] as BackgroundTask[])
+    const { output } = await subagentControlTool.call(
+      { action: 'list_agents' },
+      {},
+    )
+    expect(output).toMatch(/没有后台子 agent/)
+  })
+
+  it('description 缺省时该列不出现', async () => {
     fake.list.mockResolvedValueOnce([
       {
         id: 't3',
@@ -247,12 +260,77 @@ describe('subagent_control list_agents', () => {
         eventCount: 0,
       },
     ] as BackgroundTask[])
-    const res = await subagentControlTool.execute(
+    const { output } = await subagentControlTool.call(
       { action: 'list_agents' },
       {},
     )
-    expect(res.agents).toEqual([{ id: 't3', status: 'failed' }])
-    expect(res.agents?.[0]).not.toHaveProperty('description')
+    expect(output).toContain('task_id=t3')
+    expect(output).toContain('status=failed')
+    // 渲染行是 `task_id=X status=Y` —— 无 description 时不带尾部 " —"
+    expect(output).not.toMatch(/status=failed\s+—/)
+  })
+})
+
+describe('subagent_control opencc 包装', () => {
+  it('name 透传给 vendor(inputSchema 刻意换成 v4,见下方回归测试)', () => {
+    const wrapped = wrapSubagentControlAsOpencc() as {
+      name: string
+      inputSchema: unknown
+    }
+    expect(wrapped.name).toBe('subagent_control')
+  })
+
+  it('call 走 zai executor 并把 output 包进 ToolResult.data', async () => {
+    fake.list.mockResolvedValueOnce([] as BackgroundTask[])
+    const wrapped = wrapSubagentControlAsOpencc() as {
+      call: (a: unknown, c: unknown) => Promise<{ data?: { output?: string } }>
+    }
+    const res = await wrapped.call({ action: 'list_agents' }, {})
+    expect(res.data?.output).toMatch(/没有后台子 agent/)
+  })
+
+  it('mapToolResultToToolResultBlockParam 直接透传 output 文本(不 JSON.stringify)', () => {
+    const wrapped = wrapSubagentControlAsOpencc() as {
+      mapToolResultToToolResultBlockParam: (
+        d: unknown,
+        id: string,
+      ) => { content: Array<{ text: string }> }
+    }
+    const block = wrapped.mapToolResultToToolResultBlockParam(
+      { output: '1. task_id=t1 status=running' },
+      'tu_1',
+    )
+    expect(block.content[0]!.text).toBe('1. task_id=t1 status=running')
+  })
+
+  it('inputSchema 是 zod v4(有 _zod.def),否则 opencc 序列化时炸 def', () => {
+    // Regression: zai-native makeTool 产出的 schema 是 zod v3(只有 _def),
+    // 而 opencc 的 zodToJsonSchema 走 zod/v4 的 toJSONSchema,读
+    // `schema._zod.def` —— v3 schema 进池会让每次 API 请求抛
+    // "Cannot read properties of undefined (reading 'def')"。
+    const wrapped = wrapSubagentControlAsOpencc() as {
+      inputSchema: { _zod?: { def?: unknown } }
+    }
+    expect(wrapped.inputSchema._zod?.def).toBeDefined()
+  })
+
+  it('v4 schema 能被 zod/v4 toJSONSchema 转成 JSON Schema', async () => {
+    const { toJSONSchema } = await import('zod/v4')
+    const wrapped = wrapSubagentControlAsOpencc() as {
+      inputSchema: Parameters<typeof toJSONSchema>[0]
+    }
+    const json = toJSONSchema(wrapped.inputSchema)
+    expect(json.properties).toHaveProperty('action')
+    expect(json.properties).toHaveProperty('task_id')
+    expect(json.properties).toHaveProperty('message')
+  })
+
+  it('非法 action → [error] 前缀,不是抛异常', async () => {
+    const { output } = await subagentControlTool.call(
+      { action: 'not_a_real_action' },
+      {},
+    )
+    expect(output).toMatch(/^\[error\]/)
   })
 })
 

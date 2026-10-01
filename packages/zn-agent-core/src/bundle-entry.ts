@@ -343,6 +343,12 @@ export type {
 // then sees no CliAgent tool.
 export { wrapCliAgentToolAsOpencc } from './compat/tools/opencc/CliAgentTool.js'
 
+// Same story as CliAgent above: subagent_control is only referenced inside
+// getAllBaseTools' array literal, so without a main-entry export esbuild
+// tree-shakes the module and the wrap function is undefined at runtime —
+// the model then sees no subagent_control tool at all.
+export { wrapSubagentControlAsOpencc } from './compat/tools/opencc/subagentControl.js'
+
 // zai patch (2026-09-10, tf-mynh1twy): plugin command channel — zai's registry
 // fill site (services/commands/registry.ts) registers vendor-loaded plugin
 // commands (source === 'plugin') into the compat command registry so slashList

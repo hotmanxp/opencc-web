@@ -642,10 +642,12 @@ function readZaiCurrentSessionIdBridge(): string | undefined {
 
 /**
  * Wrap SpawnAgent as an opencc-compatible Tool so vendor's `query()` can
- * call it. Registered in `getOpenccBuiltinTools()` (compat/tools/opencc/
- * builtin.ts) alongside AskUserQuestion / Skill wrappers. Reads the
- * registry + session bridge at CALL time (globalThis), so the cached
- * wrapper stays correct across concurrent sessions.
+ * call it. ⚠️ 未接线:只有 `test/unit/compat/SpawnAgentTool.test.ts` 引用
+ * `wrapSpawnAgentToolAsOpencc()`,没有任何生产注册点。要启用需在
+ * `opencc-src/tools.ts` 的 `getAllBaseTools()` 里加入。
+ *
+ * Reads the registry + session bridge at CALL time (globalThis), so the
+ * cached wrapper stays correct across concurrent sessions.
  *
  * The default wrapper's `mapToolResultToToolResultBlockParam` JSON-stringifies
  * the data, which would dump the raw async_launched shape at the LLM. We

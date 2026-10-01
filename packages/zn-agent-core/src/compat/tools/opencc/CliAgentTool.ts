@@ -642,10 +642,10 @@ function readZaiCurrentSessionIdBridge(): string | undefined {
 
 /**
  * Wrap CliAgent as an opencc-compatible Tool so vendor's `query()` can
- * call it. Registered in `getOpenccBuiltinTools()` (compat/tools/opencc/
- * builtin.ts) alongside AskUserQuestion / Skill wrappers. Reads the
- * registry + session bridge at CALL time (globalThis), so the cached
- * wrapper stays correct across concurrent sessions.
+ * call it. Registered directly in vendor's own base-tool list
+ * (`opencc-src/tools.ts` `getAllBaseTools()`), alongside the vendor tools.
+ * Reads the registry + session bridge at CALL time (globalThis), so the
+ * cached wrapper stays correct across concurrent sessions.
  *
  * The default wrapper's `mapToolResultToToolResultBlockParam` JSON-stringifies
  * the data, which would dump the raw async_launched shape at the LLM. We

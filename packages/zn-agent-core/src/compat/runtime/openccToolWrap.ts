@@ -313,8 +313,8 @@ export function wrapAsOpenccTool(
 
     // vendor's required `prompt()` (see the interface doc above). zai
     // tools carry their full description as a static string in
-    // `description: '...'` (see compat/tools/index.ts:431-488 for all
-    // the buildDefaultTools entries). Vendor tools like Bash consume
+    // `description: '...'` (see the makeTool() entries in
+    // compat/tools/index.ts). Vendor tools like Bash consume
     // the `options` arg (getToolPermissionContext, tools, agents) to
     // render context-aware descriptions that mention allowed subcommands
     // or current sandbox state — zai tools don't have that pattern, so

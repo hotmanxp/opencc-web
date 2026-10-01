@@ -88,10 +88,10 @@ export declare const skillChangeDetector: {
   subscribe(listener: () => void): () => void
 }
 
-// Default tool registry (Phase 4): buildDefaultTools() returns the chat-path
-// tool set (Bash/Read/Edit/Write/AskUserQuestion/Skill) with stub call()
-// implementations; tool execution lands in Phase 5.
-export { buildDefaultTools, compatToolsToModelCallerTools } from './compat/tools/index.js'
+// zai-native AskUserQuestion executor. The tool the model actually calls is
+// vendor's, wrapped by compat/tools/opencc/AskUserQuestionTool.ts and injected
+// at opencc-src/server/createHeadlessContext-impl.ts:290.
+export { askUserQuestionTool } from './compat/tools/index.js'
 
 // Compact session (Batch 3b)
 export { compactSession } from './compat/runtime/compactService.js'

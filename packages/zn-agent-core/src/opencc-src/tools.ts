@@ -20,6 +20,11 @@ import { SnipTool } from './tools/SnipTool/SnipTool.js'
 // Kept as a function import so the wrapper reads the registry at call-time
 // (initAgentRuntime registers providers after zai-server boots).
 import { wrapCliAgentToolAsOpencc } from '../compat/tools/opencc/CliAgentTool.js'
+// zai patch: subagent_control — 父 agent 发送指令到后台子 agent
+// (send_message) / 中止 (interrupt_agent) / 列举 (list_agents)。
+// 走 globalThis bridge 拿 BackgroundRuntime,注册在 base tools 里,
+// 因此所有走全量池的 main agent(default / task-factory)都能看到。
+import { wrapSubagentControlAsOpencc } from '../compat/tools/opencc/subagentControl.js'
 // Dead code elimination: conditional import for internal-only tools
 /* eslint-disable @typescript-eslint/no-require-imports */
 const REPLTool = null
@@ -199,6 +204,10 @@ export function getAllBaseTools(): Tools {
     // plain object spread with no external side effects; lazy is unnecessary
     // because getAllBaseTools is invoked per-query (re-reads registry state).
     wrapCliAgentToolAsOpencc() as Tool,
+    // zai patch: subagent_control — 主 agent 侧的后端子 agent 控制面。
+    // 与 BackgroundAgentTool(启动端)配对:后者派活,前者投递后续指令 /
+    // 中止 / 列举。读 globalThis bridge,所以无需每 query 重建状态。
+    wrapSubagentControlAsOpencc() as Tool,
     ...bgTools,
     TaskOutputTool,
     BashTool,
@@ -300,6 +309,8 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
       // in the simple-mode REPL tool pool too so the model can route
       // external CLI subagents via subagent_type='opencc'|'dsh'.
       replSimple.push(wrapCliAgentToolAsOpencc() as Tool)
+      // zai patch: subagent_control mirrors the same treatment.
+      replSimple.push(wrapSubagentControlAsOpencc() as Tool)
       return filterToolsByDenyRules(replSimple, permissionContext)
     }
     const simpleTools: Tool[] = [BashTool, FileReadTool, FileEditTool]
@@ -315,6 +326,9 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
     // available in simple-mode even outside coordinator mode so worker
     // shells can spawn external CLI subagents when given a prompt.
     simpleTools.push(wrapCliAgentToolAsOpencc() as Tool)
+    // zai patch: subagent_control follows the same rule — a worker shell
+    // that can spawn a CLI subagent also needs to message / cancel it.
+    simpleTools.push(wrapSubagentControlAsOpencc() as Tool)
     return filterToolsByDenyRules(simpleTools, permissionContext)
   }
 
