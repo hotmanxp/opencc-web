@@ -26,7 +26,8 @@ import { tmpdir } from 'node:os'
  * 关键边界:
  *   - 无 bg(纯 core 单测未初始化) → 所有 action 返回 no-op
  *     (error 信息标识原因,模型可读)
- *   - list_agents 优先用 `__zaiCurrentSessionId` 桥;无桥时退化为 bg.list()
+ *   - list_agents 的 sessionId 走 ALS 优先 / globalThis 兜底;两者都拿不到
+ *     → 直接拒绝,不返回全量(否则跨会话泄漏)
  *   - send_message / interrupt_agent 缺 task_id → {ok:false, error}
  *   - send_message 缺 message → {ok:false, error}
  */
@@ -222,26 +223,76 @@ describe('subagent_control list_agents', () => {
     expect(fake.list).toHaveBeenCalledWith()
   })
 
-  it('无 currentSessionId → 退化为 bg.list() 输出全量', async () => {
+  it('SDK ALS 的 sessionId 优先于进程级 globalThis(并发 session 不串)', async () => {
+    // Regression: `__zaiCurrentSessionId` 是进程级单例,任何 session 发
+    // prompt 都会覆写它。并发两个 session 时,A 的 list_agents 若只读
+    // globalThis 就会解析到 B 的 sessionId —— 既泄漏 B 的 agent,
+    // 又看不见自己的。
+    //
+    // 生产的包裹点是 vendor 的 runWithSdkContext(createOpenccRuntime-impl
+    // 每轮 stream.next() 都在其中),不是 compat/runWithSessionId。
+    const { runWithSdkContext } = await import(
+      '../../../src/opencc-src/bootstrap/state.js'
+    )
+    // 故意把 globalThis 设成"别的 session"
+    ;(globalThis as Record<string, unknown>)['__zaiCurrentSessionId'] = 'sess-B'
     fake.list.mockResolvedValueOnce([
       {
-        id: 't2',
-        status: 'completed',
+        id: 't-mine',
+        status: 'running',
+        input: { prompt: 'x' },
+        createdAt: 0,
+        eventCount: 0,
+        parentSessionId: 'sess-A',
+      },
+      {
+        id: 't-theirs',
+        status: 'running',
         input: { prompt: 'y' },
         createdAt: 0,
         eventCount: 0,
+        parentSessionId: 'sess-B',
+      },
+    ] as BackgroundTask[])
+
+    const { output } = await runWithSdkContext(
+      {
+        sessionId: 'sess-A',
+        sessionProjectDir: null,
+        cwd: process.cwd(),
+        originalCwd: process.cwd(),
+      } as never,
+      () => subagentControlTool.call({ action: 'list_agents' }, {}),
+    )
+    // ALS 赢了:拿到 A 自己的 agent,看不到 B 的
+    expect(output).toContain('task_id=t-mine')
+    expect(output).not.toContain('t-theirs')
+  })
+
+  it('无 sessionId → 拒绝列出,而不是退化成全量(防跨会话泄漏)', async () => {
+    fake.list.mockResolvedValueOnce([
+      {
+        id: 't-other-session',
+        status: 'running',
+        input: { prompt: 'y' },
+        createdAt: 0,
+        eventCount: 0,
+        parentSessionId: 'sess-SOMEONE-ELSE',
       },
     ] as BackgroundTask[])
     const { output } = await subagentControlTool.call(
       { action: 'list_agents' },
       {},
     )
-    expect(output).toContain('task_id=t2')
-    expect(output).toContain('status=completed')
-    expect(fake.list).toHaveBeenCalledWith()
+    expect(output).toMatch(/解析不到当前 sessionId/)
+    // 关键: 绝不能把别的 session 的 task_id 吐给模型
+    expect(output).not.toContain('t-other-session')
+    // 解析不到 session 时连 bg.list 都不该调
+    expect(fake.list).not.toHaveBeenCalled()
   })
 
   it('空列表 → 明确告知无后台 agent', async () => {
+    ;(globalThis as Record<string, unknown>)['__zaiCurrentSessionId'] = 'sess-A'
     fake.list.mockResolvedValueOnce([] as BackgroundTask[])
     const { output } = await subagentControlTool.call(
       { action: 'list_agents' },
@@ -251,6 +302,7 @@ describe('subagent_control list_agents', () => {
   })
 
   it('description 缺省时该列不出现', async () => {
+    ;(globalThis as Record<string, unknown>)['__zaiCurrentSessionId'] = 'sess-A'
     fake.list.mockResolvedValueOnce([
       {
         id: 't3',
@@ -258,6 +310,7 @@ describe('subagent_control list_agents', () => {
         input: { prompt: 'z' },
         createdAt: 0,
         eventCount: 0,
+        parentSessionId: 'sess-A',
       },
     ] as BackgroundTask[])
     const { output } = await subagentControlTool.call(

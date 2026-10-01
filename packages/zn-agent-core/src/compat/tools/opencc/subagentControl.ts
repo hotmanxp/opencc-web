@@ -1,8 +1,8 @@
 /**
- * subagent_control — 父 agent 控制后台子 agent(对齐 DSH tool-subagent-control)。
- *   send_message     → bg.sendMessageToTask(taskId, prompt)(子 agent 下一轮 turn 消费)
+ * subagent_control — 父 agent 控制后台子 agent。
+ *   send_message     → bg.sendMessageToTask(taskId, prompt)
  *   interrupt_agent  → bg.cancel(taskId)(仅中止当前 turn,幂等)
- *   list_agents      → bg.list({parentSessionId})
+ *   list_agents      → bg.list() 后按 parentSessionId 客户端过滤
  *
  * 走 globalThis bridge(`__zaiBackgroundRuntime`)拿 bg;无 bg(纯
  * zn-agent-core 单测 / vendor CLI 直跑)时所有 action 走 no-op,行为对齐
@@ -13,8 +13,18 @@
  *
  * zai patch (HRMSV3-ZN-WEBSITE#668):开箱即用 send_message 投递;任务
  * 不存在 / 已终态时 send_message 返回 {ok:false},模型看到错误再决定
- * 是否重试。list_agents 当前 session 通过 `__zaiCurrentSessionId` 桥
- * 拿(对齐 `agentTaskBridge` / `subagentReport` 既有模式)。
+ * 是否重试。
+ *
+ * 语义澄清(读代码时容易误判的两点):
+ *   - send_message 只是**入队**。`DefaultBackgroundRuntime.runOne` 是
+ *     单次执行、只在开头读一次 `taskInbox`,所以正在跑的那一轮不会被打断,
+ *     消息要等这个 task 结束、下一次 runOne 启动才被消费。
+ *   - list_agents 的 sessionId 走 ALS 优先、globalThis 兜底(见
+ *     `readCurrentSessionId`);解析不到就直接拒绝,不返回全量。
+ *
+ * 历史:曾有一个 dsh 分支(`kernel.getSeam('subagent')`)与 DSH 内核并存。
+ * DSH 集成 2026-09-14 废弃后 `getKernelAdapter` 导出已不存在,该 require
+ * 恒失败被 catch 吞掉 —— 分支实际从未生效,已删。
  */
 import { z } from 'zod'
 import { z as z4 } from 'zod/v4'
@@ -23,6 +33,9 @@ import type { BackgroundTask } from '../../background/types.js'
 import { getBackgroundRuntime } from '../../background/registry.js'
 import { makeTool } from '../makeTool.js'
 import { wrapWithOverrides } from '../../runtime/openccToolWrap.js'
+import {
+  getSdkSessionId,
+} from '../../../opencc-src/bootstrap/state.js'
 
 /**
  * zai patch:必须从 globalThis 读 —— opencc-src/server 的 bundle 由
@@ -46,39 +59,40 @@ function tryGetBg(): BackgroundRuntime | null {
   }
 }
 
+/**
+ * 解析发起本次调用的 sessionId。
+ *
+ * 优先取 vendor 的 SDK ALS(`opencc-src/bootstrap/state.ts` 的
+ * `getSdkSessionId()` —— 读 `sdkContextStorage`,**没有值就返回
+ * undefined,绝不退回进程级 STATE**)。生产路径每次
+ * `createOpenccRuntime-impl.ts:1023` 的 `stream.next()` 都在
+ * `runWithSdkContext({ sessionId: input.sessionId, ... })` 内跑,
+ * 工具执行发生在同一个 async chain,所以这里能拿到本次调用真正的
+ * sessionId。
+ *
+ * 为什么不只读 globalThis: `__zaiCurrentSessionId` 是**进程级单例**,
+ * zai-server 多 session 共享进程,任何 session 发 prompt 都会覆写它。
+ * 并发两个 session 时,A 的 list_agents 会读到 B 的 sessionId ——
+ * 既泄漏 B 的子 agent,又看不见自己的。
+ *
+ * 为什么不读 vendor 的 `getSessionId()`: 它在 ALS 缺值时 fallback 到
+ * `STATE.sessionId`,那是另一个进程级单例(bootstrap/state.ts:530/570
+ * 写的),正是我们要避开的。`getSdkSessionId()` 是同文件里为此新加的
+ * 纯 ALS 访问器。
+ *
+ * 为什么不读 `compat/runWithSessionId.ts` 的 ALS: 那套只被
+ * `createReplSession.ts:392` 包裹,而 zai 生产主链路走
+ * `createOpenccRuntime` → QueryEngine,压根不经过 createReplSession。
+ * 在生产环境读它永远拿到 undefined。
+ *
+ * ALS 之外(纯 core 单测 / 未起 query 的轻量运行时)用 globalThis 兜底。
+ */
 function readCurrentSessionId(): string | undefined {
+  const als = getSdkSessionId()
+  if (als) return als
   const v = (globalThis as { __zaiCurrentSessionId?: string | null | undefined })
     .__zaiCurrentSessionId
   return typeof v === 'string' && v.length > 0 ? v : undefined
-}
-
-/**
- * zai-side 通过 seamRegistry 访问 subagent seam,不再走 globalThis 桥。
- * dsh factory 在 initDshRuntime 时把 subagent seam 注册进 kernel;
- * 本 compat 工具在 dsh 模式下通过 `kernel.getSeam('subagent')` 获取,
- * opencc 模式下 fallback 到 BackgroundRuntime。
- */
-interface DshSubagentControlBridge {
-  list: (parentSessionId?: string) => Promise<Array<{
-    id: string
-    status: string
-    description?: string
-  }>>
-  cancel: (taskId: string) => Promise<{ ok: boolean }>
-  sendMessage: (taskId: string, prompt: string) => Promise<{ ok: boolean }>
-}
-
-/** Dynamic import of getKernelAdapter from zai's agentRuntime (same process at runtime). */
-async function getDshSubagentControl(): Promise<DshSubagentControlBridge | null> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getKernelAdapter } = require('../../../../zai/src/server/services/agentRuntime.js')
-    const adapter = getKernelAdapter()
-    if (!adapter.getSeam) return null
-    return adapter.getSeam('subagent') as unknown as DshSubagentControlBridge
-  } catch {
-    return null
-  }
 }
 
 export interface SubagentControlInput {
@@ -127,40 +141,6 @@ function asError(err: unknown): string {
 async function executeImpl(
   input: SubagentControlInput,
 ): Promise<SubagentControlOutput> {
-  // dsh-019→Task 19: 通过 kernel.getSeam('subagent') 拿 dsh subagent seam;
-  // seam 未注册(opencc 模式)时 fallback 到 BackgroundRuntime。
-  const dsh = await getDshSubagentControl()
-  if (dsh) {
-    if (input.action === 'send_message') {
-      if (!input.task_id || !input.message) {
-        return { ok: false, error: 'send_message 需要 task_id 和 message' }
-      }
-      try {
-        return await dsh.sendMessage(input.task_id, input.message)
-      } catch (err) {
-        return { ok: false, error: asError(err) }
-      }
-    }
-    if (input.action === 'interrupt_agent') {
-      if (!input.task_id) {
-        return { ok: false, error: 'interrupt_agent 需要 task_id' }
-      }
-      try {
-        return await dsh.cancel(input.task_id)
-      } catch (err) {
-        return { ok: false, error: asError(err) }
-      }
-    }
-    // list_agents
-    const sessionId = readCurrentSessionId()
-    try {
-      const agents = await dsh.list(sessionId)
-      return { agents }
-    } catch (err) {
-      return { ok: false, error: asError(err) }
-    }
-  }
-
   const bg = tryGetBg()
   if (!bg) {
     return {
@@ -200,11 +180,21 @@ async function executeImpl(
   // 再按 parentSessionId 过滤。如果将来 TaskListFilter 扩字段,可改为
   // bg.list({parentSessionId})。
   const sessionId = readCurrentSessionId()
+  if (!sessionId) {
+    // 解析不到 session 就**不能**退化成返回全量: 那是跨会话泄漏 ——
+    // 模型会看到别的 session 的子 agent id,进而用 send_message /
+    // interrupt_agent 去动别人的任务。宁可直接拒绝。
+    return {
+      ok: false,
+      error:
+        '[subagent_control] 解析不到当前 sessionId,拒绝列出全量任务 ' +
+        '(否则会跨会话泄漏其它 session 的子 agent)。' +
+        '若确认本就没有后台子 agent,可忽略此错误。',
+    }
+  }
   try {
     const all: BackgroundTask[] = await bg.list()
-    const tasks = sessionId
-      ? all.filter((t) => t.parentSessionId === sessionId)
-      : all
+    const tasks = all.filter((t) => t.parentSessionId === sessionId)
     return {
       agents: tasks.map((t) => ({
         id: t.id,

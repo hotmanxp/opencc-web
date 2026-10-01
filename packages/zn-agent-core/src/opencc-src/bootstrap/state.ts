@@ -499,6 +499,25 @@ export function getMemoryCwd(): string | undefined {
   return getSdkContext()?.memoryCwd
 }
 
+/**
+ * zai patch: sessionId scoped to the current async chain, **no STATE
+ * fallback**. Same contract as `getMemoryCwd` — undefined means "no SDK
+ * context active", letting the caller decide what to do instead of
+ * silently receiving the process-global `STATE.sessionId`.
+ *
+ * Why this exists: `getSessionId()` falls back to `STATE.sessionId`, a
+ * process-wide singleton that any session's prompt overwrites. Callers
+ * that must not cross sessions (e.g. subagent_control's per-session task
+ * filter) need to tell "mine" from "whoever ran last", and only this
+ * accessor can. Production wraps every `stream.next()` in
+ * `runWithSdkContext({ sessionId })` — see
+ * `server/createOpenccRuntime-impl.ts:1023` — so inside a query this
+ * always resolves.
+ */
+export function getSdkSessionId(): SessionId | undefined {
+  return getSdkContext()?.sessionId
+}
+
 export function getSessionId(): SessionId {
   const ctx = getSdkContext()
   return ctx?.sessionId ?? STATE.sessionId
