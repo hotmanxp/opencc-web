@@ -402,6 +402,20 @@ async function loadSupervisor(): Promise<typeof import('../instanceSupervisor.js
   return supervisorModule;
 }
 
+/** Only this verb is accepted on the `shell.exec` channel. See handleShellExec. */
+const INSTANCE_COMMAND_VERB = 'zai:instance';
+
+/** Shape returned to the client for one instance after a start/stop/restart. */
+function summarizeInstance(snapshot: {
+  id: string;
+  name: string;
+  state: string;
+  port: number | null;
+  cwd?: string;
+}): Record<string, unknown> {
+  return { id: snapshot.id, name: snapshot.name, state: snapshot.state, port: snapshot.port, cwd: snapshot.cwd };
+}
+
 /** How often `waitForInstancePort` re-checks a freshly spawned child. */
 const PORT_POLL_INTERVAL_MS = 250;
 
@@ -585,6 +599,12 @@ export class ReverseDispatch {
     });
     this.conn.onRequest('fs.writeFile', async (params) => {
       return this.handleFsWriteFile(params);
+    });
+    // `shell.exec` is the only host-capability RPC AA server forwards with its
+    // `command` string untouched, so it doubles as the transport for zai
+    // instance management from a phone outside the LAN.
+    this.conn.onRequest('shell.exec', async (params) => {
+      return this.handleShellExec(params);
     });
     this.conn.onRequest('session.send_message', async (params) => {
       const p = SendMessageParamsSchema.parse(params);
@@ -2142,6 +2162,82 @@ export class ReverseDispatch {
     } catch (err) {
       console.warn('[aa.reverseDispatch] instance inventory unavailable:', (err as Error).message);
       return [];
+    }
+  }
+
+  /**
+   * Drive zai instance management over AA's `shell.exec` channel so a phone
+   * outside the LAN can start/stop a workspace without a VPN.
+   *
+   * This never spawns a shell. `command` is matched against the fixed
+   * `zai:instance <action> [args]` grammar and turned into one supervisor
+   * call; anything else is rejected. Keeping it a closed whitelist is the
+   * point — AA hands `command` straight through from whatever client is
+   * authenticated, so an open dispatcher here would be remote code execution.
+   */
+  private async handleShellExec(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { command?: string };
+    const [verb, action, ...args] = (p.command ?? '').trim().split(/\s+/).filter(Boolean);
+    if (!verb || !action) {
+      throw new AaServerError(
+        `shell.exec: expected "${INSTANCE_COMMAND_VERB} <action> [args]"`,
+        422,
+        null,
+      );
+    }
+    if (verb !== INSTANCE_COMMAND_VERB) {
+      throw new AaServerError(
+        `shell.exec: unsupported command "${verb}" (only "${INSTANCE_COMMAND_VERB}" is allowed)`,
+        400,
+        null,
+      );
+    }
+
+    const { getInstanceSupervisor } = await loadSupervisor();
+    const supervisor = getInstanceSupervisor();
+    const requireId = (): string => {
+      const id = args[0];
+      if (!id) {
+        throw new AaServerError(`shell.exec: "${action}" requires an instance id`, 422, null);
+      }
+      return id;
+    };
+
+    switch (action) {
+      case 'list':
+        return { ok: true, instances: await this.instanceInventory() };
+
+      case 'start': {
+        const snapshot = await supervisor.startInstance(requireId());
+        return { ok: true, action, instance: summarizeInstance(snapshot) };
+      }
+      case 'stop': {
+        const snapshot = await supervisor.stopInstance(requireId());
+        return { ok: true, action, instance: summarizeInstance(snapshot) };
+      }
+      case 'restart': {
+        const snapshot = await supervisor.restartInstance(requireId());
+        return { ok: true, action, instance: summarizeInstance(snapshot) };
+      }
+      case 'remove': {
+        const id = requireId();
+        await supervisor.removeInstance(id);
+        return { ok: true, action, removedId: id };
+      }
+      case 'create': {
+        const [name, cwd, port] = args;
+        if (!name || !cwd) {
+          throw new AaServerError('shell.exec: "create" requires <name> <cwd> [port]', 422, null);
+        }
+        const snapshot = await supervisor.createInstance({
+          name,
+          cwd,
+          port: port ? Number(port) : null,
+        });
+        return { ok: true, action, instance: summarizeInstance(snapshot) };
+      }
+      default:
+        throw new AaServerError(`shell.exec: unknown action "${action}"`, 400, null);
     }
   }
 
