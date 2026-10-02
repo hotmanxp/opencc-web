@@ -598,6 +598,75 @@ describe('INBOX: runNextInQueue 消费', () => {
     }
   })
 
+  it('HTTP prompt 与 inbox next-turn 同时就绪时,通知不得被丢弃', async () => {
+    // runNextInQueue 曾经无条件 consumeNextTurn(把消息 shift 出车道), 再让
+    // httpCmd 优先 —— httpCmd 胜出时 inboxMsg 无人使用, 子 agent 的
+    // <task-notification> 被静默吃掉(既不落盘也不送达)。真实触发: turn 结束
+    // 前 busyFlush.promoteNextStepToNextTurn 刚把通知搬进 nextTurn, 同一 tick
+    // 用户消息也在 HTTP 队列里, finally 那一次 runNextInQueue 同时看到两条。
+    // 修复后 HTTP 仍优先, 但消息留在 nextTurn 等下一轮 drain。
+    const releases: Array<() => void> = []
+    let callIdx = 0
+    hangingQuery.mockImplementation(() => {
+      callIdx++
+      return (async function* () {
+        yield { type: 'noop' }
+        await new Promise<void>((r) => releases.push(r))
+      })()
+    })
+
+    const app = buildApp()
+    // 模块级 sessionQueues / sessionRunning 会跨测试残留,用独立 sid 隔离。
+    const sid = `sess-loss-${Math.random().toString(36).slice(2, 8)}`
+    const settle = async () => {
+      await new Promise((r) => setImmediate(r))
+      await new Promise((r) => setImmediate(r))
+      await new Promise((r) => setTimeout(r, 20))
+    }
+
+    const r1 = await request(app)
+      .post('/api/agent/prompt')
+      .send({ prompt: 'first', sessionId: sid })
+    expect(r1.body.queued).toBe(false)
+    await settle() // 等第一条真的起跑
+
+    // 2) 用户消息排队(wasIdle=false,不启动新 turn)
+    const r2 = await request(app)
+      .post('/api/agent/prompt')
+      .send({ prompt: 'from http', sessionId: sid })
+    expect(r2.body.queued).toBe(true)
+
+    // 3) 子 agent 完成 → busy 降级入 nextStep
+    const notice = 'NOTICE-CONTENT-abc123'
+    getSessionInbox(sid).followup(sid, inboxMsg('inbox-notice', notice))
+    // 4) turn 结束时的 promote:搬进 nextTurn(此刻 busy 仍为 true,wake 被锁)
+    getSessionInbox(sid).promoteNextStepToNextTurn(sid)
+
+    // 5) 释放父 turn → finally 触发那一次 runNextInQueue
+    expect(releases).toHaveLength(1)
+    releases[0]!()
+    await settle()
+
+    const prompts = () =>
+      hangingQuery.mock.calls.map((c) => (c[0] as { prompt?: string }).prompt)
+
+    // 用户消息优先送达(HTTP 优先级语义不变)
+    expect(prompts()).toContain('from http')
+    // 关键回归断言: 通知仍在车道里, 没被 httpCmd 分支吃掉
+    expect(getSessionInbox(sid).peekNextTurnCount(sid)).toBe(1)
+    expect(prompts().some((p) => (p ?? '').includes(notice))).toBe(false)
+
+    // 6) 用户 turn 结束后, 通知作为下一轮 prompt 送达
+    expect(releases).toHaveLength(2)
+    releases[1]!()
+    await settle()
+
+    expect(prompts().some((p) => (p ?? '').includes(notice))).toBe(true)
+
+    __clearSessionRunningForTests(sid)
+    disposeSessionInbox(sid)
+  })
+
   it('busy followup 入 next-step,turn 结束 finally promote 到 nextTurn + 起第二轮 turn', async () => {
     let release!: () => void
     const releaseP = new Promise<void>((r) => {

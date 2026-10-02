@@ -988,7 +988,13 @@ async function runNextInQueue(sid: string): Promise<void> {
   if (sessionRunning.has(sid)) return
 
   const httpCmd = nextHttpPrompt(sid)
-  const inboxMsg = getSessionInbox(sid).consumeNextTurn(sid)
+  // zai patch (2026-10-02, subagent-notification-loss): 原来是无条件
+  // consumeNextTurn() 把消息 shift 出 nextTurn 车道, 再让 httpCmd 优先 ——
+  // httpCmd 胜出时 inboxMsg 无人使用, 子 agent 的 <task-notification> 被静默
+  // 丢弃 (既不落盘也不送达, 永久丢失)。真实触发: turn 结束的
+  // promoteNextStepToNextTurn 刚把通知搬进 nextTurn, 同一 tick 用户消息也在
+  // HTTP 队列里。改成只在真的要消费时才 shift, HTTP 优先级语义不变。
+  const inboxMsg = httpCmd ? null : getSessionInbox(sid).consumeNextTurn(sid)
 
   let cmd: PendingPrompt | null
   if (httpCmd) {
