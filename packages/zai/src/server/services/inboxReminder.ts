@@ -289,6 +289,14 @@ function decodeXmlEntities(s: string): string {
  * fields, no XML, no embedded newlines.
  *
  *   - subagent `${taskId}` (${agentType}${description ? ', ' + description : ''}) — ${status}: ${summary}
+ *
+ * zai patch (2026-10-02, subagent-result-inline): when the notification
+ * carries a `<result>`, it is appended as an indented, bounded block. It used
+ * to be parsed and then dropped, so a mid-turn drain handed the model nothing
+ * but "completed — use TaskOutput", forcing a second round trip to fetch a
+ * result that had already been sitting in the notification all along. The
+ * reminder is ephemeral (never persisted), so a dropped result is lost for
+ * good once the turn ends.
  */
 export function renderParsedTaskNotification(p: ParsedTaskNotification): string {
   const meta: string[] = []
@@ -296,7 +304,29 @@ export function renderParsedTaskNotification(p: ParsedTaskNotification): string 
   if (p.description) meta.push(p.description)
   const metaStr = meta.length > 0 ? ` (${meta.join(', ')})` : ''
   const summary = collapseWhitespace(p.summary)
-  return `- subagent \`${p.taskId}\`${metaStr} - ${p.status}: ${summary}`
+  const bullet = `- subagent \`${p.taskId}\`${metaStr} - ${p.status}: ${summary}`
+  if (!p.result) return bullet
+  return `${bullet}\n  result: ${truncateForReminder(neutralizeBlockTerminator(p.result))}`
+}
+
+/**
+ * Keep a decoded field value readable while making sure it cannot close the
+ * outer `<system-reminder>` block.
+ *
+ * `extractTag` decodes entities on read, so `p.result` is back to raw text
+ * with live `<` / `>`. Blanket entity-escaping is deliberately NOT used here:
+ * the 2026-09-06 design note records that `&lt;div&gt;`-style text is materially
+ * harder for the model to read, and the renderer already emits decoded,
+ * entity-free values for every other field. Escaping the whole result would
+ * regress that for the one field the model most needs to read.
+ *
+ * So only the terminator is neutralized, with the conventional `<\/` form the
+ * model already parses correctly from JSON/JS strings. Nested tags inside a
+ * report are left alone — the same exposure `summary` and `description`
+ * already carry today.
+ */
+function neutralizeBlockTerminator(s: string): string {
+  return s.replace(/<\/system-reminder/gi, '<\\/system-reminder')
 }
 
 /**
