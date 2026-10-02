@@ -101,6 +101,21 @@ export const CreateTerminalSchema = z.object({
   cwd: z.string().min(1).optional(),
 })
 
+/**
+ * 一个已解析好的 shell profile —— 绕过 `shellPath` 的候选白名单。
+ *
+ * **刻意不做成 `CreateTerminalSchema` 的字段**：那个 schema 的解析结果直接
+ * 喂给 `POST /api/terminal/create`，而 zai 开了 `--lan` 后该路由在局域网可达
+ * —— 多一个可写字段就等于多一条任意命令执行路径。所以它只是进程内的一个类型，
+ * 只有已经在信任边界内的调用方（AA connector）能构造，见
+ * `TerminalService.createWithProfile`。
+ */
+export interface TrustedShellProfile {
+  path: string
+  name: string
+  args: string[]
+}
+
 export const WriteTerminalSchema = z.object({
   data: z.string(),
 })

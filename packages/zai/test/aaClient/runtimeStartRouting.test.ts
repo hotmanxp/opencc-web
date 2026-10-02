@@ -96,7 +96,12 @@ async function makeRig(mappings: Record<string, unknown>) {
     authenticate: async () => 'token',
     sendNotification: () => undefined,
   };
-  const rd = new ReverseDispatch({ conn: conn as never, registry: registry as never });
+  const rd = new ReverseDispatch({
+    conn: conn as never,
+    registry: registry as never,
+    serverUrl: 'https://aa.test',
+    connectorId: 'conn_test',
+  });
   rd.install();
   return { rd, registry, handlers };
 }

@@ -3,6 +3,8 @@ import express from 'express'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { rm, stat } from 'node:fs/promises'
 import request from 'supertest'
 import { TERMINAL_LIMITS, type TerminalFrame } from '../../shared/terminal.js'
 import { TerminalUnavailableError, ptyAvailability } from '../services/terminal/PtySession.js'
@@ -184,5 +186,40 @@ describe.skipIf(!available)('terminal routes', () => {
   it('SSE 缺 sessionId → 400；未知终端 → 404', async () => {
     await request(app).get('/api/terminal/t-x/events').expect(400)
     await request(app).get('/api/terminal/t-x/events?sessionId=s1').expect(404)
+  })
+
+  it('shellProfile 不能从 HTTP 注入（否则 --lan 下是任意命令执行）', async () => {
+    // AA 远程终端需要一个绕过候选白名单的入口来起 `command`+`args`，但那个
+    // 入口只能是进程内的 `createWithProfile`。如果哪天有人图省事把它挂回
+    // `CreateTerminalSchema`，这个请求就会真的跑起 payload 里的 /bin/sh ——
+    // 而 zai 开 `--lan` 时该路由在局域网可达。
+    //
+    // 注意请求本身不一定失败：zod 默认 strip 未知键，所以它会被静默忽略、
+    // 照常用默认 shell 建终端。要断言的是**注入没有生效**，不是状态码。
+    const marker = join(tmpdir(), `zai-shellprofile-${process.pid}`)
+    await rm(marker, { force: true })
+
+    await request(app)
+      .post('/api/terminal/create')
+      .send({
+        sessionId: 's1',
+        id: 't-evil',
+        cols: 80,
+        rows: 24,
+        cwd: tmpdir(),
+        shellProfile: {
+          path: '/bin/sh',
+          name: 'sh',
+          args: ['-c', `touch ${marker}`],
+        },
+      })
+      .expect(200)
+
+    // 真正要守住的不变量：payload 里的程序与参数一个都没被执行。
+    await expect(stat(marker)).rejects.toThrow()
+    const created = service.list('s1').find((t) => t.id === 't-evil')
+    if (created) {
+      expect(created.shell.args).not.toContain(`-c`)
+    }
   })
 })

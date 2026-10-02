@@ -145,6 +145,8 @@ describe('interaction.respond', () => {
     new ReverseDispatch({
       conn: conn as never,
       registry: new Registry(registryConn as never),
+      serverUrl: 'https://aa.test',
+      connectorId: 'conn_test',
     }).install();
 
     const respond = handlers.get('interaction.respond');
@@ -197,6 +199,8 @@ describe('fs path shape', () => {
     new ReverseDispatch({
       conn: conn as never,
       registry: new Registry(registryConn as never),
+      serverUrl: 'https://aa.test',
+      connectorId: 'conn_test',
     }).install();
 
     const readDir = handlers.get('fs.readDir')!;
@@ -254,6 +258,8 @@ describe('session.send_message attachments', () => {
     const rd = new ReverseDispatch({
       conn: conn as never,
       registry: registry as never,
+      serverUrl: 'https://aa.test',
+      connectorId: 'conn_test',
     });
     // resolveChildPort TCP-probes the child before forwarding; nothing is
     // really listening on 9451 here, so stub the probe (same pattern as
@@ -366,7 +372,12 @@ describe('model catalog', () => {
         registeredAt: '2026-09-27T00:00:00.000Z',
       },
     };
-    const dispatch = new ReverseDispatch({ conn: conn as never, registry: registry as never });
+    const dispatch = new ReverseDispatch({
+      conn: conn as never,
+      registry: registry as never,
+      serverUrl: 'https://aa.test',
+      connectorId: 'conn_test',
+    });
     // Point the catalogue handler at a port directly — portForRuntime
     // resolves via the process registry, which reaches for `require()` and
     // isn't available in the ESM test environment.
@@ -491,7 +502,12 @@ describe('session.create selections', () => {
         registeredAt: '2026-09-27T00:00:00.000Z',
       },
     };
-    const dispatch = new ReverseDispatch({ conn: conn as never, registry: registry as never });
+    const dispatch = new ReverseDispatch({
+      conn: conn as never,
+      registry: registry as never,
+      serverUrl: 'https://aa.test',
+      connectorId: 'conn_test',
+    });
     // portFromRuntime/portForRuntime reach for `require()`, unavailable in
     // the ESM test env; the model lookups go through readChildProviderConfig.
     (dispatch as unknown as { portFromRuntime(id: string): Promise<number | null> })
@@ -636,7 +652,12 @@ describe('session.create selections', () => {
         registeredAt: '2026-09-27T00:00:00.000Z',
       },
     };
-    const dispatch = new ReverseDispatch({ conn: conn as never, registry: registry as never });
+    const dispatch = new ReverseDispatch({
+      conn: conn as never,
+      registry: registry as never,
+      serverUrl: 'https://aa.test',
+      connectorId: 'conn_test',
+    });
     (dispatch as unknown as { portFromRuntime(id: string): Promise<number | null> })
       .portFromRuntime = async () => 9451;
     (dispatch as unknown as { portForRuntime(id: string | undefined): Promise<number | null> })

@@ -45,6 +45,7 @@ import { AaNetworkError, AaServerError } from './pairing.js';
 import { upsertTimelineItem } from './rpc.js';
 import { nextTimelineOrderSeq } from './timelineOrder.js';
 import { getNotice, listNoticesForSession, resolveNotice } from './noticeStore.js';
+import { AaTerminalRegistry, type AaTerminalCreateParams } from './terminal.js';
 import { logHttp } from '../accessLog.js';
 import {
   getReasoningEffortLevelsForModel,
@@ -468,15 +469,28 @@ function aaError(code: string, message: string): Error {
 export interface ReverseDispatchOptions {
   conn: AaConnection;
   registry: RuntimeRegistry;
+  /**
+   * AA server origin, e.g. `https://web.agents-anywhere.com`.
+   *
+   * The terminal relay needs it to dial back
+   * `wss://<host>/api/v2/connector/terminals/{id}/relay`. Passed in from
+   * `startAaRoot(config)` rather than re-read from disk per RPC: the relay
+   * connects on demand, and `readAaConfig()` is async file I/O.
+   */
+  serverUrl: string;
+  /** Connector id — namespaces the AA terminal owner key. */
+  connectorId: string;
 }
 
 export class ReverseDispatch {
   private readonly conn: AaConnection;
   private readonly registry: RuntimeRegistry;
+  private readonly terminals: AaTerminalRegistry;
 
   constructor(opts: ReverseDispatchOptions) {
     this.conn = opts.conn;
     this.registry = opts.registry;
+    this.terminals = new AaTerminalRegistry(opts.connectorId, opts.serverUrl);
   }
 
   /** Wire the inbound handlers onto the connection. Idempotent. */
@@ -622,6 +636,80 @@ export class ReverseDispatch {
       const p = InteractionRespondParamsSchema.parse(params);
       return this.handleInteractionRespond(p);
     });
+    // Remote terminal RPCs — AA Web / mobile open an interactive shell through
+    // these. `terminal.create` is the one the phone hits first: without it the
+    // AA terminal page fails with `no handler for terminal.create`.
+    //
+    // The PTY runs in THIS (root) process rather than being forwarded to a
+    // child: AA terminals are connector-scoped (`browse_<connectorId>`), not
+    // owned by any zai session, and `forwardToChild` is a one-shot HTTP POST
+    // that cannot carry a bidirectional byte stream. See terminal.ts for the
+    // full rationale.
+    this.conn.onRequest('terminal.create', async (params) => {
+      return this.terminals.create((params ?? {}) as AaTerminalCreateParams);
+    });
+    this.conn.onRequest('terminal.list', async (params) => {
+      const p = (params ?? {}) as { sessionId?: string };
+      return { terminals: this.terminals.list(p.sessionId) };
+    });
+    this.conn.onRequest('terminal.rename', async (params) => {
+      const p = (params ?? {}) as { terminalId?: string; label?: string };
+      return this.terminals.rename(String(p.terminalId ?? ''), String(p.label ?? ''));
+    });
+    this.conn.onRequest('terminal.setPersistent', async (params) => {
+      const p = (params ?? {}) as { terminalId?: string; persistent?: boolean };
+      return this.terminals.setPersistent(String(p.terminalId ?? ''), p.persistent === true);
+    });
+    this.conn.onRequest('terminal.close', async (params) => {
+      const p = (params ?? {}) as { terminalId?: string };
+      return this.terminals.close(String(p.terminalId ?? ''));
+    });
+    // v1 write path — the v2 flow used by phone/web pushes bytes over the relay
+    // socket instead, but AA still calls these for terminals created before the
+    // relay was established.
+    this.conn.onRequest('terminal.write', async (params) => {
+      const p = (params ?? {}) as { terminalId?: string; dataBase64?: string };
+      return this.terminals.write(String(p.terminalId ?? ''), String(p.dataBase64 ?? ''));
+    });
+    this.conn.onRequest('terminal.resize', async (params) => {
+      const p = (params ?? {}) as { terminalId?: string; cols?: number; rows?: number };
+      return this.terminals.resize(String(p.terminalId ?? ''), Number(p.cols), Number(p.rows));
+    });
+    // `terminal.relay.connect` — the server issues this when a client attaches
+    // to an existing terminal, then waits up to 10s for US to dial the relay
+    // endpoint. Answering the RPC is not enough: the actual byte stream needs
+    // a second, dedicated WebSocket. See AaTerminalRelay.
+    this.conn.onRequest('terminal.relay.connect', async (params) => {
+      return this.handleTerminalRelayConnect(params);
+    });
+  }
+
+  /**
+   * Attach (or re-attach) a relay socket for one terminal.
+   *
+   * AA re-issues this on every client attach, so it must stay cheap: the
+   * registry drops any previous relay for the same terminal (a new token means
+   * the server replaced the record) before starting the new one.
+   */
+  private async handleTerminalRelayConnect(params: unknown): Promise<unknown> {
+    const p = (params ?? {}) as { terminalId?: string; token?: string };
+    const terminalId = String(p.terminalId ?? '');
+    const token = String(p.token ?? '');
+    if (!terminalId || !token) {
+      throw aaError('invalid_config', 'terminal.relay.connect: terminalId and token are required');
+    }
+    // 服务端只在 terminal 存在时才会发这个 RPC;本地没有就直接回 not_found,
+    // 服务端 (terminal_relay.py:84) 会把它翻成 404 而不是干等 10s 超时。
+    if (!this.terminals.session(terminalId)) {
+      throw aaError('terminal_not_found', `terminal not found: ${terminalId}`);
+    }
+    this.terminals.buildRelay(terminalId, token).start();
+    return { terminalId, connecting: true };
+  }
+
+  /** AA 连接断开 / 进程退出时收掉 AA 终端的 relay 与 PTY。 */
+  async disposeTerminals(): Promise<void> {
+    await this.terminals.disposeAll();
   }
 
   // ─── Handlers ────────────────────────────────────────────────────────
@@ -2679,9 +2767,11 @@ let singleton: ReverseDispatch | null = null;
 export function initReverseDispatch(
   conn: AaConnection,
   registry: RuntimeRegistry,
+  serverUrl: string,
+  connectorId: string,
 ): ReverseDispatch {
   if (singleton) singleton.install(); // idempotent — re-install handlers
-  else singleton = new ReverseDispatch({ conn, registry });
+  else singleton = new ReverseDispatch({ conn, registry, serverUrl, connectorId });
   return singleton;
 }
 

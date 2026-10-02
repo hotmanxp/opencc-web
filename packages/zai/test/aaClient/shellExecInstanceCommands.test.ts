@@ -92,7 +92,12 @@ async function makeExec(): Promise<Exec> {
     authenticate: async () => 'token',
     sendNotification: () => undefined,
   };
-  const rd = new ReverseDispatch({ conn: conn as never, registry: registry as never });
+  const rd = new ReverseDispatch({
+    conn: conn as never,
+    registry: registry as never,
+    serverUrl: 'https://aa.test',
+    connectorId: 'conn_test',
+  });
   rd.install();
   const handler = handlers.get('shell.exec');
   if (!handler) throw new Error('shell.exec handler was not registered');

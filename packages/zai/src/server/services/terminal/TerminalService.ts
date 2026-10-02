@@ -3,6 +3,7 @@ import {
   type CreateTerminalRequest,
   type TerminalEnvironment,
   type TerminalShell,
+  type TrustedShellProfile,
   type WebTerminalInfo,
 } from '../../../shared/terminal.js'
 import { discoverShells, resolveDefaultShell, resolveShellPath } from './shells.js'
@@ -62,10 +63,44 @@ export class TerminalService {
 
   /**
    * 为给定 id 分配一个持久 PTY；同一 id 重复调用是幂等的（返回既有终端）。
+   *
+   * `shellPath` 会过候选白名单（`resolveShellPath`）—— 这是 HTTP 路由
+   * `POST /api/terminal/create` 唯一能用的入口，白名单不能撤。
+   *
    * @throws TerminalClosedError - 服务正在关闭 / id 已关闭 / 超出上限
    * @throws TerminalShellUnavailableError - 指定或默认 shell 在本机不存在
    */
   create(request: CreateTerminalRequest): WebTerminalInfo {
+    const shell = request.shellPath ? resolveShellPath(request.shellPath) : resolveDefaultShell()
+    if (shell === undefined) {
+      throw new TerminalShellUnavailableError(request.shellPath ?? '(系统默认 shell)')
+    }
+    return this.spawn(request, shell)
+  }
+
+  /**
+   * 同 `create`，但由调用方给定已解析的 shell profile，跳过候选白名单。
+   *
+   * **只给信任边界之内的调用方用。** AA 远程终端需要它：`terminal.create` 的
+   * `command` + `args` 指向的常常不是 `SHELL_CANDINATES` 里的 shell（`sh`、
+   * `htop`、某个项目脚本），而 AA 侧本来就有 `shell.exec` 的任意命令权限，
+   * 所以这不新增特权。
+   *
+   * 之所以做成独立方法而不是 `CreateTerminalSchema` 的一个字段：那个 schema
+   * 的解析结果直接进 HTTP 路由，zai 开 `--lan` 后局域网可达 —— 挂一个可写
+   * 字段上去就是一条任意命令执行路径。
+   */
+  createWithProfile(
+    request: Omit<CreateTerminalRequest, 'shellPath'>,
+    shell: TrustedShellProfile,
+  ): WebTerminalInfo {
+    return this.spawn(request, shell)
+  }
+
+  private spawn(
+    request: Omit<CreateTerminalRequest, 'shellPath'>,
+    shell: TerminalShell,
+  ): WebTerminalInfo {
     if (this.disposed) throw new TerminalClosedError('terminal service is shutting down')
     const owner = this.owner(request.sessionId)
     const existing = owner.terminals.get(request.id)
@@ -75,10 +110,6 @@ export class TerminalService {
     }
     if (owner.terminals.size >= TERMINAL_LIMITS.maxTerminals) {
       throw new TerminalClosedError(maxTerminalsMessage())
-    }
-    const shell = request.shellPath ? resolveShellPath(request.shellPath) : resolveDefaultShell()
-    if (shell === undefined) {
-      throw new TerminalShellUnavailableError(request.shellPath ?? '(系统默认 shell)')
     }
     const session = new PtySession({
       id: request.id,

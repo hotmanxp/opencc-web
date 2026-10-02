@@ -175,7 +175,9 @@ export async function startAaRoot(config: import('./index.js').AaConfig): Promis
   // so AA server requests (mobile user actions) get routed to the right
   // child. No-op until the connection actually receives requests.
   // Singleton so debug routes can invoke handlers locally.
-  const reverse = initReverseDispatch(conn, registry);
+  // serverUrl + connectorId ride along for the remote-terminal relay, which
+  // dials back into AA server on its own WebSocket.
+  const reverse = initReverseDispatch(conn, registry, config.serverUrl, config.connectorId);
   reverse.install();
 
   // ★ ORDERING: connect LAST. AA server probes us the instant the WS
@@ -217,6 +219,9 @@ export async function startAaRoot(config: import('./index.js').AaConfig): Promis
   void sessionMap;
 
   const shutdown = async () => {
+    // Remote terminals first: their relay sockets and PTYs belong to this
+    // subsystem, so tear them down before the connection that spawned them.
+    await reverse.disposeTerminals();
     await adapter.stop();
     resetEventAdapterForTests();
     buffer.stop();
