@@ -6,7 +6,6 @@ import * as React from 'react';
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js';
 import type { AppState } from 'src/state/AppState.js';
 import { z } from 'zod/v4';
-import { getKairosActive } from '../../bootstrap/state.js';
 import { TOOL_SUMMARY_MAX_LENGTH } from '../../constants/toolLimits.js';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../../services/analytics/index.js';
 import { notifyVscodeFileUpdated } from '../../services/mcp/vscodeSdkMcp.js';
@@ -55,8 +54,18 @@ const EOL = '\n';
 
 // Progress display constants
 const PROGRESS_THRESHOLD_MS = 2000; // Show progress after 2 seconds
-// In assistant mode, blocking bash auto-backgrounds after this many ms in the main agent
-const ASSISTANT_BLOCKING_BUDGET_MS = 15_000;
+// Mirrors upstream's `frn = 2000`: a foreground command that has been running
+// this long is moved to the background. The shared poller ticks every second
+// (TaskOutput.startPolling) and calls onProgress unconditionally — including
+// for commands that produce no output — so this check fires for any command,
+// same as upstream.
+const AUTO_BACKGROUND_AFTER_SECONDS = 2;
+
+/**
+ * Minimum `sleep N` duration that counts as a polling loop. Mirrors upstream's
+ * `t6n = 25`; anything shorter is treated as legitimate pacing.
+ */
+const BLOCKED_SLEEP_THRESHOLD_SECONDS = 25;
 
 // Search commands for collapsible display (grep, find, etc.)
 const BASH_SEARCH_COMMANDS = new Set(['find', 'grep', 'rg', 'ag', 'ack', 'locate', 'which', 'whereis']);
@@ -421,19 +430,22 @@ function isAutobackgroundingAllowed(command: string): boolean {
 
 /**
  * Detect standalone or leading `sleep N` patterns that should use Monitor
- * instead. Catches `sleep 5`, `sleep 5 && check`, `sleep 5; check` — but
+ * instead. Catches `sleep 30`, `sleep 30 && check`, `sleep 30; check` — but
  * not sleep inside pipelines, subshells, or scripts (those are fine).
+ *
+ * The threshold mirrors upstream's `t6n = 25`: sleeps below 25s are legitimate
+ * pacing/rate-limiting and pass through.
  */
 export function detectBlockedSleepPattern(command: string): string | null {
   const parts = splitCommand_DEPRECATED(command);
   if (parts.length === 0) return null;
   const first = parts[0]?.trim() ?? '';
-  // Bare `sleep N` or `sleep N.N` as the first subcommand.
-  // Float durations (sleep 0.5) are allowed — those are legit pacing, not polls.
-  const m = /^sleep\s+(\d+)\s*$/.exec(first);
+  // Bare `sleep N` or `sleep N.N` as the first subcommand. Float durations
+  // are accepted so `sleep 25.5` is judged on its real value.
+  const m = /^sleep\s+(\d+(?:\.\d*)?)\s*$/.exec(first);
   if (!m) return null;
-  const secs = parseInt(m[1]!, 10);
-  if (secs < 2) return null; // sub-2s sleeps are fine (rate limiting, pacing)
+  const secs = parseFloat(m[1]!);
+  if (secs < BLOCKED_SLEEP_THRESHOLD_SECONDS) return null;
 
   // `sleep N` alone → "what are you waiting for?"
   // `sleep N && check` → "use Monitor { command: check }"
@@ -634,7 +646,7 @@ export const BashTool = buildTool({
       if (sleepPattern !== null) {
         return {
           result: false,
-          message: `Blocked: ${sleepPattern}. Run blocking commands in the background with run_in_background: true — you'll get a completion notification when done. For streaming events (watching logs, polling APIs), use the Monitor tool. If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds.`,
+          message: `Blocked: ${sleepPattern}. To wait for a condition, use Monitor with an until-loop (e.g. \`until <check>; do sleep 2; done\`). To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block.`,
           errorCode: 10
         };
       }
@@ -719,7 +731,7 @@ export const BashTool = buildTool({
     if (backgroundTaskId) {
       const outputPath = getTaskOutputPath(backgroundTaskId);
       if (assistantAutoBackgrounded) {
-        backgroundInfo = `Command exceeded the assistant-mode blocking budget (${ASSISTANT_BLOCKING_BUDGET_MS / 1000}s) and was moved to the background with ID: ${backgroundTaskId}. It is still running — you will be notified when it completes. Output is being written to: ${outputPath}. In assistant mode, delegate long-running work to a subagent or use run_in_background to keep this conversation responsive.`;
+        backgroundInfo = `Command exceeded the auto-background threshold (${AUTO_BACKGROUND_AFTER_SECONDS}s) and was moved to the background with ID: ${backgroundTaskId}. It is still running — you will be notified when it completes. Output is being written to: ${outputPath}. Delegate long-running work to a subagent or use run_in_background to keep this conversation responsive.`;
       } else if (backgroundedByUser) {
         backgroundInfo = `Command was manually backgrounded by user with ID: ${backgroundTaskId}. Output is being written to: ${outputPath}`;
       } else {
@@ -1038,6 +1050,9 @@ async function* runShellCommand({
   let lastTotalBytes = 0;
   let backgroundShellId: string | undefined = undefined;
   let assistantAutoBackgrounded = false;
+  // Mirrors upstream's `autoBackgroundArmed` task flag: once auto-backgrounding
+  // has fired we stop re-checking on subsequent progress ticks.
+  let autoBackgroundArmed = false;
 
   // Progress signal: resolved by onProgress callback from the shared poller,
   // waking the generator to yield a progress update.
@@ -1142,18 +1157,6 @@ async function* runShellCommand({
     shellCommand.onTimeout(backgroundFn => {
       startBackgrounding('tengu_bash_command_timeout_backgrounded', backgroundFn);
     });
-  }
-
-  // In assistant mode, the main agent should stay responsive. Auto-background
-  // blocking commands after ASSISTANT_BLOCKING_BUDGET_MS so the agent can keep
-  // coordinating instead of waiting. The command keeps running — no state loss.
-  if (false && getKairosActive() && isMainThread && !isBackgroundTasksDisabled && run_in_background !== true) {
-    setTimeout(() => {
-      if (shellCommand.status === 'running' && backgroundShellId === undefined) {
-        assistantAutoBackgrounded = true;
-        startBackgrounding('tengu_bash_command_assistant_auto_backgrounded');
-      }
-    }, ASSISTANT_BLOCKING_BUDGET_MS).unref();
   }
 
   // Handle OpenCC asking to run it in the background explicitly
@@ -1278,6 +1281,17 @@ async function* runShellCommand({
       // Time for a progress update
       const elapsed = Date.now() - startTime;
       const elapsedSeconds = Math.floor(elapsed / 1000);
+
+      // Auto-background once the command has run past the threshold, matching
+      // upstream. The shared poller ticks every second unconditionally, so
+      // commands producing no output (`git log -S`, `sleep N`, etc.) reach
+      // this check too. `autoBackgroundArmed` gates it to one fire per
+      // command.
+      if (!isBackgroundTasksDisabled && shouldAutoBackground && run_in_background !== true && isMainThread && !autoBackgroundArmed && backgroundShellId === undefined && elapsedSeconds >= AUTO_BACKGROUND_AFTER_SECONDS) {
+        autoBackgroundArmed = true;
+        assistantAutoBackgrounded = true;
+        startBackgrounding('tengu_bash_command_assistant_auto_backgrounded');
+      }
 
       // Show minimal backgrounding UI if available
       // Skip if background tasks are disabled
