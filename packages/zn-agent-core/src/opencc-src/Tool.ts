@@ -476,6 +476,29 @@ export type Tool<
    */
   interruptBehavior?(): 'cancel' | 'block'
   /**
+   * Which input field permission rules should match against.
+   *
+   * Upstream: `"path"` for tools that mutate a file (Edit / Write / NotebookEdit),
+   * absent for tools that take input but do not expose a clearly authoritative
+   * field for permissions (Bash, Agent, etc.). Mirrors upstream `ruleContentField`.
+   */
+  ruleContentField?: string
+  /**
+   * When true, the user's decision on the tool's permission prompt must not
+   * produce a generalized permission update. Edit and Write set this to true
+   * when the user asks for a one-off change; the rule check treats that as a
+   * non-rule.
+   */
+  suppressesAllPermissionUpdates?(input: z.infer<Input>): boolean
+  /**
+   * Whether this tool may detach to the background.
+   *
+   * `bash`/`bashOutput` use this for long-running commands; read-only search
+   * tools set `'never'` so the runtime never tries to background them.
+   * Mirrors upstream `backgrounding`.
+   */
+  backgrounding?: 'never' | 'self'
+  /**
    * Returns information about whether this tool use is a search or read operation
    * that should be collapsed into a condensed display in the UI. Examples include
    * file searching (Grep, Glob), file reading (Read), and bash commands like find,
