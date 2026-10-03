@@ -91,6 +91,33 @@ export const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }:
   );
 });
 
+// Skill 注入的 user 消息以 "Base directory for this skill: <dir>" 起头,
+// 后面是 SKILL.md 全文。正常情况下 loadTranscriptMessages 会按 isMeta:true
+// 把这条 user.text 整段跳过 —— 但万一 isMeta 没落盘、或 vendor 端走了另一条
+// 路径(例如 SkillTool 直接 createUserMessage 而没走 appendUserMessageV2),
+// 这条仍会作为可见 user.text 出现在对话里, 把整套 SKILL.md 渲染成气泡,
+// 用户体验上等于"AI 回复完又把 skill 文档贴了一遍"。
+//
+// 在渲染层再做一道防御: 见到这个起头就只画一个 Skill 名 pill, 不渲染 body.
+// 提取规则: 取路径最后一段(去掉 .git/skills/.../skills/<name> 后的 <name>),
+// 不依赖具体目录布局 —— 任何 slash-style 路径都能拿到合法名.
+//
+// 与 ToolCallBlock (rawName === "Skill") 的 skillNameFromInput 处理对齐:
+// 渲染层 vs 工具层都用「Skill 名」这一个语义, 不重复实现多份识别.
+const SKILL_CONTENT_HEADER = "Base directory for this skill: "
+
+function parseSkillInvocation(text: string): { skillName: string } | null {
+  if (!text.startsWith(SKILL_CONTENT_HEADER)) return null
+  const rest = text.slice(SKILL_CONTENT_HEADER.length)
+  // 取下一行(去掉首尾空白)作为路径
+  const firstLine = rest.split("\n", 1)[0]?.trim() ?? ""
+  if (!firstLine) return null
+  // 路径最后一段, 处理正反斜杠与结尾斜杠
+  const segments = firstLine.split(/[\\/]/).filter(Boolean)
+  const last = segments[segments.length - 1] ?? firstLine
+  return { skillName: last }
+}
+
 const THINKING_ACCENT = "var(--thinking-accent, #8b5cf6)"; // CSS var preferred, hardcoded fallback for tests/storybook
 const THINKING_BG = "var(--thinking-bg, rgba(139, 92, 246, 0.10))"; // CSS var preferred, hardcoded fallback for tests/storybook
 // 非流式(历史回放 / 思考已结束)的 "思考" pill 底色。dark 主题下等同 accent
@@ -656,6 +683,13 @@ export const MessageBubble = React.memo(function MessageBubble({
       (msg as { isRenderedPrompt?: unknown }).isRenderedPrompt,
     )
     const visibleText = ((msg.text as string) || (msg.prompt as string) || "")
+    // Skill 注入检测: 即便 isMeta 已经在 loadTranscriptMessages 处过滤了一次,
+    // 落到 transcript 的同条仍可能因为 SkillTool 直接 createUserMessage 而没走
+    // appendUserMessageV2 把 isMeta 持久化, 这样 user.text 就会带着完整 SKILL.md
+    // 内容渲染成气泡。渲染层兜底: 只画一个 Skill 名 pill, 不渲染 body, 避免
+    // 对话里出现"AI 回复完又把 SKILL.md 完整贴一遍"的视觉噪音。tooltip 暴露
+    // 完整路径便于排障, 实际技能内容仍由 SkillTool 的 tool_use:done 块呈现.
+    const skillInvocation = parseSkillInvocation(visibleText)
     return (
       <div
         data-testid="user-bubble-container"
@@ -693,9 +727,39 @@ export const MessageBubble = React.memo(function MessageBubble({
                   }
                 />
               )}
-              <Text className="break-words whitespace-pre-wrap">
-                {linkifyText(visibleText)}
-              </Text>
+              {skillInvocation ? (
+                <Tooltip
+                  // 把完整路径放到 title 上, 想看的人可以 hover; 默认不可见
+                  // 但调试/审计时仍可拿. title 截到 200 字避免极端路径撑爆 tooltip.
+                  title={visibleText.slice(0, 200)}
+                  placement="left"
+                >
+                  <span
+                    data-testid="user-text-skill-invocation"
+                    className="inline-flex items-center self-start gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold leading-[1.6] tracking-[0.2px]"
+                    style={{
+                      background: "var(--bg-card-hover, #1a1a2e)",
+                      color: "var(--accent-start)",
+                      fontFamily: CODE_FONT_FAMILY,
+                      cursor: "default",
+                    }}
+                  >
+                    <WrenchIcon style={{ fontSize: 11 }} />
+                    <span>Skill</span>
+                    <span
+                      aria-hidden="true"
+                      className="opacity-60"
+                    >
+                      ·
+                    </span>
+                    <span>{skillInvocation.skillName}</span>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Text className="break-words whitespace-pre-wrap">
+                  {linkifyText(visibleText)}
+                </Text>
+              )}
               {isRendered && (
                 <Text
                   data-testid="user-text-rendered-prompt"
