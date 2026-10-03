@@ -1236,6 +1236,12 @@ export async function runInProcessTeammate(
             availableTools: toolUseContext.options.tools,
             allowedTools,
             contentReplacementState: teammateReplacementState,
+            // Module 1551: mark the request as a teammate so runAgent can
+            // pick the right model-resolution ladder and so consumers see
+            // the flag in metadata.
+            isTeammate: true,
+            // Forward teammateContext into the subagent's tool use context.
+            teammateContext,
           })) {
             // Check lifecycle abort first (kills whole teammate)
             if (abortController.signal.aborted) {

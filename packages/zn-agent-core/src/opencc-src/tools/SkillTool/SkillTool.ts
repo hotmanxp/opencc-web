@@ -233,6 +233,8 @@ async function executeForkedSkill(
       model: command.model as ModelAlias | undefined,
       availableTools: context.options.tools,
       override: { agentId },
+      // Module 1551: tag the spawn with the skill name for telemetry.
+      spawnedBySkill: commandName,
     })) {
       agentMessages.push(message)
 

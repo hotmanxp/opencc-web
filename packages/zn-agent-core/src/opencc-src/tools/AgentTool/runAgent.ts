@@ -72,6 +72,8 @@ import {
   recordSidechainTranscript,
   setAgentTranscriptSubdir,
   writeAgentMetadata,
+  readAgentMetadata,
+  type AgentMetadata,
 } from '../../utils/sessionStorage.js'
 import {
   isRestrictedToPluginOnly,
@@ -104,6 +106,7 @@ import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
 async function initializeAgentMcpServers(
   agentDefinition: AgentDefinition,
   parentClients: MCPServerConnection[],
+  onMcpServersBlocked?: (info: unknown) => void,
 ): Promise<{
   clients: MCPServerConnection[]
   tools: Tools
@@ -128,6 +131,14 @@ async function initializeAgentMcpServers(
     logForDebugging(
       `[Agent: ${agentDefinition.agentType}] Skipping MCP servers: strictPluginOnlyCustomization locks MCP to plugin-only (agent source: ${agentDefinition.source})`,
     )
+    // (G) Fire telemetry for dropped MCP servers. opencc does not currently
+    // expose mcpServerPolicy enforcement here, but when an external policy
+    // gate drops servers, surface the event for callers (e.g. Workflow UI).
+    onMcpServersBlocked?.({
+      agentType: agentDefinition.agentType,
+      reason: 'plugin-only-policy',
+      requestedServers: agentDefinition.mcpServers ?? [],
+    })
     return {
       clients: parentClients,
       tools: [],
@@ -280,6 +291,32 @@ export async function* runAgent({
   onQueryProgress,
   agentName,
   routingSubagentType,
+  // --- new module 1551 params (all optional, additive) ---
+  requestShape,
+  requestNonInteractive,
+  webFetchReadmissionAllowed,
+  persistedToolResultFiles,
+  stickyBetas,
+  worktreeBranch,
+  session,
+  spawnMode,
+  name,
+  toolUseId,
+  spawnedBySkill,
+  spawnedByForkedSkill,
+  forkOrigin,
+  spawnedByWorkflowRunId,
+  workflowPhase,
+  onStreamTokenEstimate,
+  onMcpServersBlocked,
+  onModelRestricted,
+  isTeammate,
+  teammateContext,
+  recordedUuids,
+  extraMetadata,
+  requiresStructuredOutput,
+  handbackOptIn,
+  handbackTool,
 }: {
   agentDefinition: AgentDefinition
   promptMessages: Message[]
@@ -351,6 +388,86 @@ export async function* runAgent({
    *  which drops the original subagent_type that agentRouting is keyed on. Pass
    *  the original subagent_type here so the configured route still resolves. */
   routingSubagentType?: string
+  // --- new module 1551 params (upstream module 1551 / 2.1.287) ---
+  /** API request shape — defaults to `isAsync ? 'background' : 'foreground'`. */
+  requestShape?: 'foreground' | 'background'
+  /** Explicit `isNonInteractiveSession` hint for the request. */
+  requestNonInteractive?: boolean
+  /** Allows web fetch tool back in when normally gated. Passed through to
+   * `resolveAgentTools`. opencc does not currently gate web fetch — kept
+   * as a forward-compat pass-through. */
+  webFetchReadmissionAllowed?: boolean
+  /** List of file paths whose tool result content is persisted on the
+   * agent context. opencc does not persist tool results; kept as a field
+   * for parity — assigned to the subagent context when provided. */
+  persistedToolResultFiles?: string[]
+  /** Pre-resolved beta configuration for the request; bypasses auto-decide
+   * inside runAgent. opencc does not have a beta-resolution ladder — kept
+   * for parity, currently no-op until betas land. */
+  stickyBetas?: unknown
+  /** Branch the worktree was checked out at. Persisted to metadata for
+   * resume / cleanup. */
+  worktreeBranch?: string
+  /** Explicit session override (default = parent's session). opencc does
+   * not currently consume a session override inside runAgent — kept for
+   * parity. */
+  session?: unknown
+  /** Permission mode override at spawn (vs. agent definition's
+   * `permissionMode`). opencc does not have a separate `spawnMode` field;
+   * kept for parity. */
+  spawnMode?: unknown
+  /** Agent name override for routing/UI; persisted in metadata. */
+  name?: string
+  /** The parent's tool-use ID this subagent was spawned from. Used by
+   * progress forwarding to attach to `parentToolUseID`. */
+  toolUseId?: string
+  /** Name of the skill that triggered the spawn. */
+  spawnedBySkill?: string
+  /** Name of the forked-skill spawn chain (if applicable). */
+  spawnedByForkedSkill?: string
+  /** Origin marker on the query (`'tool' | 'skill' | ...`). */
+  forkOrigin?: string
+  /** Workflow run id linking the subagent to a workflow (workflow subagents). */
+  spawnedByWorkflowRunId?: string
+  /** Current phase the workflow is in when spawning this subagent.
+   * Persisted to metadata. */
+  workflowPhase?: string
+  /** Token-rate callback fired during the stream so the UI spinner can
+   * show live output. opencc does not currently wire this — kept as a
+   * param. */
+  onStreamTokenEstimate?: (
+    e:
+      | { type: 'tokens'; estimatedTokensDelta: number }
+      | { type: 'response_start' },
+  ) => void
+  /** Telemetry callback for when MCP servers were dropped. opencc's
+   * `initializeAgentMcpServers` does not currently report this — kept as
+   * a param. */
+  onMcpServersBlocked?: (info: unknown) => void
+  /** Telemetry callback for when the requested model was restricted. */
+  onModelRestricted?: (info: unknown) => void
+  /** Hint that this is a teammate — changes model resolution and memory
+   * caller. Defaults to false. */
+  isTeammate?: boolean
+  /** Forwarded into the subagent's tool use context (backgrounded /
+   * foregrounded teammate shape). opencc does not currently forward
+   * teammateContext into `createSubagentContext` — kept for parity. */
+  teammateContext?: unknown
+  /** Set of UUIDs the resume caller has already recorded — used to slice
+   * messages for re-recording and avoid duplicates. */
+  recordedUuids?: Set<UUID>
+  /** Extra fields merged into persisted `AgentMetadata`. */
+  extraMetadata?: Record<string, unknown>
+  /** When true, the agent is required to emit a structured output via
+   * the `StructuredOutput` tool. */
+  requiresStructuredOutput?: boolean
+  /** When true, this subagent may opt in to the hand-back contract with
+   * its caller. opencc does not have a handback system — kept as a
+   * param. */
+  handbackOptIn?: boolean
+  /** The hand-back tool to register when `handbackOptIn` is active.
+   * opencc does not have a handback system — kept as a param. */
+  handbackTool?: unknown
 }): AsyncGenerator<Message, void> {
   // Track subagent usage for feature discovery
 
@@ -524,6 +641,18 @@ export async function* runAgent({
         alwaysAllowRules: {
           // Preserve SDK-level permissions from --allowedTools
           cliArg: state.toolPermissionContext.alwaysAllowRules.cliArg,
+          // Preserve parent mcpServerPolicy if present (forward-compat — opencc
+          // doesn't read this today but upstream module 1551 threads it
+          // through so resuming subagents keep MCP gating).
+          ...(state.toolPermissionContext.alwaysAllowRules as {
+            mcpServerPolicy?: unknown
+          }).mcpServerPolicy
+            ? {
+                mcpServerPolicy: (state.toolPermissionContext.alwaysAllowRules as {
+                  mcpServerPolicy?: unknown
+                }).mcpServerPolicy,
+              }
+            : {},
           // Use the provided allowedTools as session-level permissions
           session: [...allowedTools],
         },
@@ -560,9 +689,30 @@ export async function* runAgent({
     ? availableTools
     : resolveAgentTools(agentDefinition, availableTools, isAsync).resolvedTools
 
-  const additionalWorkingDirectories = Array.from(
+  // (H) Zero-tool spawn refusal — match upstream's `Ft` guard. When
+  // resolveAgentTools returned no tools AND the caller had tools to choose
+  // from AND we are not in the resume path, refuse the spawn with the
+  // upstream error message so behavior parity is preserved.
+  if (
+    !useExactTools &&
+    resolvedTools.length === 0 &&
+    availableTools.length > 0
+  ) {
+    throw new Error(
+      `[Agent: ${agentDefinition.agentType}] subagent zero-tool spawn refused`,
+    )
+  }
+
+  let additionalWorkingDirectories = Array.from(
     appState.toolPermissionContext.additionalWorkingDirectories.keys(),
   )
+
+  // (C) Add worktree path to additionalWorkingDirectories when set so the
+  // subagent's prompt / system reminder sees the worktree as in-scope. Skip
+  // if already present (the parent may have added it explicitly).
+  if (worktreePath && !additionalWorkingDirectories.includes(worktreePath)) {
+    additionalWorkingDirectories = [...additionalWorkingDirectories, worktreePath]
+  }
 
   const agentSystemPrompt = override?.systemPrompt
     ? asSystemPrompt(withUltracodeReminder(withUltracodePrompt(override.systemPrompt)))
@@ -786,6 +936,32 @@ export async function* runAgent({
     agentToolUseContext.preserveToolUseResults = true
   }
 
+  // (L) Propagate worktree path onto the subagent context so downstream
+  // tools (e.g. Bash, Read) can resolve the correct cwd / git root. opencc
+  // does not have a typed `agentWorktree` slot on ToolUseContext — write
+  // defensively via a cast so future code can read it.
+  if (worktreePath) {
+    ;(agentToolUseContext as unknown as { agentWorktree?: string }).agentWorktree =
+      worktreePath
+  }
+
+  // (L-equivalent) thread parentToolUseID + name onto the subagent context
+  // so progress callbacks can attribute emissions back to the parent.
+  if (toolUseId) {
+    ;(agentToolUseContext as unknown as { parentToolUseID?: string }).parentToolUseID =
+      toolUseId
+  }
+  if (name) {
+    ;(agentToolUseContext as unknown as { name?: string }).name = name
+  }
+  if (persistedToolResultFiles) {
+    ;(
+      agentToolUseContext as unknown as {
+        persistedToolResultFiles?: string[]
+      }
+    ).persistedToolResultFiles = persistedToolResultFiles
+  }
+
   // Expose cache-safe params for background summarization (prompt cache sharing)
   if (onCacheSafeParams) {
     onCacheSafeParams({
@@ -810,6 +986,19 @@ export async function* runAgent({
       // to the child repo if the worktree is later removed.
       ...(cwd && { cwd }),
       ...(description && { description }),
+      ...(worktreeBranch && { worktreeBranch }),
+      ...(name && { name }),
+      ...(toolUseId && { toolUseId }),
+      ...(spawnedBySkill && { spawnedBySkill }),
+      ...(spawnedByForkedSkill && { spawnedByForkedSkill }),
+      ...(forkOrigin && { forkOrigin }),
+      ...(spawnedByWorkflowRunId && { spawnedByWorkflowRunId }),
+      ...(workflowPhase && { workflowPhase }),
+      ...(requestShape && { requestShape }),
+      ...(typeof requestNonInteractive === 'boolean' && {
+        requestNonInteractive,
+      }),
+      ...(extraMetadata ?? {}),
     })
     metadataWritten = true
   } catch (_err) {
@@ -818,17 +1007,49 @@ export async function* runAgent({
 
   // Record initial messages before the query loop starts.
   // Fire-and-forget — persistence failure shouldn't block the agent.
+  // (E) Resume-slicing: when `recordedUuids` is provided (the resume call
+  // site), slice initialMessages down to only the messages *after* the
+  // last already-recorded UUID. Already-persisted messages are skipped
+  // (both for the initial fire-and-forget record and for the inner loop).
+  // We compute the slice once, before the initial record write, so that
+  // `lastRecordedUuid` correctly anchors to the *last* message we
+  // actually wrote.
+  let messagesToRecord: Message[] = initialMessages
+  if (recordedUuids && recordedUuids.size > 0) {
+    // findLastIndex: scan backwards for the highest index whose uuid is in
+    // the already-recorded set. Anything strictly after that is new.
+    let lastRecordedIdx = -1
+    for (let i = initialMessages.length - 1; i >= 0; i--) {
+      const messageUuid = (initialMessages[i] as { uuid?: UUID }).uuid
+      if (typeof messageUuid === 'string' && recordedUuids.has(messageUuid)) {
+        lastRecordedIdx = i
+        break
+      }
+    }
+    if (lastRecordedIdx >= 0) {
+      messagesToRecord = initialMessages.slice(lastRecordedIdx + 1)
+    }
+  }
+
   // Only write the transcript if identity metadata was successfully persisted,
   // ensuring we never leave a transcript that would resume without its restricted identity.
   if (metadataWritten) {
-    void recordSidechainTranscript(initialMessages, agentId).catch(_err =>
-      logForDebugging(`Failed to record sidechain transcript: ${_err}`),
-    )
+    if (messagesToRecord.length > 0) {
+      void recordSidechainTranscript(messagesToRecord, agentId).catch(_err =>
+        logForDebugging(`Failed to record sidechain transcript: ${_err}`),
+      )
+    }
   } else {
     logForDebugging('Skipping initial transcript write because identity metadata persistence failed')
   }
-  // Track the last recorded message UUID for parent chain continuity
-  let lastRecordedUuid: UUID | null = initialMessages.at(-1)?.uuid ?? null
+  // Track the last recorded message UUID for parent chain continuity.
+  // When we sliced, anchor to the last message we *just wrote* (which may
+  // be earlier than the original initialMessages tail). When we didn't
+  // slice (no recordedUuids), preserve the previous behavior.
+  let lastRecordedUuid: UUID | null =
+    messagesToRecord.length > 0
+      ? (messagesToRecord.at(-1)?.uuid as UUID | undefined) ?? null
+      : initialMessages.at(-1)?.uuid ?? null
 
   try {
     let queryTerminal: Terminal | undefined
@@ -875,7 +1096,33 @@ export async function* runAgent({
           message.ttftMs != null
         ) {
           toolUseContext.pushApiMetricsEntry?.(message.ttftMs)
+          // (K) Fire response_start hook for live spinner ETA display
+          if (onStreamTokenEstimate) {
+            onStreamTokenEstimate({ type: 'response_start' })
+          }
           continue
+        }
+
+        // (K) Token-rate forwarder — best-effort. Inspect the stream event
+        // for usage / token_delta fields; opencc's shape may vary. We don't
+        // have a stable contract yet, so emit a synthetic delta whenever a
+        // stream_event yields a non-zero usage block. This is forward-compat
+        // — when upstream lands a precise contract, replace this with the
+        // exact delta computation.
+        if (
+          onStreamTokenEstimate &&
+          message.type === 'stream_event' &&
+          (message.event as { type?: string }).type === 'message_delta'
+        ) {
+          const ev = message.event as { usage?: { output_tokens?: number } }
+          const delta =
+            typeof ev.usage?.output_tokens === 'number'
+              ? ev.usage.output_tokens
+              : 1
+          onStreamTokenEstimate({
+            type: 'tokens',
+            estimatedTokensDelta: delta,
+          })
         }
 
         // Yield attachment messages (e.g., structured_output) without recording them
@@ -892,9 +1139,19 @@ export async function* runAgent({
         }
 
         if (isRecordableMessage(message)) {
+          // (E) Resume continuation: skip re-recording messages whose uuid
+          // is already in `recordedUuids` (the resume call site already
+          // wrote them). Still update the chain anchor so newly-yielded
+          // messages attach to the right parent.
+          const alreadyRecorded =
+            recordedUuids !== undefined &&
+            recordedUuids.size > 0 &&
+            typeof message.uuid === 'string' &&
+            recordedUuids.has(message.uuid)
+
           // Record only the new message with correct parent (O(1) per message)
           // Only write if identity metadata was successfully persisted.
-          if (metadataWritten) {
+          if (metadataWritten && !alreadyRecorded) {
             await recordSidechainTranscript(
               [message],
               agentId,
@@ -1084,4 +1341,123 @@ function resolveSkillName(
   }
 
   return null
+}
+
+/**
+ * Derive the API request shape + non-interactive flag for a subagent spawn.
+ *
+ * Pure helper ported from upstream module 1551 (`WLn`):
+ *   - async spawns always go through as background + non-interactive
+ *   - sync spawns preserve the caller's `isNonInteractiveSession` flag
+ *
+ * Used by `runAgent` to set `requestNonInteractive` on the request shape and
+ * by callers / consumers that need a single source of truth.
+ */
+export function spawnRequestShape(
+  isAsync: boolean,
+  isNonInteractiveSession: boolean | undefined,
+): { requestShape: 'foreground' | 'background'; requestNonInteractive: boolean } {
+  return isAsync
+    ? { requestShape: 'background', requestNonInteractive: true }
+    : {
+        requestShape: 'foreground',
+        requestNonInteractive: isNonInteractiveSession ?? false,
+      }
+}
+
+/**
+ * Forward a subagent's progress message into the parent's output sink
+ * (used by the bg-progress forwarding path in AgentTool.tsx).
+ *
+ * Ported from upstream module 1551 (`cst`). opencc does not currently
+ * expose an `outputSink` on `ToolUseContext.session` — when the sink is
+ * missing, this is a defensive no-op. The throttle is built into the
+ * sink itself in upstream, so we simply respect `forwardSubagentText`
+ * and skip structured-output messages unless forwarding is enabled.
+ *
+ * @param toolUseContext Parent's tool use context (only `options` is read).
+ * @param message        Message to forward (only used for progress shape).
+ * @param isStructuredOutput  True if `message` is a structured_output message.
+ */
+export function writeSubagentProgressToOutputSink(
+  toolUseContext: ToolUseContext,
+  message: Message,
+  isStructuredOutput?: boolean,
+): void {
+  // opencc does not have an outputSink abstraction on ToolUseContext.session.
+  // Probe the upstream shape; if absent, return early.
+  const sink = (toolUseContext as unknown as {
+    session?: { outputSink?: { active?: { writeAfterInit?: (msg: unknown) => void } } }
+  }).session?.outputSink?.active
+  if (!sink?.writeAfterInit) return
+
+  const forwardSubagentText: boolean =
+    (toolUseContext.options as { forwardSubagentText?: boolean })
+      .forwardSubagentText ?? false
+
+  if (isStructuredOutput && !forwardSubagentText) return
+
+  sink.writeAfterInit(message)
+}
+
+/**
+ * Mark a subagent's worktree as cleanly removed and persist updated metadata.
+ *
+ * Ported from upstream module 1551 (`Kbr`). Reads existing metadata, merges
+ * the caller-supplied `spawnMetadata` plus any preserved fields, and writes
+ * the result back with `worktreeCleanlyRemoved: true`. Also unregisters
+ * the agent from the perfetto trace.
+ *
+ * @param agentId            The subagent whose worktree was removed.
+ * @param removedWorktreePath The worktree path that was just removed.
+ * @param spawnMetadata      Metadata to merge into the persisted record.
+ */
+export async function clearWorktreeFromAgentMetadata({
+  agentId,
+  removedWorktreePath,
+  spawnMetadata,
+}: {
+  agentId: AgentId
+  removedWorktreePath: string
+  spawnMetadata: Partial<AgentMetadata>
+}): Promise<void> {
+  try {
+    unregisterPerfettoAgent(agentId)
+  } catch (err) {
+    logForDebugging(`clearWorktreeFromAgentMetadata: unregister perfetto failed: ${err}`)
+  }
+
+  let existing: AgentMetadata | null = null
+  try {
+    existing = await readAgentMetadata(agentId)
+  } catch (err) {
+    logForDebugging(`clearWorktreeFromAgentMetadata: read failed: ${err}`)
+  }
+
+  // Compute fallback cwd: keep the original cwd if it differs from the
+  // removed worktree path (multi-repo parent fallback).
+  const fallbackCwd =
+    existing?.cwd && existing.cwd !== removedWorktreePath ? existing.cwd : undefined
+
+  const merged: Partial<AgentMetadata> = {
+    ...spawnMetadata,
+    ...(fallbackCwd !== undefined ? { cwd: fallbackCwd } : {}),
+    ...(existing?.stoppedByUser ? { stoppedByUser: true } : {}),
+    ...(existing?.parentAgentId ? { parentAgentId: existing.parentAgentId } : {}),
+    ...(existing?.pluginSteered === true ? { pluginSteered: true } : {}),
+    ...(existing?.requestShape === 'foreground' ||
+    existing?.requestShape === 'background'
+      ? { requestShape: existing.requestShape }
+      : {}),
+    ...(typeof existing?.requestNonInteractive === 'boolean'
+      ? { requestNonInteractive: existing.requestNonInteractive }
+      : {}),
+    worktreeCleanlyRemoved: true,
+  }
+
+  try {
+    await writeAgentMetadata(agentId, merged as AgentMetadata)
+  } catch (err) {
+    logForDebugging(`clearWorktreeFromAgentMetadata: write failed: ${err}`)
+  }
 }

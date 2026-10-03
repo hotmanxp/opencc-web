@@ -607,6 +607,23 @@ export type AgentMetadata = {
   /** Source of the agent definition (e.g. 'built-in', 'projectSettings').
    * Used on resume to verify the resolved definition matches the original. */
   source?: string
+  /** True if the user explicitly stopped this agent (vs. natural completion).
+   * Forwarded from upstream module 1551 to enable per-agent cleanup UX. */
+  stoppedByUser?: boolean
+  /** Parent agent id when this agent was spawned by another subagent
+   * (e.g. workflow / teammate spawn chain). */
+  parentAgentId?: string
+  /** True if this agent was steered by a plugin (e.g. skill-driven loop).
+   * Forwarded from upstream module 1551. */
+  pluginSteered?: boolean
+  /** API request shape ('foreground' | 'background') used at spawn time.
+   * Persisted so resume picks up the same shape. */
+  requestShape?: 'foreground' | 'background'
+  /** Explicit non-interactive session flag passed at spawn. */
+  requestNonInteractive?: boolean
+  /** True once the worktree has been cleanly removed for this agent
+   * (set by clearWorktreeFromAgentMetadata). */
+  worktreeCleanlyRemoved?: boolean
 }
 
 /**

@@ -848,6 +848,14 @@ export const AgentTool = buildTool({
       cwd,
       description,
       agentName: name,
+      // Module 1551 wiring: pass through the new params when the call site
+      // has them in scope.
+      ...(worktreeInfo?.worktreeBranch
+        ? { worktreeBranch: worktreeInfo.worktreeBranch }
+        : {}),
+      ...(name ? { name } : {}),
+      ...(toolUseID ? { toolUseId: toolUseID } : {}),
+      ...(extraMetadata ? { extraMetadata } : {}),
     };
 
     // Helper to wrap execution with a cwd override. Worktree wins if present;
@@ -885,11 +893,16 @@ export const AgentTool = buildTool({
           // Clear worktreePath from metadata so resume doesn't try to use
           // a deleted directory, but keep an explicit child-repo cwd when
           // present so resume can still land in the target repository.
-          void writeAgentMetadata(asAgentId(earlyAgentId), {
-            agentType: selectedAgent.agentType,
-            source: selectedAgent.source,
-            ...(cwd && { cwd }),
-            ...(description && { description }),
+          void clearWorktreeFromAgentMetadata({
+            agentId: asAgentId(earlyAgentId),
+            removedWorktreePath: worktreePath,
+            spawnMetadata: {
+              agentType: selectedAgent.agentType,
+              source: selectedAgent.source,
+              ...(cwd && { cwd }),
+              ...(description && { description }),
+              ...(worktreeBranch && { worktreeBranch }),
+            },
           }).catch(_err => logForDebugging(`Failed to clear worktree metadata: ${_err}`));
           return {};
         }
