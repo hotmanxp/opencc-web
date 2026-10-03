@@ -1054,12 +1054,7 @@ export async function* runAgent({
   try {
     let queryTerminal: Terminal | undefined
     const configuredMaxSteps =
-      Number.isSafeInteger(maxSteps) && maxSteps! > 0
-        ? maxSteps
-        : Number.isSafeInteger(agentDefinition.maxSteps) &&
-            agentDefinition.maxSteps! > 0
-          ? agentDefinition.maxSteps
-          : undefined
+      Number.isSafeInteger(maxSteps) && maxSteps! > 0 ? maxSteps : undefined
     const queryIterator = query({
       messages: initialMessages,
       systemPrompt: agentSystemPrompt,

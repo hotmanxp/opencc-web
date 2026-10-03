@@ -70,7 +70,7 @@ const AgentJsonSchema = lazySchema(() =>
     description: z.string().min(1, 'Description cannot be empty'),
     tools: z.array(z.string()).optional(),
     disallowedTools: z.array(z.string()).optional(),
-    prompt: z.string().min(1, 'Prompt cannot be empty'),
+    prompt: z.string(),
     model: z
       .string()
       .trim()
@@ -82,15 +82,17 @@ const AgentJsonSchema = lazySchema(() =>
     mcpServers: z.array(AgentMcpServerSpecSchema()).optional(),
     hooks: HooksSchema().optional(),
     maxTurns: z.number().int().positive().optional(),
-    maxSteps: z.number().int().positive().optional(),
     skills: z.array(z.string()).optional(),
     initialPrompt: z.string().optional(),
     memory: z.enum(['user', 'project', 'local']).optional(),
     background: z.boolean().optional(),
+    // NOTE: vendor 保留 USER_TYPE==='ant' 门控 — zai 环境恒为 false 且无 CCR
+    // remote 后端,开放 'remote' 会产生无法执行的配置。
     isolation: (process.env.USER_TYPE === 'ant'
       ? z.enum(['worktree', 'remote'])
       : z.enum(['worktree'])
     ).optional(),
+    omitClaudeMd: z.boolean().optional(),
   }),
 )
 
@@ -112,7 +114,6 @@ export type BaseAgentDefinition = {
   effort?: EffortValue
   permissionMode?: PermissionMode
   maxTurns?: number // Maximum number of agentic turns before stopping
-  maxSteps?: number // Maximum number of tool-use steps before forcing a final summary
   filename?: string // Original filename without .md extension (for user/project/managed agents)
   baseDir?: string
   criticalSystemReminder_EXPERIMENTAL?: string // Short message re-injected at every user turn
@@ -213,7 +214,9 @@ export function getActiveAgentsFromList(
     }
   }
 
-  return Array.from(agentMap.values())
+  return Array.from(agentMap.values()).sort((a, b) =>
+    a.agentType.localeCompare(b.agentType),
+  )
 }
 
 /**
@@ -248,6 +251,44 @@ export function filterAgentsByMcpRequirements(
   availableServers: string[],
 ): AgentDefinition[] {
   return agents.filter(agent => hasRequiredMcpServers(agent, availableServers))
+}
+
+/**
+ * Returns the logical source label for an agent's MCP server definitions,
+ * distinguishing additional-directory agents from the canonical project set.
+ */
+export function agentMcpSource(agent: AgentDefinition): string {
+  return (agent as { fromAdditionalDirectory?: boolean }).fromAdditionalDirectory
+    ? 'additionalDirectory'
+    : agent.source
+}
+
+/**
+ * Convert agents into the trimmed info shape used for prompt listings.
+ */
+export function toAgentInfos(
+  agents: AgentDefinition[],
+): Array<{ name: string; description: string; model?: string }> {
+  return agents.map(a => ({
+    name: a.agentType,
+    description: a.whenToUse,
+    model: a.model,
+  }))
+}
+
+/**
+ * Recompute the active-agents view after the all-agents list has changed
+ * (e.g., a new file was added to the agents directory).
+ */
+export function rebuildAgentDefinitions(
+  previous: AgentDefinitionsResult,
+  allAgents: AgentDefinition[],
+): AgentDefinitionsResult {
+  return {
+    ...previous,
+    allAgents,
+    activeAgents: getActiveAgentsFromList(allAgents),
+  }
 }
 
 export const getAgentDefinitionsWithOverrides = memoize(
@@ -345,6 +386,14 @@ function getParseError(frontmatter: Record<string, unknown>): string {
     return 'Missing required "name" field in frontmatter'
   }
 
+  if (agentType.startsWith('-')) {
+    return 'Invalid "name": names must not start with "-"'
+  }
+
+  if (agentType.normalize('NFKC').includes(':')) {
+    return 'Invalid "name": names must not contain ":" (reserved for plugin namespacing)'
+  }
+
   if (!description || typeof description !== 'string') {
     return 'Missing required "description" field in frontmatter'
   }
@@ -434,7 +483,6 @@ export function parseAgentFromJson(
         : {}),
       ...(parsed.hooks ? { hooks: parsed.hooks } : {}),
       ...(parsed.maxTurns !== undefined ? { maxTurns: parsed.maxTurns } : {}),
-      ...(parsed.maxSteps !== undefined ? { maxSteps: parsed.maxSteps } : {}),
       ...(parsed.skills && parsed.skills.length > 0
         ? { skills: parsed.skills }
         : {}),
@@ -490,6 +538,18 @@ export function parseAgentFromMarkdown(
     // Validate required fields — silently skip files without any agent
     // frontmatter (they're likely co-located reference documentation)
     if (!agentType || typeof agentType !== 'string') {
+      return null
+    }
+    if (agentType.startsWith('-')) {
+      logForDebugging(
+        `Agent file ${filePath} has invalid name '${agentType}': names must not start with '-'`,
+      )
+      return null
+    }
+    if (agentType.normalize('NFKC').includes(':')) {
+      logForDebugging(
+        `Agent file ${filePath} has invalid name '${agentType}': names must not contain ':' (reserved for plugin namespacing)`,
+      )
       return null
     }
     if (!whenToUse || typeof whenToUse !== 'string') {
@@ -591,14 +651,10 @@ export function parseAgentFromMarkdown(
       )
     }
 
-    // Parse maxSteps from frontmatter
-    const maxStepsRaw = frontmatter['maxSteps']
-    const maxSteps = parsePositiveIntFromFrontmatter(maxStepsRaw)
-    if (maxStepsRaw !== undefined && maxSteps === undefined) {
-      logForDebugging(
-        `Agent file ${filePath} has invalid maxSteps '${maxStepsRaw}'. Must be a positive integer.`,
-      )
-    }
+    // Parse omitClaudeMd flag (skip AGENTS.md hierarchy in subagent context)
+    const omitClaudeMdRaw = frontmatter['omitClaudeMd']
+    const omitClaudeMd =
+      omitClaudeMdRaw === 'true' || omitClaudeMdRaw === true ? true : undefined
 
     // Extract filename without extension
     const filename = basename(filePath, '.md')
@@ -688,10 +744,10 @@ export function parseAgentFromMarkdown(
         ? { permissionMode: permissionModeRaw as PermissionMode }
         : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
-      ...(maxSteps !== undefined ? { maxSteps } : {}),
       ...(background ? { background } : {}),
       ...(memory ? { memory } : {}),
       ...(isolation ? { isolation } : {}),
+      ...(omitClaudeMd ? { omitClaudeMd } : {}),
     }
     return agentDef
   } catch (error) {
