@@ -857,7 +857,6 @@ export const AgentTool = buildTool({
       ...(toolUseContext.toolUseId
         ? { toolUseId: toolUseContext.toolUseId }
         : {}),
-      ...(extraMetadata ? { extraMetadata } : {}),
     };
 
     // Helper to wrap execution with a cwd override. Worktree wins if present;
