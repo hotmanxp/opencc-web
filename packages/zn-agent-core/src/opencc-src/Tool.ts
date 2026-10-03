@@ -701,8 +701,18 @@ export type Tool<
    * Renders an optional tag to display after the tool use message.
    * Used for additional metadata like timeout, model, resume ID, etc.
    * Returns null to not display anything.
+   *
+   * The optional `context` carries the tool's result and progress messages
+   * so the tag can reflect runtime data (e.g. the actual model chain
+   * AgentTool swapped to mid-flight).
    */
-  renderToolUseTag?(input: Partial<z.infer<Input>>): React.ReactNode
+  renderToolUseTag?(
+    input: Partial<z.infer<Input>>,
+    context?: {
+      toolUseResult?: unknown
+      progressMessages?: unknown[]
+    },
+  ): React.ReactNode
   /**
    * Optional. When omitted, no progress UI is shown while the tool runs.
    */

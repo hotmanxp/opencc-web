@@ -216,7 +216,9 @@ export function AssistantToolUseMessage(t0) {
   }
   let t11;
   if ($[44] !== input_0.data || $[45] !== input_0.success || $[46] !== tool_0) {
-    t11 = input_0.success && tool_0.renderToolUseTag && tool_0.renderToolUseTag(input_0.data);
+    t11 = input_0.success && tool_0.renderToolUseTag && tool_0.renderToolUseTag(input_0.data, {
+      progressMessages: progressMessagesForMessage
+    });
     $[44] = input_0.data;
     $[45] = input_0.success;
     $[46] = tool_0;

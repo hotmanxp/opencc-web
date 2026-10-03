@@ -9,6 +9,7 @@ import { Byline } from '../../components/design-system/Byline.js';
 import { Message as MessageComponent } from '../../components/Message.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { Box, Text } from '../../ink.js';
+import { ToolUseCountOverflowMessage } from '../../components/ToolUseCountOverflowMessage.js';
 import type { Tools } from '../../Tool.js';
 import type { ProgressMessage } from '../../types/message.js';
 import { buildSubagentLookups, EMPTY_LOOKUPS } from '../../utils/messages.js';
@@ -90,9 +91,7 @@ export function renderToolUseProgressMessage(
               <MessageComponent message={progressMessage.data.message} lookups={EMPTY_LOOKUPS} addMargin={false} tools={tools} commands={[]} verbose={verbose} inProgressToolUseIDs={inProgressToolUseIDs} progressMessagesForMessage={[]} shouldAnimate={false} shouldShowDot={false} style="condensed" isTranscriptMode={false} isStatic={true} />
             </Box>)}
         </SubAgentProvider>
-        {hiddenCount > 0 && <Text dimColor>
-            +{hiddenCount} more tool {plural(hiddenCount, 'use')}
-          </Text>}
+        {hiddenCount > 0 && <ToolUseCountOverflowMessage count={hiddenCount} unit="tool use" />}
       </Box>
     </MessageResponse>;
 }

@@ -854,7 +854,9 @@ export const AgentTool = buildTool({
         ? { worktreeBranch: worktreeInfo.worktreeBranch }
         : {}),
       ...(name ? { name } : {}),
-      ...(toolUseID ? { toolUseId: toolUseID } : {}),
+      ...(toolUseContext.toolUseId
+        ? { toolUseId: toolUseContext.toolUseId }
+        : {}),
       ...(extraMetadata ? { extraMetadata } : {}),
     };
 
