@@ -14,6 +14,7 @@ import { expandPath, toRelativePath } from '../../utils/path.js'
 import { checkReadPermissionForTool } from '../../utils/permissions/filesystem.js'
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
 import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.js'
+import { openSearchSession } from '../../utils/searchSession.js'
 import { DESCRIPTION, GLOB_TOOL_NAME } from './prompt.js'
 import {
   getToolUseSummary,
@@ -41,23 +42,65 @@ const outputSchema = lazySchema(() =>
     durationMs: z
       .number()
       .describe('Time taken to execute the search in milliseconds'),
-    numFiles: z.number().describe('Total number of files found'),
+    numFiles: z
+      .number()
+      .describe('Number of file paths returned (after any truncation)'),
     filenames: z
       .array(z.string())
       .describe('Array of file paths that match the pattern'),
     truncated: z
       .boolean()
       .describe('Whether results were truncated (limited to 100 files)'),
+    totalMatches: z
+      .number()
+      .optional()
+      .describe(
+        'Total number of matching files before truncation. A lower bound when countIsComplete is false.',
+      ),
+    countIsComplete: z
+      .boolean()
+      .optional()
+      .describe(
+        'Whether totalMatches is the exact total (true) or a floor because the underlying search truncated its own output (false).',
+      ),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
+
+/**
+ * Truncation notice appended to Glob results.
+ *
+ * Mirrors upstream `JKn` (bundle @8847060). The count matters: without it the
+ * model cannot tell whether it is missing three files or three thousand, and
+ * so cannot judge whether narrowing the pattern is worth the round trip.
+ *
+ * Three states, because they call for different responses:
+ *   - no count available (result from an older persisted payload)
+ *   - exact count  -> "here is how many more"
+ *   - floor count   -> "there are more than this, exact number unknown"
+ */
+function truncationNotice(output: Output): string {
+  const shown = output.filenames.length
+  if (output.totalMatches === undefined) {
+    return '(Results are truncated. Consider using a more specific path or pattern.)'
+  }
+  if (output.countIsComplete) {
+    const remaining = output.totalMatches - shown
+    return `(Showing ${shown} of ${output.totalMatches} matching files; ${remaining} more are not listed. Narrow the pattern or path to see the rest.)`
+  }
+  return `(Showing the first ${shown} files; there are more than ${output.totalMatches} matches. Narrow the pattern or path to see the rest.)`
+}
 
 export type Output = z.infer<OutputSchema>
 
 export const GlobTool = buildTool({
   name: GLOB_TOOL_NAME,
   searchHint: 'find files by name pattern or wildcard',
+  // A search never detaches itself; it always completes or fails in-turn.
+  backgrounding: 'never',
   maxResultSizeChars: 100_000,
+  // Which input field permission rules match against.
+  ruleContentField: 'path',
   async description() {
     return DESCRIPTION
   },
@@ -155,13 +198,39 @@ export const GlobTool = buildTool({
     const start = Date.now()
     const appState = getAppState()
     const limit = globLimits?.maxResults ?? 100
-    const { files, truncated } = await glob(
-      input.pattern,
-      GlobTool.getPath(input),
-      { limit, offset: 0 },
-      abortController.signal,
-      appState.toolPermissionContext,
-    )
+    const searchRoot = GlobTool.getPath(input)
+
+    // Pin the search root for the duration of the call: the symlink
+    // resolution is re-verified immediately before ripgrep spawns, so a path
+    // rewritten in between cannot redirect the search. See searchSession.ts.
+    const session = await openSearchSession(searchRoot, [searchRoot])
+    if (session === null) {
+      const empty: Output = {
+        filenames: [],
+        durationMs: Date.now() - start,
+        numFiles: 0,
+        truncated: false,
+        totalMatches: 0,
+        countIsComplete: true,
+      }
+      return { data: empty }
+    }
+
+    let result
+    try {
+      result = await glob(
+        input.pattern,
+        searchRoot,
+        { limit, offset: 0 },
+        abortController.signal,
+        appState.toolPermissionContext,
+        session,
+      )
+    } finally {
+      await session.close()
+    }
+
+    const { files, truncated, totalMatches, countIsComplete } = result
     // Relativize paths under cwd to save tokens (same as GrepTool)
     const filenames = files.map(toRelativePath)
     const output: Output = {
@@ -169,6 +238,8 @@ export const GlobTool = buildTool({
       durationMs: Date.now() - start,
       numFiles: filenames.length,
       truncated,
+      totalMatches,
+      countIsComplete,
     }
     return {
       data: output,
@@ -187,11 +258,7 @@ export const GlobTool = buildTool({
       type: 'tool_result',
       content: [
         ...output.filenames,
-        ...(output.truncated
-          ? [
-              '(Results are truncated. Consider using a more specific path or pattern.)',
-            ]
-          : []),
+        ...(output.truncated ? [truncationNotice(output)] : []),
       ].join('\n'),
     }
   },

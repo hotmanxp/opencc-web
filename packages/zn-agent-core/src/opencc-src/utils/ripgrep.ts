@@ -182,6 +182,147 @@ export class RipgrepUnavailableError extends Error {
   }
 }
 
+// ── Upstream parity: BJ's error taxonomy (bundle @5458518-5459200) ──────────
+// Without these, a malformed pattern exits rg with code 2 and opencc silently
+// returns [] — the model reads "No files found" instead of "your regex is
+// wrong", which is a materially different (and wrong) answer.
+
+/**
+ * rg rejected the pattern / glob / type before searching anything.
+ * Mirrors upstream `QJ` + `BO` (bundle @5458834).
+ *
+ * Upstream anchors on a leading `rg: `, which ripgrep emits only in some
+ * builds/paths. The vendored rg 13.0.0 prints the bare message with no
+ * program prefix, so the prefix is optional here — otherwise every usage
+ * error would fall through to "no matches" again, which is the bug this
+ * whole path exists to close.
+ */
+const RG_USAGE_ERROR_RE =
+  /^(?:rg: )?(?:regex parse error|error parsing glob|unrecognized file type|error parsing flag|compiled regex exceeds size limit)/m
+
+export class RipgrepUsageError extends Error {
+  constructor(stderr: string) {
+    super(
+      `Search failed — ripgrep rejected the pattern, glob, or file type without searching:\n${truncateForError(stderr.trim(), 2000)}`,
+    )
+    this.name = 'RipgrepUsageError'
+  }
+}
+
+export class RipgrepOutputTooLargeError extends Error {
+  constructor(overflowed: 'stdout' | 'stderr') {
+    super(
+      overflowed === 'stdout'
+        ? `Ripgrep output passed the ${MAX_BUFFER_SIZE / 1e6}MB limit before a single complete line was read, so there are no usable results: at least one matching line is extremely long. Try a more specific pattern or path, or exclude very large files.`
+        : `Ripgrep produced more than ${MAX_BUFFER_SIZE / 1e6}MB of error output (for example per-file permission warnings) before any result line, so the search is incomplete. Try a more specific path.`,
+    )
+    this.name = 'RipgrepOutputTooLargeError'
+  }
+}
+
+/** Errno values that mean "the OS could not start the process". Mirrors upstream `OO`. */
+const SPAWN_RESOURCE_ERRNOS = new Set([
+  'EAGAIN',
+  'ENOMEM',
+  'EMFILE',
+  'ENFILE',
+])
+
+/** Signals that kill rg without an exit code, leaving a torn tail. Mirrors upstream `XJ`. */
+const EXTERNAL_SIGNALS = new Set(['SIGHUP', 'SIGINT', 'SIGPIPE'])
+
+const SPAWN_RESOURCE_ADVICE: Record<string, { reason: string; advice: string }> =
+  {
+    EAGAIN: {
+      reason: 'a limit on processes or threads was reached',
+      advice:
+        'this machine has reached a limit on processes; closing other programs can help',
+    },
+    ENOMEM: {
+      reason: 'there is not enough memory',
+      advice: 'this machine is short on memory; closing other programs can help',
+    },
+    EMFILE: {
+      reason: 'this OpenCC process has too many files open',
+      advice: 'OpenCC needs a restart',
+    },
+    ENFILE: {
+      reason: 'the system has too many files open',
+      advice:
+        'this machine has too many files open; closing other programs can help',
+    },
+  }
+
+export class RipgrepSpawnResourceError extends Error {
+  constructor(errno: string) {
+    const { reason, advice } = SPAWN_RESOURCE_ADVICE[errno] ?? {
+      reason: 'the system ran out of a resource',
+      advice: 'this machine is short of a resource needed to start programs',
+    }
+    super(
+      `ripgrep could not start, so nothing was searched and matches may still exist: the operating system could not start it because ${reason} (${errno}). Retry in a moment. If it keeps failing, tell the user that ${advice}.`,
+    )
+    this.name = 'RipgrepSpawnResourceError'
+  }
+
+  /**
+   * Build the error if `err` is a spawn failure caused by resource exhaustion.
+   * Only fires for real spawn errors — not for rg's own exit codes.
+   */
+  static from(err: unknown): RipgrepSpawnResourceError | undefined {
+    const errno = getErrnoCode(err)
+    if (errno === undefined || !SPAWN_RESOURCE_ERRNOS.has(errno)) return undefined
+    const isSpawn =
+      err instanceof Error &&
+      'syscall' in err &&
+      typeof (err as { syscall?: unknown }).syscall === 'string' &&
+      (err as { syscall: string }).syscall.startsWith('spawn')
+    if (!isSpawn) return undefined
+    return new RipgrepSpawnResourceError(errno)
+  }
+}
+
+/** Thrown before spawn when argv/cwd/target contains a NUL byte. Mirrors upstream `LO` + `Im` (@5461108). */
+export class RipgrepNullByteError extends Error {
+  constructor(what: string) {
+    super(`Cannot spawn ripgrep: ${what} contains a null byte (\\0)`)
+    this.name = 'RipgrepNullByteError'
+  }
+}
+
+function truncateForError(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}…`
+}
+
+function getErrnoCode(err: unknown): string | undefined {
+  if (typeof err === 'object' && err !== null && 'code' in err) {
+    const code = (err as { code?: unknown }).code
+    if (typeof code === 'string') return code
+  }
+  return undefined
+}
+
+/**
+ * Reject a spawn whose argv, cwd, or target contains a NUL byte. Without this
+ * the NUL silently truncates the argument at the exec boundary, turning a
+ * search of `foo\0bar` into a search of `foo`. Mirrors upstream `Im` (@5461108).
+ */
+export function assertNoNullBytesInSpawn(
+  args: readonly string[],
+  target: string,
+  cwd: string,
+): void {
+  const argvIndex = args.findIndex(arg => arg.includes('\0'))
+  const what = cwd.includes('\0')
+    ? 'the session working directory'
+    : target.includes('\0')
+      ? 'the target path'
+      : argvIndex !== -1
+        ? `caller argument ${argvIndex}`
+        : null
+  if (what !== null) throw new RipgrepNullByteError(what)
+}
+
 function getRipgrepInstallHint(platform = process.platform): string {
   switch (platform) {
     case 'win32':
@@ -214,6 +355,53 @@ export function wrapRipgrepUnavailableError(
   )
 }
 
+/**
+ * Options for {@link ripGrep}. Mirrors upstream `BJ`'s options object
+ * (bundle @5470921).
+ */
+export type RipGrepOptions = {
+  /**
+   * Return stdout without newline-splitting/trimming. Required for `--null`
+   * output, where a NUL — not a newline — separates records and a filename may
+   * legally contain newlines. Mirrors upstream's `rawLines`.
+   */
+  rawLines?: boolean
+  /**
+   * Throw {@link RipgrepUsageError} when rg rejects the pattern/glob/type
+   * (exit code 2) instead of resolving with the partial output. Without this a
+   * malformed pattern is indistinguishable from "no matches".
+   */
+  rejectOnInputError?: boolean
+  /** Spawn cwd. Defaults to the resolved parent of `target`. */
+  cwd?: string
+  /** Runs immediately before each spawn, including the EAGAIN retry. */
+  beforeSpawn?: () => void
+}
+
+function splitRipGrepOutput(stdout: string, rawLines: boolean): string[] {
+  if (rawLines) {
+    return stdout === '' ? [] : stdout.replace(/\n$/, '').split('\n')
+  }
+  return stdout
+    .trim()
+    .split('\n')
+    .map(line => line.replace(/\r$/, ''))
+    .filter(Boolean)
+}
+
+/**
+ * Drop a trailing partial line from raw output. When the last record is
+ * NUL-terminated mid-buffer the partial run after the final NUL is discarded.
+ * Mirrors upstream `ZJ` (bundle @5458364).
+ */
+function dropTornTrailingLine(lines: string[], stdout: string): string[] {
+  const last = lines.at(-1)
+  if (last === undefined || stdout.endsWith('\n')) return lines
+  const nulIndex = last.lastIndexOf('\0')
+  if (nulIndex === -1) return lines.slice(0, -1)
+  return lines.with(-1, last.slice(0, nulIndex + 1))
+}
+
 function ripGrepRaw(
   args: string[],
   target: string,
@@ -224,12 +412,16 @@ function ripGrepRaw(
     stderr: string,
   ) => void,
   singleThread = false,
+  options: RipGrepOptions = {},
 ): ChildProcess {
   // NB: When running interactively, ripgrep does not require a path as its last
   // argument, but when run non-interactively, it will hang unless a path or file
   // pattern is provided
 
   const { rgPath, rgArgs, argv0 } = ripgrepCommand()
+
+  // Reject NUL bytes before they silently truncate the argument at exec.
+  assertNoNullBytesInSpawn(args, target, options.cwd ?? process.cwd())
 
   // Use single-threaded mode only if explicitly requested for this call's retry
   const threadArgs = singleThread ? ['-j', '1'] : []
@@ -245,6 +437,7 @@ function ripGrepRaw(
   if (argv0) {
     const child = spawn(rgPath, fullArgs, {
       argv0,
+      cwd: options.cwd,
       signal: abortSignal,
       // Prevent visible console window on Windows (no-op on other platforms)
       windowsHide: true,
@@ -332,6 +525,7 @@ function ripGrepRaw(
     fullArgs,
     {
       maxBuffer: MAX_BUFFER_SIZE,
+      cwd: options.cwd,
       signal: abortSignal,
       timeout,
       killSignal: process.platform === 'win32' ? undefined : 'SIGKILL',
@@ -463,6 +657,7 @@ export async function ripGrep(
   args: string[],
   target: string,
   abortSignal: AbortSignal,
+  options: RipGrepOptions = {},
 ): Promise<string[]> {
   await codesignRipgrepIfNecessary()
 
@@ -480,13 +675,7 @@ export async function ripGrep(
     ): void => {
       // Success case
       if (!error) {
-        resolve(
-          stdout
-            .trim()
-            .split('\n')
-            .map(line => line.replace(/\r$/, ''))
-            .filter(Boolean),
-        )
+        resolve(splitRipGrepOutput(stdout, options.rawLines === true))
         return
       }
 
@@ -517,6 +706,12 @@ export async function ripGrep(
           `rg EAGAIN error detected, retrying with single-threaded mode (-j 1)`,
         )
         logEvent('tengu_ripgrep_eagain_retry', {})
+        try {
+          options.beforeSpawn?.()
+        } catch (spawnErr) {
+          reject(spawnErr)
+          return
+        }
         ripGrepRaw(
           args,
           target,
@@ -537,23 +732,57 @@ export async function ripGrep(
         error.code === 'ABORT_ERR'
       const isBufferOverflow =
         error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+      // Killed by a signal with no exit code (SIGHUP/SIGINT/SIGPIPE) — the
+      // tail is torn the same way a timeout tears it. Mirrors upstream `XJ`.
+      const wasSignalled =
+        error.code === undefined &&
+        (error.signal === undefined ||
+          EXTERNAL_SIGNALS.has(error.signal as string))
 
       let lines: string[] = []
       if (hasOutput) {
-        lines = stdout
-          .trim()
-          .split('\n')
-          .map(line => line.replace(/\r$/, ''))
-          .filter(Boolean)
-        // Drop last line for timeouts and buffer overflow - it may be incomplete
-        if (lines.length > 0 && (isTimeout || isBufferOverflow)) {
-          lines = lines.slice(0, -1)
+        lines = splitRipGrepOutput(stdout, options.rawLines === true)
+        // Drop the torn last record for timeouts, buffer overflow, and
+        // externally-signalled exits — it may be incomplete.
+        if (lines.length > 0 && (isTimeout || isBufferOverflow || wasSignalled)) {
+          lines =
+            options.rawLines === true
+              ? dropTornTrailingLine(lines, stdout)
+              : lines.slice(0, -1)
         }
       }
 
       logForDebugging(
         `rg error (signal=${error.signal}, code=${error.code}, stderr: ${stderr}), ${lines.length} results`,
       )
+
+      // A pattern/glob/type that rg itself rejected is a different answer from
+      // "no matches" — surface it instead of resolving empty. Checked before
+      // the generic logError so a usage error is never reported as a crash.
+      if (
+        options.rejectOnInputError &&
+        error.code === 2 &&
+        lines.length === 0 &&
+        RG_USAGE_ERROR_RE.test(stderr)
+      ) {
+        reject(new RipgrepUsageError(stderr))
+        return
+      }
+
+      // Output blew past the buffer cap before a single complete record was
+      // readable — there is nothing usable to return.
+      if (
+        options.rejectOnInputError &&
+        isBufferOverflow &&
+        lines.length === 0
+      ) {
+        reject(
+          new RipgrepOutputTooLargeError(
+            stderr.length > MAX_BUFFER_SIZE ? 'stderr' : 'stdout',
+          ),
+        )
+        return
+      }
 
       // code 2 = ripgrep usage error (already handled); ABORT_ERR = caller
       // explicitly aborted (not an error, just a cancellation — interactive
@@ -577,9 +806,22 @@ export async function ripGrep(
       resolve(lines)
     }
 
-    ripGrepRaw(args, target, abortSignal, (error, stdout, stderr) => {
-      handleResult(error, stdout, stderr, false)
-    })
+    try {
+      options.beforeSpawn?.()
+    } catch (err) {
+      reject(err)
+      return
+    }
+    ripGrepRaw(
+      args,
+      target,
+      abortSignal,
+      (error, stdout, stderr) => {
+        handleResult(error, stdout, stderr, false)
+      },
+      false,
+      options,
+    )
   })
 }
 

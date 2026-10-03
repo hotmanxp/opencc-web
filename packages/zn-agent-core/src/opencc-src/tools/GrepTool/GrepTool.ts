@@ -23,6 +23,10 @@ import type { PermissionDecision } from '../../utils/permissions/PermissionResul
 import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.js'
 import { getGlobExclusionsForPluginCache } from '../../utils/plugins/orphanedPluginFilter.js'
 import { ripGrep } from '../../utils/ripgrep.js'
+import {
+  parseJsonContent,
+  parseNullSeparated,
+} from '../../utils/ripgrepOutput.js'
 import { semanticBoolean } from '../../utils/semanticBoolean.js'
 import { semanticNumber } from '../../utils/semanticNumber.js'
 import { plural } from '../../utils/stringUtils.js'
@@ -75,6 +79,9 @@ const inputSchema = lazySchema(() =>
     ),
     '-i': semanticBoolean(z.boolean().optional()).describe(
       'Case insensitive search (rg -i)',
+    ),
+    '-o': semanticBoolean(z.boolean().optional()).describe(
+      'Print only the matched part of a line (rg -o), not the whole line. Requires output_mode: "content", ignored otherwise.',
     ),
     type: z
       .string()
@@ -341,6 +348,7 @@ export const GrepTool = buildTool({
       context,
       '-n': show_line_numbers = true,
       '-i': case_insensitive = false,
+      '-o': only_matching = false,
       head_limit,
       offset = 0,
       multiline = false,
@@ -380,12 +388,25 @@ export const GrepTool = buildTool({
     if (output_mode === 'files_with_matches') {
       args.push('-l')
     } else if (output_mode === 'count') {
-      args.push('-c')
+      // -H forces the filename even for a single-file search; without it rg
+      // prints a bare count that carries no path.
+      args.push('-c', '-H')
     }
+
+    // Machine-readable output. Content mode needs rg's JSON event stream so the
+    // parser can distinguish a match from a context row, detect binary hits,
+    // and report the real truncation boundary; the other two modes only need
+    // NUL separation so a path containing a colon or newline survives.
+    args.push(output_mode === 'content' ? '--json' : '--null')
 
     // Add line numbers if requested
     if (show_line_numbers && output_mode === 'content') {
       args.push('-n')
+    }
+
+    // -o (only matching): print just the matched substrings
+    if (only_matching && output_mode === 'content') {
+      args.push('-o')
     }
 
     // Add context flags (-C/context takes precedence over context_before/context_after)
@@ -452,7 +473,10 @@ export const GrepTool = buildTool({
       const rgIgnorePattern = ignorePattern.startsWith('/')
         ? `!${ignorePattern}`
         : `!**/${ignorePattern}`
-      args.push('--glob', rgIgnorePattern)
+      // --iglob, not --glob: deny rules must match case-insensitively, so a
+      // rule for `secret` also excludes a directory named `Secret`. With
+      // case-sensitive --glob the deny is silently bypassed by casing.
+      args.push('--iglob', rgIgnorePattern)
     }
 
     // Exclude orphaned plugin version directories
@@ -467,7 +491,31 @@ export const GrepTool = buildTool({
     // We don't use AbortController for timeout to avoid interrupting the agent loop
     // If ripgrep times out, it throws RipgrepTimeoutError which propagates up
     // so OpenCC knows the search didn't complete (rather than thinking there were no matches)
-    const results = await ripGrep(args, absolutePath, abortController.signal)
+    const contextRequested =
+      (context ?? 0) > 0 ||
+      (context_c ?? 0) > 0 ||
+      (context_before ?? 0) > 0 ||
+      (context_after ?? 0) > 0
+
+    const rawOutput = await ripGrep(args, absolutePath, abortController.signal, {
+      rawLines: true,
+      rejectOnInputError: true,
+    })
+
+    const results =
+      output_mode === 'content'
+        ? parseJsonContent(rawOutput, {
+            contextBreaks: contextRequested,
+            onlyMatching: only_matching,
+          }).map(line => {
+            // parseJsonContent emits `path\0line:content` so the path can be
+            // told from the content without parsing — a path may contain a
+            // colon and content may contain anything. Drop the NUL and let
+            // relativizeContentLine re-attach the cwd prefix it expects.
+            const nul = line.indexOf('\0')
+            return nul < 0 ? line : `${line.slice(0, nul)}:${line.slice(nul + 1)}`
+          })
+        : parseNullSeparated(rawOutput, output_mode)
 
     if (output_mode === 'content') {
       // For content mode, results are the actual content lines
