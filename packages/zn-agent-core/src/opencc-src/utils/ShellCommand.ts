@@ -166,10 +166,13 @@ class ShellCommandImpl implements ShellCommand {
   readonly taskOutput: TaskOutput
 
   static #handleTimeout(self: ShellCommandImpl): void {
+    // Record the timeout on both paths. A backgrounded command is still a
+    // command that hit its timeout — it just kept running instead of dying —
+    // and the result has to say so via abortReason / timedOutAfterMs.
+    self.#timedOut = true
     if (self.#shouldAutoBackground && self.#onTimeoutCallback) {
       self.#onTimeoutCallback(self.background.bind(self))
     } else {
-      self.#timedOut = true
       self.#doKill(SIGTERM)
     }
   }
