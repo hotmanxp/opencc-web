@@ -508,20 +508,24 @@ export function detectGhRateLimitHint(
 /**
  * Detect files the model had already read that this command rewrote behind its
  * back, so it re-reads before editing. Only fires for commands matching
- * WRITE_COMMAND_MARKERS; `commandStartSec` is the floored second the command
- * started, and a file must be newer than both it and its cached read time.
+ * WRITE_COMMAND_MARKERS; `commandStartMs` is when the command started, and a
+ * file must be newer than both it and its cached read time.
+ *
+ * All three timestamps are milliseconds — `getFileModificationTime{,Async}`
+ * return `Math.floor(mtimeMs)`, and `readFileState` entries are written with
+ * the same helper.
  *
  * Mirrors upstream's `Xhr`.
  */
 export async function detectStaleReadFiles(
   command: string,
   readFileState: ToolUseContext['readFileState'],
-  commandStartSec: number,
+  commandStartMs: number,
 ): Promise<string[]> {
   if (!WRITE_COMMAND_MARKERS.test(command)) return [];
   const stale: string[] = [];
-  await Promise.all(Array.from(readFileState.entries(), ([path, entry]) => getFileModificationTimeAsync(path).then(mtimeSec => {
-    if (mtimeSec > commandStartSec && mtimeSec > entry.timestamp) {
+  await Promise.all(Array.from(readFileState.entries(), ([path, entry]) => getFileModificationTimeAsync(path).then(mtimeMs => {
+    if (mtimeMs > commandStartMs && mtimeMs > entry.timestamp) {
       stale.push(path);
     }
   }).catch(() => {})));
@@ -903,10 +907,11 @@ export const BashTool = buildTool({
     let result: ExecResult;
     const isMainThread = !toolUseContext.agentId;
     const preventCwdChanges = !isMainThread;
-    // Floored to whole seconds, matching the granularity of
-    // getFileModificationTimeAsync — a file written during the command has an
-    // mtime strictly greater than this.
-    const commandStartSec = Math.floor(Date.now() / 1000);
+    // Milliseconds, matching getFileModificationTimeAsync (which returns
+    // `Math.floor(mtimeMs)`) — a file written during the command has an mtime
+    // strictly greater than this. Comparing against a seconds value here made
+    // every cached read look stale, so the hint fired unconditionally.
+    const commandStartMs = Date.now();
     try {
       const commandAnalysis = await analyzeBashCommand(input.command);
       // Use the new async generator version of runShellCommand
@@ -966,6 +971,31 @@ export const BashTool = buildTool({
 
       // Interpret the command result using semantic rules
       interpretationResult = interpretCommandResult(input.command, result.code, result.stdout || '', '');
+
+      // Hints below mirror Claude Code 2.1.287. gitOperation / ghRateLimitHint /
+      // staleReadFileStateHint are only meaningful for a command that ran to
+      // completion in the foreground — once backgrounded we have no settled
+      // output to inspect, and the process may still be mutating files.
+      //
+      // Computed here, before the non-zero-exit throw below, so the error path
+      // can carry them too. `gh` exits non-zero on precisely the API errors
+      // `ghRateLimitHint` exists to explain, so computing this only after the
+      // success path left the hint unreachable in its one real case.
+      const ranInForeground = result.backgroundTaskId === undefined;
+      let gitOperation: Out['gitOperation'];
+      let ghRateLimitHint: string | undefined;
+      let staleReadFileStateHint: string | undefined;
+      if (ranInForeground) {
+        gitOperation = detectGitOperation(input.command, result.stdout);
+        if (Object.keys(gitOperation).length === 0) gitOperation = undefined;
+        ghRateLimitHint = detectGhRateLimitHint(input.command, result.stdout);
+        if (!result.interrupted) {
+          const stalePaths = await detectStaleReadFiles(input.command, toolUseContext.readFileState, commandStartMs);
+          if (stalePaths.length > 0) {
+            staleReadFileStateHint = formatStaleReadHint(stalePaths, getCwd());
+          }
+        }
+      }
 
       // Check for git index.lock error (stderr is in stdout now)
       if (result.stdout && result.stdout.includes(".git/index.lock': File exists")) {
@@ -1034,6 +1064,23 @@ export const BashTool = buildTool({
               persistedForError.truncated,
             )
           }
+        }
+        // Carry the model-facing reminders into the error text. The error path
+        // is formatted with `formatError` and never reaches
+        // `mapToolResultToToolResultBlockParam`, so anything not attached here
+        // is simply lost — which is why a rate-limited `gh` call told the model
+        // "Exit code 1" and nothing about why.
+        //
+        // Re-check the gh hint against the failure text: `gh` reports API
+        // errors on stderr, and the early pass only inspects `result.stdout`,
+        // so on the pipe path it saw nothing.
+        const ghHintForError =
+          ghRateLimitHint ??
+          detectGhRateLimitHint(input.command, outputWithSbFailures);
+        if (staleReadFileStateHint || ghHintForError) {
+          errorStdout = [errorStdout, staleReadFileStateHint, ghHintForError]
+            .filter(Boolean)
+            .join('\n');
         }
         throw new ShellError(errorStdout, result.stderr || '', result.code, result.interrupted, {
           abortReason: result.abortReason,
@@ -1121,25 +1168,6 @@ export const BashTool = buildTool({
         // accurate — mapToolResultToToolResultBlockParam's defensive
         // fallthrough will send text, not an image block.
         isImage = false;
-      }
-    }
-    // Hints below mirror Claude Code 2.1.287. gitOperation / ghRateLimitHint /
-    // staleReadFileStateHint are only meaningful for a command that ran to
-    // completion in the foreground — once backgrounded we have no settled
-    // output to inspect, and the process may still be mutating files.
-    const ranInForeground = result.backgroundTaskId === undefined;
-    let gitOperation: Out['gitOperation'];
-    let ghRateLimitHint: string | undefined;
-    let staleReadFileStateHint: string | undefined;
-    if (ranInForeground) {
-      gitOperation = detectGitOperation(input.command, result.stdout);
-      if (Object.keys(gitOperation).length === 0) gitOperation = undefined;
-      ghRateLimitHint = detectGhRateLimitHint(input.command, result.stdout);
-      if (!wasInterrupted) {
-        const stalePaths = await detectStaleReadFiles(input.command, toolUseContext.readFileState, commandStartSec);
-        if (stalePaths.length > 0) {
-          staleReadFileStateHint = formatStaleReadHint(stalePaths, getCwd());
-        }
       }
     }
     const data: Out = {
@@ -1338,14 +1366,20 @@ async function* runShellCommand({
   // background rather than letting it die with the turn. The unregister
   // callback fires on the normal paths so the listener does not outlive the
   // command.
-  if (!isBackgroundTasksDisabled && shouldAutoBackground && run_in_background !== true && onTurnEnd) {
+  //
+  // Registration goes through the turnLifecycle module, which the query loop
+  // drives via fireTurnEnd() — that is the actual trigger, and it already
+  // clears the scope's listeners afterwards. `onTurnEnd` is only an extra
+  // unregister hook for contexts that supply it; gating on it left this whole
+  // path unreachable, since nothing populated it.
+  if (!isBackgroundTasksDisabled && shouldAutoBackground && run_in_background !== true) {
     const unregisterTurnEnd = registerTurnEndListener(() => {
       if (shellCommand.status === 'running' && backgroundShellId === undefined) {
         backgroundedByTurnAbort = true;
         startBackgrounding('tengu_bash_command_turn_abort_backgrounded');
       }
     });
-    onTurnEnd(() => {
+    onTurnEnd?.(() => {
       unregisterTurnEnd();
     });
   }
@@ -1388,7 +1422,13 @@ async function* runShellCommand({
         interrupted: false,
         backgroundTaskId: backgroundShellId,
         assistantAutoBackgrounded,
-        backgroundedByTurnAbort
+        backgroundedByTurnAbort,
+        // The command timed out and was handed to the background. The real
+        // result settles later, but the model needs to know *now* that this
+        // was a timeout, not a command that finished cleanly.
+        ...(shellCommand.timedOutAfterMs !== undefined
+          ? { timedOutAfterMs: shellCommand.timedOutAfterMs }
+          : {})
       };
     }
   }
@@ -1452,7 +1492,11 @@ async function* runShellCommand({
           interrupted: false,
           backgroundTaskId: backgroundShellId,
           assistantAutoBackgrounded,
-          backgroundedByTurnAbort
+          backgroundedByTurnAbort,
+          // The command timed out and was handed to the background. The real
+          // result settles later, but the model needs to know *now* that this
+          // was a timeout, not a command that finished cleanly.
+          ...(shellCommand.timedOutAfterMs !== undefined            ? { timedOutAfterMs: shellCommand.timedOutAfterMs }            : {})
         };
       }
 
@@ -1466,7 +1510,10 @@ async function* runShellCommand({
             code: 0,
             interrupted: false,
             backgroundTaskId: foregroundTaskId,
-            backgroundedByUser: true
+            backgroundedByUser: true,
+            ...(shellCommand.timedOutAfterMs !== undefined
+              ? { timedOutAfterMs: shellCommand.timedOutAfterMs }
+              : {})
           };
         }
       }

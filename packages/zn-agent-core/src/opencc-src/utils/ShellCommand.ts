@@ -59,6 +59,13 @@ export type ShellCommand = {
   kill: () => void
   status: 'running' | 'backgrounded' | 'completed' | 'killed'
   /**
+   * The timeout that fired, in ms — readable synchronously, unlike
+   * `ExecResult.timedOutAfterMs`, which is only populated once the result
+   * settles. A backgrounded-on-timeout command returns to its caller *before*
+   * that, so this is how the early return learns the command timed out.
+   */
+  timedOutAfterMs?: number
+  /**
    * Cleans up stream resources (event listeners).
    * Should be called after the command completes or is killed to prevent memory leaks.
    */
@@ -222,6 +229,10 @@ class ShellCommandImpl implements ShellCommand {
     return this.#status
   }
 
+  get timedOutAfterMs(): number | undefined {
+    return this.#timedOut ? this.#timeout : undefined
+  }
+
   #abortHandler(): void {
     // On 'interrupt' (user submitted a new message), keep explicit survivors
     // alive: already-backgrounded commands and asyncRewake hook processes
@@ -368,7 +379,7 @@ class ShellCommandImpl implements ShellCommand {
       durationMs: Date.now() - this.#startedAt,
       signalAborted,
       isAbort,
-      timedOutAfterMs: this.#timedOut ? this.#timeout : undefined,
+      timedOutAfterMs: this.timedOutAfterMs,
       abortReason: normalizedAbortReason,
       abortMessage:
         normalizedAbortReason && isAbort

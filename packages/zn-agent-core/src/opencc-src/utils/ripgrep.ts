@@ -213,7 +213,7 @@ export class RipgrepOutputTooLargeError extends Error {
   constructor(overflowed: 'stdout' | 'stderr') {
     super(
       overflowed === 'stdout'
-        ? `Ripgrep output passed the ${MAX_BUFFER_SIZE / 1e6}MB limit before a single complete line was read, so there are no usable results: at least one matching line is extremely long. Try a more specific pattern or path, or exclude very large files.`
+        ? `Ripgrep produced more than ${MAX_BUFFER_SIZE / 1e6}MB of output, so the result set was cut off and what remains is only part of it. Rather than report a partial list as complete, the search failed. Narrow it with a more specific pattern, a subdirectory path, a glob, or a lower head_limit.`
         : `Ripgrep produced more than ${MAX_BUFFER_SIZE / 1e6}MB of error output (for example per-file permission warnings) before any result line, so the search is incomplete. Try a more specific path.`,
     )
     this.name = 'RipgrepOutputTooLargeError'
@@ -720,6 +720,8 @@ export async function ripGrep(
             handleResult(retryError, retryStdout, retryStderr, true)
           },
           true, // Force single-threaded mode for this retry only
+          options, // Must carry `cwd` — dropping it respawns in process.cwd(),
+          // which discards the search session's pinned directory.
         )
         return
       }
@@ -769,13 +771,13 @@ export async function ripGrep(
         return
       }
 
-      // Output blew past the buffer cap before a single complete record was
-      // readable — there is nothing usable to return.
-      if (
-        options.rejectOnInputError &&
-        isBufferOverflow &&
-        lines.length === 0
-      ) {
+      // rg's stdout was cut off at the buffer cap, so whatever we parsed is a
+      // prefix of the real result set. Returning it as-is told the model that
+      // a partial list was the complete one — with `--json` the payload is
+      // ~1.9x the size of the human-readable output, so this triggers on
+      // searches that used to fit. Report it and let the model narrow the
+      // search instead.
+      if (options.rejectOnInputError && isBufferOverflow) {
         reject(
           new RipgrepOutputTooLargeError(
             stderr.length > MAX_BUFFER_SIZE ? 'stderr' : 'stdout',
