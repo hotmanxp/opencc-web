@@ -110,9 +110,22 @@ export function MonacoCodeView({
       syncRef.current = (): void => {
         if (disposed) return;
         const next = latest.current;
-        const changed = !previous || previous.documentKey !== next.documentKey
-          || previous.content !== next.content || previous.fileName !== next.fileName || previous.language !== next.language;
-        if (changed) {
+        // 内容变化分两条路径,不能都重建 model:
+        // (a) 用户在编辑器里输入 → onDidChangeModelContent 已经把新值同步到
+        //     model,React onChange 触发的 useEffect 重跑 sync 时
+        //     editor.getValue() === next.content —— 这种情况不能 createModel,
+        //     否则光标会被丢回 (1,1)(JsonFileEditor 的 JSON 编辑器症状)。
+        // (b) 父组件异步更新 content(网络响应 / 外部按钮改 draft),model 还没
+        //     跟上 —— setValue 同步过去。setValue 同样会重置光标,但这是外部
+        //     同步路径,接受。
+        // documentKey / language / fileName 变化才真需要 createModel + setModel
+        // (换文件 / 换语法)。
+        const contentChanged = !!previous && previous.content !== next.content;
+        const needsModelReplace = !previous
+          || previous.documentKey !== next.documentKey
+          || previous.language !== next.language
+          || previous.fileName !== next.fileName;
+        if (needsModelReplace) {
           const oldModel = editor.getModel();
           const model = monaco.editor.createModel(
             next.content,
@@ -122,9 +135,11 @@ export function MonacoCodeView({
           editor.setModel(model);
           switchingModel = false;
           oldModel?.dispose();
+        } else if (contentChanged && editor.getValue() !== next.content) {
+          editor.getModel()?.setValue(next.content);
         }
         editor.updateOptions({ ...next.options, readOnly: !next.editable });
-        if (changed) next.onReady?.(api);
+        if (!previous) next.onReady?.(api);
         if (next.editable && !previous?.editable) editor.focus();
         previous = next;
       };
