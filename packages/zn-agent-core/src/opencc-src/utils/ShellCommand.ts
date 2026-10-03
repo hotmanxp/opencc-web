@@ -25,6 +25,8 @@ export type ExecResult = {
   backgroundedByUser?: boolean
   /** Set when assistant-mode auto-backgrounded a long-running blocking command. */
   assistantAutoBackgrounded?: boolean
+  /** Set when the turn ending handed this command to the background. */
+  backgroundedByTurnAbort?: boolean
   /** Set when stdout was too large to fit inline — points to the output file on disk. */
   outputFilePath?: string
   /** Total size of the output file in bytes (set when outputFilePath is set). */
@@ -41,6 +43,8 @@ export type ExecResult = {
   signalAborted?: boolean
   /** True when the command was cancelled through the abort path, not by shell exit. */
   isAbort?: boolean
+  /** The timeout that actually fired, in ms. Present only when the command timed out. */
+  timedOutAfterMs?: number
   /** Normalized abort or timeout reason, when known. */
   abortReason?: AbortReason
   /** Safe user-facing abort explanation. */
@@ -361,6 +365,7 @@ class ShellCommandImpl implements ShellCommand {
       durationMs: Date.now() - this.#startedAt,
       signalAborted,
       isAbort,
+      timedOutAfterMs: this.#timedOut ? this.#timeout : undefined,
       abortReason: normalizedAbortReason,
       abortMessage:
         normalizedAbortReason && isAbort

@@ -1,12 +1,15 @@
+import { feature } from 'bun:bundle';
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import { copyFile, stat as fsStat, link, unlink } from 'fs/promises';
 import { createReadStream, createWriteStream } from 'fs';
+import { relative } from 'path';
 import { pipeline } from 'stream/promises';
 import * as React from 'react';
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js';
 import type { AppState } from 'src/state/AppState.js';
 import { z } from 'zod/v4';
 import { TOOL_SUMMARY_MAX_LENGTH } from '../../constants/toolLimits.js';
+import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../../services/analytics/index.js';
 import { notifyVscodeFileUpdated } from '../../services/mcp/vscodeSdkMcp.js';
 import type { SetToolJSXFn, ToolCallProgress, ToolUseContext, ValidationResult } from '../../Tool.js';
@@ -20,10 +23,12 @@ import { extractClaudeCodeHints } from '../../utils/claudeCodeHints.js';
 import { detectCodeIndexingFromCommand } from '../../utils/codeIndexing.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isENOENT, ShellError } from '../../utils/errors.js';
-import { detectFileEncoding, detectLineEndings, getFileModificationTime, writeTextContent } from '../../utils/file.js';
+import { detectFileEncoding, detectLineEndings, getFileModificationTime, getFileModificationTimeAsync, writeTextContent } from '../../utils/file.js';
 import { fileHistoryEnabled, fileHistoryTrackEdit } from '../../utils/fileHistory.js';
 import { truncate } from '../../utils/format.js';
 import { getFsImplementation } from '../../utils/fsOperations.js';
+import { getCwd } from '../../utils/cwd.js';
+import { registerTurnEndListener } from '../../utils/turnLifecycle.js';
 import { lazySchema } from '../../utils/lazySchema.js';
 import { expandPath } from '../../utils/path.js';
 import type { PermissionResult } from '../../utils/permissions/PermissionResult.js';
@@ -39,7 +44,7 @@ import { TaskOutput } from '../../utils/task/TaskOutput.js';
 import { isOutputLineTruncated } from '../../utils/terminal.js';
 import { buildLargeToolResultMessage, ensureToolResultsDir, generatePreview, getToolResultPath, PREVIEW_SIZE_BYTES } from '../../utils/toolResultStorage.js';
 import { userFacingName as fileEditUserFacingName } from '../FileEditTool/UI.js';
-import { trackGitOperations } from '../shared/gitOperationTracking.js';
+import { detectGitOperation, trackGitOperations } from '../shared/gitOperationTracking.js';
 import { bashToolHasPermission, commandHasAnyCd, matchWildcardPattern, permissionRuleExtractPrefix } from './bashPermissions.js';
 import { analyzeBashCommand, parseLegacyShellCommandForAnalysis, type BashCommandAnalysis } from './bashCommandAnalysis.js';
 import { interpretCommandResult } from './commandSemantics.js';
@@ -66,6 +71,28 @@ const AUTO_BACKGROUND_AFTER_SECONDS = 2;
  * `t6n = 25`; anything shorter is treated as legitimate pacing.
  */
 const BLOCKED_SLEEP_THRESHOLD_SECONDS = 25;
+
+/**
+ * GitHub API rate-limit detection, mirroring upstream's `lse` / `cse` / `use`.
+ * `lse` only matches a gh invocation that actually talks to the API (excluding
+ * `gh auth/config/help/...`), `cse` matches the error text GitHub returns, and
+ * the hint is emitted at most once per `RATE_LIMIT_BACKOFF_MS` so a command
+ * loop cannot spam the model with the same reminder.
+ */
+const GH_API_COMMAND_RE = /(?:^|[;&|]|\b(?:then|do)\b)\s*gh\s+(?!auth\b|help\b|version\b|alias\b|completion\b|config\b)/;
+const GH_RATE_LIMIT_OUTPUT_RE = /API rate limit (?:already )?exceeded|exceeded a secondary rate limit|\bRATE_LIMITED\b/i;
+const RATE_LIMIT_BACKOFF_MS = 60_000;
+const ghRateLimitBackoff = { backoffUntil: 0 };
+
+/**
+ * Commands that plausibly rewrite files in place. A command matching this is
+ * the only case where we bother stat-ing everything in the read cache.
+ * Mirrors upstream's `Yhr`.
+ */
+const WRITE_COMMAND_MARKERS = new RegExp(['--write', '--fix', '--in-place', '--auto-correct', '\\brun\\s+format\\b', '\\brun\\s+fix\\b', '\\b(yarn|pnpm)\\s+format\\b', '\\blint:file\\b', '\\blint:fix\\b', '\\bblack\\b', '\\bisort\\b', '\\bruff\\s+format\\b', '\\bcargo\\s+(fmt|fix)\\b', '\\brustfmt\\b', '\\bgo\\s+fmt\\b', '\\bterraform\\s+fmt\\b', '\\bdprint\\s+fmt\\b', '\\bswiftformat\\b', '\\bphpcbf\\b'].join('|'));
+
+/** Cap on how many paths we name inline before collapsing into "and N more". */
+const STALE_READ_HINT_MAX_PATHS = 5;
 
 // Search commands for collapsible display (grep, find, etc.)
 const BASH_SEARCH_COMMANDS = new Set(['find', 'grep', 'rg', 'ag', 'ack', 'locate', 'which', 'whereis']);
@@ -312,7 +339,41 @@ const outputSchema = lazySchema(() => z.object({
   structuredContent: z.array(z.any()).optional().describe('Structured content blocks'),
   persistedOutputPath: z.string().optional().describe('Path to the persisted full output in tool-results dir (set when output is too large for inline)'),
   persistedOutputSize: z.number().optional().describe('Total size of the output in bytes (set when output is too large for inline)'),
-  persistedOutputTruncated: z.boolean().optional().describe('Whether the persisted file is capped (only the first portion of the output was saved)')
+  persistedOutputTruncated: z.boolean().optional().describe('Whether the persisted file is capped (only the first portion of the output was saved)'),
+  timedOutAfterMs: z.number().optional().describe('Set when the command hit its timeout and was auto-backgrounded; the timeout value in ms'),
+  backgroundCwdHint: z.string().optional().describe('Model-facing note that the session cwd was not changed by a backgrounded command containing a directory-change builtin (cd/pushd/popd/chdir)'),
+  backgroundedByTurnAbort: z.boolean().optional().describe('True if a turn abort moved the running command to the background'),
+  backgroundedToDeliverMessage: z.boolean().optional().describe('True if the command was moved to the background so a message queued for the model could reach it'),
+  backgroundEndsWithFinalResponse: z.boolean().optional().describe("True when this backgrounded command is owned by a synchronous subagent and is therefore terminated when that agent gives its final response; absent when the command survives (main loop, async subagents)"),
+  staleReadFileStateHint: z.string().optional().describe('Model-facing note listing readFileState entries whose mtime bumped during this command (set when the command matches WRITE_COMMAND_MARKERS)'),
+  ghRateLimitHint: z.string().optional().describe('Model-facing system-reminder appended when a gh command reports a GitHub API rate-limit error'),
+  gitOperation: z.object({
+    commit: z.object({
+      sha: z.string(),
+      kind: z.enum(['committed', 'amended', 'cherry-picked']),
+      branch: z.string().optional()
+    }).optional(),
+    push: z.object({ branch: z.string() }).optional(),
+    branch: z.object({ ref: z.string(), action: z.enum(['merged', 'rebased']) }).optional(),
+    pr: z.object({
+      number: z.number(),
+      url: z.string().optional(),
+      action: z.enum(['created', 'edited', 'merged', 'commented', 'closed', 'ready'])
+    }).optional()
+  }).optional().describe('Structured classification of git/gh operations detected in this command (commit/push/merge/rebase/PR). Not surfaced to the model.'),
+  bashEditDiff: z.object({
+    files: z.array(z.object({
+      filePath: z.string(),
+      hunks: z.array(z.any()),
+      created: z.boolean().optional(),
+      deleted: z.boolean().optional()
+    })),
+    moreFiles: z.number(),
+    changedFiles: z.array(z.string()).optional(),
+    unavailable: z.boolean().optional(),
+    skipped: z.boolean().optional(),
+    shared: z.boolean().optional()
+  }).optional().describe('Per-file diff of the working-tree changes this command made. Not surfaced to the model.')
 }));
 type OutputSchema = ReturnType<typeof outputSchema>;
 export type Out = z.infer<OutputSchema>;
@@ -426,6 +487,77 @@ function isAutobackgroundingAllowed(command: string): boolean {
   const baseCommand = parts[0]?.trim();
   if (!baseCommand) return true;
   return !DISALLOWED_AUTO_BACKGROUND_COMMANDS.includes(baseCommand);
+}
+
+/**
+ * Emit a one-shot reminder when a `gh` call comes back rate-limited. The
+ * backoff window keeps a retry loop from repeating the same reminder on every
+ * iteration. Returns undefined for non-`gh` commands, unmatched output, or a
+ * command issued inside the backoff window.
+ */
+export function detectGhRateLimitHint(
+  command: string,
+  output: string,
+): string | undefined {
+  if (!GH_API_COMMAND_RE.test(command)) return undefined;
+  if (!GH_RATE_LIMIT_OUTPUT_RE.test(output)) return undefined;
+  if (Date.now() < ghRateLimitBackoff.backoffUntil) return undefined;
+  ghRateLimitBackoff.backoffUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
+  return '<system-reminder>GitHub API rate limit exceeded (5,000/hr shared across all tools and agents). Run `gh api rate_limit --jq .resources` and sleep until reset before further gh calls. If polling in a loop, use Monitor instead of retrying.</system-reminder>';
+}
+
+/**
+ * Detect files the model had already read that this command rewrote behind its
+ * back, so it re-reads before editing. Only fires for commands matching
+ * WRITE_COMMAND_MARKERS; `commandStartSec` is the floored second the command
+ * started, and a file must be newer than both it and its cached read time.
+ *
+ * Mirrors upstream's `Xhr`.
+ */
+export async function detectStaleReadFiles(
+  command: string,
+  readFileState: ToolUseContext['readFileState'],
+  commandStartSec: number,
+): Promise<string[]> {
+  if (!WRITE_COMMAND_MARKERS.test(command)) return [];
+  const stale: string[] = [];
+  await Promise.all(Array.from(readFileState.entries(), ([path, entry]) => getFileModificationTimeAsync(path).then(mtimeSec => {
+    if (mtimeSec > commandStartSec && mtimeSec > entry.timestamp) {
+      stale.push(path);
+    }
+  }).catch(() => {})));
+  return stale;
+}
+
+/** Build the "you read these but they changed" reminder shown to the model. */
+export function formatStaleReadHint(paths: string[], cwd: string): string {
+  const count = paths.length;
+  const shown = paths.slice(0, STALE_READ_HINT_MAX_PATHS).map(p => relative(cwd, p) || p).join(', ');
+  const more = count > STALE_READ_HINT_MAX_PATHS ? ` and ${count - STALE_READ_HINT_MAX_PATHS} more` : '';
+  const noun = count === 1 ? 'file' : 'files';
+  return `[This command modified ${count} ${noun} you've previously read: ${shown}${more}. Call ${FILE_READ_TOOL_NAME} before editing.]`;
+}
+
+/** Builtins that move the shell's working directory. */
+const DIRECTORY_CHANGE_BUILTINS = new Set(['cd', 'pushd', 'popd', 'chdir']);
+
+/**
+ * True when the command moves the shell's cwd. A backgrounded command keeps
+ * running in its own process, so its `cd` never reaches the session — the
+ * model needs telling or it will assume the directory changed.
+ *
+ * Mirrors upstream's `qNe`.
+ */
+export function commandChangesDirectory(command: string): boolean {
+  return splitCommandWithOperators(command).some(part => {
+    const trimmed = part.trim();
+    if (trimmed.length === 0) return false;
+    // `VAR=x cd ..` — the builtin can follow an env assignment.
+    const withoutAssignments = trimmed.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '');
+    const base = withoutAssignments.split(/\s+/)[0] ?? '';
+    const name = base.includes('/') ? base.slice(base.lastIndexOf('/') + 1) : base;
+    return DIRECTORY_CHANGE_BUILTINS.has(name);
+  });
 }
 
 /**
@@ -765,6 +897,10 @@ export const BashTool = buildTool({
     let result: ExecResult;
     const isMainThread = !toolUseContext.agentId;
     const preventCwdChanges = !isMainThread;
+    // Floored to whole seconds, matching the granularity of
+    // getFileModificationTimeAsync — a file written during the command has an
+    // mtime strictly greater than this.
+    const commandStartSec = Math.floor(Date.now() / 1000);
     try {
       const commandAnalysis = await analyzeBashCommand(input.command);
       // Use the new async generator version of runShellCommand
@@ -779,7 +915,8 @@ export const BashTool = buildTool({
         preventCwdChanges,
         isMainThread,
         toolUseId: toolUseContext.toolUseId,
-        agentId: toolUseContext.agentId
+        agentId: toolUseContext.agentId,
+        onTurnEnd: toolUseContext.onTurnEnd
       });
 
       // Consume the generator and capture the return value
@@ -980,6 +1117,25 @@ export const BashTool = buildTool({
         isImage = false;
       }
     }
+    // Hints below mirror Claude Code 2.1.287. gitOperation / ghRateLimitHint /
+    // staleReadFileStateHint are only meaningful for a command that ran to
+    // completion in the foreground — once backgrounded we have no settled
+    // output to inspect, and the process may still be mutating files.
+    const ranInForeground = result.backgroundTaskId === undefined;
+    let gitOperation: Out['gitOperation'];
+    let ghRateLimitHint: string | undefined;
+    let staleReadFileStateHint: string | undefined;
+    if (ranInForeground) {
+      gitOperation = detectGitOperation(input.command, result.stdout);
+      if (Object.keys(gitOperation).length === 0) gitOperation = undefined;
+      ghRateLimitHint = detectGhRateLimitHint(input.command, result.stdout);
+      if (!wasInterrupted) {
+        const stalePaths = await detectStaleReadFiles(input.command, toolUseContext.readFileState, commandStartSec);
+        if (stalePaths.length > 0) {
+          staleReadFileStateHint = formatStaleReadHint(stalePaths, getCwd());
+        }
+      }
+    }
     const data: Out = {
       stdout: compressedStdout,
       stderr: stderrForShellReset,
@@ -993,6 +1149,16 @@ export const BashTool = buildTool({
       backgroundTaskId: result.backgroundTaskId,
       backgroundedByUser: result.backgroundedByUser,
       assistantAutoBackgrounded: result.assistantAutoBackgrounded,
+      ...(result.backgroundedByTurnAbort ? { backgroundedByTurnAbort: true } : {}),
+      // A synchronous subagent is torn down when it emits its final response,
+      // and its background commands die with it. Flagging this lets callers
+      // (and the model) know the command's lifetime is bounded.
+      ...(result.backgroundTaskId !== undefined && toolUseContext.agentId !== undefined && toolUseContext.parentAgentIsAsync === false ? { backgroundEndsWithFinalResponse: true } : {}),
+      timedOutAfterMs: result.timedOutAfterMs,
+      ...(result.backgroundTaskId !== undefined && commandChangesDirectory(input.command) ? { backgroundCwdHint: `Session cwd remains ${getCwd()}; directory changes made by the backgrounded command do not apply to subsequent commands.` } : {}),
+      staleReadFileStateHint,
+      ghRateLimitHint,
+      gitOperation,
       dangerouslyDisableSandbox: 'dangerouslyDisableSandbox' in input ? input.dangerouslyDisableSandbox as boolean | undefined : undefined,
       persistedOutputPath,
       persistedOutputSize,
@@ -1016,7 +1182,8 @@ async function* runShellCommand({
   preventCwdChanges,
   isMainThread,
   toolUseId,
-  agentId
+  agentId,
+  onTurnEnd
 }: {
   input: BashToolInput;
   commandAnalysis: BashCommandAnalysis;
@@ -1027,6 +1194,7 @@ async function* runShellCommand({
   isMainThread?: boolean;
   toolUseId?: string;
   agentId?: AgentId;
+  onTurnEnd?: ToolUseContext['onTurnEnd'];
 }): AsyncGenerator<{
   type: 'progress';
   output: string;
@@ -1050,6 +1218,7 @@ async function* runShellCommand({
   let lastTotalBytes = 0;
   let backgroundShellId: string | undefined = undefined;
   let assistantAutoBackgrounded = false;
+  let backgroundedByTurnAbort = false;
   // Mirrors upstream's `autoBackgroundArmed` task flag: once auto-backgrounding
   // has fired we stop re-checking on subsequent progress ticks.
   let autoBackgroundArmed = false;
@@ -1159,6 +1328,22 @@ async function* runShellCommand({
     });
   }
 
+  // When this turn is aborted or is wrapping up, hand the command to the
+  // background rather than letting it die with the turn. The unregister
+  // callback fires on the normal paths so the listener does not outlive the
+  // command.
+  if (!isBackgroundTasksDisabled && shouldAutoBackground && run_in_background !== true && onTurnEnd) {
+    const unregisterTurnEnd = registerTurnEndListener(() => {
+      if (shellCommand.status === 'running' && backgroundShellId === undefined) {
+        backgroundedByTurnAbort = true;
+        startBackgrounding('tengu_bash_command_turn_abort_backgrounded');
+      }
+    });
+    onTurnEnd(() => {
+      unregisterTurnEnd();
+    });
+  }
+
   // Handle OpenCC asking to run it in the background explicitly
   // When explicitly requested via run_in_background, always honor the request
   // regardless of the command type (isAutobackgroundingAllowed only applies to automatic backgrounding)
@@ -1196,7 +1381,8 @@ async function* runShellCommand({
         code: 0,
         interrupted: false,
         backgroundTaskId: backgroundShellId,
-        assistantAutoBackgrounded
+        assistantAutoBackgrounded,
+        backgroundedByTurnAbort
       };
     }
   }
@@ -1259,7 +1445,8 @@ async function* runShellCommand({
           code: 0,
           interrupted: false,
           backgroundTaskId: backgroundShellId,
-          assistantAutoBackgrounded
+          assistantAutoBackgrounded,
+          backgroundedByTurnAbort
         };
       }
 
@@ -1287,7 +1474,9 @@ async function* runShellCommand({
       // commands producing no output (`git log -S`, `sleep N`, etc.) reach
       // this check too. `autoBackgroundArmed` gates it to one fire per
       // command.
-      if (!isBackgroundTasksDisabled && shouldAutoBackground && run_in_background !== true && isMainThread && !autoBackgroundArmed && backgroundShellId === undefined && elapsedSeconds >= AUTO_BACKGROUND_AFTER_SECONDS) {
+      if (
+        !isBackgroundTasksDisabled && shouldAutoBackground && run_in_background !== true && isMainThread && !autoBackgroundArmed && backgroundShellId === undefined && elapsedSeconds >= AUTO_BACKGROUND_AFTER_SECONDS
+      ) {
         autoBackgroundArmed = true;
         assistantAutoBackgrounded = true;
         startBackgrounding('tengu_bash_command_assistant_auto_backgrounded');

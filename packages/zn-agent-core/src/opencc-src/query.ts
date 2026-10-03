@@ -62,6 +62,7 @@ import {
   getQueryAbortSystemMessage,
   shouldCreateUserInterruptionMessage,
 } from './utils/abortReasons.js'
+import { fireTurnEnd } from './utils/turnLifecycle.js'
 import {
   createUserMessage,
   createUserInterruptionMessage,
@@ -2487,6 +2488,9 @@ if (
     // We were aborted during tool calls
     if (toolUseContext.abortController.signal.aborted) {
       const abortReason = toolUseContext.abortController.signal.reason
+      // Let long-running foreground commands hand themselves to the background
+      // instead of dying with the aborted turn — their output is still wanted.
+      fireTurnEnd()
       // chicago MCP: auto-unhide + lock release when aborted mid-tool-call.
       // This is the most likely Ctrl+C path for CU (e.g. slow screenshot).
       // Main thread only — see stopHooks.ts for the subagent rationale.

@@ -275,6 +275,22 @@ export type ToolUseContext = {
   setConversationId?: (id: UUID) => void
   agentId?: AgentId // Only set for subagents; use getSessionId() for session ID. Hooks use this to distinguish subagent calls.
   agentType?: string // Subagent type name. For the main thread's --agent type, hooks fall back to getMainThreadAgentType().
+  /**
+   * True when the subagent running this tool was started with
+   * run_in_background (or otherwise forced async). Only meaningful when
+   * `agentId` is set. A synchronous subagent is torn down when it produces its
+   * final response, so background commands it owns cannot outlive it.
+   */
+  parentAgentIsAsync?: boolean
+  /**
+   * Registers a callback invoked when the current turn is about to end —
+   * either because the turn is being aborted or because the agent is about to
+   * emit its final response. Long-running foreground commands can use this to
+   * hand themselves to the background instead of being killed.
+   *
+   * Mirrors upstream's turn-abort backgrounding.
+   */
+  onTurnEnd?: (onTurnEnding: () => void) => void
   /** When true, canUseTool must always be called even when hooks auto-approve.
    *  Used by speculation for overlay file path rewriting. */
   requireCanUseTool?: boolean

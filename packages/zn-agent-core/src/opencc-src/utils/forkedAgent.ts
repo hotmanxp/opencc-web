@@ -270,6 +270,13 @@ export type SubagentContextOverrides = {
   agentId?: AgentId
   /** Override the agentType (for subagents with a specific type) */
   agentType?: string
+  /**
+   * Whether the subagent runs detached (run_in_background / coordinator /
+   * fork). Synchronous subagents are torn down at their final response, so
+   * tools like Bash use this to decide whether a background command can
+   * outlive the agent that started it.
+   */
+  isAsync?: boolean
   /** Override the messages array */
   messages?: Message[]
   /** Override the readFileState (e.g., fresh cache instead of clone) */
@@ -455,6 +462,9 @@ export function createSubagentContext(
     // Generate new agentId for subagents (each subagent should have its own ID)
     agentId: overrides?.agentId ?? createAgentId(),
     agentType: overrides?.agentType,
+    ...(overrides?.isAsync !== undefined
+      ? { parentAgentIsAsync: overrides.isAsync }
+      : {}),
     ...(overrides?.queryLifecycle
       ? { queryLifecycle: overrides.queryLifecycle }
       : {}),
