@@ -14,11 +14,18 @@ export type AgentMemoryScope = 'user' | 'project' | 'local'
 
 /**
  * Sanitize an agent type name for use as a directory name.
- * Replaces colons (invalid on Windows, used in plugin-namespaced agent
- * types like "my-plugin:my-agent") with dashes.
+ * Replaces any character outside [a-z0-9-_] with dashes (collapses runs),
+ * strips leading/trailing dashes, lower-cases, and falls back to 'unknown'
+ * for empty results. This prevents path traversal via agent types like
+ * "../../evil" and matches upstream Claude Code 2.1.287.
  */
 function sanitizeAgentTypeForPath(agentType: string): string {
-  return agentType.replace(/:/g, '-')
+  return (
+    agentType
+      .toLowerCase()
+      .replace(/[^a-z0-9\-_]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'unknown'
+  )
 }
 
 /**
