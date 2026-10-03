@@ -46,10 +46,6 @@ import {
   setAgentColor,
 } from './agentColorManager.js'
 import { type AgentMemoryScope, loadAgentMemoryPrompt } from './agentMemory.js'
-import {
-  checkAgentMemorySnapshot,
-  initializeFromSnapshot,
-} from './agentMemorySnapshot.js'
 import { getBuiltInAgents } from './builtInAgents.js'
 
 // Type for MCP server specification in agent definitions
@@ -125,7 +121,6 @@ export type BaseAgentDefinition = {
   initialPrompt?: string // Prepended to the first user turn (slash commands work)
   memory?: AgentMemoryScope // Persistent memory scope
   isolation?: 'worktree' | 'remote' // Run in an isolated git worktree, or remotely in CCR (internal-only)
-  pendingSnapshotUpdate?: { snapshotTimestamp: string }
   /** Omit AGENTS.md hierarchy from the agent's userContext. Read-only agents
    * (Explore, Plan) don't need commit/PR/lint guidelines — the main agent has
    * full AGENTS.md and interprets their output. Saves ~5-15 Gtok/week across
@@ -255,45 +250,6 @@ export function filterAgentsByMcpRequirements(
   return agents.filter(agent => hasRequiredMcpServers(agent, availableServers))
 }
 
-/**
- * Check for and initialize agent memory from project snapshots.
- * For agents with memory enabled, copies snapshot to local if no local memory exists.
- * For agents with newer snapshots, logs a debug message (user prompt TODO).
- */
-async function initializeAgentMemorySnapshots(
-  agents: CustomAgentDefinition[],
-): Promise<void> {
-  await Promise.all(
-    agents.map(async agent => {
-      if (agent.memory !== 'user') return
-      const result = await checkAgentMemorySnapshot(
-        agent.agentType,
-        agent.memory,
-      )
-      switch (result.action) {
-        case 'initialize':
-          logForDebugging(
-            `Initializing ${agent.agentType} memory from project snapshot`,
-          )
-          await initializeFromSnapshot(
-            agent.agentType,
-            agent.memory,
-            result.snapshotTimestamp!,
-          )
-          break
-        case 'prompt-update':
-          agent.pendingSnapshotUpdate = {
-            snapshotTimestamp: result.snapshotTimestamp!,
-          }
-          logForDebugging(
-            `Newer snapshot available for ${agent.agentType} memory (snapshot: ${result.snapshotTimestamp})`,
-          )
-          break
-      }
-    }),
-  )
-}
-
 export const getAgentDefinitionsWithOverrides = memoize(
   async (cwd: string): Promise<AgentDefinitionsResult> => {
     try {
@@ -333,18 +289,7 @@ export const getAgentDefinitionsWithOverrides = memoize(
         })
         .filter(agent => agent !== null)
 
-      // Kick off plugin agent loading concurrently with memory snapshot init —
-      // loadPluginAgents is memoized and takes no args, so it's independent.
-      // Join both so neither becomes a floating promise if the other throws.
-      let pluginAgentsPromise = loadPluginAgents()
-      if (false && isAutoMemoryEnabled()) {
-        const [pluginAgents_] = await Promise.all([
-          pluginAgentsPromise,
-          initializeAgentMemorySnapshots(customAgents),
-        ])
-        pluginAgentsPromise = Promise.resolve(pluginAgents_)
-      }
-      const pluginAgents = await pluginAgentsPromise
+      const pluginAgents = await loadPluginAgents()
 
       const builtInAgents = getBuiltInAgents()
 
