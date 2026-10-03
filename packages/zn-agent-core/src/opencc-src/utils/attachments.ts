@@ -3319,12 +3319,12 @@ export async function tryGetPDFReference(
       getPDFPageCount(filename),
     ])
     // Use page count if available, otherwise fall back to size heuristic (~100KB per page)
-    const effectivePageCount = pageCount ?? Math.ceil(stats.size / (100 * 1024))
+    const effectivePageCount = pageCount.pageCount ?? Math.ceil(stats.size / (100 * 1024))
     if (effectivePageCount > PDF_AT_MENTION_INLINE_THRESHOLD) {
       logEvent('tengu_pdf_reference_attachment', {
         pageCount: effectivePageCount,
         fileSize: stats.size,
-        hadPdfinfo: pageCount !== null,
+        hadPdfinfo: pageCount.pageCount !== null,
       } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
       return {
         type: 'pdf_reference',
