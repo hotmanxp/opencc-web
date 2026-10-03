@@ -814,7 +814,10 @@ export const BashTool = buildTool({
     structuredContent,
     persistedOutputPath,
     persistedOutputSize,
-    persistedOutputTruncated
+    persistedOutputTruncated,
+    staleReadFileStateHint,
+    ghRateLimitHint,
+    backgroundCwdHint
   }, toolUseID): ToolResultBlockParam {
     // Handle structured content
     if (structuredContent && structuredContent.length > 0) {
@@ -868,11 +871,15 @@ export const BashTool = buildTool({
       } else {
         backgroundInfo = `Command running in background with ID: ${backgroundTaskId}. Output is being written to: ${outputPath}`;
       }
+      // The cwd note belongs with the background notice: the command is gone
+      // but its `cd` would have moved the shell had it stayed in the
+      // foreground, and the model needs to know that did not happen.
+      if (backgroundCwdHint) backgroundInfo += `\n${backgroundCwdHint}`;
     }
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: [processedStdout, errorMessage, backgroundInfo].filter(Boolean).join('\n'),
+      content: [processedStdout, errorMessage, backgroundInfo, staleReadFileStateHint, ghRateLimitHint].filter(Boolean).join('\n'),
       is_error: interrupted
     };
   },
