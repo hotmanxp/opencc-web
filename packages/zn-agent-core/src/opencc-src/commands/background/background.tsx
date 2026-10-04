@@ -44,25 +44,6 @@ function BackgroundGuard({
   onDone,
 }: {
   onDone: LocalJSXCommandOnDone
-}): React.ReactNode {
-  const settings = useSettings()
-  // useSettings returns the full Settings shape (passthrough),
-  // not the narrow { enableAgentView? } that isAgentViewEnabled expects.
-  // Cast through unknown because the field is genuinely optional on both sides.
-  if (!isAgentViewEnabled(settings as unknown as { enableAgentView?: boolean })) {
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        <Text bold>Background agents</Text>
-        <Text dimColor>
-          Agent view is disabled (default-off). Set
-          CLAUDE_CODE_ENABLE_AGENT_VIEW=1 or ManagedSettings.enableAgentView
-          to enable.
-        </Text>
-        <Box marginTop={1}>
-          <Text dimColor>Press Esc or q to close.</Text>
-        </Box>
-      </Box>
-    )
-  }
-  return <BackgroundAgentViewDialog onDone={onDone} />
+}): React.ReactNode | null {
+  return null;
 }

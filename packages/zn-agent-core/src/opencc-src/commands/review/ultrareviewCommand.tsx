@@ -26,32 +26,5 @@ async function launchAndDone(args: string, context: Parameters<LocalJSXCommandCa
   }
 }
 export const call: LocalJSXCommandCall = async (onDone, context, args) => {
-  const gate = await checkOverageGate();
-  if (gate.kind === 'not-enabled') {
-    onDone('Free ultrareviews used. Enable Extra Usage at https://claude.ai/settings/billing to continue.', {
-      display: 'system'
-    });
-    return null;
-  }
-  if (gate.kind === 'low-balance') {
-    onDone(`Balance too low to launch ultrareview ($${gate.available.toFixed(2)} available, $10 minimum). Top up at https://claude.ai/settings/billing`, {
-      display: 'system'
-    });
-    return null;
-  }
-  if (gate.kind === 'needs-confirm') {
-    return <UltrareviewOverageDialog onProceed={async signal => {
-      await launchAndDone(args, context, onDone, ' This review bills as Extra Usage.', signal);
-      // Only persist the confirmation flag after a non-aborted launch —
-      // otherwise Escape-during-launch would leave the flag set and
-      // skip this dialog on the next attempt.
-      if (!signal.aborted) confirmOverage();
-    }} onCancel={() => onDone('Ultrareview cancelled.', {
-      display: 'system'
-    })} />;
-  }
-
-  // gate.kind === 'proceed'
-  await launchAndDone(args, context, onDone, gate.billingNote);
-  return null;
+  return Promise.resolve(null);
 };

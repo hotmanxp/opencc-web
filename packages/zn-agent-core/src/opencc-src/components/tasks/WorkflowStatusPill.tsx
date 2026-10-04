@@ -51,33 +51,6 @@ function formatElapsed(startedAt: number): string {
   return formatDuration(Date.now() - startedAt)
 }
 
-export function WorkflowStatusPill({ selected, showHint: _showHint }: Props): React.ReactNode {
-  const workflows = useAppState(s => s.workflows)
-  const wf = pickRunningWorkflow(workflows)
-  if (!wf) return null
-  const completed = wf.agents.filter(a => a.status === 'completed').length
-  const failed = wf.agents.filter(a => a.status === 'failed').length
-  const total = wf.agents.length
-  const elapsed = formatElapsed(wf.startedAt)
-  // Compact: name · X/Y agents · elapsed · (optional failed count)
-  // Bracketed by `·` so it reads as a discrete segment within the
-  // surrounding text footer.
-  const segments: string[] = [wf.name]
-  if (total > 0) {
-    segments.push(`${completed}/${total} agents`)
-  }
-  segments.push(elapsed)
-  if (failed > 0) {
-    segments.push(`${failed} failed`)
-  }
-  // Note: `inverse` on a Text inside a Text-wrapping context doesn't
-  // produce the same pill styling as a Box sibling, but the segment
-  // is visually distinct enough (bold + background color) to read as
-  // a status. The user can still press /workflows to see the full
-  // detail dialog.
-  return (
-    <Text bold color="background" inverse={selected}>
-      {` [${segments.join(' · ')}] `}
-    </Text>
-  )
+export function WorkflowStatusPill({ selected, showHint: _showHint }: Props): React.ReactNode | null {
+  return null;
 }

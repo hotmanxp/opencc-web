@@ -91,38 +91,5 @@ function TicketSelector({
   onPicked: (id: string) => Promise<void>
   onCancelled: () => void
 }) {
-  const [entered, setEntered] = useState('')
-
-  const options: Array<OptionWithDescription<string>> = [
-    ...recent.map(id => ({ label: id, value: id })),
-    {
-      label: '输入新 ID…',
-      value: NEW_VALUE,
-      type: 'input',
-      onChange: (val: string) => setEntered(val),
-      placeholder: '如 HRMSV3-ZN-WEBSITE#668',
-    },
-  ]
-
-  const handleSelect = async (val: string) => {
-    if (val === NEW_VALUE) {
-      const candidate = entered.trim()
-      if (!ID_RE.test(candidate)) {
-        // 输入空或非法 ID：必须调 onDone 才能让 JSX 卸载（不能 silent return），
-        // 并把无效原因传到 user bubble，给用户明确反馈。
-        onDone(`✗ 无效的 ticket id（输入为空或格式不符），正例：HRMSV3-ZN-WEBSITE#668`)
-        return
-      }
-      await onPicked(candidate)
-      return
-    }
-    await onPicked(val)
-  }
-
-  return (
-    <Box flexDirection="column">
-      <Text>选择 Ticket ID（上下键移动，回车确认，Tab 切换到输入框，Esc 取消）：</Text>
-      <Select<string> options={options} onChange={handleSelect} onCancel={onCancelled} />
-    </Box>
-  )
+  return null;
 }

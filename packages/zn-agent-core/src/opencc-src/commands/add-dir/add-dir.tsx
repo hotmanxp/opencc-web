@@ -18,20 +18,8 @@ type AddDirErrorProps = {
   onDone: () => void;
 };
 
-function AddDirError({ message, args, onDone }: AddDirErrorProps): React.ReactNode {
-  useEffect(() => {
-    const timer = setTimeout(onDone, 0);
-    return () => clearTimeout(timer);
-  }, [onDone]);
-
-  return (
-    <Box flexDirection="column">
-      <Text dimColor={true}>{figures.pointer} /add-dir {args}</Text>
-      <MessageResponse>
-        <Text>{message}</Text>
-      </MessageResponse>
-    </Box>
-  );
+function AddDirError({ message, args, onDone }: AddDirErrorProps): React.ReactNode | null {
+  return null;
 }
 export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXCommandContext, args?: string): Promise<React.ReactNode> {
   const directoryPath = (args ?? '').trim();

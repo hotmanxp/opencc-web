@@ -34,13 +34,5 @@ const LEGACY_CLAUDE_MASCOT_ROWS = [
 ] as const
 
 export function ClaudeMascot() {
-  const [themeName] = useTheme()
-  const theme = getTheme(themeName)
-  return (
-    <Box flexDirection="column">
-      <Text color={theme.mascotPrimary}>{WOODPECKER_MASCOT_ROWS[0]}</Text>
-      <Text color={theme.mascotPrimary}>{WOODPECKER_MASCOT_ROWS[1]}</Text>
-      <Text color={theme.mascotPrimary}>{WOODPECKER_MASCOT_ROWS[2]}</Text>
-    </Box>
-  )
+  return null;
 }

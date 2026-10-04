@@ -7,10 +7,6 @@ export function KeepMounted({
 }: {
   hidden: boolean
   children: ReactNode
-}): ReactNode {
-  return (
-    <Box height={hidden ? 0 : undefined} overflow="hidden">
-      {children}
-    </Box>
-  )
+}): ReactNode | null {
+  return null;
 }

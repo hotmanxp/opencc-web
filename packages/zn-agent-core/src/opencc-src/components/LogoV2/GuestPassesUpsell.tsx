@@ -58,14 +58,5 @@ export function incrementGuestPassesSeenCount(): void {
 
 // Condensed layout for mini welcome screen
 export function GuestPassesUpsell() {
-  const $ = _c(1);
-  let t0;
-  if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
-    const reward = getCachedReferrerReward();
-    t0 = <Text dimColor={true}><Text color="claude">[✻]</Text> <Text color="claude">[✻]</Text>{" "}<Text color="claude">[✻]</Text> ·{" "}{reward ? `Share ${BRAND_NAME} and earn ${formatCreditAmount(reward)} of extra usage · /passes` : "3 guest passes at /passes"}</Text>;
-    $[0] = t0;
-  } else {
-    t0 = $[0];
-  }
-  return t0;
+  return null;
 }

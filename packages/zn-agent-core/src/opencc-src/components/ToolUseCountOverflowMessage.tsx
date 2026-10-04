@@ -18,23 +18,6 @@ export function ToolUseCountOverflowMessage({
   unit: string
   expandable?: boolean
   hiddenChars?: number
-}): React.ReactNode {
-  if (count <= 0) {
-    return null
-  }
-  const suffix = count === 1 ? unit : `${unit}s`
-  const sizeNote =
-    hiddenChars !== undefined && hiddenChars >= 1000
-      ? ` (~${Math.round(hiddenChars / 1024)} KB)`
-      : ''
-  return (
-    <Box>
-      <Text dimColor>
-        {'… '}+{count} {suffix}
-        {sizeNote}
-      </Text>
-      {expandable && <Text dimColor>{' '}</Text>}
-      {expandable && <CtrlOToExpand />}
-    </Box>
-  )
+}): React.ReactNode | null {
+  return null;
 }

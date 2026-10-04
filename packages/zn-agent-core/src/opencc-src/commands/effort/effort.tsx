@@ -341,18 +341,5 @@ export function handleSelect(
 }
 
 function EffortPickerWrapper({ onDone }: { onDone: LocalJSXCommandOnDone }) {
-  const setAppState = useSetAppState();
-  const model = useMainLoopModel();
-  const usesOpenAIEffort = modelUsesOpenAIEffort(model);
-
-  function onPickerSelect(effort: EffortValue | undefined) {
-    // Delegate to the standalone exported function
-    handleSelect(effort, onDone, setter => setAppState(setter as unknown as Parameters<typeof setAppState>[0]));
-  }
-
-  function handleCancel() {
-    onDone('Cancelled');
-  }
-
-  return <EffortPicker onSelect={onPickerSelect} onCancel={handleCancel} />;
+  return null;
 }

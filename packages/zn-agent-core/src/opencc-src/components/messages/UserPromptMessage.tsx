@@ -34,7 +34,7 @@ export function UserPromptMessage({
   },
   isTranscriptMode,
   timestamp
-}: Props): React.ReactNode {
+}: Props): React.ReactNode | null {
   // REPL.tsx passes isBriefOnly={viewedTeammateTask ? false : isBriefOnly}
   // but that prop isn't threaded this deep — replicate the override by
   // reading viewingAgentTaskId directly. Computed here (not in the child)
@@ -47,39 +47,5 @@ export function UserPromptMessage({
   // bypasses React.memo). Runtime-gated like isBriefEnabled() but inlined
   // to avoid pulling BriefTool.ts → prompt.ts tool-name strings into
   // external builds.
-  const isBriefOnly = false || false ?
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
-  useAppState(s => s.isBriefOnly) : false;
-  const viewingAgentTaskId = false || false ?
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
-  useAppState(s_0 => s_0.viewingAgentTaskId) : null;
-  // Hoisted to mount-time — per-message component, re-renders on every scroll.
-  const briefEnvEnabled = false || false ?
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
-  useMemo(() => isEnvTruthy(process.env.CLAUDE_CODE_BRIEF), []) : false;
-  const useBriefLayout = false || false ? (getKairosActive() || getUserMsgOptIn() && (briefEnvEnabled || getFeatureValue_CACHED_MAY_BE_STALE('tengu_kairos_brief', false))) && isBriefOnly && !isTranscriptMode && !viewingAgentTaskId : false;
-
-  // Truncate before the early return so the hook order is stable.
-  // Strip <system-reminder> blocks first so reminder text injected by
-  // upstream features (e.g. ultracode opt-in in REPL.tsx, CCR scaffolding)
-  // doesn't leak into the user-visible chat. The reminder still reaches the
-  // LLM via the API call — only the on-screen display strips it.
-  const displayText = useMemo(() => {
-    const stripped = stripSystemReminders(text);
-    if (stripped.length <= MAX_DISPLAY_CHARS) return stripped;
-    const head = stripped.slice(0, TRUNCATE_HEAD_CHARS);
-    const tail = stripped.slice(-TRUNCATE_TAIL_CHARS);
-    const hiddenLines =
-      countCharInString(stripped, '\n', TRUNCATE_HEAD_CHARS) -
-      countCharInString(tail, '\n');
-    return `${head}\n… +${hiddenLines} lines …\n${tail}`;
-  }, [text]);
-  const isSelected = useContext(MessageActionsSelectedContext);
-  if (!text) {
-    logError(new Error('No content found in user prompt message'));
-    return null;
-  }
-  return <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor={isSelected ? 'messageActionsBackground' : useBriefLayout ? undefined : 'userMessageBackground'} paddingRight={useBriefLayout ? 0 : 1}>
-      <HighlightedThinkingText text={displayText} useBriefLayout={useBriefLayout} timestamp={useBriefLayout ? timestamp : undefined} />
-    </Box>;
+  return null;
 }

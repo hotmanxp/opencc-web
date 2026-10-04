@@ -40,30 +40,5 @@ function safeContextWindowDisplay(name: string): string {
 }
 
 export const StartupHeader: React.FC = React.memo(function StartupHeader() {
-  const model = useMainLoopModel()
-  const effortValue = useAppState(s => s.effortValue)
-  const { columns } = useTerminalSize()
-  const cwd = useMemo(() => safeGetCwd(), [])
-  const expanded = useMemo(() => expandTilde(cwd), [cwd])
-  const dirMax = Math.max(10, columns - 30)
-  const dir = useMemo(() => truncatePath(expanded, dirMax), [expanded, dirMax])
-  const modelDisplay = model ? safeRenderModel(model) : '(no model)'
-  const contextWindowDisplay = model ? safeContextWindowDisplay(model) : ''
-  const effortSuffix = model ? getEffortSuffix(model, effortValue) : ''
-  const version = MACRO.DISPLAY_VERSION ?? MACRO.VERSION ?? 'unknown'
-
-  return (
-    <Box alignSelf="flex-start" flexDirection="row" gap={2}>
-      <ClaudeMascot />
-      <Box flexDirection="column">
-        <Text>
-          <Text bold>OpenCC</Text> <Text dimColor>v{version}</Text>
-        </Text>
-        <Text dimColor>
-          {modelDisplay}{contextWindowDisplay}{effortSuffix}
-        </Text>
-        <Text dimColor>{dir}</Text>
-      </Box>
-    </Box>
-  )
+  return null;
 })
