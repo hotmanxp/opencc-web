@@ -2,16 +2,6 @@
 import figures from '../../utils/figures-safe.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
-import { Box, color, Link, Text, useTheme } from '../../ink.js';
-import { useKeybinding } from '../../keybindings/useKeybinding.js';
-import { AuthenticationCancelledError, performMCPOAuthFlow } from '../../services/mcp/auth.js';
-import { capitalize } from '../../utils/stringUtils.js';
-import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Select, type OptionWithDescription } from '../CustomSelect/index.js';
-import { Byline } from '../design-system/Byline.js';
-import { Dialog } from '../design-system/Dialog.js';
-import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
-import { Spinner } from '../Spinner.js';
 import type { AgentMcpServerInfo } from './types.js';
 type Props = {
   agentServer: AgentMcpServerInfo;

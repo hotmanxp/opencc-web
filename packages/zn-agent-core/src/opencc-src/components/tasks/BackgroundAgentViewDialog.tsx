@@ -34,7 +34,6 @@
  */
 
 import figures from 'figures'
-import { Box, Text, useApp, useInput } from '../../ink.js'
 import React, { useEffect, useMemo, useState } from 'react'
 import type { JobRecord } from '../../utils/daemon/protocol.js'
 import { BG_PROTO } from '../../utils/daemon/protocol.js'

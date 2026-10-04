@@ -1,19 +1,11 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
-import React, { useCallback, useEffect, useRef } from 'react';
-import { Box, Text } from '../ink.js';
 import { isMaxSubscriber, isProSubscriber, isTeamSubscriber } from '../utils/auth.js';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import type { EffortLevel } from '../utils/effort.js';
-import { convertEffortValueToLevel, getDefaultEffortForModel, getOpusDefaultEffortConfig, modelSupportsUltracode, toPersistableEffort } from '../utils/effort.js';
+import { getOpusDefaultEffortConfig, modelSupportsUltracode } from '../utils/effort.js'
 import { isWorkflowsDisabled } from '../utils/envUtils.js';
 import { isUltracodeActive } from '../utils/ultracode.js';
 import { parseUserSpecifiedModel } from '../utils/model/model.js';
-import { updateSettingsForSource } from '../utils/settings/settings.js';
-import type { OptionWithDescription } from './CustomSelect/select.js';
-import { Select } from './CustomSelect/select.js';
-import { effortLevelToSymbol } from './EffortIndicator.js';
-import { PermissionDialog } from './permissions/PermissionDialog.js';
 
 /**
  * Pure helper that returns the option list shown by EffortCallout.

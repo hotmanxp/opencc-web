@@ -1,7 +1,4 @@
 // @ts-nocheck
-import { Box, Text } from '../../ink.js'
-import { getTheme } from '../../utils/theme.js'
-import { useTheme } from '../design-system/ThemeProvider.js'
 
 // 3-row mascot sprite for the REPL startup header.
 // Each row is a fixed string; do NOT edit characters — they are designed

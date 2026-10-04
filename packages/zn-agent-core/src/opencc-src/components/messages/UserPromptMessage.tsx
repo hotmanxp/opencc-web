@@ -1,14 +1,5 @@
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import React, { useContext, useMemo } from 'react';
-import { getKairosActive, getUserMsgOptIn } from '../../bootstrap/state.js';
-import { Box } from '../../ink.js';
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
-import { useAppState } from '../../state/AppState.js';
-import { isEnvTruthy } from '../../utils/envUtils.js';
-import { logError } from '../../utils/log.js';
-import { countCharInString } from '../../utils/stringUtils.js';
-import { MessageActionsSelectedContext, stripSystemReminders } from '../messageActions.js';
-import { HighlightedThinkingText } from './HighlightedThinkingText.js';
 type Props = {
   addMargin: boolean;
   param: TextBlockParam;

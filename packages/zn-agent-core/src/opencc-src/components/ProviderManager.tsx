@@ -1,29 +1,8 @@
 import figures from 'figures'
 import * as React from 'react'
-import { Box, Text } from '../ink.js'
-import { useKeybinding } from '../keybindings/useKeybinding.js'
 import type { ProviderProfile } from '../utils/config.js'
-import { hasLocalOllama, listOllamaModels } from '../utils/providerDiscovery.js'
-import {
-  addProviderProfile,
-  deleteProviderProfile,
-  getActiveProviderProfile,
-  getProviderPresetDefaults,
-  getProviderProfiles,
-  maybeResetMainLoopModel,
-  setActiveProviderProfile,
-  type ProviderPreset,
-  type ProviderProfileInput,
-  updateProviderProfile,
-} from '../utils/providerProfiles.js'
-import {
-  rankOllamaModels,
-  recommendOllamaModel,
-} from '../utils/providerRecommendation.js'
-import { updateSettingsForSource } from '../utils/settings/settings.js'
-import { useAppState, useSetAppState } from '../state/AppState.js'
-import { type OptionWithDescription, Select } from './CustomSelect/index.js'
-import { Pane } from './design-system/Pane.js'
+import { getProviderPresetDefaults, type ProviderPreset } from '../utils/providerProfiles.js'
+import { type OptionWithDescription } from './CustomSelect/index.js'
 import TextInput from './TextInput.js'
 
 export type ProviderManagerResult = {

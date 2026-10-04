@@ -2,55 +2,18 @@
 import * as React from 'react'
 
 import type { LocalJSXCommandCall, LocalJSXCommandOnDone } from '../../types/command.js'
-import { PROFILE_FILENAME } from '../../constants.js'
 import {  } from '../../constants/product.js'
 import { BRAND_NAME } from '../../constants.js'
-import { COMMON_HELP_ARGS, COMMON_INFO_ARGS } from '../../constants/xml.js'
-import {
-  ProviderManager,
-  type ProviderManagerResult,
-} from '../../components/ProviderManager.js'
+import { type ProviderManagerResult } from '../../components/ProviderManager.js'
 import TextInput from '../../components/TextInput.js'
-import {
-  Select,
-  type OptionWithDescription,
-} from '../../components/CustomSelect/index.js'
-import { Dialog } from '../../components/design-system/Dialog.js'
-import { LoadingState } from '../../components/design-system/LoadingState.js'
-import { useTerminalSize } from '../../hooks/useTerminalSize.js'
-import { Box, Text } from '../../ink.js'
 import {
   DEFAULT_OPENAI_BASE_URL,
   isLocalProviderUrl,
   resolveProviderRequest,
 } from '../../services/api/providerConfig.js'
-import {
-  buildOllamaProfileEnv,
-  buildOpenAIProfileEnv,
-  createProfileFile,
-  deleteProfileFile,
-  loadProfileFile,
-  maskSecretForDisplay,
-  redactSecretValueForDisplay,
-  sanitizeApiKey,
-  sanitizeProviderConfigValue,
-  saveProfileFile,
-  type ProfileEnv,
-  type ProfileFile,
-  type ProviderProfile,
-} from '../../utils/providerProfile.js'
-import {
-  getGoalDefaultOpenAIModel,
-  normalizeRecommendationGoal,
-  rankOllamaModels,
-  recommendOllamaModel,
-  type RecommendationGoal,
-} from '../../utils/providerRecommendation.js'
-import {
-  getLocalOpenAICompatibleProviderLabel,
-  hasLocalOllama,
-  listOllamaModels,
-} from '../../utils/providerDiscovery.js'
+import { createProfileFile, loadProfileFile, maskSecretForDisplay, redactSecretValueForDisplay, sanitizeProviderConfigValue, saveProfileFile, type ProfileEnv, type ProfileFile, type ProviderProfile } from '../../utils/providerProfile.js'
+import { type RecommendationGoal } from '../../utils/providerRecommendation.js'
+import { getLocalOpenAICompatibleProviderLabel } from '../../utils/providerDiscovery.js'
 
 export function buildProviderManagerCompletion(result?: ProviderManagerResult): {
   message: string

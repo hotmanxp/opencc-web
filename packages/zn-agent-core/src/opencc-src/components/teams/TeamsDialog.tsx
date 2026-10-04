@@ -1,34 +1,25 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import { randomUUID } from 'crypto';
 import figures from 'figures';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useInterval } from 'usehooks-ts';
-import { useRegisterOverlay } from '../../context/overlayContext.js';
-import { stringWidth } from '../../ink/stringWidth.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw j/k/arrow dialog navigation
-import { Box, Text, useInput } from '../../ink.js';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
-import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
-import { type AppState, useAppState, useSetAppState } from '../../state/AppState.js';
+import { Text } from '../../ink.js'
+import { type AppState } from '../../state/AppState.js'
 import { getEmptyToolPermissionContext } from '../../Tool.js';
-import { AGENT_COLOR_TO_THEME_COLOR } from '../../tools/AgentTool/agentColorManager.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { execFileNoThrow } from '../../utils/execFileNoThrow.js';
-import { truncateToWidth } from '../../utils/format.js';
 import { getNextPermissionMode } from '../../utils/permissions/getNextPermissionMode.js';
-import { getModeColor, type PermissionMode, permissionModeFromString, permissionModeSymbol } from '../../utils/permissions/PermissionMode.js';
+import { type PermissionMode, permissionModeFromString } from '../../utils/permissions/PermissionMode.js'
 import { jsonStringify } from '../../utils/slowOperations.js';
 import { IT2_COMMAND, isInsideTmuxSync } from '../../utils/swarm/backends/detection.js';
-import { ensureBackendsRegistered, getBackendByType, getCachedBackend } from '../../utils/swarm/backends/registry.js';
+import { ensureBackendsRegistered, getBackendByType } from '../../utils/swarm/backends/registry.js'
 import type { PaneBackendType } from '../../utils/swarm/backends/types.js';
 import { getSwarmSocketName, TMUX_COMMAND } from '../../utils/swarm/constants.js';
-import { addHiddenPaneId, removeHiddenPaneId, removeMemberFromTeam, setMemberMode, setMultipleMemberModes } from '../../utils/swarm/teamHelpers.js';
-import { listTasks, type Task, unassignTeammateTasks } from '../../utils/tasks.js';
-import { getTeammateStatuses, type TeammateStatus, type TeamSummary } from '../../utils/teamDiscovery.js';
-import { createModeSetRequestMessage, sendShutdownRequestToMailbox, writeToMailbox } from '../../utils/teammateMailbox.js';
-import { Dialog } from '../design-system/Dialog.js';
+import { removeMemberFromTeam, setMemberMode, setMultipleMemberModes } from '../../utils/swarm/teamHelpers.js'
+import { unassignTeammateTasks } from '../../utils/tasks.js'
+import { type TeammateStatus, type TeamSummary } from '../../utils/teamDiscovery.js'
+import { createModeSetRequestMessage, writeToMailbox } from '../../utils/teammateMailbox.js'
 import ThemedText from '../design-system/ThemedText.js';
 type Props = {
   initialTeams?: TeamSummary[];

@@ -1,18 +1,13 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import capitalize from 'lodash-es/capitalize.js';
 import * as React from 'react';
 import { useMemo } from 'react';
-import { type Command, type CommandBase, type CommandResultDisplay, getCommandName, type PromptCommand } from '../../commands.js';
-import { USER_CONFIG_DIRNAME } from '../../constants.js';
-import { Box, Text } from '../../ink.js';
+import { type Command, type CommandBase, type CommandResultDisplay, type PromptCommand } from '../../commands.js'
+import { Text } from '../../ink.js'
 import { estimateSkillFrontmatterTokens, getSkillsPath } from '../../skills/loadSkillsDir.js';
 import { getDisplayPath } from '../../utils/file.js';
 import { formatTokens } from '../../utils/format.js';
 import { getSettingSourceName, type SettingSource } from '../../utils/settings/constants.js';
-import { plural } from '../../utils/stringUtils.js';
-import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Dialog } from '../design-system/Dialog.js';
 import FullWidthRow from '../design-system/FullWidthRow.js';
 
 // Skills are always PromptCommands with CommandBase properties

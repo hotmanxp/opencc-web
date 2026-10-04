@@ -1,18 +1,9 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import figures from 'figures';
 import * as React from 'react';
-import { BRAND_NAME } from '../../constants/product.js';
 import type { SettingSource } from 'src/utils/settings/constants.js';
-import type { KeyboardEvent } from '../../ink/events/keyboard-event.js';
-import { Box, Text } from '../../ink.js';
 import type { ResolvedAgent } from '../../tools/AgentTool/agentDisplay.js';
-import { AGENT_SOURCE_GROUPS, compareAgentsByName, getOverrideSourceLabel, resolveAgentModelDisplay } from '../../tools/AgentTool/agentDisplay.js';
 import type { AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js';
-import { count } from '../../utils/array.js';
-import { Dialog } from '../design-system/Dialog.js';
-import { Divider } from '../design-system/Divider.js';
-import { getAgentSourceDisplayName } from './utils.js';
 type Props = {
   source: SettingSource | 'all' | 'built-in' | 'plugin';
   agents: ResolvedAgent[];

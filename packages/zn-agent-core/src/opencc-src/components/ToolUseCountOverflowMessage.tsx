@@ -1,6 +1,4 @@
 import * as React from 'react'
-import { Box, Text } from '../ink.js'
-import { CtrlOToExpand } from './CtrlOToExpand.js'
 
 /**
  * Shared overflow indicator shown when a collapsible tool list hides messages.

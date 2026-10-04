@@ -1,10 +1,6 @@
 import * as React from 'react'
-import { Box, Text } from '../../ink.js'
 import type { LocalJSXCommandContext } from '../../commands.js'
 import type { LocalJSXCommandOnDone } from '../../types/command.js'
-import { BackgroundAgentViewDialog } from '../../components/tasks/BackgroundAgentViewDialog.js'
-import { useSettings } from '../../hooks/useSettings.js'
-import { isAgentViewEnabled } from '../../utils/settings/agentView.js'
 
 /**
  * `/background` renderer. T8 + T9 of the bg-agent-view plan.

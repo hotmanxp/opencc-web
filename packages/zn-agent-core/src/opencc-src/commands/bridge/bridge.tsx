@@ -1,20 +1,11 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
-import { toString as qrToString } from 'qrcode';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { getBridgeAccessToken } from '../../bridge/bridgeConfig.js';
 import { checkBridgeMinVersion, getBridgeDisabledReason, isEnvLessBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { checkEnvLessBridgeMinVersion } from '../../bridge/envLessBridgeConfig.js';
-import { BRIDGE_LOGIN_INSTRUCTION, REMOTE_CONTROL_DISCONNECTED_MSG } from '../../bridge/types.js';
-import { Dialog } from '../../components/design-system/Dialog.js';
-import { ListItem } from '../../components/design-system/ListItem.js';
-import { shouldShowRemoteCallout } from '../../components/RemoteCallout.js';
-import { useRegisterOverlay } from '../../context/overlayContext.js';
-import { Box, Text } from '../../ink.js';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
-import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../../services/analytics/index.js';
-import { useAppState, useSetAppState } from '../../state/AppState.js';
+import { BRIDGE_LOGIN_INSTRUCTION } from '../../bridge/types.js'
+import { Text } from '../../ink.js'
 import type { ToolUseContext } from '../../Tool.js';
 import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js';
 import { logForDebugging } from '../../utils/debug.js';

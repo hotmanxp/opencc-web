@@ -1,8 +1,6 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
-import React, { createContext, isValidElement, type ReactNode, useContext } from 'react';
-import { Box } from '../../ink.js';
-import { OrderedListItem, OrderedListItemContext } from './OrderedListItem.js';
+import { createContext, type ReactNode } from 'react'
+import { OrderedListItem } from './OrderedListItem.js'
 const OrderedListContext = createContext({
   marker: ''
 });

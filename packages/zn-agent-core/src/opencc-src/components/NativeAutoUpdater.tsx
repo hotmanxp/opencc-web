@@ -1,18 +1,6 @@
 import * as React from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { logEvent } from 'src/services/analytics/index.js';
-import { logForDebugging } from 'src/utils/debug.js';
-import { logError } from 'src/utils/log.js';
-import { useInterval } from 'usehooks-ts';
-import { useUpdateNotification } from '../hooks/useUpdateNotification.js';
-import { Box, Text } from '../ink.js';
 import type { AutoUpdaterResult } from '../utils/autoUpdater.js';
-import { getMaxVersion, getMaxVersionMessage } from '../utils/autoUpdater.js';
-import { isAutoUpdaterDisabled } from '../utils/config.js';
-import { installLatest } from '../utils/nativeInstaller/index.js';
-import { gt } from '../utils/semver.js';
-import { getInitialSettings } from '../utils/settings/settings.js';
-import { isAntEmployee } from '../utils/buildConfig.js';
 
 /**
  * Categorize error messages for analytics

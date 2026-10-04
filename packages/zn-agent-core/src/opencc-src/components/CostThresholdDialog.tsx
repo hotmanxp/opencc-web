@@ -1,7 +1,4 @@
 import React from 'react'
-import { Box, Link, Text } from '../ink.js'
-import { Select } from './CustomSelect/index.js'
-import { Dialog } from './design-system/Dialog.js'
 import { getAPIProvider } from '../utils/model/providers.js'
 
 type Props = {

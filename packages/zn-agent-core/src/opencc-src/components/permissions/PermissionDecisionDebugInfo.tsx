@@ -1,18 +1,13 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import chalk from 'chalk';
 import figures from 'figures';
 import React, { useMemo } from 'react';
-import { Ansi, Box, color, Text, useTheme } from '../../ink.js';
-import { useAppState } from '../../state/AppState.js';
+import { Box, color, Text } from '../../ink.js'
 import type { PermissionMode } from '../../utils/permissions/PermissionMode.js';
 import { permissionModeTitle } from '../../utils/permissions/PermissionMode.js';
 import type { PermissionDecision, PermissionDecisionReason } from '../../utils/permissions/PermissionResult.js';
-import { extractRules } from '../../utils/permissions/PermissionUpdate.js';
 import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js';
 import { permissionRuleValueToString } from '../../utils/permissions/permissionRuleParser.js';
-import { detectUnreachableRules } from '../../utils/permissions/shadowedRuleDetection.js';
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
 import { getSettingSourceDisplayNameLowercase } from '../../utils/settings/constants.js';
 type PermissionDecisionInfoItemProps = {
   title?: string;

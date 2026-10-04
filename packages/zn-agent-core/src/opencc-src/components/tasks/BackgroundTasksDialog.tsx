@@ -1,52 +1,18 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import figures from 'figures';
 import React, { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js';
-import { useEffectEventCompat } from 'src/hooks/useEffectEventCompat.js';
-import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
-import { useAppState, useSetAppState } from 'src/state/AppState.js';
-import { enterTeammateView, exitTeammateView } from 'src/state/teammateViewHelpers.js';
 import type { ToolUseContext } from 'src/Tool.js';
-import { DreamTask, type DreamTaskState } from 'src/tasks/DreamTask/DreamTask.js';
-import { InProcessTeammateTask } from 'src/tasks/InProcessTeammateTask/InProcessTeammateTask.js';
+import { type DreamTaskState } from 'src/tasks/DreamTask/DreamTask.js'
 import type { InProcessTeammateTaskState } from 'src/tasks/InProcessTeammateTask/types.js';
 import type { LocalAgentTaskState } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
-import { LocalAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
 import type { LocalShellTaskState } from 'src/tasks/LocalShellTask/guards.js';
-import { LocalShellTask } from 'src/tasks/LocalShellTask/LocalShellTask.js';
 // Type import is erased at build time — safe even though module is ant-gated.
 import type { LocalWorkflowTaskState } from 'src/tasks/LocalWorkflowTask/LocalWorkflowTask.js';
-import { MonitorMcpTask, type MonitorMcpTaskState } from 'src/tasks/MonitorMcpTask/MonitorMcpTask.js';
-import { RemoteAgentTask, type RemoteAgentTaskState } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js';
+import { type MonitorMcpTaskState } from 'src/tasks/MonitorMcpTask/MonitorMcpTask.js'
+import { type RemoteAgentTaskState } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js'
 import { type BackgroundTaskState, isBackgroundTask, type TaskState } from 'src/tasks/types.js';
 import type { DeepImmutable } from 'src/types/utils.js';
-import { intersperse } from 'src/utils/array.js';
-import { TEAM_LEAD_NAME } from 'src/utils/swarm/constants.js';
-import { stopUltraplan } from '../../commands/ultraplan.js';
 import type { CommandResultDisplay } from '../../commands.js';
-import { useRegisterOverlay } from '../../context/overlayContext.js';
-import type { ExitState } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import type { KeyboardEvent } from '../../ink/events/keyboard-event.js';
-import { Box, Text } from '../../ink.js';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
-import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
-import { count } from '../../utils/array.js';
-import { Byline } from '../design-system/Byline.js';
-import { Dialog } from '../design-system/Dialog.js';
-import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
-import { AsyncAgentDetailDialog } from './AsyncAgentDetailDialog.js';
-import { BackgroundTask as BackgroundTaskComponent } from './BackgroundTask.js';
-import { DreamDetailDialog } from './DreamDetailDialog.js';
-import { InProcessTeammateDetailDialog } from './InProcessTeammateDetailDialog.js';
-import { RemoteSessionDetailDialog } from './RemoteSessionDetailDialog.js';
-import { ShellDetailDialog } from './ShellDetailDialog.js';
-import { WorkflowDetailDialog } from './WorkflowDetailDialog.js';
-import {
-  killWorkflowTask,
-  skipWorkflowAgent,
-  retryWorkflowAgent,
-} from '../../tasks/LocalWorkflowTask/lifecycle.js';
 type ViewState = {
   mode: 'list';
 } | {
@@ -112,7 +78,6 @@ type ListItem = {
 // Lifecycle helpers (killWorkflowTask, skipWorkflowAgent, retryWorkflowAgent)
 // live in src/tasks/LocalWorkflowTask/lifecycle.ts. They're imported above
 // via the runtime control plane so the dialog can drive running workflows.
-import { MonitorMcpDetailDialog } from './MonitorMcpDetailDialog.js';
 
 // Helper to get filtered background tasks (excludes foregrounded local_agent)
 function getSelectableBackgroundTasks(tasks: Record<string, TaskState> | undefined, foregroundedTaskId: string | undefined): TaskState[] {

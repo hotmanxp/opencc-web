@@ -1,20 +1,8 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import figures from 'figures';
 import * as React from 'react';
-import type { KeyboardEvent } from '../../ink/events/keyboard-event.js';
-import { Box, Text, useInput } from '../../ink.js';
-import { useKeybinding } from '../../keybindings/useKeybinding.js';
-import { AgentRouteSelector } from './AgentRouteSelector.js';
-import { describeRouteLine, getAgentRoute } from '../../services/api/agentRouteSettings.js';
 import type { Tools } from '../../Tool.js';
-import { getAgentColor } from '../../tools/AgentTool/agentColorManager.js';
-import { getMemoryScopeDisplay } from '../../tools/AgentTool/agentMemory.js';
-import { resolveAgentTools } from '../../tools/AgentTool/agentToolUtils.js';
-import { type AgentDefinition, isBuiltInAgent } from '../../tools/AgentTool/loadAgentsDir.js';
-import { getAgentModelDisplay } from '../../utils/model/agent.js';
-import { Markdown } from '../Markdown.js';
-import { getActualRelativeAgentFilePath } from './agentFileUtils.js';
+import { type AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
 type Props = {
   agent: AgentDefinition;
   tools: Tools;

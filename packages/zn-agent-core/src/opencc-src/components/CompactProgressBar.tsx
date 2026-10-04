@@ -1,5 +1,4 @@
 import React from 'react'
-import { Box, Text } from '../ink.js'
 
 const BAR_WIDTH = 16
 

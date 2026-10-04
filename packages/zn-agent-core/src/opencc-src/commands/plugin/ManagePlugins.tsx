@@ -5,53 +5,18 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Byline } from '../../components/design-system/Byline.js';
-import { MCPRemoteServerMenu } from '../../components/mcp/MCPRemoteServerMenu.js';
-import { MCPStdioServerMenu } from '../../components/mcp/MCPStdioServerMenu.js';
-import { MCPToolDetailView } from '../../components/mcp/MCPToolDetailView.js';
-import { MCPToolListView } from '../../components/mcp/MCPToolListView.js';
-import type { ClaudeAIServerInfo, HTTPServerInfo, SSEServerInfo, StdioServerInfo } from '../../components/mcp/types.js';
-import { SearchBox } from '../../components/SearchBox.js';
-import { useSearchInput } from '../../hooks/useSearchInput.js';
-import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
-import { Box, Text, useInput, useTerminalFocus } from '../../ink.js';
-import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
-import { getBuiltinPluginDefinition } from '../../plugins/builtinPlugins.js';
-import { useMcpToggleEnabled } from '../../services/mcp/MCPConnectionManager.js';
-import type { MCPServerConnection, McpClaudeAIProxyServerConfig, McpHTTPServerConfig, McpSSEServerConfig, McpStdioServerConfig } from '../../services/mcp/types.js';
-import { filterToolsByServer } from '../../services/mcp/utils.js';
-import { disablePluginOp, enablePluginOp, getPluginInstallationFromV2, isInstallableScope, isPluginEnabledAtProjectScope, uninstallPluginOp, updatePluginOp } from '../../services/plugins/pluginOperations.js';
-import { useAppState } from '../../state/AppState.js';
+import type { MCPServerConnection } from '../../services/mcp/types.js'
 import type { Tool } from '../../Tool.js';
 import type { LoadedPlugin, PluginError } from '../../types/plugin.js';
-import { count } from '../../utils/array.js';
-import { openBrowser } from '../../utils/browser.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { errorMessage, toError } from '../../utils/errors.js';
 import { logError } from '../../utils/log.js';
-import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
-import { loadInstalledPluginsV2 } from '../../utils/plugins/installedPluginsManager.js';
 import { getMarketplace } from '../../utils/plugins/marketplaceManager.js';
-import { isMcpbSource, loadMcpbFile, type McpbNeedsConfigResult, type UserConfigValues } from '../../utils/plugins/mcpbHandler.js';
-import { getPluginDataDirSize, pluginDataDirPath } from '../../utils/plugins/pluginDirectories.js';
-import { getFlaggedPlugins, markFlaggedPluginsSeen, removeFlaggedPlugin } from '../../utils/plugins/pluginFlagging.js';
-import { type PersistablePluginScope, parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js';
-import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js';
-import { loadPluginOptions, type PluginOptionSchema, savePluginOptions } from '../../utils/plugins/pluginOptionsStorage.js';
+import { type PersistablePluginScope } from '../../utils/plugins/pluginIdentifier.js'
+import { type PluginOptionSchema } from '../../utils/plugins/pluginOptionsStorage.js'
 import { isPluginBlockedByPolicy } from '../../utils/plugins/pluginPolicy.js';
-import { getPluginEditableScopes } from '../../utils/plugins/pluginStartupCheck.js';
-import { getSettings_DEPRECATED, getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
-import { jsonParse } from '../../utils/slowOperations.js';
-import { plural } from '../../utils/stringUtils.js';
-import { formatErrorMessage, getErrorGuidance } from './PluginErrors.js';
-import { PluginOptionsDialog } from './PluginOptionsDialog.js';
-import { PluginOptionsFlow } from './PluginOptionsFlow.js';
 import type { ViewState as ParentViewState } from './types.js';
-import { UnifiedInstalledCell } from './UnifiedInstalledCell.js';
-import type { UnifiedInstalledItem } from './unifiedTypes.js';
-import { usePagination } from './usePagination.js';
 type Props = {
   setViewState: (state: ParentViewState) => void;
   setResult: (result: string | null) => void;

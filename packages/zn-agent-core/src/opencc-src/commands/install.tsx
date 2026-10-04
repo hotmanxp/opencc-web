@@ -1,18 +1,10 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import React, { useEffect, useState } from 'react';
 import type { CommandResultDisplay } from 'src/commands.js';
-import { logEvent } from 'src/services/analytics/index.js';
-import { StatusIcon } from '../components/design-system/StatusIcon.js';
 import { Box, render, Text } from '../ink.js';
-import { logForDebugging } from '../utils/debug.js';
 import { env } from '../utils/env.js';
-import { errorMessage } from '../utils/errors.js';
-import { hasNativeDistribution } from '../utils/nativeDistribution.js';
-import { checkInstall, cleanupNpmInstallations, cleanupShellAliases, installLatest, repairNativeLauncher } from '../utils/nativeInstaller/index.js';
-import { getInitialSettings, updateSettingsForSource } from '../utils/settings/settings.js';
 interface InstallProps {
   onDone: (result: string, options?: {
     display?: CommandResultDisplay;

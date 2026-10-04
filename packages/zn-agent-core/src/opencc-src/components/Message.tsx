@@ -1,34 +1,9 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
-import type { BetaContentBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs';
-import type { ImageBlockParam, TextBlockParam, ThinkingBlockParam, ToolResultBlockParam, ToolUseBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import * as React from 'react';
 import type { Command } from '../commands.js';
-import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box } from '../ink.js';
 import type { Tools } from '../Tool.js';
-import { type ConnectorTextBlock, isConnectorTextBlock } from '../types/connectorText.js';
 import type { AssistantMessage, AttachmentMessage as AttachmentMessageType, CollapsedReadSearchGroup as CollapsedReadSearchGroupType, GroupedToolUseMessage as GroupedToolUseMessageType, NormalizedUserMessage, ProgressMessage, SystemMessage } from '../types/message.js';
-import { type AdvisorBlock, isAdvisorBlock } from '../utils/advisor.js';
-import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
-import { logError } from '../utils/log.js';
 import type { buildMessageLookups } from '../utils/messages.js';
-import { CompactSummary } from './CompactSummary.js';
-import { AdvisorMessage } from './messages/AdvisorMessage.js';
-import { AssistantRedactedThinkingMessage } from './messages/AssistantRedactedThinkingMessage.js';
-import { AssistantTextMessage } from './messages/AssistantTextMessage.js';
-import { AssistantThinkingMessage } from './messages/AssistantThinkingMessage.js';
-import { AssistantToolUseMessage } from './messages/AssistantToolUseMessage.js';
-import { AttachmentMessage } from './messages/AttachmentMessage.js';
-import { CollapsedReadSearchContent } from './messages/CollapsedReadSearchContent.js';
-import { CompactBoundaryMessage } from './messages/CompactBoundaryMessage.js';
-import { GroupedToolUseContent } from './messages/GroupedToolUseContent.js';
-import { SystemTextMessage } from './messages/SystemTextMessage.js';
-import { UserImageMessage } from './messages/UserImageMessage.js';
-import { UserTextMessage } from './messages/UserTextMessage.js';
-import { UserToolResultMessage } from './messages/UserToolResultMessage/UserToolResultMessage.js';
-import { OffscreenFreeze } from './OffscreenFreeze.js';
-import { ExpandShellOutputProvider } from './shell/ExpandShellOutputContext.js';
 export type Props = {
   message: NormalizedUserMessage | AssistantMessage | AttachmentMessageType | SystemMessage | GroupedToolUseMessageType | CollapsedReadSearchGroupType;
   lookups: ReturnType<typeof buildMessageLookups>;

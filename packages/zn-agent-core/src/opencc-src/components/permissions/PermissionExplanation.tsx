@@ -1,13 +1,10 @@
 // @ts-nocheck
 import { c as _c } from "react-compiler-runtime";
 import React, { Suspense, use, useState } from 'react';
-import { Box, Text } from '../../ink.js';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { logEvent } from '../../services/analytics/index.js';
 import type { Message } from '../../types/message.js';
 import { generatePermissionExplanation, isPermissionExplainerEnabled, type PermissionExplanation as PermissionExplanationType, type RiskLevel } from '../../utils/permissions/permissionExplainer.js';
-import { ShimmerChar } from '../Spinner/ShimmerChar.js';
-import { useShimmerAnimation } from '../Spinner/useShimmerAnimation.js';
 const LOADING_MESSAGE = 'Loading explanation…';
 function ShimmerLoadingText() {
   return null;

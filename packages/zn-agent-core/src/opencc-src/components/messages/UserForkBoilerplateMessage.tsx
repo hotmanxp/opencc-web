@@ -1,7 +1,5 @@
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import * as React from 'react'
-import { Box, Text } from '../../ink.js'
-import { FORK_DIRECTIVE_PREFIX } from '../../constants/xml.js'
 
 type Props = {
   addMargin: boolean

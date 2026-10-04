@@ -1,7 +1,5 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
-import React, { createContext, type ReactNode, useContext } from 'react';
-import { Box, Text } from '../../ink.js';
+import { createContext, type ReactNode } from 'react'
 export const OrderedListItemContext = createContext({
   marker: ''
 });

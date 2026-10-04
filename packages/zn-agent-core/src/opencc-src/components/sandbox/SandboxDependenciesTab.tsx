@@ -1,8 +1,6 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import React from 'react';
-import { Box, Text } from '../../ink.js';
-import { getPlatform } from '../../utils/platform.js';
+import { Text } from '../../ink.js'
 import type { SandboxDependencyCheck } from '../../utils/sandbox/sandbox-adapter.js';
 type Props = {
   depCheck: SandboxDependencyCheck;

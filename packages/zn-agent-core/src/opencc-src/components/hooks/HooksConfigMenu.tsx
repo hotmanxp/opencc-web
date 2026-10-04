@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 /**
  * HooksConfigMenu is a read-only browser for configured hooks.
  *
@@ -15,20 +14,10 @@ import { c as _c } from "react-compiler-runtime";
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
-import { useAppState, useAppStateStore } from 'src/state/AppState.js';
 import type { CommandResultDisplay } from '../../commands.js';
-import { useSettingsChange } from '../../hooks/useSettingsChange.js';
-import { Box, Text } from '../../ink.js';
-import { useKeybinding } from '../../keybindings/useKeybinding.js';
-import { getHookEventMetadata, getHooksForMatcher, getMatcherMetadata, getSortedMatchersForEvent, groupHooksByEventAndMatcher } from '../../utils/hooks/hooksConfigManager.js';
+import { Text } from '../../ink.js'
 import type { IndividualHookConfig } from '../../utils/hooks/hooksSettings.js';
 import { getSettings_DEPRECATED, getSettingsForSource } from '../../utils/settings/settings.js';
-import { plural } from '../../utils/stringUtils.js';
-import { Dialog } from '../design-system/Dialog.js';
-import { SelectEventMode } from './SelectEventMode.js';
-import { SelectHookMode } from './SelectHookMode.js';
-import { SelectMatcherMode } from './SelectMatcherMode.js';
-import { ViewHookMode } from './ViewHookMode.js';
 type Props = {
   toolNames: string[];
   onExit: (result?: string, options?: {

@@ -1,28 +1,15 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import * as React from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { useInterval } from 'usehooks-ts';
 import type { CommandResultDisplay } from '../../commands.js';
-import { Markdown } from '../../components/Markdown.js';
-import { SpinnerGlyph } from '../../components/Spinner/SpinnerGlyph.js';
-import { DOWN_ARROW, UP_ARROW } from '../../constants/figures.js';
 import { getSystemPrompt } from '../../constants/prompts.js';
-import { useModalOrTerminalSize } from '../../context/modalContext.js';
 import { getSystemContext, getUserContext } from '../../context.js';
-import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import ScrollBox, { type ScrollBoxHandle } from '../../ink/components/ScrollBox.js';
-import type { KeyboardEvent } from '../../ink/events/keyboard-event.js';
-import { Box, Text } from '../../ink.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import type { Message } from '../../types/message.js';
-import { createAbortController } from '../../utils/abortController.js';
 import { saveGlobalConfig } from '../../utils/config.js';
-import { errorMessage } from '../../utils/errors.js';
 import { type CacheSafeParams, getLastCacheSafeParams } from '../../utils/forkedAgent.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
 import type { ProcessUserInputContext } from '../../utils/processUserInput/processUserInput.js';
-import { runSideQuestion } from '../../utils/sideQuestion.js';
 import { asSystemPrompt } from '../../utils/systemPromptType.js';
 type BtwComponentProps = {
   question: string;

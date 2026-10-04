@@ -1,20 +1,8 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
-import { basename } from 'path';
-import { toString as qrToString } from 'qrcode';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
-import { getOriginalCwd } from '../bootstrap/state.js';
-import { buildActiveFooterText, buildIdleFooterText, FAILED_FOOTER_TEXT, getBridgeStatus } from '../bridge/bridgeStatusUtil.js';
-import { BRIDGE_FAILED_INDICATOR, BRIDGE_READY_INDICATOR } from '../constants/figures.js';
-import { useRegisterOverlay } from '../context/overlayContext.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw 'd' key for disconnect, not a configurable keybinding action
-import { Box, Text, useInput } from '../ink.js';
-import { useKeybindings } from '../keybindings/useKeybinding.js';
-import { useAppState, useSetAppState } from '../state/AppState.js';
-import { saveGlobalConfig } from '../utils/config.js';
-import { getBranch } from '../utils/git.js';
-import { Dialog } from './design-system/Dialog.js';
+import { Text } from '../ink.js'
 type Props = {
   onDone: () => void;
 };

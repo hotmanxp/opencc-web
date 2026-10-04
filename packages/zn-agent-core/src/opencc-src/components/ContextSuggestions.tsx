@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import figures from 'figures';
 import { Box, Text } from '../ink.js';
 import type { ContextSuggestion } from '../utils/contextSuggestions.js';

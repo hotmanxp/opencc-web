@@ -1,9 +1,6 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import * as React from 'react';
-import { Text, useTheme } from '../../ink.js';
-import { getTheme, type Theme } from '../../utils/theme.js';
-import { interpolateColor, parseRGB, toRGBColor } from './utils.js';
+import { type Theme } from '../../utils/theme.js'
 type Props = {
   char: string;
   flashOpacity: number;

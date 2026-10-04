@@ -10,8 +10,6 @@
 // options. We use OpenCC's existing `Select` from
 // `src/components/CustomSelect/Select.js` for consistency.
 import React from 'react'
-import { Box, Text } from '../../ink.js'
-import { Select } from '../CustomSelect/select.js'
 
 export type ExitBackgroundItem = {
   label: string

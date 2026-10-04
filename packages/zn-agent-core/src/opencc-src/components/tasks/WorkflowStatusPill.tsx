@@ -18,10 +18,8 @@
 // We use the same `appState.workflows` slice that
 // registerWorkflowInAppState populates — that's already wired in
 // WorkflowTool.call() and stays live while the workflow runs.
-import { Text } from '../../ink.js'
 import type { LocalWorkflowTaskState } from '../../tasks/LocalWorkflowTask/state.js'
-import { useAppState } from '../../state/AppState.js'
-import { formatDuration, formatAgentSummary } from './workflowActivityRenderers.js'
+import { formatDuration } from './workflowActivityRenderers.js'
 
 type Props = {
   selected: boolean

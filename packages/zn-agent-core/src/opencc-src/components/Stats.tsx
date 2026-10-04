@@ -1,20 +1,16 @@
-import { c as _c } from "react-compiler-runtime";
 import { plot as asciichart } from 'asciichart';
 import chalk from 'chalk';
 import figures from 'figures';
 import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 // React 19 `use()` — @types/react 18 doesn't declare it; preact-shim provides
 // the runtime implementation (and its type) in the bundled build.
-import { use } from '../../compat/preact-shim.js';
 import { stripVTControlCharacters as stripAnsi } from 'node:util';
 import type { CommandResultDisplay } from '../commands.js';
-import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { applyColor } from '../ink/colorize.js';
 import { stringWidth as getStringWidth } from '../ink/stringWidth.js';
 import type { Color } from '../ink/styles.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw j/k/arrow stats navigation
-import { Ansi, Box, type Key, Text, useInput } from '../ink.js';
-import { useKeybinding } from '../keybindings/useKeybinding.js';
+import { Ansi, Text } from '../ink.js'
 import { getGlobalConfig } from '../utils/config.js';
 import { formatDuration, formatNumber } from '../utils/format.js';
 import { generateHeatmap } from '../utils/heatmap.js';
@@ -23,8 +19,6 @@ import { copyAnsiToClipboard } from '../utils/screenshotClipboard.js';
 import { aggregateClaudeCodeStatsForRange, type ClaudeCodeStats, type DailyModelTokens, type StatsDateRange } from '../utils/stats.js';
 import { resolveThemeSetting } from '../utils/systemTheme.js';
 import { getTheme, themeColorToAnsi } from '../utils/theme.js';
-import { Tab, Tabs, useOuterTabsFocus, useTabHeaderFocus } from './design-system/Tabs.js';
-import { Spinner } from './Spinner.js';
 import { isAntEmployee } from '../utils/buildConfig.js';
 function formatPeakDay(dateStr: string): string {
   const date = new Date(dateStr);

@@ -1,20 +1,9 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import type { StructuredPatchHunk } from 'diff';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
-import { useRegisterOverlay } from '../../context/overlayContext.js';
-import { type DiffData, useDiffData } from '../../hooks/useDiffData.js';
-import { type TurnDiff, useTurnDiffs } from '../../hooks/useTurnDiffs.js';
-import { Box, Text } from '../../ink.js';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
-import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
+import { type DiffData } from '../../hooks/useDiffData.js'
+import { type TurnDiff } from '../../hooks/useTurnDiffs.js'
 import type { Message } from '../../types/message.js';
-import { plural } from '../../utils/stringUtils.js';
-import { Byline } from '../design-system/Byline.js';
-import { Dialog } from '../design-system/Dialog.js';
-import { DiffDetailView } from './DiffDetailView.js';
-import { DiffFileList } from './DiffFileList.js';
 type Props = {
   messages: Message[];
   onDone: (result?: string, options?: {

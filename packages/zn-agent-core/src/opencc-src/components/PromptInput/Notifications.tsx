@@ -1,38 +1,13 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import * as React from 'react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { type Notification, useNotifications } from 'src/context/notifications.js';
-import { logEvent } from 'src/services/analytics/index.js';
-import { useAppState } from 'src/state/AppState.js';
-import { useVoiceState } from '../../context/voice.js';
+import { type ReactNode } from 'react'
+import { type Notification } from 'src/context/notifications.js'
 import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
-import { useIdeConnectionStatus } from '../../hooks/useIdeConnectionStatus.js';
 import type { IDESelection } from '../../hooks/useIdeSelection.js';
-import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
-import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
-import { Box, Text } from '../../ink.js';
-import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
-import { calculateTokenWarningState } from '../../services/compact/autoCompact.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import type { Message } from '../../types/message.js';
-import { getApiKeyHelperElapsedMs, getConfiguredApiKeyHelper, getSubscriptionType } from '../../utils/auth.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
-import { getExternalEditor } from '../../utils/editor.js';
-import { isEnvTruthy } from '../../utils/envUtils.js';
-import { formatDuration } from '../../utils/format.js';
 import { setEnvHookNotifier } from '../../utils/hooks/fileChangedWatcher.js';
-import { toIDEDisplayName } from '../../utils/ide.js';
-import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
-import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js';
-import { AutoUpdaterWrapper } from '../AutoUpdaterWrapper.js';
-import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { getEffortNotificationText } from '../EffortIndicator.js';
-import { hasIdeSelection, IdeStatusIndicator } from '../IdeStatusIndicator.js';
-import { MemoryUsageIndicator } from '../MemoryUsageIndicator.js';
-import { SentryErrorBoundary } from '../SentryErrorBoundary.js';
-import { TokenWarning } from '../TokenWarning.js';
-import { SandboxPromptFooterHint } from './SandboxPromptFooterHint.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const VoiceIndicator: typeof import('./VoiceIndicator.js').VoiceIndicator = false ? require('./VoiceIndicator.js').VoiceIndicator : () => null;

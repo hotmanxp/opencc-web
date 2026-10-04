@@ -2,8 +2,6 @@ import * as React from 'react'
 
 import type { Tools } from '../../Tool.js'
 import type { AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
-import { Dialog } from '../design-system/Dialog.js'
-import { AgentDetail } from './AgentDetail.js'
 
 type Props = {
   agent: AgentDefinition

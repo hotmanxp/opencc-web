@@ -1,9 +1,5 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import * as React from 'react';
-import { useSettings } from '../../hooks/useSettings.js';
-import { Box, Text, useAnimationFrame } from '../../ink.js';
-import { interpolateColor, toRGBColor } from '../Spinner/utils.js';
 type Props = {
   voiceState: 'idle' | 'recording' | 'processing';
 };

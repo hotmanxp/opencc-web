@@ -27,11 +27,8 @@
 // Mirrors the visual shape of ShellDetailDialog / DreamDetailDialog
 // but without live output tailing — workflows surface their final
 // report via the agent's `result` field, not a streamed outputFile.
-import { Box, Text, useInput } from '../../ink.js'
-import { useMemo, useState } from 'react'
 import type { WorkflowAgentState } from '../../tools/WorkflowTool/types.js'
 import type { LocalWorkflowTaskState } from '../../tasks/LocalWorkflowTask/state.js'
-import { buildTerminalStatusLine } from './workflowActivityRenderers.js'
 
 type Props = {
   // Accept both prop names for back-compat:

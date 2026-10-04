@@ -2,19 +2,9 @@ import chalk from 'chalk';
 import figures from 'figures';
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
-import { useSetAppState } from 'src/state/AppState.js';
-import type { KeyboardEvent } from '../../ink/events/keyboard-event.js';
-import { Box, Text } from '../../ink.js';
-import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import type { Tools } from '../../Tool.js';
-import { type AgentColorName, setAgentColor } from '../../tools/AgentTool/agentColorManager.js';
-import { type AgentDefinition, getActiveAgentsFromList, isCustomAgent, isPluginAgent } from '../../tools/AgentTool/loadAgentsDir.js';
-import { editFileInEditor } from '../../utils/promptEditor.js';
-import { getActualAgentFilePath, updateAgentFile } from './agentFileUtils.js';
-import { ColorPicker } from './ColorPicker.js';
-import { ModelSelector } from './ModelSelector.js';
-import { ToolSelector } from './ToolSelector.js';
-import { getAgentSourceDisplayName } from './utils.js';
+import { type AgentColorName } from '../../tools/AgentTool/agentColorManager.js'
+import { type AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
 type Props = {
   agent: AgentDefinition;
   tools: Tools;

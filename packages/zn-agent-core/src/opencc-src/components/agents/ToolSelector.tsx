@@ -1,12 +1,9 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import figures from 'figures';
 import React, { useCallback, useMemo, useState } from 'react';
 import { mcpInfoFromString } from 'src/services/mcp/mcpStringUtils.js';
 import { isMcpTool } from 'src/services/mcp/utils.js';
 import type { Tool, Tools } from 'src/Tool.js';
-import { filterToolsForAgent } from 'src/tools/AgentTool/agentToolUtils.js';
-import { AGENT_TOOL_NAME } from 'src/tools/AgentTool/constants.js';
 import { BashTool } from 'src/tools/BashTool/BashTool.js';
 import { ExitPlanModeV2Tool } from 'src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js';
 import { FileEditTool } from 'src/tools/FileEditTool/FileEditTool.js';
@@ -22,12 +19,6 @@ import { TodoWriteTool } from 'src/tools/TodoWriteTool/TodoWriteTool.js';
 import { TungstenTool } from 'src/tools/TungstenTool/TungstenTool.js';
 import { WebFetchTool } from 'src/tools/WebFetchTool/WebFetchTool.js';
 import { WebSearchTool } from 'src/tools/WebSearchTool/WebSearchTool.js';
-import type { KeyboardEvent } from '../../ink/events/keyboard-event.js';
-import { Box, Text } from '../../ink.js';
-import { useKeybinding } from '../../keybindings/useKeybinding.js';
-import { count } from '../../utils/array.js';
-import { plural } from '../../utils/stringUtils.js';
-import { Divider } from '../design-system/Divider.js';
 import { isAntEmployee } from '../../utils/buildConfig.js';
 type Props = {
   tools: Tools;

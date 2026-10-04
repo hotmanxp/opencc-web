@@ -1,51 +1,15 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js';
-import { Box, Text, Link } from '../../ink.js';
+import { Text } from '../../ink.js'
 import * as React from 'react';
 import figures from 'figures';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { VimMode, PromptInputMode } from '../../types/textInputTypes.js';
 import type { ToolPermissionContext } from '../../Tool.js';
-import { isVimModeEnabled } from './utils.js';
-import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
-import { isDefaultMode, permissionModeSymbol, permissionModeTitle, permissionModeShortTitle, getModeColor } from '../../utils/permissions/PermissionMode.js';
-import { BackgroundTaskStatus } from '../tasks/BackgroundTaskStatus.js';
-import { WorkflowStatusPill } from '../tasks/WorkflowStatusPill.js';
-import { isBackgroundTask } from '../../tasks/types.js';
-import { isPanelAgentTask } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
-import { getVisibleAgentTasks } from '../CoordinatorAgentStatus.js';
-import { count } from '../../utils/array.js';
-import { shouldHideTasksFooter } from '../tasks/taskStatusUtils.js';
-import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
-import { getBranch } from '../../utils/git.js';
-import { getCwd } from '../../utils/cwd.js';
-import { TeamStatus } from '../teams/TeamStatus.js';
-import { isInProcessEnabled } from '../../utils/swarm/backends/registry.js';
-import { useAppState, useAppStateStore, useSetAppState } from 'src/state/AppState.js';
-import { getIsRemoteMode } from '../../bootstrap/state.js';
 import HistorySearchInput from './HistorySearchInput.js';
-import { usePrStatus } from '../../hooks/usePrStatus.js';
 import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
-import { Byline } from '../design-system/Byline.js';
-import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { useTasksV2 } from '../../hooks/useTasksV2.js';
-import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
-import { formatDuration } from '../../utils/format.js';
-import { VoiceWarmupHint } from './VoiceIndicator.js';
-import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
-import { useVoiceState } from '../../context/voice.js';
-import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
-import { isXtermJs } from '../../ink/terminal.js';
-import { useHasSelection, useSelection } from '../../ink/hooks/use-selection.js';
-import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
-import { getPlatform } from '../../utils/platform.js';
+import { getGlobalConfig } from '../../utils/config.js'
 import path from 'node:path';
-import { PrBadge } from '../PrBadge.js';
-import { renderModelName } from '../../utils/model/model.js';
-import { resolveRegularFooterActive, resolveVisibleTransientFooterMessage } from './footerVisibility.js';
-import { KeepMounted } from './KeepMounted.js';
 
 // Dead code elimination: conditional import for proactive mode
 /* eslint-disable @typescript-eslint/no-require-imports */

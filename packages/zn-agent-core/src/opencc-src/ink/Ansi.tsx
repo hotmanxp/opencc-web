@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import React from 'react';
 import Link from './components/Link.js';
 import Text from './components/Text.js';

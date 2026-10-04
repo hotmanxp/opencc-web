@@ -1,29 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 import type { CommandResultDisplay } from '../../commands.js'
-import { StatusIcon } from '../../components/design-system/StatusIcon.js'
-import { Box, render, Text } from '../../ink.js'
-import {
-  getLatestVersion,
-  installGlobalPackage,
-} from '../../utils/autoUpdater.js'
-import {
-  getGlobalConfig,
-  type InstallMethod,
-  type ReleaseChannel,
-} from '../../utils/config.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { errorMessage } from '../../utils/errors.js'
-import { detectGlobalPackageManager } from '../../utils/globalPackageManager.js'
-import { installOrUpdateClaudePackage } from '../../utils/localInstaller.js'
+import { render } from '../../ink.js'
+import { getGlobalConfig, type InstallMethod } from '../../utils/config.js'
 import { hasNativeDistribution } from '../../utils/nativeDistribution.js'
-import {
-  installLatest as installLatestNative,
-  removeInstalledSymlink,
-} from '../../utils/nativeInstaller/index.js'
+import { removeInstalledSymlink } from '../../utils/nativeInstaller/index.js'
 import type { PackageManager } from '../../utils/nativeInstaller/packageManagers.js'
-import { getPackageManagerUpdateGuidance } from '../../utils/packageManagerUpdateGuidance.js'
 import { shouldRemoveInstalledSymlinkForNpmUpdate } from '../../utils/autoUpdaterRouting.js'
-import { resolveUpdateStrategy } from '../../utils/updateStrategy.js'
 
 const PACKAGE_URL = MACRO.PACKAGE_URL
 const CURRENT_VERSION = MACRO.DISPLAY_VERSION

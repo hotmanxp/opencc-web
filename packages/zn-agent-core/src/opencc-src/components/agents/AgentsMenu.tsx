@@ -1,27 +1,8 @@
-import { c as _c } from "react-compiler-runtime";
 import chalk from 'chalk';
 import * as React from 'react';
-import { useCallback, useMemo, useState } from 'react';
-import type { SettingSource } from 'src/utils/settings/constants.js';
 import type { CommandResultDisplay } from '../../commands.js';
-import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { useMergedTools } from '../../hooks/useMergedTools.js';
-import { Box, Text } from '../../ink.js';
-import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { Tools } from '../../Tool.js';
-import { type ResolvedAgent, resolveAgentOverrides } from '../../tools/AgentTool/agentDisplay.js';
-import { type AgentDefinition, getActiveAgentsFromList } from '../../tools/AgentTool/loadAgentsDir.js';
-import { toError } from '../../utils/errors.js';
-import { logError } from '../../utils/log.js';
-import { Select } from '../CustomSelect/select.js';
-import { Dialog } from '../design-system/Dialog.js';
-import { AgentDetail } from './AgentDetail.js';
-import { AgentDetailDialog } from './AgentDetailDialog.js';
-import { AgentEditor } from './AgentEditor.js';
-import { AgentNavigationFooter } from './AgentNavigationFooter.js';
-import { AgentsList } from './AgentsList.js';
-import { deleteAgentFromFile } from './agentFileUtils.js';
-import { CreateAgentWizard } from './new-agent-creation/CreateAgentWizard.js';
+import { type AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
 import type { ModeState } from './types.js';
 type Props = {
   tools: Tools;

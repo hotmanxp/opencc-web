@@ -1,28 +1,17 @@
-import { c as _c } from "react-compiler-runtime";
 import { execa } from 'execa';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import * as React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
-import { Select } from '../../components/CustomSelect/select.js';
-import { Dialog } from '../../components/design-system/Dialog.js';
-import { Spinner } from '../../components/Spinner.js';
 import instances from '../../ink/instances.js';
-import { Box, Text } from '../../ink.js';
-import { enablePluginOp } from '../../services/plugins/pluginOperations.js';
-import { logForDebugging } from '../../utils/debug.js';
 import { isENOENT, toError } from '../../utils/errors.js';
 import { execFileNoThrow } from '../../utils/execFileNoThrow.js';
 import { pathExists } from '../../utils/file.js';
 import { logError } from '../../utils/log.js';
 import { getPlatform } from '../../utils/platform.js';
-import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
-import { isPluginInstalled } from '../../utils/plugins/installedPluginsManager.js';
-import { addMarketplaceSource, clearMarketplacesCache, loadKnownMarketplacesConfig, refreshMarketplace } from '../../utils/plugins/marketplaceManager.js';
 import { OFFICIAL_MARKETPLACE_NAME } from '../../utils/plugins/officialMarketplace.js';
 import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js';
-import { installSelectedPlugins } from '../../utils/plugins/pluginStartupCheck.js';
 import { isAntEmployee } from '../../utils/buildConfig.js';
 
 // Marketplace and plugin identifiers - varies by user type

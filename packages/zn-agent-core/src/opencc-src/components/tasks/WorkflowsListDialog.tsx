@@ -15,17 +15,11 @@
 // Mirrors BackgroundTasksDialog's list+detail shape but is narrower (no
 // shells / agents / teammates / monitors — workflows only) and uses plain
 // useInput rather than the useKeybindings registry.
-import { Box, Text, useInput } from '../../ink.js'
 import { useEffect, useMemo, useState } from 'react'
-import { useAppState } from '../../state/AppState.js'
 import type { LocalWorkflowTaskState } from '../../tasks/LocalWorkflowTask/state.js'
-import {
-  killWorkflowTask,
-} from '../../tasks/LocalWorkflowTask/lifecycle.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { LocalJSXCommandContext } from '../../commands.js'
 import type { LocalJSXCommandOnDone } from '../../types/command.js'
-import { WorkflowDetailDialog } from './WorkflowDetailDialog.js'
 
 type ViewState =
   | { mode: 'list' }

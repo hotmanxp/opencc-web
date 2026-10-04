@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import '../global.d.ts';
 import React, { type PropsWithChildren } from 'react';
 import type { Except } from 'type-fest';

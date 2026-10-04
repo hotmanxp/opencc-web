@@ -2,34 +2,21 @@ import axios from 'axios';
 import { readFile, stat } from 'fs/promises';
 import * as React from 'react';
 import { useCallback, useEffect, useState } from 'react';
-import { getLastAPIRequest } from 'src/bootstrap/state.js';
-import { logEventTo1P } from 'src/services/analytics/firstPartyEventLogger.js';
-import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from 'src/services/analytics/index.js';
-import { getLastAssistantMessage, normalizeMessagesForAPI } from 'src/utils/messages.js';
 import type { CommandResultDisplay } from '../commands.js';
-import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, Text, useInput } from '../ink.js';
-import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { queryHaiku } from '../services/api/claude.js';
 import { startsWithApiErrorPrefix } from '../services/api/errors.js';
 import type { Message } from '../types/message.js';
 import { checkAndRefreshOAuthTokenIfNeeded } from '../utils/auth.js';
-import { openBrowser } from '../utils/browser.js';
 import { logForDebugging } from '../utils/debug.js';
 import { env } from '../utils/env.js';
-import { type GitRepoState, getGitState, getIsGit } from '../utils/git.js';
 import { getAuthHeaders, getUserAgent } from '../utils/http.js';
 import { getInMemoryErrors, logError } from '../utils/log.js';
 import { getAPIProvider } from '../utils/model/providers.js';
 import { isEssentialTrafficOnly } from '../utils/privacyLevel.js';
-import { jsonRedactor, redactJsonLines, redactSensitiveInfo } from '../utils/redaction.js';
-import { extractTeammateTranscriptsFromTasks, getTranscriptPath, loadAllSubagentTranscriptsFromDisk, MAX_TRANSCRIPT_READ_BYTES } from '../utils/sessionStorage.js';
+import { jsonRedactor, redactSensitiveInfo } from '../utils/redaction.js'
+import { getTranscriptPath, MAX_TRANSCRIPT_READ_BYTES } from '../utils/sessionStorage.js'
 import { jsonStringify } from '../utils/slowOperations.js';
 import { asSystemPrompt } from '../utils/systemPromptType.js';
-import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
-import { Byline } from './design-system/Byline.js';
-import { Dialog } from './design-system/Dialog.js';
-import { KeyboardShortcutHint } from './design-system/KeyboardShortcutHint.js';
 import TextInput from './TextInput.js';
 
 // This value was determined experimentally by testing the URL length limit

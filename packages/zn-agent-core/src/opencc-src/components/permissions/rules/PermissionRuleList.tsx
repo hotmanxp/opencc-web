@@ -1,36 +1,10 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import chalk from 'chalk';
 import figures from 'figures';
 import * as React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAppState, useSetAppState } from 'src/state/AppState.js';
-import { applyPermissionUpdate, persistPermissionUpdate } from 'src/utils/permissions/PermissionUpdate.js';
-import type { PermissionUpdateDestination } from 'src/utils/permissions/PermissionUpdateSchema.js';
 import type { CommandResultDisplay } from '../../../commands.js';
-import { Select } from '../../../components/CustomSelect/select.js';
-import { useExitOnCtrlCDWithKeybindings } from '../../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { useSearchInput } from '../../../hooks/useSearchInput.js';
-import type { KeyboardEvent } from '../../../ink/events/keyboard-event.js';
-import { Box, Text, useTerminalFocus } from '../../../ink.js';
-import { useKeybinding } from '../../../keybindings/useKeybinding.js';
-import { type AutoModeDenial, getAutoModeDenials } from '../../../utils/autoModeDenials.js';
-import type { PermissionBehavior, PermissionRule, PermissionRuleValue } from '../../../utils/permissions/PermissionRule.js';
-import { permissionRuleValueToString } from '../../../utils/permissions/permissionRuleParser.js';
-import { deletePermissionRule, getAllowRules, getAskRules, getDenyRules, permissionRuleSourceDisplayString } from '../../../utils/permissions/permissions.js';
-import type { UnreachableRule } from '../../../utils/permissions/shadowedRuleDetection.js';
-import { jsonStringify } from '../../../utils/slowOperations.js';
-import { Pane } from '../../design-system/Pane.js';
-import { Tab, Tabs, useTabHeaderFocus, useTabsWidth } from '../../design-system/Tabs.js';
-import { SearchBox } from '../../SearchBox.js';
+import type { PermissionBehavior, PermissionRule } from '../../../utils/permissions/PermissionRule.js'
 import type { Option } from '../../ui/option.js';
-import { AddPermissionRules } from './AddPermissionRules.js';
-import { AddWorkspaceDirectory } from './AddWorkspaceDirectory.js';
-import { PermissionRuleDescription } from './PermissionRuleDescription.js';
-import { PermissionRuleInput } from './PermissionRuleInput.js';
-import { RecentDenialsTab } from './RecentDenialsTab.js';
-import { RemoveWorkspaceDirectory } from './RemoveWorkspaceDirectory.js';
-import { WorkspaceTab } from './WorkspaceTab.js';
 type TabType = 'recent' | 'allow' | 'ask' | 'deny' | 'workspace';
 type RuleSourceTextProps = {
   rule: PermissionRule;

@@ -1,8 +1,6 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import * as React from 'react';
-import { Box, Text } from '../../ink.js';
-import { SandboxManager, shouldAllowManagedSandboxDomainsOnly } from '../../utils/sandbox/sandbox-adapter.js';
+import { Text } from '../../ink.js'
 export function SandboxConfigTab() {
   return null;
 }

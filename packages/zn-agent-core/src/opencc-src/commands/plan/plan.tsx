@@ -1,9 +1,7 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import * as React from 'react';
 import { handlePlanModeTransition } from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext } from '../../commands.js';
-import { Box, Text } from '../../ink.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { getExternalEditor } from '../../utils/editor.js';
 import { toIDEDisplayName } from '../../utils/ide.js';

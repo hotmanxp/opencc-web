@@ -1,32 +1,18 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { Box, Text, type TextProps } from '../../ink.js';
+import { Text } from '../../ink.js'
 import * as React from 'react';
 import { useState } from 'react';
 import sample from 'lodash-es/sample.js';
-import { BLACK_CIRCLE, REFERENCE_MARK, TEARDROP_ASTERISK } from '../../constants/figures.js';
 import figures from 'figures';
-import { basename } from 'path';
-import { MessageResponse } from '../MessageResponse.js';
-import { FilePathLink } from '../FilePathLink.js';
-import { openPath } from '../../utils/browser.js';
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemSaved = true ? require('./teamMemSaved.js') as typeof import('./teamMemSaved.js') : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { TURN_COMPLETION_VERBS } from '../../constants/turnCompletionVerbs.js';
-import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import type { SystemMessage, SystemStopHookSummaryMessage, SystemBridgeStatusMessage, SystemTurnDurationMessage, SystemThinkingMessage, SystemMemorySavedMessage } from '../../types/message.js';
-import { SystemAPIErrorMessage } from './SystemAPIErrorMessage.js';
-import { formatDuration, formatNumber, formatSecondsShort } from '../../utils/format.js';
-import { getGlobalConfig } from '../../utils/config.js';
+import type { SystemMessage } from '../../types/message.js'
+import { formatSecondsShort } from '../../utils/format.js'
 import Link from '../../ink/components/Link.js';
 import ThemedText from '../design-system/ThemedText.js';
-import { CtrlOToExpand } from '../CtrlOToExpand.js';
-import { useAppStateStore } from '../../state/AppState.js';
-import { isBackgroundTask, type TaskState } from '../../tasks/types.js';
-import { getPillLabel } from '../../tasks/pillLabel.js';
-import { useSelectedMessageBg } from '../messageActions.js';
 type Props = {
   message: SystemMessage;
   addMargin: boolean;

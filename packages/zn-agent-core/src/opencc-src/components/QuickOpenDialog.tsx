@@ -1,20 +1,6 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import * as path from 'path';
 import * as React from 'react';
-import { useEffect, useRef, useState } from 'react';
-import { useRegisterOverlay } from '../context/overlayContext.js';
-import { generateFileSuggestions } from '../hooks/fileSuggestions.js';
-import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Text } from '../ink.js';
-import { logEvent } from '../services/analytics/index.js';
-import { getCwd } from '../utils/cwd.js';
-import { openFileInExternalEditor } from '../utils/editor.js';
-import { truncatePathMiddle, truncateToWidth } from '../utils/format.js';
-import { highlightMatch } from '../utils/highlightMatch.js';
-import { readFileInRange } from '../utils/readFileInRange.js';
-import { FuzzyPicker } from './design-system/FuzzyPicker.js';
-import { LoadingState } from './design-system/LoadingState.js';
 type Props = {
   onDone: () => void;
   onInsert: (text: string) => void;

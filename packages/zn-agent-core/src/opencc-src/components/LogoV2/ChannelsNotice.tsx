@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 // Conditionally require()'d in LogoV2.tsx behind feature('KAIROS') ||
 // feature('KAIROS_CHANNELS'). No feature() guard here — the whole file
 // tree-shakes via the require pattern when both flags are false (see
@@ -8,8 +7,8 @@ import { c as _c } from "react-compiler-runtime";
 
 import * as React from 'react';
 import { useState } from 'react';
-import { type ChannelEntry, getAllowedChannels, getHasDevChannels } from '../../bootstrap/state.js';
-import { Box, Text } from '../../ink.js';
+import { type ChannelEntry, getAllowedChannels } from '../../bootstrap/state.js'
+import { Text } from '../../ink.js'
 import { isChannelsEnabled } from '../../services/mcp/channelAllowlist.js';
 import { getEffectiveChannelAllowlist } from '../../services/mcp/channelNotification.js';
 import { getMcpConfigsByScope } from '../../services/mcp/config.js';

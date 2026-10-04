@@ -1,11 +1,8 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import React, { useEffect, useRef } from 'react';
-import { BLACK_CIRCLE, BULLET_OPERATOR } from '../constants/figures.js';
-import { Box, Text } from '../ink.js';
+import { BULLET_OPERATOR } from '../constants/figures.js'
+import { Text } from '../ink.js'
 import type { SkillUpdate } from '../utils/hooks/skillImprovement.js';
-import { normalizeFullWidthDigits } from '../utils/stringUtils.js';
-import { isValidResponseInput } from './FeedbackSurvey/FeedbackSurveyView.js';
 import type { FeedbackSurveyResponse } from './FeedbackSurvey/utils.js';
 type Props = {
   isOpen: boolean;

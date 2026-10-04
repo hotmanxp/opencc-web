@@ -1,5 +1,3 @@
-import { Box, Text } from '../../ink.js'
-import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js'
 
 // Rendered by Message.tsx when a snip_boundary message is displayed. Mirrors
 // CompactBoundaryMessage: a single dimmed line marking where the model snipped

@@ -7,33 +7,16 @@ import {
   useRef,
   useState,
 } from 'react';
-import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js';
-import { getBridgeStatus } from '../../bridge/bridgeStatusUtil.js';
-import { useSetPromptOverlay } from '../../context/promptOverlayContext.js';
 import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
 import type { IDESelection } from '../../hooks/useIdeSelection.js';
-import { type ReadonlySettings, useSettings } from '../../hooks/useSettings.js';
-import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, Text } from '../../ink.js';
+import { type ReadonlySettings } from '../../hooks/useSettings.js'
 import type { MCPServerConnection } from '../../services/mcp/types.js';
-import { useAppState } from '../../state/AppState.js';
 import type { ToolPermissionContext } from '../../Tool.js';
 import type { Message } from '../../types/message.js';
-import { formatGoalDuration, formatTokenCount } from './goalFormat.js';
 import type { PromptInputMode, VimMode } from '../../types/textInputTypes.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
-import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
-import { isUndercover } from '../../utils/undercover.js';
-import { getGlobalConfig } from '../../utils/config.js';
-import { CoordinatorTaskPanel, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
-import { getLastAssistantMessageId, StatusLine, statusLineShouldDisplay } from '../StatusLine.js';
-import { Notifications } from './Notifications.js';
-import { resolveFooterOverlay, resolveTransientFooterMessage } from './footerVisibility.js';
-import { KeepMounted } from './KeepMounted.js';
-import { PromptInputFooterLeftSide } from './PromptInputFooterLeftSide.js';
-import { PromptInputFooterSuggestions, type SuggestionItem } from './PromptInputFooterSuggestions.js';
-import { PromptInputHelpMenu } from './PromptInputHelpMenu.js';
-import { isAntEmployee } from '../../utils/buildConfig.js';
+import { statusLineShouldDisplay } from '../StatusLine.js'
+import { type SuggestionItem } from './PromptInputFooterSuggestions.js'
 
 type Props = {
   apiKeyStatus: VerificationStatus;

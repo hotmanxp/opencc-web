@@ -1,16 +1,8 @@
 // @ts-nocheck
 import * as React from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import { useRegisterOverlay } from '../context/overlayContext.js';
-import { getTimestampedHistory, type TimestampedHistoryEntry } from '../history.js';
-import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { stringWidth } from '../ink/stringWidth.js';
-import { wrapAnsi } from '../ink/wrapAnsi.js';
-import { Box, Text } from '../ink.js';
-import { logEvent } from '../services/analytics/index.js';
+import { type TimestampedHistoryEntry } from '../history.js'
 import type { HistoryEntry } from '../utils/config.js';
-import { formatRelativeTimeAgo, truncateToWidth } from '../utils/format.js';
-import { FuzzyPicker } from './design-system/FuzzyPicker.js';
 type Props = {
   initialQuery?: string;
   onSelect: (entry: HistoryEntry) => void;

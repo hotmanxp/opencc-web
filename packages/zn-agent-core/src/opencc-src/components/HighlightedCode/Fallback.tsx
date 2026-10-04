@@ -1,11 +1,6 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
-import { extname } from 'path';
 import React, { Suspense, use, useMemo } from 'react';
-import { Ansi, Text } from '../../ink.js';
 import { getCliHighlightPromise } from '../../utils/cliHighlight.js';
-import { logForDebugging } from '../../utils/debug.js';
-import { convertLeadingTabsToSpaces } from '../../utils/file.js';
 import { hashPair } from '../../utils/hash.js';
 type Props = {
   code: string;

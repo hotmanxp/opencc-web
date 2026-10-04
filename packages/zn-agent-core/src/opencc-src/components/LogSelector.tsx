@@ -1,36 +1,15 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import chalk from 'chalk';
 import figures from 'figures';
 import Fuse from 'fuse.js';
 import React from 'react';
-import { getOriginalCwd, getSessionId } from '../bootstrap/state.js';
-import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { useSearchInput } from '../hooks/useSearchInput.js';
-import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { applyColor } from '../ink/colorize.js';
-import type { Color } from '../ink/styles.js';
-import { Box, Text, useInput, useTerminalFocus, useTheme } from '../ink.js';
-import { useKeybinding } from '../keybindings/useKeybinding.js';
-import { logEvent } from '../services/analytics/index.js';
+import { getSessionId } from '../bootstrap/state.js'
 import type { LogOption, SerializedMessage } from '../types/logs.js';
 import { formatLogMetadata, truncateToWidth } from '../utils/format.js';
-import { getWorktreePaths } from '../utils/getWorktreePaths.js';
-import { getBranch } from '../utils/git.js';
 import { getLogDisplayTitle } from '../utils/log.js';
-import { getFirstMeaningfulUserMessageTextContent, getSessionIdFromLog, isCustomTitleEnabled, saveCustomTitle } from '../utils/sessionStorage.js';
-import { getTheme } from '../utils/theme.js';
-import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
-import { Select, type OptionWithDescription } from './CustomSelect/select.js';
-import { Byline } from './design-system/Byline.js';
-import { Divider } from './design-system/Divider.js';
-import { KeyboardShortcutHint } from './design-system/KeyboardShortcutHint.js';
-import { SearchBox } from './SearchBox.js';
-import { SessionPreview } from './SessionPreview.js';
-import { Spinner } from './Spinner.js';
-import { TagTabs } from './TagTabs.js';
+import { getFirstMeaningfulUserMessageTextContent, getSessionIdFromLog } from '../utils/sessionStorage.js'
 import TextInput from './TextInput.js';
-import { type TreeNode, TreeSelect } from './ui/TreeSelect.js';
+import { type TreeNode } from './ui/TreeSelect.js'
 type AgenticSearchState = {
   status: 'idle';
 } | {

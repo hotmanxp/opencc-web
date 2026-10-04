@@ -1,13 +1,8 @@
 // @ts-nocheck
 import React, { useCallback, useState } from 'react'
-import { Box, Text } from '../../ink.js'
-import { useKeybinding } from '../../keybindings/useKeybinding.js'
 import type { OptionWithDescription } from '../CustomSelect/select.js'
-import { Select } from '../CustomSelect/select.js'
-import { type UnaryEvent, usePermissionRequestLogging } from './hooks.js'
-import { PermissionDecisionDebugInfo } from './PermissionDecisionDebugInfo.js'
+import { type UnaryEvent } from './hooks.js'
 import { PermissionExplainerContent } from './PermissionExplanation.js'
-import { PermissionScaffold } from './PermissionScaffold.js'
 import type { PermissionRequestProps, ToolUseConfirm } from './PermissionRequest.js'
 
 type ExplainerState = {

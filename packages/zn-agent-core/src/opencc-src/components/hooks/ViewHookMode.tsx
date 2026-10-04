@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 /**
  * ViewHookMode shows read-only details for a single configured hook.
  *
@@ -7,9 +6,8 @@ import { c as _c } from "react-compiler-runtime";
  * confirmation screen and directs users to settings.json or OpenCC for edits.
  */
 import * as React from 'react';
-import { Box, Text } from '../../ink.js';
-import { hookSourceDescriptionDisplayString, type IndividualHookConfig } from '../../utils/hooks/hooksSettings.js';
-import { Dialog } from '../design-system/Dialog.js';
+import { Text } from '../../ink.js'
+import { type IndividualHookConfig } from '../../utils/hooks/hooksSettings.js'
 type Props = {
   selectedHook: IndividualHookConfig;
   eventSupportsMatcher: boolean;

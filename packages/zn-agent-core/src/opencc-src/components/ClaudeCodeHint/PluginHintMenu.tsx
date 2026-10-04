@@ -1,7 +1,4 @@
 import * as React from 'react';
-import { Box, Text } from '../../ink.js';
-import { Select } from '../CustomSelect/select.js';
-import { PermissionDialog } from '../permissions/PermissionDialog.js';
 type Props = {
   pluginName: string;
   pluginDescription?: string;

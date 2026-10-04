@@ -1,33 +1,18 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import figures from 'figures';
 import React, { useMemo, useState } from 'react';
-import type { SDKMessage } from 'src/entrypoints/agentSdkTypes.js';
 import type { ToolUseContext } from 'src/Tool.js';
 import type { DeepImmutable } from 'src/types/utils.js';
 import type { CommandResultDisplay } from '../../commands.js';
-import { DIAMOND_FILLED, DIAMOND_OPEN } from '../../constants/figures.js';
-import { useElapsedTime } from '../../hooks/useElapsedTime.js';
-import type { KeyboardEvent } from '../../ink/events/keyboard-event.js';
-import { Box, Link, Text } from '../../ink.js';
+import { Text } from '../../ink.js'
 import type { RemoteAgentTaskState } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js';
-import { getRemoteTaskSessionUrl } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js';
-import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.js';
 import { ASK_USER_QUESTION_TOOL_NAME } from '../../tools/AskUserQuestionTool/prompt.js';
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../../tools/ExitPlanModeTool/constants.js';
-import { openBrowser } from '../../utils/browser.js';
-import { errorMessage } from '../../utils/errors.js';
-import { formatDuration, truncateToWidth } from '../../utils/format.js';
-import { toInternalMessages } from '../../utils/messages/mappers.js';
-import { EMPTY_LOOKUPS, normalizeMessages } from '../../utils/messages.js';
+import { truncateToWidth } from '../../utils/format.js'
 import { plural } from '../../utils/stringUtils.js';
-import { teleportResumeCodeSession } from '../../utils/teleport.js';
-import { Select } from '../CustomSelect/select.js';
 import { Byline } from '../design-system/Byline.js';
-import { Dialog } from '../design-system/Dialog.js';
 import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
-import { Message } from '../Message.js';
-import { formatReviewStageCounts, RemoteSessionProgress } from './RemoteSessionProgress.js';
+import { formatReviewStageCounts } from './RemoteSessionProgress.js'
 type Props = {
   session: DeepImmutable<RemoteAgentTaskState>;
   toolUseContext: ToolUseContext;

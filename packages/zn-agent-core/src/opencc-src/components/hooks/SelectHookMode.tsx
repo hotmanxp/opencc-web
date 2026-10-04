@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 /**
  * SelectHookMode shows all hooks configured for a given event+matcher pair.
  *
@@ -10,10 +9,8 @@ import { c as _c } from "react-compiler-runtime";
 import * as React from 'react';
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
 import type { HookEventMetadata } from 'src/utils/hooks/hooksConfigManager.js';
-import { Box, Text } from '../../ink.js';
+import { Text } from '../../ink.js'
 import { getHookDisplayText, hookSourceHeaderDisplayString, type IndividualHookConfig } from '../../utils/hooks/hooksSettings.js';
-import { Select } from '../CustomSelect/select.js';
-import { Dialog } from '../design-system/Dialog.js';
 type Props = {
   selectedEvent: HookEvent;
   selectedMatcher: string | null;

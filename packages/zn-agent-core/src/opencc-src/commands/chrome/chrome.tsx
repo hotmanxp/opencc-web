@@ -1,17 +1,7 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import React, { useState } from 'react';
-import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
-import { Dialog } from '../../components/design-system/Dialog.js';
-import { Box, Text } from '../../ink.js';
-import { useAppState } from '../../state/AppState.js';
 import { isClaudeAISubscriber } from '../../utils/auth.js';
-import { openBrowser } from '../../utils/browser.js';
-import { CLAUDE_IN_CHROME_MCP_SERVER_NAME, openInChrome } from '../../utils/claudeInChrome/common.js';
-import { isChromeExtensionInstalled } from '../../utils/claudeInChrome/setup.js';
-import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
-import { env } from '../../utils/env.js';
-import { isRunningOnHomespace } from '../../utils/envUtils.js';
+import { CLAUDE_IN_CHROME_MCP_SERVER_NAME } from '../../utils/claudeInChrome/common.js'
 const CHROME_EXTENSION_URL = 'https://claude.ai/chrome';
 const CHROME_PERMISSIONS_URL = 'https://clau.de/chrome/permissions';
 const CHROME_RECONNECT_URL = 'https://clau.de/chrome/reconnect';

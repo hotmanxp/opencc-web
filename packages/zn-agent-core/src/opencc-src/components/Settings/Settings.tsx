@@ -1,18 +1,8 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import * as React from 'react';
 import { Suspense, useState } from 'react';
-import { useKeybinding } from '../../keybindings/useKeybinding.js';
-import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
-import { Pane } from '../design-system/Pane.js';
-import { Tabs, Tab, useTabHeaderFocus } from '../design-system/Tabs.js';
-import { Status, buildDiagnostics } from './Status.js';
-import { Config } from './Config.js';
-import { Usage } from './Usage.js';
-import { Stats } from '../Stats.js';
+import { buildDiagnostics } from './Status.js'
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
 type Props = {
   onClose: (result?: string, options?: {

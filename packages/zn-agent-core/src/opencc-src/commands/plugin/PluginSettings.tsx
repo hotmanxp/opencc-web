@@ -1,33 +1,13 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import figures from 'figures';
 import * as React from 'react';
 import { useCallback, useEffect, useState } from 'react';
-import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Byline } from '../../components/design-system/Byline.js';
-import { Pane } from '../../components/design-system/Pane.js';
-import { Tab, Tabs } from '../../components/design-system/Tabs.js';
-import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Text } from '../../ink.js';
-import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
-import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { PluginError } from '../../types/plugin.js';
-import { errorMessage } from '../../utils/errors.js';
-import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
-import { loadMarketplacesWithGracefulDegradation } from '../../utils/plugins/marketplaceHelpers.js';
-import { loadKnownMarketplacesConfig, removeMarketplaceSource } from '../../utils/plugins/marketplaceManager.js';
-import { getPluginEditableScopes } from '../../utils/plugins/pluginStartupCheck.js';
 import type { EditableSettingSource } from '../../utils/settings/constants.js';
 import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
-import { AddMarketplace } from './AddMarketplace.js';
-import { BrowseMarketplace } from './BrowseMarketplace.js';
-import { DiscoverPlugins } from './DiscoverPlugins.js';
-import { ManageMarketplaces } from './ManageMarketplaces.js';
-import { ManagePlugins } from './ManagePlugins.js';
 import { formatErrorMessage, getErrorGuidance } from './PluginErrors.js';
-import { type ParsedCommand, parsePluginArgs } from './parseArgs.js';
+import { type ParsedCommand } from './parseArgs.js'
 import type { PluginSettingsProps, ViewState } from './types.js';
-import { ValidatePlugin } from './ValidatePlugin.js';
 type TabId = 'discover' | 'installed' | 'marketplaces' | 'errors';
 type MarketplaceLoadFailure = {
   name: string;

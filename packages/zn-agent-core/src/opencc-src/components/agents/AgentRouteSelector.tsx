@@ -1,21 +1,6 @@
 import * as React from 'react'
 import { useRef, useState } from 'react'
-import { Box, Text } from '../../ink.js'
-import {
-  CUSTOM_MODEL_VALUE,
-  CLEAR_ROUTE_VALUE,
-  buildRouteOptions,
-  clearAgentRoute,
-  currentRouteValue,
-  getRouteShadowSource,
-  getShadowedModelKeys,
-  setAgentRoute,
-  shadowRemediation,
-  type CurrentAgentRoute,
-} from '../../services/api/agentRouteSettings.js'
-import type { OptionWithDescription } from '../CustomSelect/select.js'
-import { Select } from '../CustomSelect/select.js'
-import { getInitialSettings, getSettingsForSource } from '../../utils/settings/settings.js'
+import { type CurrentAgentRoute } from '../../services/api/agentRouteSettings.js'
 
 type Props = {
   agentType: string

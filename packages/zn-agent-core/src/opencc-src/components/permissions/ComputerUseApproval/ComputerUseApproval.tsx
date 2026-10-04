@@ -1,17 +1,11 @@
 // @ts-nocheck
-import { c as _c } from "react-compiler-runtime";
 import { getSentinelCategory } from '@ant/computer-use-mcp/sentinelApps';
 import type { CuPermissionRequest, CuPermissionResponse } from '@ant/computer-use-mcp/types';
 import { DEFAULT_GRANT_FLAGS } from '@ant/computer-use-mcp/types';
 import figures from 'figures';
 import * as React from 'react';
 import { useMemo, useState } from 'react';
-import { Box, Text } from '../../../ink.js';
-import { execFileNoThrow } from '../../../utils/execFileNoThrow.js';
-import { plural } from '../../../utils/stringUtils.js';
-import type { OptionWithDescription } from '../../CustomSelect/select.js';
-import { Select } from '../../CustomSelect/select.js';
-import { Dialog } from '../../design-system/Dialog.js';
+import { Text } from '../../../ink.js'
 type ComputerUseApprovalProps = {
   request: CuPermissionRequest;
   onDone: (response: CuPermissionResponse) => void;
