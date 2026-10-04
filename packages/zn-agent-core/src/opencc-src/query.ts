@@ -482,7 +482,6 @@ export {
   GrepTool,
   AgentTool,
   BackgroundAgentResultTool,
-  TaskOutputTool,
   WebFetchTool,
   WebSearchTool,
 } from './tools/index.js'
