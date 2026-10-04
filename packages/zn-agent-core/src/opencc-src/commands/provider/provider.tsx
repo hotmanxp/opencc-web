@@ -5,7 +5,6 @@ import type { LocalJSXCommandCall, LocalJSXCommandOnDone } from '../../types/com
 import {  } from '../../constants/product.js'
 import { BRAND_NAME } from '../../constants.js'
 import { type ProviderManagerResult } from '../../components/ProviderManager.js'
-import TextInput from '../../components/TextInput.js'
 import {
   DEFAULT_OPENAI_BASE_URL,
   isLocalProviderUrl,

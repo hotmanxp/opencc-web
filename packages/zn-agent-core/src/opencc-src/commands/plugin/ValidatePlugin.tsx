@@ -1,6 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
-import * as React from 'react';
 type Props = {
   onComplete: (result?: string) => void;
   path?: string;

@@ -3,8 +3,6 @@ import * as React from 'react';
 import { useState, useCallback } from 'react';
 // React 19 `use()` — @types/react 18 doesn't declare it; preact-shim provides
 // the runtime implementation (and its type) in the bundled build.
-import figures from 'figures';
-import chalk from 'chalk';
 import { modelDisplayString } from '../../utils/model/model.js'
 import type { LocalJSXCommandContext, CommandResultDisplay } from '../../commands.js';
 import { getHardcodedTeammateModelFallback } from '../../utils/swarm/teammateModel.js';

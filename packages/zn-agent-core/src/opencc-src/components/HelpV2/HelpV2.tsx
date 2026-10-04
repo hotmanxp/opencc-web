@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import { type Command, type CommandResultDisplay } from '../../commands.js'
 type Props = {
   onClose: (result?: string, options?: {

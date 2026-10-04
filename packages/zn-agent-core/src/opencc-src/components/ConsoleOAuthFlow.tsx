@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import TextInput from './TextInput.js';
 export type ConsoleOAuthFlowResult = {
   type: 'oauth';
 } | {

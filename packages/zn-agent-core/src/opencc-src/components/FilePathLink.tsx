@@ -1,6 +1,5 @@
 // @ts-nocheck
 import React from 'react';
-import Link from '../ink/components/Link.js';
 type Props = {
   /** The absolute file path */
   filePath: string;

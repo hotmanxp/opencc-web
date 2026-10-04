@@ -1,7 +1,6 @@
 // @ts-nocheck
 import * as React from 'react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import sliceAnsi from '../utils/sliceAnsi.js';
 type Props = {
   code: string;
   filePath: string;

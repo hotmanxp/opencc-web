@@ -1,5 +1,4 @@
 // @ts-nocheck
-import TextInput from '../../components/TextInput.js';
 interface ChooseRepoStepProps {
   currentRepo: string | null;
   useCurrentRepo: boolean;

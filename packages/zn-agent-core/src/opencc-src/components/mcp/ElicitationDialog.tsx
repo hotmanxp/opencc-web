@@ -1,10 +1,8 @@
 // @ts-nocheck
 import type { ElicitResult, PrimitiveSchemaDefinition } from '@modelcontextprotocol/sdk/types.js'
-import figures from '../../utils/figures-safe.js';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw text input for elicitation form
 import type { ElicitationRequestEvent } from '../../services/mcp/elicitationHandler.js';
-import TextInput from '../TextInput.js';
 type Props = {
   event: ElicitationRequestEvent;
   onResponse: (action: ElicitResult['action'], content?: ElicitResult['content']) => void;

@@ -1,9 +1,7 @@
 // @ts-nocheck
-import figures from '../../utils/figures-safe.js';
 import React, { useEffect, useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw j/k/arrow menu navigation
-import TextInput from '../TextInput.js';
 import type { ClaudeAIServerInfo, HTTPServerInfo, SSEServerInfo } from './types.js';
 type Props = {
   server: SSEServerInfo | HTTPServerInfo | ClaudeAIServerInfo;

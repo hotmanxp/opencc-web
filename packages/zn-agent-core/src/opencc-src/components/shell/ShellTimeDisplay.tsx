@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 type Props = {
   elapsedTimeSeconds?: number;
   timeoutMs?: number;

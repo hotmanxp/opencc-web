@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 type IdleReturnAction = 'continue' | 'clear' | 'dismiss' | 'never';
 type Props = {
   idleMinutes: number;

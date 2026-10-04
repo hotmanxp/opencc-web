@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import { type ReactNode } from 'react'
 import { type Notification } from 'src/context/notifications.js'
 import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';

@@ -1,5 +1,3 @@
-import chalk from 'chalk';
-import * as React from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import type { Tools } from '../../Tool.js';
 import { type AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'

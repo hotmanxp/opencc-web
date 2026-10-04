@@ -1,6 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
-import * as React from 'react';
 import type { Tools } from '../../Tool.js';
 import { type AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
 type Props = {

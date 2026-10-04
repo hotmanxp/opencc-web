@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 import type { Workflow } from './types.js';
 interface CreatingStepProps {
   currentWorkflowInstallStep: number;

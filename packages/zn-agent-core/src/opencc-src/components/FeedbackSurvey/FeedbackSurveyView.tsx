@@ -1,4 +1,3 @@
-import React from 'react';
 import type { FeedbackSurveyResponse } from './utils.js';
 type Props = {
   onSelect: (option: FeedbackSurveyResponse) => void;

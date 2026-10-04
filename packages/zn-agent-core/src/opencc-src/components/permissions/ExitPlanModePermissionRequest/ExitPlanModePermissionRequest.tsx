@@ -1,5 +1,4 @@
 import type { UUID } from 'crypto';
-import figures from 'figures';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Notification } from 'src/context/notifications.js';
 import { getSdkBetas, getSessionId, isSessionPersistenceDisabled } from '../../../bootstrap/state.js'

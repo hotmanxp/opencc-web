@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import type { IDESelection } from '../hooks/useIdeSelection.js';
 import type { MCPServerConnection } from '../services/mcp/types.js';
 type IdeStatusIndicatorProps = {

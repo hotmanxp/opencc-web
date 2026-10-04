@@ -2,7 +2,6 @@
 import React from 'react';
 import { type ExitState } from '../../hooks/useExitOnCtrlCDWithKeybindings.js'
 import type { Theme } from '../../utils/theme.js';
-import FullWidthRow from './FullWidthRow.js';
 type DialogProps = {
   title: React.ReactNode;
   subtitle?: React.ReactNode;

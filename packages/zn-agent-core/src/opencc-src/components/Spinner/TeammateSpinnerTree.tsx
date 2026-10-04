@@ -1,6 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
-import * as React from 'react';
 type Props = {
   selectedIndex?: number;
   isInSelectionMode?: boolean;

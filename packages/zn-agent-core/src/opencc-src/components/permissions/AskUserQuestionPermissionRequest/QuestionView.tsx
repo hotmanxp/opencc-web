@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import React, { useState } from 'react';
 import type { Question } from '../../../tools/AskUserQuestionTool/AskUserQuestionTool.js'
 import type { PastedContent } from '../../../utils/config.js';

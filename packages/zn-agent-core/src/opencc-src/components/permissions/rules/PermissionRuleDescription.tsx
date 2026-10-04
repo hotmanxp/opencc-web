@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import type { PermissionRuleValue } from '../../../utils/permissions/PermissionRule.js';
 type RuleSubtitleProps = {
   ruleValue: PermissionRuleValue;

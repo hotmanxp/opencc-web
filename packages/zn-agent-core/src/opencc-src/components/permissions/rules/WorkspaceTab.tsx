@@ -1,6 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
-import * as React from 'react';
 import type { CommandResultDisplay } from '../../../commands.js';
 import type { ToolPermissionContext } from '../../../Tool.js';
 type Props = {

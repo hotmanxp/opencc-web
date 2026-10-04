@@ -1,10 +1,8 @@
-import figures from 'figures';
 import * as React from 'react';
 import { useMemo, useRef } from 'react';
 import { stringWidth } from '../../ink/stringWidth.js';
 import type { InProcessTeammateTaskState } from '../../tasks/InProcessTeammateTask/types.js';
 import type { Theme } from '../../utils/theme.js';
-import FullWidthRow from '../design-system/FullWidthRow.js';
 import type { SpinnerMode } from './types.js';
 const SEP_WIDTH = stringWidth(' · ');
 const THINKING_BARE_WIDTH = stringWidth('thinking');

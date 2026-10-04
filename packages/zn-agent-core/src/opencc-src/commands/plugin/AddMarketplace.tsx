@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { useEffect, useRef, useState } from 'react';
-import TextInput from '../../components/TextInput.js';
 import type { ViewState } from './types.js';
 type Props = {
   inputValue: string;

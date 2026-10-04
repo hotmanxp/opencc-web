@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import { isAntEmployee } from '../utils/buildConfig.js';
 
 // Show DevBar for dev builds or all ants

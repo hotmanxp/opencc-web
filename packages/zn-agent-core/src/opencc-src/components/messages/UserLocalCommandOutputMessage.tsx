@@ -1,6 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
-import FullWidthRow from '../design-system/FullWidthRow.js';
 type Props = {
   content: string;
 };

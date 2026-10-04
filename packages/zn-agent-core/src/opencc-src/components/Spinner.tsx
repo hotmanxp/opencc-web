@@ -8,7 +8,6 @@ import { getSpinnerVerbs } from '../constants/spinnerVerbs.js';
 import type { Task } from '../utils/tasks.js';
 import { getDefaultCharacters, type SpinnerMode } from './Spinner/index.js';
 import { isBackgroundTask, type TaskState } from '../tasks/types.js';
-import figures from 'figures';
 export type { SpinnerMode } from './Spinner/index.js';
 const DEFAULT_CHARACTERS = getDefaultCharacters();
 const SPINNER_FRAMES = [...DEFAULT_CHARACTERS, ...[...DEFAULT_CHARACTERS].reverse()];

@@ -1,6 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
-import TextInput from './TextInput.js';
 type Props = {
   initialLanguage: string | undefined;
   onComplete: (language: string | undefined) => void;

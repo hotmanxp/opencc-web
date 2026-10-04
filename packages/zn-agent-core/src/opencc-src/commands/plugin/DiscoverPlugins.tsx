@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import {  } from '../../constants/product.js'
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';

@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import { type TextHighlight } from '../../utils/textHighlighting.js'
 type Props = {
   text: string;

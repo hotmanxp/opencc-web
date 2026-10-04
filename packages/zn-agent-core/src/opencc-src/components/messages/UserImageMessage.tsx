@@ -1,6 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
-import Link from '../../ink/components/Link.js';
 type Props = {
   imageId?: number;
   addMargin?: boolean;

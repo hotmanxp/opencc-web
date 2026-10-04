@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 import {  } from '../constants/product.js'
 import { envDynamic } from 'src/utils/envDynamic.js';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';

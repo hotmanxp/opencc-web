@@ -5,7 +5,6 @@
  * Used by both DiscoverPlugins and BrowseMarketplace components.
  */
 
-import * as React from 'react';
 import type { PluginMarketplaceEntry } from '../../utils/plugins/schemas.js';
 
 /**

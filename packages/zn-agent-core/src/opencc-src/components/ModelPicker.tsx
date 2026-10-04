@@ -1,6 +1,4 @@
 // @ts-nocheck
-import capitalize from 'lodash-es/capitalize.js';
-import * as React from 'react';
 import { isFastModeEnabled } from 'src/utils/fastMode.js'
 import { convertEffortValueToLevel, type EffortLevel, getDefaultEffortForModel } from '../utils/effort.js'
 import { getDefaultMainLoopModel, type ModelSetting, parseUserSpecifiedModel } from '../utils/model/model.js'

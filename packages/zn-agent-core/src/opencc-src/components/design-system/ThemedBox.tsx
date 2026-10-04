@@ -1,6 +1,5 @@
 // @ts-nocheck
 import React, { type PropsWithChildren } from 'react';
-import Box from '../../ink/components/Box.js';
 import type { DOMElement } from '../../ink/dom.js';
 import type { ClickEvent } from '../../ink/events/click-event.js';
 import type { FocusEvent } from '../../ink/events/focus-event.js';

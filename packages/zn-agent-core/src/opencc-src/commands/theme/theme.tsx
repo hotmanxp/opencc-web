@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 type Props = {

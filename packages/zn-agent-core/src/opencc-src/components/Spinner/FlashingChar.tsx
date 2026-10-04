@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import { type Theme } from '../../utils/theme.js'
 type Props = {
   char: string;

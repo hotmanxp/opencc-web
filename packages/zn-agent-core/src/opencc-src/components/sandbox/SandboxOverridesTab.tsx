@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 import type { CommandResultDisplay } from '../../types/command.js';
 type Props = {
   onComplete: (result?: string, options?: {

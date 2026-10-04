@@ -4,15 +4,12 @@ import { Text } from '../../ink.js'
 import * as React from 'react';
 import { useState } from 'react';
 import sample from 'lodash-es/sample.js';
-import figures from 'figures';
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemSaved = true ? require('./teamMemSaved.js') as typeof import('./teamMemSaved.js') : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { TURN_COMPLETION_VERBS } from '../../constants/turnCompletionVerbs.js';
 import type { SystemMessage } from '../../types/message.js'
 import { formatSecondsShort } from '../../utils/format.js'
-import Link from '../../ink/components/Link.js';
-import ThemedText from '../design-system/ThemedText.js';
 type Props = {
   message: SystemMessage;
   addMargin: boolean;

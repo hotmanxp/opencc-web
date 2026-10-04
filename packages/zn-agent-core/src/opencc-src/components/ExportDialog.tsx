@@ -1,6 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
 import type { ExportFormat } from '../utils/exportFormats.js';
-import TextInput from './TextInput.js';
 type ExportDialogProps = {
   defaultFilename: string;
   defaultFormat: ExportFormat;

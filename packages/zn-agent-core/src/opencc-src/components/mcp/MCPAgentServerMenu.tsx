@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from '../../utils/figures-safe.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import type { AgentMcpServerInfo } from './types.js';

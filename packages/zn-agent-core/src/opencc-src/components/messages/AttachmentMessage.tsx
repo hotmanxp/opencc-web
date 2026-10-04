@@ -2,7 +2,6 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import React, { useMemo } from 'react';
 import type { Attachment } from 'src/utils/attachments.js';
-import FullWidthRow from '../design-system/FullWidthRow.js';
 type Props = {
   addMargin: boolean;
   attachment: Attachment;

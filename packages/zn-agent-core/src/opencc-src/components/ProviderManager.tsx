@@ -1,9 +1,7 @@
-import figures from 'figures'
 import * as React from 'react'
 import type { ProviderProfile } from '../utils/config.js'
 import { getProviderPresetDefaults, type ProviderPreset } from '../utils/providerProfiles.js'
 import { type OptionWithDescription } from './CustomSelect/index.js'
-import TextInput from './TextInput.js'
 
 export type ProviderManagerResult = {
   action: 'saved' | 'cancelled' | 'activated'

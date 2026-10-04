@@ -1,5 +1,3 @@
-import chalk from 'chalk';
-import figures from 'figures';
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import type { Tools } from '../../Tool.js';

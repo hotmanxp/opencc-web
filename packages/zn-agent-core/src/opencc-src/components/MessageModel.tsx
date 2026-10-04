@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 import type { NormalizedMessage } from '../types/message.js';
 type Props = {
   message: NormalizedMessage;

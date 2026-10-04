@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import { stringWidth } from '../../../ink/stringWidth.js';
 import type { Question } from '../../../tools/AskUserQuestionTool/AskUserQuestionTool.js';
 type Props = {

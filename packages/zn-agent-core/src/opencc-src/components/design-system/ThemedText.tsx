@@ -1,7 +1,6 @@
 // @ts-nocheck
 import type { ReactNode } from 'react';
 import React, { useContext } from 'react';
-import Text from '../../ink/components/Text.js';
 import type { Color, Styles } from '../../ink/styles.js';
 import { type Theme } from '../../utils/theme.js'
 

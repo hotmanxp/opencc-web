@@ -1,8 +1,5 @@
 // @ts-nocheck
-import chalk from 'chalk';
-import * as React from 'react';
 import { type MemoryFileInfo } from '../../utils/claudemd.js'
-import * as teamMemPaths from '../../memdir/teamMemPaths.js'
 
 
 

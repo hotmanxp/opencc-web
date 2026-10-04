@@ -1,5 +1,4 @@
 // @ts-nocheck
-import chalk from 'chalk';
 import type { RefObject } from 'react';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';

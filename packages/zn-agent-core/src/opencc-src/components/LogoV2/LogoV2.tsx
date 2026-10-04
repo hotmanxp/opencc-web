@@ -1,6 +1,5 @@
 // @ts-nocheck
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import * as React from 'react';
 
 // Conditional require so ChannelsNotice.tsx tree-shakes when both flags are
 // false. A module-scope helper component inside a feature() ternary does NOT

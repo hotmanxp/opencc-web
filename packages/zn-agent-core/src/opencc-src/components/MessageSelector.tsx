@@ -1,7 +1,6 @@
 // @ts-nocheck
 import type { ContentBlockParam, TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import { type UUID } from 'crypto'
-import figures from 'figures';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type DiffStats } from 'src/utils/fileHistory.js'
@@ -10,7 +9,6 @@ import { isToolUseResultMessage } from '../utils/messages.js'
 function isTextBlock(block: ContentBlockParam): block is TextBlockParam {
   return block.type === 'text';
 }
-import * as path from 'path';
 import type { FileEditOutput } from 'src/tools/FileEditTool/types.js';
 import type { Output as FileWriteToolOutput } from 'src/tools/FileWriteTool/FileWriteTool.js';
 import { count } from '../utils/array.js';

@@ -7,7 +7,6 @@
  * always; a timestamp shows until passed. Enter to view/steer, x to dismiss.
  */
 
-import figures from 'figures';
 import * as React from 'react';
 import { type AppState, useAppState } from '../state/AppState.js'
 import { isPanelAgentTask, type LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js';

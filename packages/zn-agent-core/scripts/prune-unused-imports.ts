@@ -85,42 +85,55 @@ function pruneFile(path: string): { out: string; removed: number; wholeStmts: nu
   for (const stmt of sf.statements) {
     if (!ts.isImportDeclaration(stmt)) continue
     const clause = stmt.importClause
-    if (!clause || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) continue
+    if (!clause) continue // bare side-effect import — never touched
     const moduleText = stmt.moduleSpecifier.getText(sf)
+    const isReact = moduleText === "'react'" || moduleText === '"react"'
 
     // Guard the react binding: if anything in this file still needs React at
-    // runtime, keep the react specifier even if `allUses` says it's unreferenced
-    // (free-global React + JSX transform both fail without it).
-    if (moduleText === "'react'" || moduleText === '"react"') {
-      if (needsReactGlobal) continue
+    // runtime, keep the whole react import even if `allUses` says it's
+    // unreferenced (free-global React + JSX transform both fail without it).
+    if (isReact && needsReactGlobal) continue
+
+    const parts: string[] = []
+    let dropped = 0
+
+    // default import: `import figures from 'figures'`
+    if (clause.name) {
+      if ((allUses.get(clause.name.text) ?? 0) === 0) dropped++
+      else parts.push(clause.name.getText(sf))
+    }
+    // namespace: `import * as React from 'react'`
+    if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+      const local = clause.namedBindings.name.text
+      if ((allUses.get(local) ?? 0) === 0) dropped++
+      else parts.push(`* as ${local}`)
+    }
+    // named: `import { Box, Text } from '../ink.js'`
+    if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+      const specs = clause.namedBindings.elements
+      const dead = specs.filter(el => (allUses.get(el.name.text) ?? 0) === 0)
+      dropped += dead.length
+      const alive = specs.filter(el => !dead.includes(el))
+      if (alive.length) parts.push(`{ ${alive.map(el => el.getText(sf)).join(', ')} }`)
     }
 
-    const specs = clause.namedBindings.elements
-    const dead = specs.filter(el => (allUses.get(el.name.text) ?? 0) === 0)
-    if (!dead.length) continue
+    if (!dropped) continue
+    removed += dropped
 
-    const alive = specs.filter(el => !dead.includes(el))
-    removed += dead.length
+    const keyword = clause.isTypeOnly ? 'import type' : 'import'
 
-    const typeOnly = clause.isTypeOnly
-
-    if (alive.length === 0) {
-      // Every specifier is dead → the whole statement goes. This is safe for
-      // this tree: the removed imports are UI barrels / component modules whose
-      // only role was to feed the (now stubbed) JSX bodies. Bare side-effect
-      // imports (`import './x.js'`) have no namedBindings and are never touched
-      // here, so real side-effect entry points are preserved.
+    if (!parts.length) {
+      // Every binding is dead → the whole statement goes. Safe for this tree:
+      // the removed imports are UI barrels / component modules whose only role
+      // was to feed the (now stubbed) JSX bodies. Bare side-effect imports have
+      // no importClause and are never reached here.
       wholeStmts++
       edits.push({ start: stmt.getStart(sf), end: stmt.getEnd(), text: '' })
     } else {
-      const rendered = alive
-        .map(el => el.getText(sf))
-        .join(', ')
-      const keyword = typeOnly ? 'import type' : 'import'
       edits.push({
         start: stmt.getStart(sf),
         end: stmt.getEnd(),
-        text: `${keyword} { ${rendered} } from ${moduleText}`,
+        text: `${keyword} ${parts.join(', ')} from ${moduleText}`,
       })
     }
   }

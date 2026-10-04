@@ -1,6 +1,5 @@
 // @ts-nocheck
 import * as path from 'path';
-import * as React from 'react';
 type Props = {
   onDone: () => void;
   onInsert: (text: string) => void;

@@ -1,7 +1,5 @@
 // @ts-nocheck
 import React from 'react';
-import Link from './components/Link.js';
-import Text from './components/Text.js';
 import type { Color } from './styles.js';
 import { type NamedColor, Parser, type Color as TermioColor, type TextStyle } from './termio.js';
 type Props = {

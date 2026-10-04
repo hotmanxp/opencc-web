@@ -1,4 +1,3 @@
-import figures from 'figures';
 import * as React from 'react';
 import { type Tool, type Tools } from '../../../Tool.js'
 import type { NormalizedUserMessage, ProgressMessage } from '../../../types/message.js';

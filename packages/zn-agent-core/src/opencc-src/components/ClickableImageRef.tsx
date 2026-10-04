@@ -1,5 +1,4 @@
 // @ts-nocheck
-import Link from '../ink/components/Link.js';
 import type { Theme } from '../utils/theme.js';
 type Props = {
   imageId: number;

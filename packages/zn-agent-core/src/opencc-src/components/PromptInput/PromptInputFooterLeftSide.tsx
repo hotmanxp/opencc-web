@@ -2,14 +2,11 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import { Text } from '../../ink.js'
 import * as React from 'react';
-import figures from 'figures';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { VimMode, PromptInputMode } from '../../types/textInputTypes.js';
 import type { ToolPermissionContext } from '../../Tool.js';
-import HistorySearchInput from './HistorySearchInput.js';
 import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
 import { getGlobalConfig } from '../../utils/config.js'
-import path from 'node:path';
 
 // Dead code elimination: conditional import for proactive mode
 /* eslint-disable @typescript-eslint/no-require-imports */

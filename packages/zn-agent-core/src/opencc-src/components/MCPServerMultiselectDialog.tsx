@@ -1,5 +1,4 @@
 // @ts-nocheck
-import partition from 'lodash-es/partition.js';
 type Props = {
   serverNames: string[];
   onDone(): void;

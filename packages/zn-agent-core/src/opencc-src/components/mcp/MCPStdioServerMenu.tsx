@@ -1,4 +1,3 @@
-import figures from '../../utils/figures-safe.js';
 import React, { useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import type { StdioServerInfo } from './types.js';

@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import React, { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import type { ToolUseContext } from 'src/Tool.js';
 import { type DreamTaskState } from 'src/tasks/DreamTask/DreamTask.js'

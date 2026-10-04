@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 import {  } from '../../constants/product.js'
 export type TranscriptShareResponse = 'yes' | 'no' | 'dont_ask_again';
 type Props = {

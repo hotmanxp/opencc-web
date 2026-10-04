@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import * as React from 'react';
 import { useState } from 'react';
 import type { Root } from '../ink.js';

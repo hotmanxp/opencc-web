@@ -20,7 +20,6 @@ import { removeMemberFromTeam, setMemberMode, setMultipleMemberModes } from '../
 import { unassignTeammateTasks } from '../../utils/tasks.js'
 import { type TeammateStatus, type TeamSummary } from '../../utils/teamDiscovery.js'
 import { createModeSetRequestMessage, writeToMailbox } from '../../utils/teammateMailbox.js'
-import ThemedText from '../design-system/ThemedText.js';
 type Props = {
   initialTeams?: TeamSummary[];
   onDone: () => void;

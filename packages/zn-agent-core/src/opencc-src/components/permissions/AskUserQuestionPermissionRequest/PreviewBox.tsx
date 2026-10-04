@@ -1,7 +1,6 @@
 // @ts-nocheck
 import { stringWidth } from '../../../ink/stringWidth.js';
 import { type CliHighlight } from '../../../utils/cliHighlight.js'
-import sliceAnsi from '../../../utils/sliceAnsi.js';
 type PreviewBoxProps = {
   /** The preview content to display. Markdown is rendered with syntax highlighting
    * for code blocks (```ts, ```py, etc.). Also supports plain multi-line text. */

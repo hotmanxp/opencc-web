@@ -1,6 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
-import * as React from 'react';
 import type { SettingSource } from 'src/utils/settings/constants.js';
 import type { ResolvedAgent } from '../../tools/AgentTool/agentDisplay.js';
 import type { AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js';

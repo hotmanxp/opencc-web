@@ -2,7 +2,6 @@
 import { getSentinelCategory } from '@ant/computer-use-mcp/sentinelApps';
 import type { CuPermissionRequest, CuPermissionResponse } from '@ant/computer-use-mcp/types';
 import { DEFAULT_GRANT_FLAGS } from '@ant/computer-use-mcp/types';
-import figures from 'figures';
 import * as React from 'react';
 import { useMemo, useState } from 'react';
 import { Text } from '../../../ink.js'

@@ -3,7 +3,6 @@ import React, { type ReactNode, useEffect, useRef, useState } from 'react';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- UP arrow exit not in Attachments bindings
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
-import TextInput from '../TextInput.js';
 import type { OptionWithDescription } from './select.js';
 type Props<T> = {
   option: Extract<OptionWithDescription<T>, {

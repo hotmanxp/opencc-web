@@ -1,6 +1,4 @@
 // @ts-nocheck
-import chalk from 'chalk';
-import figures from 'figures';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { Text } from '../ink.js';

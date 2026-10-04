@@ -1,8 +1,6 @@
 // @ts-nocheck
-import figures from 'figures';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import TextInput from '../../../components/TextInput.js';
 import { Text } from '../../../ink.js'
 import type { ToolPermissionContext } from '../../../Tool.js';
 import { ConfigurableShortcutHint } from '../../ConfigurableShortcutHint.js';

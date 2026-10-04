@@ -1,6 +1,5 @@
 // @ts-nocheck
 import type { ReactNode } from 'react';
-import React from 'react';
 import type { Color, Styles } from '../styles.js'
 type BaseProps = {
   /**

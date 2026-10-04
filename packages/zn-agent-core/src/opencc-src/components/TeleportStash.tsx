@@ -1,4 +1,3 @@
-import figures from 'figures';
 import React, { useEffect, useState } from 'react';
 type TeleportStashProps = {
   onStashAndContinue: () => void;

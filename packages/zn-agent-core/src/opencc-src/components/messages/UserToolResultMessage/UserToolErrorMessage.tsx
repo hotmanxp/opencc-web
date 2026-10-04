@@ -1,6 +1,5 @@
 // @ts-nocheck
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
-import * as React from 'react';
 import { type Tool, type Tools } from '../../../Tool.js'
 import type { ProgressMessage } from '../../../types/message.js';
 type Props = {

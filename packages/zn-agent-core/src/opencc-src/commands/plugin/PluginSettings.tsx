@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import * as React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import type { PluginError } from '../../types/plugin.js';

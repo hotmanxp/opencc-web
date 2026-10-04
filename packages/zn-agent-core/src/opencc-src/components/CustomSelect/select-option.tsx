@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { type ReactNode } from 'react';
+import { type ReactNode } from 'react'
 export type SelectOptionProps = {
   /**
    * Determines if option is focused.

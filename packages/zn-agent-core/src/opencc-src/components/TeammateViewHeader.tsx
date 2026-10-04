@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import { getViewedTeammateTask } from '../state/selectors.js';
 
 /**

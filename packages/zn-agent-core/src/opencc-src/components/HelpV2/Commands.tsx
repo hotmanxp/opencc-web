@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import { type Command } from '../../commands.js'
 type Props = {
   commands: Command[];

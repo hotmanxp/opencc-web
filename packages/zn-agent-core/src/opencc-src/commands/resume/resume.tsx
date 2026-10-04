@@ -1,7 +1,6 @@
 // @ts-nocheck
 import chalk from 'chalk';
 import type { UUID } from 'crypto';
-import figures from 'figures';
 import * as React from 'react';
 import type { CommandResultDisplay, ResumeEntrypoint } from '../../commands.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';

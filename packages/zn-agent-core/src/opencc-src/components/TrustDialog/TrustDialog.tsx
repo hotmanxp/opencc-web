@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 import type { Command } from '../../commands.js';
 import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';

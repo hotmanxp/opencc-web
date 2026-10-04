@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 const CHECKING_TEXT = 'Attempting to auto-approve\u2026';

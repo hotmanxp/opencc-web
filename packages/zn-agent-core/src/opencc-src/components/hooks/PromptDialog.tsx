@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import type { PromptRequest } from '../../types/hooks.js';
 type Props = {
   title: string;

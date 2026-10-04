@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 import type { TaskStatus } from 'src/Task.js';
 type TaskStatusTextProps = {
   status: TaskStatus;

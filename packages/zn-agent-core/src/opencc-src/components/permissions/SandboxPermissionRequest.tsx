@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import { type NetworkHostPattern } from 'src/utils/sandbox/sandbox-adapter.js'
 export type SandboxPermissionRequestProps = {
   hostPattern: NetworkHostPattern;

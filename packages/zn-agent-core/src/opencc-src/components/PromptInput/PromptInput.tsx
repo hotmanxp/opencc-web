@@ -1,5 +1,4 @@
 import chalk from 'chalk';
-import * as path from 'path';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { type AppState } from 'src/state/AppState.js'
@@ -21,9 +20,6 @@ import { type PastedContent } from '../../utils/config.js'
 import type { PromptInputHelpers } from '../../utils/handlePromptSubmit.js';
 import type { ProcessUserInputContext } from '../../utils/processUserInput/processUserInput.js';
 import { getFastIconString } from '../FastIcon.js';
-import TextInput from '../TextInput.js';
-import VimTextInput from '../VimTextInput.js';
-import PromptInputFooter from './PromptInputFooter.js';
 type Props = {
   debug: boolean;
   ideSelection: IDESelection | undefined;

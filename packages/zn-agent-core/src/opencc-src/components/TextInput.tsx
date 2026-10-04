@@ -1,4 +1,3 @@
-import chalk from 'chalk';
 import React, { useMemo, useRef } from 'react';
 import type { BaseTextInputProps } from '../types/textInputTypes.js';
 import type { TextHighlight } from '../utils/textHighlighting.js';

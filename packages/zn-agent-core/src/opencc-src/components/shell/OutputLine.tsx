@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import { createHyperlink } from '../../utils/hyperlink.js';
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js';
 export function tryFormatJson(line: string): string {

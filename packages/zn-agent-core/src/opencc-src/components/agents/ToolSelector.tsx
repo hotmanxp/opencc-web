@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import React, { useCallback, useMemo, useState } from 'react';
 import { mcpInfoFromString } from 'src/services/mcp/mcpStringUtils.js';
 import { isMcpTool } from 'src/services/mcp/utils.js';

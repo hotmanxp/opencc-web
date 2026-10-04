@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import type { ReactNode } from 'react';
 import React from 'react';
 type ListItemProps = {

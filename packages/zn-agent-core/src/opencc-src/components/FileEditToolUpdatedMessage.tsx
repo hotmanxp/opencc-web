@@ -1,6 +1,5 @@
 // @ts-nocheck
 import type { StructuredPatchHunk } from 'diff';
-import * as React from 'react';
 import { count } from '../utils/array.js';
 type Props = {
   filePath: string;

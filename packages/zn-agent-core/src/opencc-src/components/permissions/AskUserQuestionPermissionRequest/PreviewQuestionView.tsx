@@ -1,7 +1,5 @@
-import figures from 'figures';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type { Question } from '../../../tools/AskUserQuestionTool/AskUserQuestionTool.js';
-import TextInput from '../../TextInput.js';
 import type { QuestionState } from './use-multiple-choice-state.js';
 type Props = {
   question: Question;

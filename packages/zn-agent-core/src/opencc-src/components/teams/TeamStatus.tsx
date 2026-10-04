@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 type Props = {
   teamsSelected: boolean;
   showHint: boolean;

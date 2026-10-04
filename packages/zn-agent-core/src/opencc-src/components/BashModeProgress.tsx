@@ -1,5 +1,4 @@
 // @ts-nocheck
-import React from 'react';
 import type { ShellProgress } from '../types/tools.js';
 type Props = {
   input: string;

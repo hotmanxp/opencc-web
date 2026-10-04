@@ -33,7 +33,6 @@
  * @see docs/superpowers/plans/2026-06-13-plan-bg-agent-view.md §T9
  */
 
-import figures from 'figures'
 import React, { useEffect, useMemo, useState } from 'react'
 import type { JobRecord } from '../../utils/daemon/protocol.js'
 import { BG_PROTO } from '../../utils/daemon/protocol.js'

@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import useStdin from '../../ink/hooks/use-stdin.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import type { ThemeName, ThemeSetting } from '../../utils/theme.js';
 type ThemeContextValue = {

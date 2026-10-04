@@ -17,7 +17,6 @@ import { jsonRedactor, redactSensitiveInfo } from '../utils/redaction.js'
 import { getTranscriptPath, MAX_TRANSCRIPT_READ_BYTES } from '../utils/sessionStorage.js'
 import { jsonStringify } from '../utils/slowOperations.js';
 import { asSystemPrompt } from '../utils/systemPromptType.js';
-import TextInput from './TextInput.js';
 
 // This value was determined experimentally by testing the URL length limit
 const GITHUB_URL_LIMIT = 7250;

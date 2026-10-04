@@ -7,7 +7,6 @@ import type { ClickEvent } from '../events/click-event.js';
 import type { FocusEvent } from '../events/focus-event.js';
 import type { KeyboardEvent } from '../events/keyboard-event.js';
 import type { Styles } from '../styles.js';
-import * as warn from '../warn.js';
 export type Props = Except<Styles, 'textWrap'> & {
   /**
    * Tab order index. Nodes with `tabIndex >= 0` participate in

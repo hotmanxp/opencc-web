@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import { AGENT_COLORS, type AgentColorName } from '../../tools/AgentTool/agentColorManager.js'
 type ColorOption = AgentColorName | 'automatic';
 const COLOR_OPTIONS: ColorOption[] = ['automatic', ...AGENT_COLORS];

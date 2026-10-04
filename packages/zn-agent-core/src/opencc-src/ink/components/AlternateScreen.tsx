@@ -1,7 +1,5 @@
 // @ts-nocheck
 import { type PropsWithChildren } from 'react'
-import instances from '../instances.js';
-import Box from './Box.js';
 type Props = PropsWithChildren<{
   /** Enable SGR mouse tracking (wheel + click/drag). Default true. */
   mouseTracking?: boolean;

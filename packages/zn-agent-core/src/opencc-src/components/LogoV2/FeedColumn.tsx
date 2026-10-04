@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import type { FeedConfig } from './Feed.js';
 import { calculateFeedWidth } from './Feed.js'
 type FeedColumnProps = {

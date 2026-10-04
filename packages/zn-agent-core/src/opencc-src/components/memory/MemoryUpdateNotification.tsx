@@ -1,7 +1,6 @@
 // @ts-nocheck
 import { homedir } from 'os';
 import { relative } from 'path';
-import React from 'react';
 import { getCwd } from '../../utils/cwd.js';
 export function getRelativeMemoryPath(path: string): string {
   const homeDir = homedir();

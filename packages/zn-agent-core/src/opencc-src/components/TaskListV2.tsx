@@ -3,8 +3,6 @@ import figures from 'figures';
 import * as React from 'react';
 import { type Task } from '../utils/tasks.js'
 import type { Theme } from '../utils/theme.js';
-import FullWidthRow from './design-system/FullWidthRow.js';
-import ThemedText from './design-system/ThemedText.js';
 type Props = {
   tasks: Task[];
   isStandalone?: boolean;

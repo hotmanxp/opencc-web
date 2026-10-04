@@ -1,4 +1,3 @@
-import chalk from 'chalk';
 import { type ReactNode } from 'react'
 import type { Tools } from '../../../../Tool.js';
 import type { AgentDefinition } from '../../../../tools/AgentTool/loadAgentsDir.js';

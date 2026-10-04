@@ -1,7 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
-import * as React from 'react';
-import TextInput from '../../../components/TextInput.js';
 import type { PermissionBehavior, PermissionRuleValue } from '../../../utils/permissions/PermissionRule.js';
 export type PermissionRuleInputProps = {
   onCancel: () => void;

@@ -8,8 +8,6 @@
  * edit settings.json directly or ask OpenCC.
  */
 
-import figures from 'figures';
-import * as React from 'react';
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
 import type { HookEventMetadata } from 'src/utils/hooks/hooksConfigManager.js';
 type Props = {

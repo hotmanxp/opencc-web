@@ -1,14 +1,11 @@
 // @ts-nocheck
 import chalk from 'chalk';
-import figures from 'figures';
-import Fuse from 'fuse.js';
 import React from 'react';
 import { getSessionId } from '../bootstrap/state.js'
 import type { LogOption, SerializedMessage } from '../types/logs.js';
 import { formatLogMetadata, truncateToWidth } from '../utils/format.js';
 import { getLogDisplayTitle } from '../utils/log.js';
 import { getFirstMeaningfulUserMessageTextContent, getSessionIdFromLog } from '../utils/sessionStorage.js'
-import TextInput from './TextInput.js';
 import { type TreeNode } from './ui/TreeSelect.js'
 type AgenticSearchState = {
   status: 'idle';

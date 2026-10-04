@@ -1,5 +1,4 @@
 // @ts-nocheck
-import TextInput from '../../components/TextInput.js';
 interface CheckExistingSecretStepProps {
   useExistingSecret: boolean;
   secretName: string;

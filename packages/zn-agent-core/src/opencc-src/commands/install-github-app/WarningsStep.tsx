@@ -1,5 +1,4 @@
 // @ts-nocheck
-import figures from 'figures';
 import React from 'react';
 import { Box, Text } from '../../ink.js';
 import type { Warning } from './types.js';

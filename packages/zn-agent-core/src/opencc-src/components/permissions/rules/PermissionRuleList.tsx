@@ -1,7 +1,5 @@
 // @ts-nocheck
 import chalk from 'chalk';
-import figures from 'figures';
-import * as React from 'react';
 import type { CommandResultDisplay } from '../../../commands.js';
 import type { PermissionBehavior, PermissionRule } from '../../../utils/permissions/PermissionRule.js'
 import type { Option } from '../../ui/option.js';

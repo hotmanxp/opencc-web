@@ -1,6 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
-import TextInput from '../TextInput.js';
 type Props = {
   value: string;
   onChange: (value: string) => void;

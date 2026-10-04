@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 export type Props = {
   currentValue: boolean;
   onSelect: (enabled: boolean) => void;

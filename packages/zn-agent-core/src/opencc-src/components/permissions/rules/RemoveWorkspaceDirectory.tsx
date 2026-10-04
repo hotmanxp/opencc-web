@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as React from 'react';
 import type { ToolPermissionContext } from '../../../Tool.js';
 type Props = {
   directoryPath: string;
