@@ -31,7 +31,6 @@ import { lazySchema } from '../../utils/lazySchema.js';
 import { logError } from '../../utils/log.js';
 import { createUserMessage, extractTextContent, isSyntheticMessage, normalizeMessages } from '../../utils/messages.js';
 import { getAgentModel } from '../../utils/model/agent.js';
-import { resolveOutOfProcessTeammateProvider } from '../../services/api/agentRouting.js';
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { getInitialSettings } from '../../utils/settings/settings.js';
 import { permissionModeSchema } from '../../utils/permissions/PermissionMode.js';

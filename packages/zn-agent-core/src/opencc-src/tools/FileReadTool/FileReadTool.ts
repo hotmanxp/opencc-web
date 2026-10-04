@@ -80,7 +80,7 @@ import { semanticNumber } from '../../utils/semanticNumber.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js'
 import { GREP_TOOL_NAME } from '../GrepTool/prompt.js'
-import { FILE_READ_TOOL_NAME } from './constants.js'
+import { FILE_READ_TOOL_NAME, writeReadFileState } from './constants.js'
 import { getDefaultFileReadingLimits } from './limits.js'
 import {
   DESCRIPTION,
@@ -271,6 +271,16 @@ const inputSchema = lazySchema(() =>
 type InputSchema = ReturnType<typeof inputSchema>
 
 export type Input = z.infer<InputSchema>
+
+/**
+ * `call()`'s accepted input. Wider than the zod schema on purpose: `internal`
+ * is a caller-side signal for reads the model never requested and never sees
+ * (see `writeReadFileState`), so it must NOT appear in the zod schema — that
+ * schema is serialized verbatim into the model-facing tool definition
+ * (`zodToJsonSchema(tool.inputSchema)`), and a model-supplied `internal: true`
+ * would let it suppress the cache bookkeeping that staleness detection needs.
+ */
+type CallInput = Input & { internal?: boolean }
 
 const outputSchema = lazySchema(() => {
   // Define the media types supported for images
@@ -527,7 +537,13 @@ export const FileReadTool = buildTool({
     return { result: true }
   },
   async call(
-    { file_path, offset = 1, limit = undefined, pages },
+    {
+      file_path,
+      offset = 1,
+      limit = undefined,
+      pages,
+      internal,
+    }: CallInput,
     context,
     _canUseTool?,
     parentMessage?,
@@ -637,6 +653,7 @@ export const FileReadTool = buildTool({
         readFileState,
         context,
         parentMessage?.message.id,
+        internal === true,
       )
     } catch (error) {
       // Handle file-not-found: suggest similar files
@@ -660,6 +677,7 @@ export const FileReadTool = buildTool({
               readFileState,
               context,
               parentMessage?.message.id,
+              internal === true,
             )
           } catch (altError) {
             if (!isENOENT(altError)) {
@@ -968,6 +986,7 @@ async function callInner(
   readFileState: ToolUseContext['readFileState'],
   context: ToolUseContext,
   messageId: string | undefined,
+  isInternal: boolean,
 ): Promise<{
   data: Output
   newMessages?: ReturnType<typeof createUserMessage>[]
@@ -993,12 +1012,17 @@ async function callInner(
 
     // Get mtime via async stat (single call, no prior existence check)
     const stats = await getFsImplementation().stat(resolvedFilePath)
-    readFileState.set(fullFilePath, {
-      content: cellsJson,
-      timestamp: Math.floor(stats.mtimeMs),
-      offset,
-      limit,
-    })
+    writeReadFileState(
+      readFileState,
+      fullFilePath,
+      {
+        content: cellsJson,
+        timestamp: Math.floor(stats.mtimeMs),
+        offset,
+        limit,
+      },
+      isInternal,
+    )
     context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
 
     const data = {
@@ -1236,15 +1260,20 @@ async function callInner(
     await validateContentTokens(content, ext, maxTokens)
   }
 
-  readFileState.set(fullFilePath, {
-    content: finalContent,
-    timestamp: Math.floor(mtimeMs),
-    offset,
-    limit: finalLimit,
-    // isPartialView gates dedup — a truncated read must NOT dedup because the
-    // content the model saw is smaller than what's on disk.
-    ...(truncatedByTokenCap && { isPartialView: true }),
-  })
+  writeReadFileState(
+    readFileState,
+    fullFilePath,
+    {
+      content: finalContent,
+      timestamp: Math.floor(mtimeMs),
+      offset,
+      limit: finalLimit,
+      // isPartialView gates dedup — a truncated read must NOT dedup because the
+      // content the model saw is smaller than what's on disk.
+      ...(truncatedByTokenCap && { isPartialView: true }),
+    },
+    isInternal,
+  )
   context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
 
   // Snapshot before iterating — a listener that unsubscribes mid-callback

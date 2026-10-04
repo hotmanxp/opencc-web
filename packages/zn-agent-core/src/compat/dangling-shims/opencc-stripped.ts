@@ -34,6 +34,30 @@
  * first non-`../` segment matches a stripped directory to this stub.
  */
 
+// ─── tools/BashTool/prompt.js ─────────────────────────────────────────
+// `tools/BashTool/prompt` is stripped (React/Ink prompt text), but
+// BashTool.tsx calls getMaxTimeoutMs() *inside* its zod schema
+// descriptions, so the module is evaluated at import time and a missing
+// export is a hard TypeError ("getMaxTimeoutMs is not a function") that
+// takes down every test importing the tool graph. The timeout numbers
+// themselves live in utils/timeouts.ts, which is NOT stripped — delegate
+// there so the schema text stays truthful instead of hardcoding a value.
+import {
+  getDefaultBashTimeoutMs,
+  getMaxBashTimeoutMs,
+  getEffectiveBashTimeoutMs,
+} from '../../opencc-src/utils/timeouts.js'
+
+export function getDefaultTimeoutMs(): number {
+  return getDefaultBashTimeoutMs()
+}
+export function getMaxTimeoutMs(): number {
+  return getMaxBashTimeoutMs()
+}
+export function getEffectiveTimeoutMs(timeout: unknown): number {
+  return getEffectiveBashTimeoutMs(timeout)
+}
+
 // ─── memdir/paths.js ──────────────────────────────────────────────────
 export function getAutoMemPath() { return '/tmp/zai-memdir/auto' }
 export function getMemoryBaseDir() { return '/tmp/zai-memdir' }

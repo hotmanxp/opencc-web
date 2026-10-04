@@ -2293,7 +2293,14 @@ const defaultChangedFileDeps: ChangedFileDeps = {
   getFileModificationTime: getFileModificationTimeAsync,
   validateFileReadInput: (input, context) =>
     FileReadTool.validateInput(input, context),
-  readFile: (input, context) => FileReadTool.call(input, context),
+  // `internal: true` — this read only feeds the changed-file diff shown to the
+  // model; the model never asked for it and never sees its output. Without the
+  // flag the call would write a normal `offset: 1` readFileState entry,
+  // promoting a Write-seeded entry (offset: undefined) into Read shape. The
+  // next model Read would then dedup against that entry and return
+  // `file_unchanged` for a file that had genuinely changed on disk.
+  readFile: (input, context) =>
+    FileReadTool.call({ ...input, internal: true }, context),
   readEditedImageAttachment: tryReadEditedImageAttachment,
 }
 
