@@ -81,7 +81,7 @@ const inputSchema = lazySchema(() =>
       'Case insensitive search (rg -i)',
     ),
     '-o': semanticBoolean(z.boolean().optional()).describe(
-      'Print only the matched part of a line (rg -o), not the whole line. Requires output_mode: "content", ignored otherwise.',
+      'Print only the matched (non-empty) parts of each matching line, one match per output line (rg -o / --only-matching). Requires output_mode: "content", ignored otherwise. Defaults to false.',
     ),
     type: z
       .string()
