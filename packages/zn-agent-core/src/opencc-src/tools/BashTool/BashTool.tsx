@@ -905,6 +905,19 @@ export const BashTool = buildTool({
     let progressCounter = 0;
     let wasInterrupted = false;
     let result: ExecResult;
+    // These three are read AFTER the try/finally closes, when building the
+    // `data` payload below. They must be declared at function scope — a `let`
+    // inside the try block is block-scoped and invisible there.
+    //
+    // Nothing typechecks this file (vendor is bundled by esbuild, which does
+    // not report TS2454 "used outside its containing block"; the
+    // `tsc -p tsconfig.server.json` pass only emits `server/*.d.ts`). The
+    // out-of-scope reference therefore bundled cleanly and surfaced as a
+    // runtime `ReferenceError: staleReadFileStateHint is not defined` on
+    // every Bash call — the whole tool was dead, not just the hint.
+    let gitOperation: Out['gitOperation'];
+    let ghRateLimitHint: string | undefined;
+    let staleReadFileStateHint: string | undefined;
     const isMainThread = !toolUseContext.agentId;
     const preventCwdChanges = !isMainThread;
     // Milliseconds, matching getFileModificationTimeAsync (which returns
@@ -982,9 +995,12 @@ export const BashTool = buildTool({
       // `ghRateLimitHint` exists to explain, so computing this only after the
       // success path left the hint unreachable in its one real case.
       const ranInForeground = result.backgroundTaskId === undefined;
-      let gitOperation: Out['gitOperation'];
-      let ghRateLimitHint: string | undefined;
-      let staleReadFileStateHint: string | undefined;
+      // Reassigned each pass of the do/while — the final ExecResult decides
+      // what the payload reports, so clear any earlier progress iteration's
+      // value before recomputing.
+      gitOperation = undefined;
+      ghRateLimitHint = undefined;
+      staleReadFileStateHint = undefined;
       if (ranInForeground) {
         gitOperation = detectGitOperation(input.command, result.stdout);
         if (Object.keys(gitOperation).length === 0) gitOperation = undefined;

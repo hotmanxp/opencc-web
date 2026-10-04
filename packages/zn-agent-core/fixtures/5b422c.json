@@ -1,0 +1,298 @@
+{
+  "input": [
+    [
+      {
+        "type": "text",
+        "text": "<system-reminder>\nAvailable agent types for the Agent tool:\n- browser-operator: 使用 ego-browser 驱动真实浏览器完成多步骤 Web 交互、页面验证和结果确认。适用于需要点击、输入、滚动、截图、登录态或动态页面反馈的任务。\n\n<example>\nContext: 用户要在 JavaScript-heavy Web app 中填写表单\nuser: \"在 https://example.com/signup 注册账号，邮箱 test@example.com，密码 P@ssw0rd!\"\nassistant: \"我会使用 browser-operator，通过 ego-browser 完成注册流程。\"\n</example>\n\n<example>\nContext: 用户要验证 Web app 功能\nuser: \"登录 https://app.example.com 创建一个新项目并截图保存\"\nassistant: \"我会委托 browser-operator，使用 ego-browser 驱动登录、创建和验证流程。\"\n</example>\n\n<example>\nContext: 用户要操作富文本编辑器或表格\nuser: \"在 Google Sheet 里把 A1 改成 'Hello'，A2 填公式 =NOW()\"\nassistant: \"我会委托 browser-operator，使用 ego-browser 的视觉工作流和真实键盘操作。\"\n</example>\n\n不要把此 agent 用于不需要真实浏览器的纯本地文件任务；只要任务涉及真实浏览器，就必须使用 ego-browser，不要改用 Chrome DevTools MCP、Playwright、Puppeteer、curl 或其他浏览器替代方案。\n (Tools: Bash, Read, Grep, Glob)\n- code-reviewer: Independent code reviewer for changes, diffs, and pull requests. Provides balanced critique across correctness, security, performance, maintainability, and design. Use after completing a coding task or when asked to review specific changes. The caller must provide the diff or changed hunks inline in the prompt because this agent cannot run shell commands. Invoke with subagent_type: \"code-reviewer\". Reviewer runs with no project CLAUDE.md context (clean slate) — it evaluates only what the inline diff and surrounding reads surface. (Tools: Read, Glob, Grep)\n- Explore: Fast read-only search agent for locating code. Use it to find files by pattern (eg. \"src/components/**/*.tsx\"), grep for symbols or keywords (eg. \"API endpoints\"), or answer \"where is X defined / which files reference Y.\" Do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, or \"very thorough\" to search across multiple locations and naming conventions. (Tools: All tools except Agent, ExitPlanMode, Edit, Write, NotebookEdit)\n- general-purpose: General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you. (Tools: *)\n- Plan: Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs. (Tools: All tools except Agent, ExitPlanMode, Edit, Write, NotebookEdit)\n- tui-func-verifier: Use this agent when manually triggered by a coordinator to verify CLI/TUI functionality through terminal automation and command execution. Examples:\n\n<example>\nContext: Coordinator wants to verify /help command renders correctly in TUI\nuser: \"Verify /help displays plugin commands correctly in the TUI\"\nassistant: \"I'll use the cli-tui-verifier agent to execute and verify this.\"\n</example>\n\n<example>\nContext: Post-task verification of provider switching\nuser: \"Verify 'opencc provider set' command changes provider in the TUI\"\nassistant: \"Running cli-tui-verifier to validate this behavior.\"\n</example>\n\n<example>\nContext: Build verification after code change\nuser: \"Verify build succeeds and CLI entrypoint works in TUI\"\nassistant: \"Using cli-tui-verifier to validate build and TUI function.\"\n</example>\n (Tools: Bash, Glob, Grep, Read)\n\nLaunch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses.\n</system-reminder>\n"
+      },
+      {
+        "type": "text",
+        "text": "hello"
+      }
+    ]
+  ],
+  "output": [
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "message_start",
+        "message": {
+          "id": "070fd7c3c8a2a28adbd2848ab83bb96c",
+          "type": "message",
+          "role": "assistant",
+          "content": [],
+          "model": "MiniMax-M3",
+          "stop_reason": null,
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "service_tier": "standard"
+          },
+          "service_tier": "standard"
+        }
+      },
+      "ttftMs": 1749
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {
+          "type": "thinking",
+          "thinking": ""
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "The user said"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " \"hi\" -"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " a"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " simple greeting. I should"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " respond briefly and not"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " over"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "-engineer this."
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "d8dc6f3dc89f89cdb3b3638a0d987d40475c65dbff5206de275bd4c5e6227214"
+        }
+      }
+    },
+    {
+      "uuid": "UUID-10",
+      "requestId": "REQUEST_ID",
+      "timestamp": "2026-10-03T06:46:29.219Z",
+      "message": {
+        "id": "070fd7c3c8a2a28adbd2848ab83bb96c",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "The user said \"hi\" - a simple greeting. I should respond briefly and not over-engineer this.",
+            "signature": "d8dc6f3dc89f89cdb3b3638a0d987d40475c65dbff5206de275bd4c5e6227214"
+          }
+        ],
+        "model": "MiniMax-M3",
+        "stop_reason": null,
+        "stop_sequence": null,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "service_tier": "standard"
+        },
+        "service_tier": "standard"
+      },
+      "type": "assistant"
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_stop",
+        "index": 0
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_start",
+        "index": 1,
+        "content_block": {
+          "type": "text",
+          "text": ""
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "text_delta",
+          "text": "Hi"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "text_delta",
+          "text": "! What"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "text_delta",
+          "text": " can I help you with"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "text_delta",
+          "text": " today?"
+        }
+      }
+    },
+    {
+      "uuid": "UUID-17",
+      "requestId": "REQUEST_ID",
+      "timestamp": "2026-10-03T06:46:29.505Z",
+      "message": {
+        "id": "070fd7c3c8a2a28adbd2848ab83bb96c",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Hi! What can I help you with today?",
+            "citations": []
+          }
+        ],
+        "model": "MiniMax-M3",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "usage": {
+          "input_tokens": 25295,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 128,
+          "output_tokens": 35,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_deleted_input_tokens": 0,
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard"
+        },
+        "service_tier": "standard"
+      },
+      "type": "assistant"
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_stop",
+        "index": 1
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "message_delta",
+        "delta": {
+          "stop_reason": "end_turn"
+        },
+        "usage": {
+          "input_tokens": 25295,
+          "output_tokens": 35,
+          "cache_read_input_tokens": 128,
+          "service_tier": "standard",
+          "output_tokens_details": {
+            "thinking_tokens": 22
+          }
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "message_stop"
+      }
+    }
+  ]
+}
