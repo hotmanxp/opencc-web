@@ -264,7 +264,14 @@ export async function showSetupScreens(root: Root, permissionMode: PermissionMod
     if (getAllowedChannels().length > 0 || (devChannels?.length ?? 0) > 0) {
       await checkGate_CACHED_OR_BLOCKING('tengu_harbor');
     }
-    if (devChannels && devChannels.length > 0) {
+    // zai patch 2026-10-04:这里原来写成 `if (devChannels && devChannels.length > 0)`,
+    // 但整段包在上面的 `if (false || false)` 停用开关里 —— TS 把编译期假分支
+    // 当不可达、不做收窄分析,于是守卫自身的 `devChannels.length` 报 TS18048,
+    // 守卫对下面 onAccept 箭头函数里的引用同样无效(3 处 ChannelEntry[] |
+    // undefined)。`??` 不依赖收窄,直接给出确定的 ChannelEntry[];devChannels
+    // 有值时返回原数组,身份不变。
+    const devChannelEntries: ChannelEntry[] = devChannels ?? []
+    if (devChannelEntries.length > 0) {
       // gateChannelServer() still enforces the OAuth and org-policy gates
       // upstream of the allowlist check. Users without a Claude.ai OAuth
       // token or whose managed org has not set channelsEnabled: true are
@@ -289,7 +296,7 @@ export async function showSetupScreens(root: Root, permissionMode: PermissionMod
         // them named — but do not show the dialog since acceptance
         // would be moot. This preserves the previous behavior for the
         // genuinely-disabled case.
-        registerDevChannels(devChannels)
+        registerDevChannels(devChannelEntries)
       } else {
         const {
           DevChannelsDialog,
@@ -298,11 +305,11 @@ export async function showSetupScreens(root: Root, permissionMode: PermissionMod
           root,
           done => (
             <DevChannelsDialog
-              channels={devChannels}
+              channels={devChannelEntries}
               onAccept={() => {
                 // Mark dev entries per-entry so the allowlist bypass doesn't leak
                 // to --channels entries when both flags are passed.
-                registerDevChannels(devChannels)
+                registerDevChannels(devChannelEntries)
                 void done()
               }}
             />

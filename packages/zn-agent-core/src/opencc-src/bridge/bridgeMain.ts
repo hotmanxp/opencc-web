@@ -2664,7 +2664,7 @@ export async function bridgeMain(args: string[]): Promise<void> {
   // "Creating a fresh session instead" warning printed above).
   let initialSessionId: string | null =
     false && effectiveResumeSessionId
-      ? effectiveResumeSessionId
+      ? effectiveResumeSessionId ?? null
       : null
   if (preCreateSession && !(false && effectiveResumeSessionId)) {
     const { createBridgeSession } = await import('./createSession.js')

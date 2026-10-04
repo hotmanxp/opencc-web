@@ -1811,40 +1811,30 @@ console.log(`[bundle-opencc] compress-tool-history: ${COMPRESS_TOOL_HISTORY_OUT}
     stdio: ['inherit', 'pipe', 'pipe'],
   })
   if (proc.status !== 0) {
-    // tsc reports errors in vendored transitive files (the opencc-src
-    // tree has known vendor-type drift — 89× TS2742 lodash portability
-    // + other assorted strict-mode issues — that does not affect our
-    // server public surface). The server emit contract is "the two
-    // required d.ts files exist" — we sanity-check that below. tsc
-    // emits declaration files for the include files regardless of
-    // errors in transitive dependencies (default `noEmitOnError: false`),
-    // so the d.ts we need are written before this branch fires.
+    // zai patch 2026-10-04:这段原本把 tsc 的错误降级成一行 note 就继续
+    // 构建,理由写的是「vendor 有已知类型漂移(89× TS2742 lodash
+    // portability 等),不影响 server 公共表面」。那个前提已经不成立:
+    // 当天把 server/ 里 12 个真实类型错误修掉后,`tsc -p tsconfig.server.json`
+    // 已经是 0 错。既然如此,继续吞错误只会让下一次漂移静默通过 ——
+    // 改成硬失败,与 build 链上其它闸门一致。
     //
-    // The runtime contract is enforced by vitest
-    // (test/unit/server/headless-context.test.ts), NOT by `tsc -p
-    // tsconfig.server.json`. Vendor files MAY be edited for type fixes
-    // (see AGENTS.md — opencc-src is a zai patch surface, not a frozen
-    // upstream copy); any remaining errors are logged as a one-line
-    // summary and we rely on the required-d.ts sanity check below.
+    // emit 本身不受影响:tsc 默认 noEmitOnError:false,声明文件在报错时
+    // 也会写进 tmp 目录;但 dist 的 server d.ts 拷贝在下面,硬失败就意味着
+    // 这批 d.ts 不会进 dist —— 构建中断,不会产出半成品。
     //
-    // tsc writes its errors to stdout (not stderr) by default; capture
-    // from both streams so the count is accurate regardless of host
-    // tsc version.
+    // tsc 默认把错误写到 stdout(不是 stderr),两路都转发给调用方。
     const stdoutStr = proc.stdout?.toString() ?? ''
     const stderrStr = proc.stderr?.toString() ?? ''
+    if (stdoutStr) process.stderr.write(stdoutStr)
+    if (stderrStr) process.stderr.write(stderrStr)
     const errorCount = (stdoutStr.match(/error TS/g) ?? []).length +
       (stderrStr.match(/error TS/g) ?? []).length
-    if (errorCount > 0) {
-      process.stderr.write(
-        `[bundle-opencc] note: tsc -p tsconfig.server.json reported ${errorCount} errors in vendored transitive files; ` +
-          `relying on the emit + required-d.ts sanity check below.\n`,
-      )
-      // Temporary: dump full stderr/stdout to investigate remaining errors.
-      if (process.env.BUNDLE_OPENCC_DEBUG_TS) {
-        if (proc.stdout) process.stderr.write(proc.stdout)
-        if (proc.stderr) process.stderr.write(proc.stderr)
-      }
-    }
+    console.error(
+      `[bundle-opencc] tsc -p tsconfig.server.json failed with ${errorCount} error(s) — ` +
+        `server 类型发射中止。修掉上面的错误后重跑(类型闸门:` +
+        `pnpm --filter @zn-ai/zn-agent-core typecheck)。`,
+    )
+    process.exit(1)
   }
 
   // Copy the two server d.ts files from the tmp emit into the real

@@ -130,6 +130,12 @@ export const superTasksCreateTool = buildTool({
         .describe('File paths (relative to executor cwd) the task is expected to touch. Optional — the verifier uses this for the targeted-test scope and the executor uses it for the change-set bound check. Strings only; non-string elements are filtered at write time.'),
     })
   },
+  // zai patch 2026-10-04:ToolDef 要求每个工具显式给 maxResultSizeChars
+  // (它不在 buildTool 的 DefaultableToolKeys 里)。以前这 7 个任务工厂工具
+  // 全都漏了,运行时是 undefined —— 于是 query.ts:822 的
+  // `!Number.isFinite(t.maxResultSizeChars)` 把它们误判成 FileRead 那种
+  // 「结果永不持久化」的工具,toolResultStorage 的阈值也算错。
+  maxResultSizeChars: 20_000,
   async call(input: {
     title: string; cwd: string; description?: string; agent?: string; verifierAgent?: string; spec?: string; plan?: string
     priority?: 'P0' | 'P1' | 'P2' | 'P3'; dependsOn?: string[]; mode?: 'quick' | 'full'
@@ -185,6 +191,7 @@ export const superTasksMoveTool = buildTool({
       verifierTaskId: z.string().optional().describe('Optional verifier subagent task id to backfill into task.yaml (use with from == to == "verifying-tasks" right after CliAgent returns the verifier id)'),
     })
   },
+  maxResultSizeChars: 20_000,
   async call(input: { id: string; from: 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'; to: 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'; executorTaskId?: string; verifierTaskId?: string }) {
     const summary = await getTaskSummary(input.id, input.from)
     if (!summary) {
@@ -270,6 +277,7 @@ export const superTasksResetTool = buildTool({
   get inputSchema() {
     return z.object({ id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4') })
   },
+  maxResultSizeChars: 20_000,
   async call(input: { id: string }) {
     const [inQueue, inProcessing, inVerifying, inFinished] = await Promise.all([
       getTaskSummary(input.id, 'queue-tasks'),
@@ -318,6 +326,7 @@ export const superTasksPauseTool = buildTool({
   get inputSchema() {
     return z.object({ id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4') })
   },
+  maxResultSizeChars: 20_000,
   async call(input: { id: string }) {
     const [inQueue, inProcessing, inVerifying, inFinished] = await Promise.all([
       getTaskSummary(input.id, 'queue-tasks'),
@@ -384,6 +393,8 @@ export const superTasksGetTool = buildTool({
       id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4'),
     })
   },
+  // 比其余工具大:SuperTasksGet 返回 spec.md / plan.md / process.md 全文。
+  maxResultSizeChars: 50_000,
   async call(input: { id: string }) {
     const details = await getTaskDetails(input.id)
     if (!details) throw new Error(`task ${input.id} not found`)
@@ -424,6 +435,7 @@ export const superTasksListTool = buildTool({
     // 故意设为空对象 —— list 任务没有任何入参(bucket 过滤由调用方读完四个数组自行筛选,避免实现泄漏)。
     return z.object({})
   },
+  maxResultSizeChars: 20_000,
   async call() {
     const buckets = await listTasks()
     // 输出 JSON 字符串方便 model 解析;同时给一个简短的人读摘要(各桶计数)帮助回看。
@@ -486,6 +498,7 @@ export const createWorktreeTool = buildTool({
       slot: z.string().optional().describe('Worktree path segment under ~/.zai/task-factory/worktrees/ (default <taskId>). Integration verification uses a per-repo segment like "integration-<repoDirName>" so multiple repos keep separate integration worktrees.'),
     })
   },
+  maxResultSizeChars: 20_000,
   async call(input: { taskId: string; repoPath: string; baseRef?: string; branch?: string; slot?: string }) {
     const { taskId, repoPath } = input
     const branch = input.branch && input.branch.length > 0 ? input.branch : `task-${taskId}`
@@ -500,9 +513,14 @@ export const createWorktreeTool = buildTool({
       }
     }
     await mkdir(join(taskFactoryRoot(), 'worktrees'), { recursive: true })
-    const gitErr = (err: unknown) => err instanceof Error
-      ? `${err.message}${(err as { stderr?: string }).stderr ? `\n${(err as { stderr: string }).stderr}` : ''}`
-      : String(err)
+    // execFile 的 reject 值带 stderr(execa 风格),Error 自身没有这个字段,
+    // 所以要窄化一次。原来两处 as 用了不同形状({stderr?} vs {stderr}),
+    // 第二处触发 TS2352 —— Error 与 {stderr: string} 毫无重叠。
+    const gitErr = (err: unknown) => {
+      if (!(err instanceof Error)) return String(err)
+      const stderr = (err as { stderr?: string }).stderr
+      return `${err.message}${stderr ? `\n${stderr}` : ''}`
+    }
     try {
       try {
         const args = ['worktree', 'add', worktreePath, '-b', branch]

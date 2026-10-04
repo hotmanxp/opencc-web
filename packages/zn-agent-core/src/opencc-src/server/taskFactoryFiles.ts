@@ -257,8 +257,18 @@ export function normalizeVerificationScope(v: unknown): VerificationScope | unde
   return (VERIFICATION_SCOPES as readonly string[]).includes(String(v)) ? (v as VerificationScope) : undefined
 }
 
-/** task.yaml 的内存表示(扁平 key-value)。null 表示字段被显式置空。 */
-export type TaskYaml = Record<(typeof TASK_YAML_FIELDS)[number], TaskYamlScalar>
+/**
+ * task.yaml 的内存表示(扁平 key-value)。null 表示字段被显式置空。
+ *
+ * zai patch 2026-10-04:原先是 `Record<...>`,即所有字段必填。但两条生产
+ * 路径都只写「实际存在」的键 —— parseTaskYaml 只填 yaml 里真有的键,
+ * createPoolTask 对 mode / attachments / changeType / verificationScope /
+ * changedFiles 一律走 `...(cond ? {k} : {})` 条件展开(task.yaml 干净原则,
+ * 不污染历史任务)。`Record` 与之矛盾,曾迫使 parse 路径用 `as TaskYaml`
+ * 绕过,并且让 createPoolTask 的对象字面量报 TS2322。改成 `Partial` 后
+ * 类型与实际行为一致,下游读 `meta.x` 拿到 `... | undefined` 也才是真相。
+ */
+export type TaskYaml = Partial<Record<(typeof TASK_YAML_FIELDS)[number], TaskYamlScalar>>
 
 export function taskFactoryRoot(): string {
   return process.env.ZAI_TASK_FACTORY_DIR ?? join(homedir(), '.zai', 'task-factory')
@@ -582,17 +592,22 @@ async function readTaskMeta(id: string, bucket: TaskBucketName): Promise<TaskYam
 function toSummary(id: string, bucket: TaskBucketName, meta: TaskYaml): TaskSummary {
   // 标量字段(2026-09-02 + dependsOn 后 TaskYamlScalar 变宽泛):用 String() 兜底
   // 把 number/boolean/null 统一规整成 string/null/undefined,避免 TaskSummary 字段类型不匹配。
-  const str = (v: TaskYamlScalar): string | null | undefined =>
+  // 参数含 undefined:TaskYaml 是 Partial,task.yaml 缺字段就是 undefined。
+  const str = (v: TaskYamlScalar | undefined): string | null | undefined =>
     v == null ? v : String(v)
   return {
     id, bucket,
     title: str(meta.title) ?? id,
     status: str(meta.status) ?? 'queued',
     cwd: str(meta.cwd) ?? process.cwd(),
-    description: meta.description == null ? undefined : str(meta.description),
-    agent: meta.agent == null ? undefined : str(meta.agent),
+    // 下面三处已用 `== null` 守卫排掉 null/undefined,str() 在这条分支上
+    // 必然返回 string,但它的签名带 null|undefined,过不了 TaskSummary 的
+    // `string | undefined`。守卫已排除 null,直接 String() 取确定的 string
+    // (与 str() 在非空输入上完全等价)。
+    description: meta.description == null ? undefined : String(meta.description),
+    agent: meta.agent == null ? undefined : String(meta.agent),
     verifierAgent: meta.verifierAgent == null ? null : str(meta.verifierAgent),
-    createdAt: meta.createdAt == null ? undefined : str(meta.createdAt),
+    createdAt: meta.createdAt == null ? undefined : String(meta.createdAt),
     startedAt: meta.startedAt == null ? undefined : str(meta.startedAt),
     completedAt: meta.completedAt == null ? undefined : str(meta.completedAt),
     executorTaskId: meta.executorTaskId == null ? null : str(meta.executorTaskId),

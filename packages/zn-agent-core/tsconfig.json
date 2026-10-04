@@ -16,15 +16,27 @@
     // substituted at bundle time by esbuild), producing TS2304 once
     // tsc started following imports into excluded vendor files.
     //
-    // Without composite, excluded-file imports are silently treated as
-    // `any` (the project's file list is just `include - exclude`, no
-    // transitive enforcement). Vendor files are still excluded — tsc
-    // does not compile them — so no d.ts is emitted for src/opencc-src/
-    // (dist stays minimal). `incremental` + `tsBuildInfoFile` retain
-    // incremental-build behavior (the part of composite we actually
-    // wanted); `noEmitOnError: false` is kept as a defensive guard for
-    // any future vendor import that slips through and surfaces a benign
-    // error during emit.
+    // zai patch (2026-10-04, 修正上一段的错误论断):原文写「Without
+    // composite, excluded-file imports are silently treated as `any`
+    // ... tsc does not compile them」。**这是错的**,2026-10-04 实测证伪:
+    // `exclude` 只裁剪 root file set(决定哪些文件算「根」),完全不影响
+    // import 传递闭包 —— `tsc -p tsconfig.json --listFilesOnly` 列出
+    // 3843 个文件,其中 2142 个是 src/opencc-src/**;在 vendor 文件里制造
+    // 一个 TS2322,tsc 会如实报出来。所以 vendor 一直是被真实类型检查的,
+    // 不是 any。
+    //
+    // exclude 真正带来的两个后果(都与类型检查无关):
+    //   1. 不往 dist 发射 src/opencc-src/ 的 d.ts(dist 保持精简);
+    //   2. **`tsc -b` 的 up-to-date 判定只看 root file set** —— 改 vendor
+    //      不会让 tsbuildinfo 失效,build 模式直接报「up to date」跳过重检。
+    //      这曾让 `typecheck` 脚本(第一步是 `tsc -b --noEmit`)对 vendor
+    //      改动完全失明。类型闸门已改走 tsconfig.typecheck.json(非 build
+    //      模式 + vendor 进 root file set),本项目保留 exclude 只为发射。
+    //
+    // `incremental` + `tsBuildInfoFile` retain incremental-build behavior
+    // (the part of composite we actually wanted); `noEmitOnError: false` is
+    // kept as a defensive guard for any future vendor import that slips
+    // through and surfaces a benign error during emit.
     "incremental": true,
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
     "noEmit": false,
@@ -47,6 +59,10 @@
     "dist",
     "test",
     "**/*.test.ts",
+    // zai patch (2026-08-09, 语义于 2026-10-04 更正):把 vendor 移出 root
+    // file set,只为「不发射 vendor d.ts」+「tsc -b 不跟踪 vendor 改动」。
+    // vendor 仍会被 import 传递闭包带进 program 并被真实类型检查,不是 any
+    // (实测见上方注释)。真正的类型闸门是 tsconfig.typecheck.json。
     "src/opencc-src",
     // zai patch (2026-08-09): esbuild-only 聚合入口,横跨 vendor(opencc-src)
     // 与 compat 两个 tsconfig 项目,由 scripts/bundle-opencc.ts 编译,不进
