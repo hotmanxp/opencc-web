@@ -73,6 +73,14 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 - **core 改动必须先 build:core**:`packages/zn-agent-core/` 改完后的修复或特性,ego-browser 验证前**必须**先 `pnpm run build:core`。zai 进程通过 `node_modules/@zn-ai/zn-agent-core/` 加载的内容里,`dist/opencc-core.mjs` 单一 bundle、`dist/bundle-entry.d.ts`(主入口 types,机械生成)、以及 `dist/opencc-src/server/*.d.ts` 等被 bundle-entry 引用的小段 d.ts 都是构建产物,改源不会自动生效;不重建就用 ego 验证会复现到旧 core 行为,误导排错。仅改 `packages/zai/src/web/`(纯前端)或只改 zai 服务端源码(无 core 依赖)时**不需要** build:core。
 - **Node-direct runtime(默认)**:`zai dev` 默认走 Node,入口为 `tsx --loader .../bun-protocol.mjs`,通过 loader 拦截 `bun:bundle` / `bun:feature`(漏掉会 `ERR_UNSUPPORTED_ESM_URL_SCHEME`)。保留 `dev:bun`(`bun run src/cli/index.ts dev`)作为可选快速运行方式。opencc vendor 是 un-stripped 全量,Node 冷启动加载较慢,属预期。
 - **opencc-src vs compat**:`src/opencc-src/` 是 opencc 上游拷贝,但**允许修改**(类型修复、zai 补丁——改后需 `build:core` 生效)。`src/compat/` 是 zai 专属别名载体。**zai 调用方统一从主入口 `@zn-ai/zn-agent-core` 取值**(2026-08-16 起全部 subpath 已废除);`src/bundle-entry.ts` 把 vendor 与 compat 符号聚合 re-export,主入口暴露 plugin DTO 等类型(`export type * from './opencc-src/server/index.js'`)与运行时。**禁止**用 tsc 整编 opencc-src(拖入 UI 传递依赖);`dist/opencc-src/server/*.d.ts` 由 `tsc -p tsconfig.server.json` 机械发射,由 `scripts/verify-server-types-self-contained.mjs` 守护 self-contained。
+- **vendor 终端 UI 已被就地 stub(2026-10-04)**:opencc 的 ink / React 终端 UI 在 zai 里从不渲染(无 DOM/TTY),`src/opencc-src/{commands,components,ink}/` 下 426 个 `.tsx` 的组件函数体已就地替换为 `return null`,累计净删约 7.4 万行。**读这些文件时不要再找 UI 逻辑**——它们只剩类型、常量、hooks 与签名。改动约束:
+  - **三条签名不变量**(改组件时必须守住,否则 tsc 立刻报):① `LocalJSXCommandCall` 返回 `Promise<ReactNode>`,非 async 的 `call`(如 `commands/doctor`)stub 必须是 `return Promise.resolve(null)` 而非 `return null`;② 带显式返回标注的组件(`React.ReactElement`)要把标注放宽成 `T | null`;③ **async 函数绝不能加 `| null`** —— 那会把契约从 `Promise<ReactNode>` 变成 `Promise<ReactNode> | null`,打挂 `commands/chrome` 的 index.ts
+  - **模块顶层 `React.createContext(...)` 不受组件 stub 保护**:这类调用发生在任何组件之外(见 `components/CtrlOToExpand.tsx`)。删掉 react import 后 **tsc 无感、build:core 绿、bundle 字节数不变**,只有真正 `import` bundle 才炸 `React is not defined` —— 改完务必 `node -e "import('./dist/opencc-core.mjs')"` 实测,别只看构建
+  - **保留死函数 / 常量是刻意的**:`extractCodeBlocks`、`CHROME_ROWS`、`MAX_VISIBLE_ITEMS` 等 408 个声明运行时同样死,但记录了组件原本做什么,恢复组件或读上游时要参考。只清了悬空 import 与无人引用的 type/interface(不留空壳 `import {  } from`)
+  - **构建期的 `uiComponentStubPlugin` / `inkRenderStubPlugin` 仍在跑**(`scripts/bundle-opencc.ts`),与源码 stub 有重叠。它们兜着未 stub 的文件与将来同步进来的新 UI,暂不摘
+  - **四个工具脚本可重跑**:`stub-ui-sources.ts`(组件体 stub,splice 模式只改字符区间)、`prune-unused-imports.ts`(删未使用 import,含 react 整文件 guard)、`drop-dead-types.ts`(删死 type/interface)、`scan-dead-code.ts`(只读审计)。**审计类脚本必须先用 `DEAD_PROBE` 之类的探针验证"能检出已知死代码"再用** —— 这批脚本开发中出现过两次反向 bug:只做文件内计数导致 1712 个假阳性,以及 URL 解析错误导致"0 个死代码"这种更危险的假阴性
+  - **清理是迭代收敛的**:类型互相引用、删类型会让 import 变未使用。要跑到两个脚本都报 0 才算收敛(实测 3 轮)
+  - **未纳入**:`screens/` `tasks/` `state/` `context/` `hooks/` `utils/` —— React 与 zai 真正调用的逻辑混装(AppState store、LocalAgentTask 生命周期),需逐文件判断
 - **MACRO stub**:`installMacroStub()` 在 zn-agent-core vendor 内部调用,`packages/zn-agent-core/src/compat/openccInit.ts:428`(`prepareBundle()` 内)+ `packages/zn-agent-core/src/opencc-src/server/createHeadlessContext-impl.ts:145` 都会触发,预填 `globalThis.MACRO`;若未执行,vendor 顶层 `MACRO.X` 引用 panic。**zai-server 的 `enableOpenccConfigs` 不直接调 `installMacroStub`**,它只触发 `initAgentRuntime()` 链路到 vendor,由 vendor 内部按需执行。
 - **CodeGraph 优先**:理解代码用 `codegraph_explore` 单调用,不要 grep + read 轮询;索引未初始化时跑 `codegraph init -i`。`codegraph_context` / `codegraph_trace` 当前 v1.4.1 不可用。
 - **端口使用(必查)**:启动 `zai dev` / `zai start` 或任何本地服务前,先 `lsof -i :<port>` 确认端口空闲再起。显式 `--port` / `--api-port` 被占用必须报错退出(EADDRINUSE,dev.ts/start.ts 已实现),**禁止**静默递增换端口——多个实例静默换端口共享同一 API key 是请求风暴根因(见 `docs/superpowers/plans/` 请求风暴修复)。只有未显式指定端口时才允许自动扫描(`ports.ts resolveServerPort`)。开发中如需多实例,用不同 `--port` 显式指定空闲端口。
@@ -171,6 +179,7 @@ pnpm release:major
 | Auto memory 多会话 | `docs/superpowers/specs/2026-09-23-zai-auto-memory-multisession-design.md` |
 | 会话归档 | `docs/superpowers/specs/2026-09-23-zai-session-archive-design.md` |
 | Turn artifacts | `docs/superpowers/specs/2026-09-24-zai-turn-artifacts-design.md` |
+| vendor 终端 UI 清理 | AGENTS.md「vendor 终端 UI 已被就地 stub(2026-10-04)」条 + `packages/zn-agent-core/scripts/{stub-ui-sources,prune-unused-imports,drop-dead-types,scan-dead-code}.ts` |
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。**新特性开工前先在此目录搜既有 spec**,避免重复设计。
 
