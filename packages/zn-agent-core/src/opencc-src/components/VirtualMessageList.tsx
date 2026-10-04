@@ -162,19 +162,6 @@ function computeStickyPromptText(msg: RenderableMessage): string | null {
  * The wrapping <Box ref> is the measurement anchor — MessageRow doesn't take
  * a ref. Single-child column Box passes Yoga height through unchanged.
  */
-type VirtualItemProps = {
-  itemKey: string;
-  msg: RenderableMessage;
-  idx: number;
-  measureRef: (key: string) => (el: DOMElement | null) => void;
-  expanded: boolean | undefined;
-  hovered: boolean;
-  clickable: boolean;
-  onClickK: (msg: RenderableMessage, cellIsBlank: boolean) => void;
-  onEnterK: (k: string) => void;
-  onLeaveK: (k: string) => void;
-  renderItem: (msg: RenderableMessage, idx: number) => React.ReactNode;
-};
 
 // Item wrapper with stable click handlers. The per-item closures were the
 // `operationNewArrowFunction` leafs → `FunctionExecutable::finalizeUnconditionally`

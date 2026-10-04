@@ -7,7 +7,6 @@ type Props = {
   }) => void;
   depCheck: SandboxDependencyCheck;
 };
-type SandboxMode = 'auto-allow' | 'regular' | 'disabled';
 export function SandboxSettings(t0) {
   return null;
 }

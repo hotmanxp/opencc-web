@@ -142,15 +142,6 @@ function hasAnyTextProps(props: SpanProps): boolean {
   return props.color !== undefined || props.backgroundColor !== undefined || props.dim === true || props.bold === true || props.italic === true || props.underline === true || props.strikethrough === true || props.inverse === true;
 }
 
-// Text style props without weight (bold/dim) - these are handled separately
-type BaseTextStyleProps = {
-  color?: Color;
-  backgroundColor?: Color;
-  italic?: boolean;
-  underline?: boolean;
-  strikethrough?: boolean;
-  inverse?: boolean;
-};
 
 // Wrapper component that handles bold/dim mutual exclusivity for Text
 function StyledText(t0) {

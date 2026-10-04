@@ -10,7 +10,6 @@
 import * as React from 'react';
 import type { LoadedPlugin } from '../../types/plugin.js';
 import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js';
-import { type PluginOptionSchema, type PluginOptionValues } from '../../utils/plugins/pluginOptionsStorage.js'
 
 /**
  * Post-install lookup: return the LoadedPlugin for the just-installed
@@ -32,16 +31,6 @@ export async function findPluginOptionsTarget(pluginId: string): Promise<LoadedP
  * A single dialog step in the walk. Top-level options and channels both
  * collapse to this shape — the only difference is which save function runs.
  */
-type ConfigStep = {
-  key: string;
-  title: string;
-  subtitle: string;
-  schema: PluginOptionSchema;
-  /** Returns any already-saved values so PluginOptionsDialog can pre-fill and
-   *  skip unchanged sensitive fields on reconfigure. */
-  load: () => PluginOptionValues | undefined;
-  save: (values: PluginOptionValues) => void;
-};
 type Props = {
   plugin: LoadedPlugin;
   /** `name@marketplace` — the savePluginOptions / saveMcpServerUserConfig key. */

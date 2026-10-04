@@ -1,12 +1,7 @@
 // @ts-nocheck
-import { type MemoryFileInfo } from '../../utils/claudemd.js'
 
 
 
-interface ExtendedMemoryFileInfo extends MemoryFileInfo {
-  isNested?: boolean;
-  exists: boolean;
-}
 
 // Remember last selected path
 let lastSelectedPath: string | undefined;

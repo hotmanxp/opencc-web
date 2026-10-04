@@ -1,63 +1,6 @@
 // @ts-nocheck
 import type { ReactNode } from 'react';
 import React from 'react';
-type ListItemProps = {
-  /**
-   * Whether this item is currently focused (keyboard selection).
-   * Shows the pointer indicator (❯) when true.
-   */
-  isFocused: boolean;
-
-  /**
-   * Whether this item is selected (chosen/checked).
-   * Shows the checkmark indicator (✓) when true.
-   * @default false
-   */
-  isSelected?: boolean;
-
-  /**
-   * The content to display for this item.
-   */
-  children: ReactNode;
-
-  /**
-   * Optional description text displayed below the main content.
-   */
-  description?: string;
-
-  /**
-   * Show a down arrow indicator instead of pointer (for scroll hints).
-   * Only applies when not focused.
-   */
-  showScrollDown?: boolean;
-
-  /**
-   * Show an up arrow indicator instead of pointer (for scroll hints).
-   * Only applies when not focused.
-   */
-  showScrollUp?: boolean;
-
-  /**
-   * Whether to apply automatic styling to the children based on focus/selection state.
-   * - When true (default): children are wrapped in Text with state-based colors
-   * - When false: children are rendered as-is, allowing custom styling
-   * @default true
-   */
-  styled?: boolean;
-
-  /**
-   * Whether this item is disabled. Disabled items show dimmed text and no indicators.
-   * @default false
-   */
-  disabled?: boolean;
-
-  /**
-   * Whether this ListItem should declare the terminal cursor position.
-   * Set false when a child (e.g. BaseTextInput) declares its own cursor.
-   * @default true
-   */
-  declareCursor?: boolean;
-};
 
 /**
  * A list item component for selection UIs (dropdowns, multi-selects, menus).

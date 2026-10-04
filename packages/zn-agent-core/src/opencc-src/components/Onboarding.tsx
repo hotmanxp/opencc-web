@@ -1,11 +1,6 @@
 // @ts-nocheck
 import { c as _c } from "react-compiler-runtime";
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-type StepId = 'preflight' | 'theme' | 'oauth' | 'api-key' | 'security' | 'terminal-setup';
-interface OnboardingStep {
-  id: StepId;
-  component: React.ReactNode;
-}
 type Props = {
   onDone(): void;
 };

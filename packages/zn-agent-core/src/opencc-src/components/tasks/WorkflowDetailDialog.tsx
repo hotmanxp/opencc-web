@@ -50,7 +50,6 @@ type Props = {
 }
 
 type Focus = 'phases' | 'agents'
-type RightMode = 'list' | 'detail'
 
 const RESULT_PREVIEW_LIMIT = 1200
 const LABEL_TRUNCATE_LIMIT = 36

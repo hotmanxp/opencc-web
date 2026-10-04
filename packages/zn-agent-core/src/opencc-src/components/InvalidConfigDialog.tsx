@@ -10,12 +10,6 @@ import type { ThemeName } from '../utils/theme.js';
 interface InvalidConfigHandlerProps {
   error: ConfigParseError;
 }
-interface InvalidConfigDialogProps {
-  filePath: string;
-  errorDescription: string;
-  onExit: () => void;
-  onReset: () => void;
-}
 
 /**
  * Dialog shown when the OpenCC config file contains invalid JSON

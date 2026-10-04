@@ -88,13 +88,6 @@ export function FuzzyPicker<T>({
 }: Props<T>): React.ReactNode | null {
   return null;
 }
-type ListProps<T> = Pick<Props<T>, 'visibleCount' | 'direction' | 'getKey' | 'renderItem'> & {
-  visible: readonly T[];
-  windowStart: number;
-  total: number;
-  focusedIndex: number;
-  emptyText: string;
-};
 function List(t0) {
   return null;
 }

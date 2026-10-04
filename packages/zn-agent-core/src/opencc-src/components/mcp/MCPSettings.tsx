@@ -1,7 +1,6 @@
 // @ts-nocheck
 import React, { useEffect, useMemo } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
-import {  } from '../../constants/product.js'
 type Props = {
   onComplete: (result?: string, options?: {
     display?: CommandResultDisplay;

@@ -2,54 +2,6 @@
 import { c as _c } from "react-compiler-runtime";
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { stringWidth } from '../../ink/stringWidth.js';
-import type { Theme } from '../../utils/theme.js';
-type TabsProps = {
-  children: Array<React.ReactElement<TabProps>>;
-  title?: string;
-  color?: keyof Theme;
-  defaultTab?: string;
-  hidden?: boolean;
-  useFullWidth?: boolean;
-  /** Controlled mode: current selected tab id/title */
-  selectedTab?: string;
-  /** Controlled mode: callback when tab changes */
-  onTabChange?: (tabId: string) => void;
-  /** Optional banner to display below tabs header */
-  banner?: React.ReactNode;
-  /** Disable keyboard navigation (e.g. when a child component handles arrow keys) */
-  disableNavigation?: boolean;
-  /**
-   * Initial focus state for the tab header row. Defaults to true (header
-   * focused, nav always works). Keep the default for Select/list content —
-   * those only use up/down so there's no conflict; pass
-   * isDisabled={headerFocused} to the Select instead. Only set false when
-   * content actually binds left/right/tab (e.g. enum cycling), and show a
-   * "↑ tabs" footer hint — without it tabs look broken.
-   */
-  initialHeaderFocused?: boolean;
-  /**
-   * Fixed height for the content area. When set, all tabs render within the
-   * same height (overflow hidden) so switching tabs doesn't cause layout
-   * shifts. Shorter tabs get whitespace; taller tabs are clipped.
-   */
-  contentHeight?: number;
-  /**
-   * Let Tab/←/→ switch tabs from focused content. Opt-in since some
-   * content uses those keys; pass a reactive boolean to cede them when
-   * needed. Switching from content focuses the header.
-   */
-  navFromContent?: boolean;
-  /**
-   * Tab ids whose content owns its own keybinding/focus (nested Tabs,
-   * `useTabHeaderFocus`, etc.). When `handleTabChange` lands on one of
-   * these, the header is BLURRED instead of focused — so the inner
-   * control's `tabs:next`/`tabs:previous` binding can fire. Without
-   * this, navigating INTO such a tab (e.g. /status → Stats) via keyboard
-   * leaves the outer header focused and its binding (registered first
-   * with `context="Tabs"`) steals the key from the inner one.
-   */
-  noHeaderFocusTabIds?: string[];
-};
 type TabsContextValue = {
   selectedTab: string | undefined;
   width: number | undefined;
@@ -90,11 +42,6 @@ function _temp2(n) {
 function _temp(child) {
   return [child.props.id ?? child.props.title, child.props.title];
 }
-type TabProps = {
-  title: string;
-  id?: string;
-  children: React.ReactNode;
-};
 export function Tab(t0) {
   return null;
 }

@@ -14,12 +14,6 @@ type Props = {
 export function FeedbackSurvey(t0) {
   return null;
 }
-type ThanksProps = {
-  lastResponse: FeedbackSurveyResponse | null;
-  inputValue: string;
-  setInputValue: (value: string) => void;
-  onRequestFeedback?: () => void;
-};
 const isFollowUpDigit = (char: string): char is '1' => char === '1';
 function FeedbackSurveyThanks(t0) {
   return null;

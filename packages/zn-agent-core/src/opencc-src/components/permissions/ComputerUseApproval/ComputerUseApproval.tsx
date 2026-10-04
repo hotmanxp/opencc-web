@@ -1,14 +1,10 @@
 // @ts-nocheck
 import { getSentinelCategory } from '@ant/computer-use-mcp/sentinelApps';
-import type { CuPermissionRequest, CuPermissionResponse } from '@ant/computer-use-mcp/types';
+import type { CuPermissionResponse } from '@ant/computer-use-mcp/types'
 import { DEFAULT_GRANT_FLAGS } from '@ant/computer-use-mcp/types';
 import * as React from 'react';
 import { useMemo, useState } from 'react';
 import { Text } from '../../../ink.js'
-type ComputerUseApprovalProps = {
-  request: CuPermissionRequest;
-  onDone: (response: CuPermissionResponse) => void;
-};
 const DENY_ALL_RESPONSE: CuPermissionResponse = {
   granted: [],
   denied: [],
@@ -27,14 +23,12 @@ export function ComputerUseApproval(t0) {
 
 // ── TCC panel ─────────────────────────────────────────────────────────────
 
-type TccOption = 'open_accessibility' | 'open_screen_recording' | 'retry';
 function ComputerUseTccPanel(t0) {
   return null;
 }
 
 // ── App allowlist panel ───────────────────────────────────────────────────
 
-type AppListOption = 'allow_all' | 'deny';
 const SENTINEL_WARNING: Record<NonNullable<ReturnType<typeof getSentinelCategory>>, string> = {
   shell: 'equivalent to shell access',
   filesystem: 'can read/write any file',

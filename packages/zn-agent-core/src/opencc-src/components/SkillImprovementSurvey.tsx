@@ -15,13 +15,6 @@ type Props = {
 export function SkillImprovementSurvey(t0) {
   return null;
 }
-type ViewProps = {
-  skillName: string;
-  updates: SkillUpdate[];
-  onSelect: (option: FeedbackSurveyResponse) => void;
-  inputValue: string;
-  setInputValue: (value: string) => void;
-};
 
 // Only 1 (apply) and 0 (dismiss) are valid for this survey
 const VALID_INPUTS = ['0', '1'] as const;

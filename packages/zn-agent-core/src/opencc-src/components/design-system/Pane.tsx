@@ -1,13 +1,5 @@
 // @ts-nocheck
 import React from 'react';
-import type { Theme } from '../../utils/theme.js';
-type PaneProps = {
-  children: React.ReactNode;
-  /**
-   * Theme color for the top border line.
-   */
-  color?: keyof Theme;
-};
 
 /**
  * A pane — a region of the terminal that appears below the REPL prompt,

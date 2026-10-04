@@ -8,10 +8,6 @@ import { formatErrorMessage, getErrorGuidance } from './PluginErrors.js';
 import { type ParsedCommand } from './parseArgs.js'
 import type { PluginSettingsProps, ViewState } from './types.js';
 type TabId = 'discover' | 'installed' | 'marketplaces' | 'errors';
-type MarketplaceLoadFailure = {
-  name: string;
-  error: string;
-};
 type ErrorsTabContentProps = {
   setViewState: (state: ViewState) => void;
   setActiveTab: (tab: TabId) => void;

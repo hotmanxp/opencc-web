@@ -1,7 +1,6 @@
 import * as React from 'react'
 import type { ProviderProfile } from '../utils/config.js'
 import { getProviderPresetDefaults, type ProviderPreset } from '../utils/providerProfiles.js'
-import { type OptionWithDescription } from './CustomSelect/index.js'
 
 export type ProviderManagerResult = {
   action: 'saved' | 'cancelled' | 'activated'
@@ -36,15 +35,6 @@ type DraftField =
 
 type ProviderDraft = Record<DraftField, string>
 
-type OllamaSelectionState =
-  | { state: 'idle' }
-  | { state: 'loading' }
-  | {
-      state: 'ready'
-      options: OptionWithDescription<string>[]
-      defaultValue?: string
-    }
-  | { state: 'unavailable'; message: string }
 
 const FORM_STEPS: Array<{
   key: DraftField

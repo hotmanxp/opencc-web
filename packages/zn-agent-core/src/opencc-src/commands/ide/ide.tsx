@@ -11,15 +11,7 @@ import { getCwd } from '../../utils/cwd.js';
 import { execFileNoThrow } from '../../utils/execFileNoThrow.js';
 import { type DetectedIDEInfo, detectIDEs, detectRunningIDEs, type IdeType, isJetBrainsIde, isSupportedJetBrainsTerminal, isSupportedTerminal, toIDEDisplayName } from '../../utils/ide.js';
 import { getCurrentWorktreeSession } from '../../utils/worktree.js';
-import {  } from '../../constants/product.js'
 import { BRAND_NAME } from '../../constants.js';
-type IDEScreenProps = {
-  availableIDEs: DetectedIDEInfo[];
-  unavailableIDEs: DetectedIDEInfo[];
-  selectedIDE?: DetectedIDEInfo | null;
-  onClose: () => void;
-  onSelect: (ide?: DetectedIDEInfo) => void;
-};
 function IDEScreen(t0) {
   return null;
 }
@@ -45,13 +37,6 @@ async function findCurrentIDE(availableIDEs: DetectedIDEInfo[], dynamicMcpConfig
   }
   return null;
 }
-type IDEOpenSelectionProps = {
-  availableIDEs: DetectedIDEInfo[];
-  onSelectIDE: (ide?: DetectedIDEInfo) => void;
-  onDone: (result?: string, options?: {
-    display?: CommandResultDisplay;
-  }) => void;
-};
 function IDEOpenSelection(t0) {
   return null;
 }

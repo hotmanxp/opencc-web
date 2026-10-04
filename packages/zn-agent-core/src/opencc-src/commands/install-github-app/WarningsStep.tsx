@@ -1,11 +1,6 @@
 // @ts-nocheck
 import React from 'react';
 import { Box, Text } from '../../ink.js';
-import type { Warning } from './types.js';
-interface WarningsStepProps {
-  warnings: Warning[];
-  onContinue: () => void;
-}
 export function WarningsStep(t0) {
   return null;
 }

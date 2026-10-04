@@ -9,13 +9,6 @@ export type TreeNode<T> = {
   children?: TreeNode<T>[];
   metadata?: Record<string, unknown>;
 };
-type FlattenedNode<T> = {
-  node: TreeNode<T>;
-  depth: number;
-  isExpanded: boolean;
-  hasChildren: boolean;
-  parentId?: string | number;
-};
 export type TreeSelectProps<T> = {
   /**
    * Tree nodes to display.

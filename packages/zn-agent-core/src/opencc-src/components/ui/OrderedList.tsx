@@ -1,12 +1,9 @@
 // @ts-nocheck
-import { createContext, type ReactNode } from 'react'
+import { createContext } from 'react'
 import { OrderedListItem } from './OrderedListItem.js'
 const OrderedListContext = createContext({
   marker: ''
 });
-type OrderedListProps = {
-  children: ReactNode;
-};
 function OrderedListComponent(t0) {
   return null;
 }

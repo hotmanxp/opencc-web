@@ -4,11 +4,6 @@ type Props = {
   text: string;
   highlights: TextHighlight[];
 };
-type LinePart = {
-  text: string;
-  highlight: TextHighlight | undefined;
-  start: number;
-};
 export function HighlightedInput(t0) {
   return null;
 }

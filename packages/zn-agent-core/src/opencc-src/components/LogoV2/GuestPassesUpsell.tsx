@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { useState } from 'react';
-import {  } from '../../constants/product.js'
 import { logEvent } from '../../services/analytics/index.js';
 import { checkCachedPassesEligibility, getCachedRemainingPasses } from '../../services/api/referral.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';

@@ -1,6 +1,5 @@
 // @ts-nocheck
 import React from 'react';
-import {  } from '../../constants/product.js'
 import { Box, Text } from '../../ink.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
 type Props = {

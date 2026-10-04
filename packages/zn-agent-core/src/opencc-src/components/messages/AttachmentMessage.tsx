@@ -16,9 +16,6 @@ export function AttachmentMessage({
 }: Props): React.ReactNode | null {
   return null;
 }
-type TaskStatusAttachment = Extract<Attachment, {
-  type: 'task_status';
-}>;
 function TaskStatusMessage(t0) {
   return null;
 }

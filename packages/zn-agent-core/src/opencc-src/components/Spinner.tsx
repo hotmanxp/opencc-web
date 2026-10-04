@@ -52,19 +52,6 @@ function SpinnerWithVerbInner({
   return null;
 }
 
-// Brief/assistant mode spinner: single status line. PromptInput drops its
-// own marginTop when isBriefOnly is active, so this component owns the
-// 2-row footprint between messages and input. Footprint is [blank, content]
-// — one blank row above (breathing room under the messages list), spinner
-// flush against the input bar. PromptInput's absolute-positioned
-// Notifications overlay compensates with marginTop=-2 in brief mode
-// (PromptInput.tsx:~2928) so it floats into the blank row above the
-// spinner, not over the spinner content. Paired with BriefIdleStatus which
-// keeps the same footprint when idle.
-type BriefSpinnerProps = {
-  mode: SpinnerMode;
-  overrideMessage?: string | null;
-};
 function BriefSpinner(t0) {
   return null;
 }

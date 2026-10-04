@@ -22,14 +22,6 @@ export function TaskListV2({
 }: Props): React.ReactNode | null {
   return null;
 }
-type TaskItemProps = {
-  task: Task;
-  ownerColor?: keyof Theme;
-  openBlockers: string[];
-  activity?: string;
-  ownerActive: boolean;
-  columns: number;
-};
 function getTaskIcon(status: Task['status']): {
   icon: string;
   color: keyof Theme | undefined;

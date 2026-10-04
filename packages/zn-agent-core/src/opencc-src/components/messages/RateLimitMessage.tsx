@@ -38,10 +38,6 @@ export function getUpsellMessage({
   }
   return '/upgrade or /extra-usage to finish what you\u2019re working on.';
 }
-type RateLimitMessageProps = {
-  text: string;
-  onOpenRateLimitOptions?: () => void;
-};
 export function RateLimitMessage(t0) {
   return null;
 }

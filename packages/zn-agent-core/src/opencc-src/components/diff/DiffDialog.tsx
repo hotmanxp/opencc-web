@@ -11,12 +11,6 @@ type Props = {
   }) => void;
 };
 type ViewMode = 'list' | 'detail';
-type DiffSource = {
-  type: 'current';
-} | {
-  type: 'turn';
-  turn: TurnDiff;
-};
 function turnDiffToDiffData(turn: TurnDiff): DiffData {
   const files = Array.from(turn.files.values()).map(f => ({
     path: f.filePath,

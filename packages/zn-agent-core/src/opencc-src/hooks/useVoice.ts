@@ -7,7 +7,6 @@
 // endpoint (conversation_engine) for STT.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {  } from '../constants/product.js'
 import { BRAND_NAME } from '../constants.js'
 import { useSetVoiceState } from '../context/voice.js'
 import { useTerminalFocus } from '../ink/hooks/use-terminal-focus.js'

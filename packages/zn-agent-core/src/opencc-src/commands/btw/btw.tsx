@@ -1,7 +1,6 @@
 // @ts-nocheck
 import * as React from 'react';
 import { useEffect, useRef, useState } from 'react';
-import type { CommandResultDisplay } from '../../commands.js';
 import { getSystemPrompt } from '../../constants/prompts.js';
 import { getSystemContext, getUserContext } from '../../context.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
@@ -11,13 +10,6 @@ import { type CacheSafeParams, getLastCacheSafeParams } from '../../utils/forked
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
 import type { ProcessUserInputContext } from '../../utils/processUserInput/processUserInput.js';
 import { asSystemPrompt } from '../../utils/systemPromptType.js';
-type BtwComponentProps = {
-  question: string;
-  context: ProcessUserInputContext;
-  onDone: (result?: string, options?: {
-    display?: CommandResultDisplay;
-  }) => void;
-};
 const CHROME_ROWS = 5;
 const OUTER_CHROME_ROWS = 6;
 const SCROLL_LINES = 3;

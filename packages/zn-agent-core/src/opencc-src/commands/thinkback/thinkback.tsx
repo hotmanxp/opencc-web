@@ -149,7 +149,6 @@ function ThinkbackInstaller({
   return null;
 }
 type MenuAction = 'play' | 'edit' | 'fix' | 'regenerate';
-type GenerativeAction = Exclude<MenuAction, 'play'>;
 function ThinkbackMenu(t0) {
   return null;
 }

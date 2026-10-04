@@ -14,13 +14,6 @@ type Props = {
   }) => void;
   defaultTab?: string;
 };
-type SelectableItem = {
-  type: 'server';
-  server: ServerInfo;
-} | {
-  type: 'agent-server';
-  agentServer: AgentMcpServerInfo;
-};
 
 // Define scope order for display (constant, outside component)
 // 'dynamic' (built-in) is rendered separately at the end

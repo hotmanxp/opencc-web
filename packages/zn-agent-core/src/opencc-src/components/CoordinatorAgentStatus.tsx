@@ -43,13 +43,6 @@ function _temp(s) {
 function MainLine(t0) {
   return null;
 }
-type AgentLineProps = {
-  task: LocalAgentTaskState;
-  name?: string;
-  isSelected?: boolean;
-  isViewed?: boolean;
-  onClick?: () => void;
-};
 function AgentLine(t0) {
   return null;
 }

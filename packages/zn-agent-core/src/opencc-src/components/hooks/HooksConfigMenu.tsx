@@ -38,10 +38,6 @@ type ModeState = {
   event: HookEvent;
   hook: IndividualHookConfig;
 };
-type HooksByEventAndMatcher = Record<
-  HookEvent,
-  Record<string, IndividualHookConfig[]>
->;
 export function HooksConfigMenu(t0) {
   return null;
 }

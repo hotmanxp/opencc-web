@@ -1,12 +1,9 @@
 // @ts-nocheck
 import * as React from 'react';
 import { jsonParse } from '../../utils/slowOperations.js';
-import { type IdleNotificationMessage, isIdleNotification, isPlanApprovalRequest, isPlanApprovalResponse, type PlanApprovalRequestMessage, type PlanApprovalResponseMessage } from '../../utils/teammateMailbox.js';
+import { type IdleNotificationMessage, isIdleNotification, isPlanApprovalRequest, isPlanApprovalResponse } from '../../utils/teammateMailbox.js'
 import { getShutdownMessageSummary } from './ShutdownMessage.js';
 import { getTaskAssignmentSummary } from './TaskAssignmentMessage.js';
-type PlanApprovalRequestProps = {
-  request: PlanApprovalRequestMessage;
-};
 
 /**
  * Renders a plan approval request with a planMode-colored border,
@@ -15,10 +12,6 @@ type PlanApprovalRequestProps = {
 export function PlanApprovalRequestDisplay(t0) {
   return null;
 }
-type PlanApprovalResponseProps = {
-  response: PlanApprovalResponseMessage;
-  senderName: string;
-};
 
 /**
  * Renders a plan approval response with a success (green) or error (red) border.

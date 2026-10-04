@@ -9,7 +9,6 @@ type ExportDialogProps = {
     message: string;
   }) => void;
 };
-type DialogStep = 'format' | 'method' | 'filename';
 export function ExportDialog({
   defaultFilename,
   defaultFormat,

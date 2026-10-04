@@ -45,10 +45,6 @@ export function ShellDetailDialog(t0) {
 function _temp(setOutputPromise_0, shell_0) {
   return setOutputPromise_0(getTaskOutput(shell_0));
 }
-type ShellOutputContentProps = {
-  outputPromise: Promise<TaskOutputResult>;
-  columns: number;
-};
 function ShellOutputContent(t0) {
   return null;
 }

@@ -74,13 +74,6 @@ type MarketplaceInfo = {
   enabledCount?: number;
   disabledCount?: number;
 };
-type PluginState = {
-  plugin: LoadedPlugin;
-  marketplace: string;
-  scope?: 'user' | 'project' | 'local' | 'managed' | 'builtin';
-  pendingEnable?: boolean; // Toggle enable/disable
-  pendingUpdate?: boolean; // Marked for update
-};
 
 /**
  * Get list of base file names (without .md extension) from a directory

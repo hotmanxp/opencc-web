@@ -10,11 +10,6 @@ type Props = {
   onRequestRemoveDirectory: (path: string) => void;
   onHeaderFocusChange?: (focused: boolean) => void;
 };
-type DirectoryItem = {
-  path: string;
-  isCurrent: boolean;
-  isDeletable: boolean;
-};
 export function WorkspaceTab(t0) {
   return null;
 }

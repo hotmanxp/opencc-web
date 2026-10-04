@@ -42,7 +42,6 @@ type StatsResult = {
   type: 'empty';
 };
 type StatsTab = 'Overview' | 'Models';
-type StatsCache = Partial<Record<StatsDateRange, ClaudeCodeStats>>;
 type ModelUsageStats = ClaudeCodeStats['modelUsage'][string];
 type ModelUsageEntry = [string, ModelUsageStats];
 const DATE_RANGE_LABELS: Record<StatsDateRange, string> = {

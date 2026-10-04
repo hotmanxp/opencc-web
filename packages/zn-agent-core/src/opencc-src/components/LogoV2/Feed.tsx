@@ -15,10 +15,6 @@ export type FeedConfig = {
     width: number;
   };
 };
-type FeedProps = {
-  config: FeedConfig;
-  actualWidth: number;
-};
 export function calculateFeedWidth(config: FeedConfig): number {
   const {
     title,

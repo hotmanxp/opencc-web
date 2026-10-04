@@ -1,12 +1,5 @@
-import type { ReactNode } from 'react'
 import type { EffortLevel } from '../utils/effort.js'
 
-type EffortOption = {
-  label: ReactNode
-  value: string
-  description: string
-  isAvailable: boolean
-}
 
 type Props = {
   onSelect: (effort: EffortLevel | undefined) => void

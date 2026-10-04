@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from 'react';
 import { logEvent } from 'src/services/analytics/index.js'
 import { Text } from '../../ink.js'
-import { type AccountSettings } from '../../services/api/grove.js'
 import { Byline } from '../design-system/Byline.js';
 import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
 export type GroveDecision = 'accept_opt_in' | 'accept_opt_out' | 'defer' | 'escape' | 'skip_rendering';
@@ -34,11 +33,6 @@ export function GroveDialog(t0) {
 function _temp(exitState) {
   return exitState.pending ? <Text>Press {exitState.keyName} again to exit</Text> : <Byline><KeyboardShortcutHint shortcut="Enter" action="confirm" /><KeyboardShortcutHint shortcut="Esc" action="cancel" /></Byline>;
 }
-type PrivacySettingsDialogProps = {
-  settings: AccountSettings;
-  domainExcluded?: boolean;
-  onDone(): void;
-};
 export function PrivacySettingsDialog(t0) {
   return null;
 }

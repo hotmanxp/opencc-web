@@ -7,18 +7,6 @@ import { formatLogMetadata, truncateToWidth } from '../utils/format.js';
 import { getLogDisplayTitle } from '../utils/log.js';
 import { getFirstMeaningfulUserMessageTextContent, getSessionIdFromLog } from '../utils/sessionStorage.js'
 import { type TreeNode } from './ui/TreeSelect.js'
-type AgenticSearchState = {
-  status: 'idle';
-} | {
-  status: 'searching';
-} | {
-  status: 'results';
-  results: LogOption[];
-  query: string;
-} | {
-  status: 'error';
-  message: string;
-};
 export type LogSelectorProps = {
   logs: LogOption[];
   maxHeight?: number;
@@ -48,14 +36,6 @@ type DeepSearchResult = {
   log: LogOption;
   score?: number;
   searchableText: string;
-};
-type DeepSearchResults = {
-  results: DeepSearchResult[];
-  query: string;
-};
-type FilteredLogState = {
-  filteredLogs: LogOption[];
-  snippets: Map<LogOption, Snippet>;
 };
 const EMPTY_AGENTIC_RESULTS: LogOption[] = [];
 function normalizeAndTruncateToWidth(text: string, maxWidth: number): string {

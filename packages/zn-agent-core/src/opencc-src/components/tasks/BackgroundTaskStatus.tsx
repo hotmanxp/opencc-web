@@ -59,14 +59,6 @@ function _temp2(s_0) {
 function _temp(s) {
   return s.tasks;
 }
-type AgentPillProps = {
-  name: string;
-  color?: keyof Theme;
-  isSelected: boolean;
-  isViewed: boolean;
-  isIdle: boolean;
-  onClick?: () => void;
-};
 function AgentPill(t0) {
   return null;
 }

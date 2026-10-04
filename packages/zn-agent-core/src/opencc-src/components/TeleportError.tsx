@@ -3,10 +3,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { checkIsGitClean, checkNeedsClaudeAiLogin } from 'src/utils/background/remote/preconditions.js';
 import { gracefulShutdownSync } from 'src/utils/gracefulShutdown.js';
 export type TeleportLocalErrorType = 'needsLogin' | 'needsGitStash';
-type TeleportErrorProps = {
-  onComplete: () => void;
-  errorsToIgnore?: ReadonlySet<TeleportLocalErrorType>;
-};
 
 // Module-level sentinel so the default parameter has stable identity.
 // Previously `= new Set()` created a fresh Set every render, which put

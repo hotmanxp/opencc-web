@@ -2,7 +2,6 @@
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import * as React from 'react';
 import { TEAMMATE_MESSAGE_TAG } from '../../constants/xml.js';
-import { type TextProps } from '../../ink.js'
 type Props = {
   addMargin: boolean;
   param: TextBlockParam;
@@ -53,13 +52,6 @@ export function UserTeammateMessage({
 }: Props): React.ReactNode | null {
   return null;
 }
-type TeammateMessageContentProps = {
-  displayName: string;
-  inkColor: TextProps['color'];
-  content: string;
-  summary?: string;
-  isTranscriptMode?: boolean;
-};
 export function TeammateMessageContent(t0) {
   return null;
 }

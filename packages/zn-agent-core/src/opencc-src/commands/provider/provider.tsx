@@ -2,7 +2,6 @@
 import * as React from 'react'
 
 import type { LocalJSXCommandCall, LocalJSXCommandOnDone } from '../../types/command.js'
-import {  } from '../../constants/product.js'
 import { BRAND_NAME } from '../../constants.js'
 import { type ProviderManagerResult } from '../../components/ProviderManager.js'
 import {

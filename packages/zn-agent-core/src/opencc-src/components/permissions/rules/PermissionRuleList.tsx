@@ -1,12 +1,8 @@
 // @ts-nocheck
 import chalk from 'chalk';
 import type { CommandResultDisplay } from '../../../commands.js';
-import type { PermissionBehavior, PermissionRule } from '../../../utils/permissions/PermissionRule.js'
-import type { Option } from '../../ui/option.js';
+import type { PermissionBehavior } from '../../../utils/permissions/PermissionRule.js'
 type TabType = 'recent' | 'allow' | 'ask' | 'deny' | 'workspace';
-type RuleSourceTextProps = {
-  rule: PermissionRule;
-};
 function RuleSourceText(t0) {
   return null;
 }
@@ -27,17 +23,6 @@ function getRuleBehaviorLabel(ruleBehavior: PermissionBehavior): string {
 function RuleDetails(t0) {
   return null;
 }
-type RulesTabContentProps = {
-  options: Option[];
-  searchQuery: string;
-  isSearchMode: boolean;
-  isFocused: boolean;
-  onSelect: (value: string) => void;
-  onCancel: () => void;
-  lastFocusedRuleKey: string | undefined;
-  cursorOffset?: number;
-  onHeaderFocusChange?: (focused: boolean) => void;
-};
 
 // Component for rendering rules tab content with full width support
 function RulesTabContent(props) {

@@ -1,28 +1,5 @@
 // @ts-nocheck
 import React from 'react';
-type LoadingStateProps = {
-  /**
-   * The loading message to display next to the spinner.
-   */
-  message: string;
-
-  /**
-   * Display the message in bold.
-   * @default false
-   */
-  bold?: boolean;
-
-  /**
-   * Display the message in dimmed color.
-   * @default false
-   */
-  dimColor?: boolean;
-
-  /**
-   * Optional subtitle displayed below the main message.
-   */
-  subtitle?: string;
-};
 
 /**
  * A spinner with loading message for async operations.

@@ -5,7 +5,6 @@ type Props = {
     display?: CommandResultDisplay;
   }) => void;
 };
-type OverrideMode = 'open' | 'closed';
 export function SandboxOverridesTab(t0) {
   return null;
 }

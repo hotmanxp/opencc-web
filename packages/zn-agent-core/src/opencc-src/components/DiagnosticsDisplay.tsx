@@ -3,16 +3,8 @@ import { relative } from 'path';
 import React from 'react';
 import { Text } from '../ink.js'
 import { DiagnosticTrackingService } from '../services/diagnosticTracking.js';
-import type { Attachment } from '../utils/attachments.js';
 import { getCwd } from '../utils/cwd.js';
 import { MessageResponse } from './MessageResponse.js';
-type DiagnosticsAttachment = Extract<Attachment, {
-  type: 'diagnostics';
-}>;
-type DiagnosticsDisplayProps = {
-  attachment: DiagnosticsAttachment;
-  verbose: boolean;
-};
 export function DiagnosticsDisplay(t0) {
   return null;
 }

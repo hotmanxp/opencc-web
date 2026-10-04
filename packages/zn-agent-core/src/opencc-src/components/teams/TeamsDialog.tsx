@@ -24,14 +24,6 @@ type Props = {
   initialTeams?: TeamSummary[];
   onDone: () => void;
 };
-type DialogLevel = {
-  type: 'teammateList';
-  teamName: string;
-} | {
-  type: 'teammateDetail';
-  teamName: string;
-  memberName: string;
-};
 
 /**
  * Dialog for viewing teammates in the current team
@@ -43,27 +35,12 @@ export function TeamsDialog({
   // Register as overlay so CancelRequestHandler doesn't intercept escape
   return null;
 }
-type TeamDetailViewProps = {
-  teamName: string;
-  teammates: TeammateStatus[];
-  selectedIndex: number;
-  onCancel: () => void;
-};
 function TeamDetailView(t0) {
   return null;
 }
-type TeammateListItemProps = {
-  teammate: TeammateStatus;
-  isSelected: boolean;
-};
 function TeammateListItem(t0) {
   return null;
 }
-type TeammateDetailViewProps = {
-  teammate: TeammateStatus;
-  teamName: string;
-  onCancel: () => void;
-};
 function TeammateDetailView(t0) {
   return null;
 }

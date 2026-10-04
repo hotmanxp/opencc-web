@@ -11,7 +11,6 @@ export function getDownloadUrl(): string {
       return 'https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect';
   }
 }
-type DesktopHandoffState = 'checking' | 'prompt-download' | 'flushing' | 'opening' | 'success' | 'error';
 type Props = {
   onDone: (result?: string, options?: {
     display?: CommandResultDisplay;

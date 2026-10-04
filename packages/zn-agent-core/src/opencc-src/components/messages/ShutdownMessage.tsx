@@ -1,9 +1,6 @@
 // @ts-nocheck
 import * as React from 'react';
-import { isShutdownApproved, isShutdownRejected, isShutdownRequest, type ShutdownRejectedMessage, type ShutdownRequestMessage } from '../../utils/teammateMailbox.js';
-type ShutdownRequestProps = {
-  request: ShutdownRequestMessage;
-};
+import { isShutdownApproved, isShutdownRejected, isShutdownRequest } from '../../utils/teammateMailbox.js'
 
 /**
  * Renders a shutdown request with a warning-colored border.
@@ -11,9 +8,6 @@ type ShutdownRequestProps = {
 export function ShutdownRequestDisplay(t0) {
   return null;
 }
-type ShutdownRejectedProps = {
-  response: ShutdownRejectedMessage;
-};
 
 /**
  * Renders a shutdown rejected message with a subtle (grey) border.

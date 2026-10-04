@@ -4,7 +4,6 @@ import { marked, type Tokens } from 'marked';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import React, { useRef } from 'react';
-import type { CommandResultDisplay } from '../../commands.js';
 import { stringWidth } from '../../ink/stringWidth.js';
 import { setClipboard } from '../../ink/termio/osc.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
@@ -99,15 +98,6 @@ function truncateLine(text: string, maxLen: number): string {
   }
   return result + '\u2026';
 }
-type PickerProps = {
-  fullText: string;
-  codeBlocks: CodeBlock[];
-  messageAge: number;
-  onDone: (result?: string, options?: {
-    display?: CommandResultDisplay;
-  }) => void;
-};
-type PickerSelection = number | 'full' | 'always';
 function CopyPicker(t0) {
   return null;
 }

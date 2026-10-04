@@ -24,7 +24,6 @@ export function shouldShowDesktopUpsellStartup(): boolean {
   if ((config.desktopUpsellSeenCount ?? 0) >= 3) return false;
   return true;
 }
-type DesktopUpsellSelection = 'try' | 'not-now' | 'never';
 type Props = {
   onDone: () => void;
 };

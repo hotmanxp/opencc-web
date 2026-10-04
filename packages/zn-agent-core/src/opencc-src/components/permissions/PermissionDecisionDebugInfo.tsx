@@ -9,10 +9,6 @@ import type { PermissionDecision, PermissionDecisionReason } from '../../utils/p
 import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js';
 import { permissionRuleValueToString } from '../../utils/permissions/permissionRuleParser.js';
 import { getSettingSourceDisplayNameLowercase } from '../../utils/settings/constants.js';
-type PermissionDecisionInfoItemProps = {
-  title?: string;
-  decisionReason: PermissionDecisionReason;
-};
 function decisionReasonDisplayString(decisionReason: PermissionDecisionReason & {
   type: Exclude<PermissionDecisionReason['type'], 'subcommandResults'>;
 }): string {
