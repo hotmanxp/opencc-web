@@ -81,13 +81,17 @@ describe('CliAgentTool — surface', () => {
     expect(schema.shape?.subagent_type).toBeTruthy()
   })
 
-  it('description advertises TaskOutput / notification workflow', () => {
-    // The base description tells the model how to query progress after
-    // async_launched — explicitly mentioning task_id and TaskOutput so the
-    // model knows to poll instead of waiting on the same tool call.
+  it('description advertises the output-file / async-result workflow', () => {
+    // The base description tells the model what happens after the spawn:
+    // a task_id comes back immediately, the result arrives on completion, and
+    // early progress checks go through the returned output file. TaskOutput
+    // was removed (f40c015a) — assert it is not advertised again, since two
+    // fetch paths for one result was the removal's whole motive.
     const desc = cliAgentTool.description()
     expect(desc).toMatch(/task_id/)
-    expect(desc).toMatch(/TaskOutput/)
+    expect(desc).toMatch(/output file/i)
+    expect(desc).toMatch(/arrives on completion/i)
+    expect(desc).not.toMatch(/TaskOutput/)
   })
 
   it('base description + subagent_type field mention the opencode provider', () => {
@@ -115,7 +119,7 @@ describe('CliAgentTool — surface', () => {
 })
 
 describe('CliAgentTool — mapToolResultToToolResultBlockParam', () => {
-  it('surfaces the TaskOutput hint for async_launched', () => {
+  it('surfaces the output_file / wait-for-notification hint for async_launched', () => {
     const wrapped = wrapCliAgentToolAsOpencc() as {
       mapToolResultToToolResultBlockParam: (
         data: unknown,
@@ -141,11 +145,15 @@ describe('CliAgentTool — mapToolResultToToolResultBlockParam', () => {
     expect(block.content).toHaveLength(1)
     expect(block.content[0]!.text).toContain('Async subagent launched successfully')
     expect(block.content[0]!.text).toContain('agentId: tabcdef12')
-    expect(block.content[0]!.text).toContain("TaskOutput(task_id: 'tabcdef12')")
     expect(block.content[0]!.text).toContain('/tmp/tasks/tabcdef12/output')
-    // Ensure the model knows it will be notified on completion — this is
-    // the same wording AgentTool uses for `status: 'async_launched'`.
-    expect(block.content[0]!.text).toContain('notified automatically when it completes')
+    // TaskOutput was removed (f40c015a, matching upstream 2.1.287): subagent
+    // results now arrive via <task-notification> with an inline <result>
+    // block, and progress is checked by reading output_file. Guard the
+    // surviving contract, and guard that the removed tool is NOT advertised
+    // again — two fetch paths for the same result was the removal's motive.
+    expect(block.content[0]!.text).toContain('output_file')
+    expect(block.content[0]!.text).toMatch(/notified automatically when it completes/i)
+    expect(block.content[0]!.text).not.toContain('TaskOutput')
   })
 
   it('falls back to default for non-async payloads (e.g. [error])', () => {
