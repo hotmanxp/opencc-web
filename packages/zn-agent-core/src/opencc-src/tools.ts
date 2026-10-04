@@ -1,5 +1,10 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import { toolMatchesName, type Tool, type Tools } from './Tool.js'
+
+// zai patch (2026-10-04):Tools 定义在 Tool.ts(已 export),本文件 import 了
+// 但没再导出;`server/createHeadlessContext-impl.ts` 从 `../tools.js` 取它,
+// 在 @ts-nocheck 掩盖下一直是悬空引用。同上,纯类型层。
+export type { Tools }
 import { AgentTool } from './tools/AgentTool/AgentTool.js'
 import { BackgroundAgentTool } from './tools/BackgroundAgentTool/index.js'
 import { BackgroundAgentResultTool } from './tools/BackgroundAgentResultTool/index.js'

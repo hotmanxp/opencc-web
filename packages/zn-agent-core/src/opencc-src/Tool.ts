@@ -14,6 +14,15 @@ import type { Command } from './commands.js'
 import type { CanUseToolFn } from './hooks/useCanUseTool.js'
 import type { ThinkingConfig } from './utils/thinking.js'
 
+// zai patch (2026-10-04):再导出这 3 个类型。Tool.ts 顶部 import 了它们
+// (Command / CanUseToolFn / MCPServerConnection)并在内部类型里使用,但没有
+// re-export;`server/createHeadlessContext-impl.ts` 是从 `../Tool.js` 取的
+// —— 该文件长期挂着 @ts-nocheck,所以 TS2459「declares locally but not
+// exported」一直没暴露。纯类型层改动,编译后完全擦除。
+export type { Command }
+export type { CanUseToolFn }
+export type { MCPServerConnection }
+
 export type ToolInputJSONSchema = {
   [x: string]: unknown
   type: 'object'

@@ -29,7 +29,11 @@ type SetupScheduledTasksOpts = {
   onMissed?: (tasks: any[]) => void
 }
 
-type SetupScheduledTasks = {
+// zai patch (2026-10-04):改为导出。`server/createOpenccRuntime-impl.ts:75`
+// 用 `import { type SetupScheduledTasks }` 取它做 `_cronHandle` 的类型注解,
+//但本文件一直没 export —— 该引用被 @ts-nocheck 掩盖成 TS2724
+//「no exported member named 'SetupScheduledTasks'」。纯类型层,编译后擦除。
+export type SetupScheduledTasks = {
   teardown(): void
   subscribe(cb: (prompt: string) => void): () => void
 }

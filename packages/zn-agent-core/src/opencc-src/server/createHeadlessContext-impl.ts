@@ -44,7 +44,6 @@ import { getAllMcpConfigs } from '../services/mcp/config.js'
 import { captureHooksConfigSnapshot } from '../utils/hooks/hooksConfigSnapshot.js'
 import { SandboxManager } from '../utils/sandbox/sandbox-adapter.js'
 import {
-  type AppStateStore,
   createAppStateStore,
 } from '../state/createAppStateStore.js'
 import { getDefaultAppState } from '../state/AppStateStore.js'
