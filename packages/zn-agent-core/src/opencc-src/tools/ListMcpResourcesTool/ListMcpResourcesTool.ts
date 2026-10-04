@@ -9,6 +9,7 @@ import { lazySchema } from '../../utils/lazySchema.js'
 import { logMCPError } from '../../utils/log.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { isOutputLineTruncated } from '../../utils/terminal.js'
+import { findServersByName } from '../../services/mcp/normalization.js'
 import { DESCRIPTION, LIST_MCP_RESOURCES_TOOL_NAME, PROMPT } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
@@ -49,6 +50,9 @@ export const ListMcpResourcesTool = buildTool({
   },
   shouldDefer: true,
   name: LIST_MCP_RESOURCES_TOOL_NAME,
+  // The description tells the model to call `listMcpResources`; without this
+  // alias that name resolves to nothing.
+  aliases: ['ListMcpResources'],
   searchHint: 'list resources from connected MCP servers',
   maxResultSizeChars: 100_000,
   async description() {
@@ -67,7 +71,7 @@ export const ListMcpResourcesTool = buildTool({
     const { server: targetServer } = input
 
     const clientsToProcess = targetServer
-      ? mcpClients.filter(client => client.name === targetServer)
+      ? findServersByName(mcpClients, targetServer)
       : mcpClients
 
     if (targetServer && clientsToProcess.length === 0) {

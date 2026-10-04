@@ -201,6 +201,33 @@ export function isMcpSessionExpiredError(error: Error): boolean {
   )
 }
 
+// JSON-RPC "Resource not found". The SDK's ErrorCode enum omits it, but the
+// MCP spec assigns it here.
+const MCP_ERROR_RESOURCE_NOT_FOUND = -32002
+
+function mcpErrorCode(error: unknown): number | undefined {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? (error as { code?: unknown }).code
+      : undefined
+  return typeof code === 'number' ? code : undefined
+}
+
+/** The server does not implement the method we called. */
+export function isMcpMethodNotFoundError(error: unknown): boolean {
+  return mcpErrorCode(error) === ErrorCode.MethodNotFound
+}
+
+/** The server implements the method but has no such resource. */
+export function isMcpResourceNotFoundError(error: unknown): boolean {
+  return mcpErrorCode(error) === MCP_ERROR_RESOURCE_NOT_FOUND
+}
+
+/** Numeric JSON-RPC code for logging; undefined for non-JSON-RPC errors. */
+export function getMcpErrorCode(error: unknown): number | undefined {
+  return mcpErrorCode(error)
+}
+
 /**
  * Default timeout for MCP tool calls (5 minutes — reasonable for most tools).
  * Use MCP_TOOL_TIMEOUT env var to override per-server.
