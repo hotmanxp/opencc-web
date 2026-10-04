@@ -21,3 +21,20 @@ export function normalizeNameForMCP(name: string): string {
   }
   return normalized
 }
+
+/**
+ * Match servers by name, retrying on the normalized form when no exact hit.
+ * A model that writes "my server" or "my.server" for a server configured as
+ * "my_server" should still reach it instead of getting "not found".
+ */
+export function findServersByName<T extends { name: string }>(
+  servers: T[],
+  name: string,
+): T[] {
+  const exact = servers.filter(server => server.name === name)
+  if (exact.length > 0) return exact
+  const normalized = normalizeNameForMCP(name)
+  return servers.filter(
+    server => normalizeNameForMCP(server.name) === normalized,
+  )
+}
