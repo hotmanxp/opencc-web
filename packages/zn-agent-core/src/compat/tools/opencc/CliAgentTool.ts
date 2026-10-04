@@ -34,7 +34,7 @@ import type { SetAppState } from '../../../opencc-src/Task.js'
  * Modeled on vendor `AgentTool`'s async-from-start branch (AgentTool.tsx
  * lines 897-973): the tool call returns immediately with a task_id; the
  * CLI runs detached; lifecycle transitions are tracked via vendor
- * LocalAgentTask so `TaskOutput(task_id)` and the task panel work the same
+ * LocalAgentTask so the task panel and result delivery work the same
  * as for built-in agents.
  *
  * Lifecycle mapping:
@@ -90,8 +90,8 @@ const CliAgentBaseDescription =
   'independent process in its own context and inherits no parent conversation. ' +
   'Choose the engine via `subagent_type`; give it a complete, self-contained prompt ' +
   'because it cannot see this conversation. The tool always returns a task_id ' +
-  'immediately — poll progress with `TaskOutput(task_id)` or read the output file ' +
-  'path returned in the result; you will be notified on completion.'
+  'immediately — the result arrives on completion; to check progress early, read ' +
+  'the output file path returned in the result. Do not spawn a duplicate.'
 
 function buildDescription(): string {
   const section = formatSubagentProviderSection(getSubagentRegistry())
@@ -191,7 +191,7 @@ async function executeSpawn(
     import('../../../opencc-src/utils/cleanupRegistry.js'),
   ])
 
-  // Register the LocalAgentTask so TaskOutput / task panel / SSE drawer
+  // Register the LocalAgentTask so task panel / SSE drawer
   // pick up the detached run. `agentType` carries the CLI provider kind
   // (AgentTool normally carries an `AgentDefinition.agentType`; for CLI
   // children we use the provider name directly — it stays a `string` per
@@ -236,7 +236,7 @@ async function executeSpawn(
 
   // Return the AgentTool-shaped async_launched payload. Tool.tsx:118 +
   // mapToolResultToToolResultBlockParam below surface this to the model
-  // with the standard "use TaskOutput / wait for notification" wording.
+  // with the standard "read output_file / wait for notification" wording.
   return {
     data: {
       isAsync: true,
@@ -355,7 +355,7 @@ async function runCliSubagentLifecycle({
     //   2. completeTaskState → mirror bg with resultText (so SubagentNotifier
     //      inlines <result>{text}</result> in the parent session's
     //      <task-notification> — parent agent sees the result without a
-    //      follow-up TaskOutput / Read round trip)
+    //      follow-up Read round trip)
     // We bypass vendor `completeAgentTask` because it calls
     // `mirrorFinalizeBgTask(taskId, 'completed')` without resultText.
     const resultText = result.text ?? ''
@@ -476,7 +476,7 @@ function buildAgentToolResult(
  * `mirrorFinalizeBgTask(taskId, 'completed')` without forwarding
  * `resultText`, so the bg BackgroundTask's `resultText` field stays empty
  * and the parent session's `<task-notification>` ships without a `<result>`
- * block (parent agent has to follow up with TaskOutput / Read output_file).
+ * block (parent agent has to follow up with Read output_file).
  *
  * This helper mirrors vendor `completeAgentTask` verbatim but plumbs
  * `resultText` through to `mirrorFinalizeBgTask` so SubagentNotifier can
@@ -526,7 +526,7 @@ async function completeLocalAgentTaskWithResultText(
  * transcript JSONL, but attach-path callers (CliAgent) don't have a
  * transcript — the simplest durable representation is the result text
  * itself, written verbatim. Best-effort: any fs failure is silently
- * swallowed (TaskOutput still works via in-memory `task.result.content`).
+ * swallowed (the notifier still delivers via in-memory `task.result.content`).
  */
 async function writeResultToOutputFile(
   outputFile: string,
@@ -541,7 +541,7 @@ async function writeResultToOutputFile(
     await mkdir(dirname(outputFile), { recursive: true })
     await writeFile(outputFile, text, 'utf8')
   } catch {
-    // best-effort; Read tool can still fail but TaskOutput stays functional
+    // best-effort; Read tool can still fail but result delivery stays functional
   }
 }
 
@@ -649,8 +649,8 @@ function readZaiCurrentSessionIdBridge(): string | undefined {
  *
  * The default wrapper's `mapToolResultToToolResultBlockParam` JSON-stringifies
  * the data, which would dump the raw async_launched shape at the LLM. We
- * override it to mirror AgentTool's user-facing wording ("use TaskOutput /
- * read output_file / wait for <task-notification>") so the model knows how
+ * override it to mirror AgentTool's user-facing wording ("read output_file /
+ * wait for <task-notification>") so the model knows how
  * to query progress for the spawned task.
  */
 export function wrapCliAgentToolAsOpencc(): unknown {
@@ -674,8 +674,7 @@ export function wrapCliAgentToolAsOpencc(): unknown {
                 `agentId: ${d.agentId}\n` +
                 `The CLI subagent is running in the background. You will be notified automatically when it completes.\n` +
                 `output_file: ${outputFile}\n` +
-                `If asked, you can check progress before completion by using TaskOutput(task_id: '${d.agentId}') ` +
-                `or by reading the output file with Read / Bash tail.`,
+                `Do NOT spawn a duplicate. If asked before it completes, check progress by reading the output file with Read / Bash tail.`,
             },
           ],
         }

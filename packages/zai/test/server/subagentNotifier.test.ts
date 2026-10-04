@@ -80,11 +80,12 @@ describe('renderTaskNotificationMessage', () => {
     expect(msg).toContain('</task-notification>')
   })
 
-  test('completed → summary 指引主 Agent 用 TaskOutput(task_id) 取结果,不读 output 文件', () => {
+  test('completed → summary 指向内联 result,不再指引调用已删除的 TaskOutput 工具', () => {
     const msg = renderTaskNotificationMessage(
       makeTask({ status: 'completed' }),
     )
-    expect(msg).toContain('Use TaskOutput with task_id to retrieve the final result')
+    expect(msg).toContain('The final result is inlined in the result block below')
+    expect(msg).not.toContain('TaskOutput')
   })
 
   test('failed → result 字段含 [error: ...]', () => {
