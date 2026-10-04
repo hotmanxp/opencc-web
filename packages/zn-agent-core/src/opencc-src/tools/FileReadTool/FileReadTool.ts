@@ -593,9 +593,17 @@ export const FileReadTool = buildTool({
     // by Read). Edit/Write store offset=undefined — their readFileState
     // entry reflects post-edit mtime, so deduping against it would wrongly
     // point the model at the pre-edit Read content.
+    //
+    // `refreshedBehindModel` additionally rules out entries rewritten by an
+    // internal read (see `writeReadFileState`). Those keep a Read-shaped
+    // offset only when a Read had genuinely produced them, but their content
+    // and mtime were refreshed outside the model's request flow — so the
+    // model has still never seen the current bytes, and deduping here would
+    // return a stub for a file that did change.
     if (
       existingState &&
       !existingState.isPartialView &&
+      !existingState.refreshedBehindModel &&
       existingState.offset !== undefined
     ) {
       const rangeMatch =
@@ -1020,6 +1028,12 @@ async function callInner(
         timestamp: Math.floor(stats.mtimeMs),
         offset,
         limit,
+        // Model initiated the Read itself — model has a 1:1 view of `content`
+        // unless the cells string was truncated upstream. We don't currently
+        // token-cap notebooks, but flag the future-proofing hook so
+        // contentNotInModelContext stays accurate if validateContentTokens
+        // ever caps notebooks too.
+        contentNotInModelContext: false,
       },
       isInternal,
     )
@@ -1271,6 +1285,10 @@ async function callInner(
       // isPartialView gates dedup — a truncated read must NOT dedup because the
       // content the model saw is smaller than what's on disk.
       ...(truncatedByTokenCap && { isPartialView: true }),
+      // Model initiated this Read itself. contentNotInModelContext is true only
+      // when the model's view is NOT a 1:1 mirror of `content` — currently just
+      // the token-cap truncation path.
+      contentNotInModelContext: truncatedByTokenCap === true,
     },
     isInternal,
   )

@@ -1,17 +1,14 @@
 // Keep tool name constants in a leaf module to avoid circular-import TDZ issues.
 export const FILE_READ_TOOL_NAME = 'Read'
 
+import type { FileState } from '../../utils/fileStateCache.js'
+
 /**
- * One entry of the read cache (`ToolUseContext['readFileState']`).
- * Kept structural so this leaf module needs no imports.
+ * One entry of the read cache. Aliased to the canonical `FileState` rather
+ * than restated, so the two cannot drift — an earlier hand-written copy here
+ * typed `offset: number` while `FileState.offset` is `number | undefined`.
  */
-export interface ReadFileStateEntry {
-  content: string
-  timestamp: number
-  offset: number
-  limit: number | undefined
-  isPartialView?: boolean
-}
+export type ReadFileStateEntry = FileState
 
 /** The slice of FileStateCache this function needs. */
 export type ReadFileStateCache = {
@@ -53,12 +50,13 @@ export function writeReadFileState(
   }
   const existing = readFileState.get(fullFilePath)
   if (!existing) {
-    // Nothing to preserve the shape of. `offset: undefined` still records
-    // "the model has not read this", which is the honest state.
+    // Nothing to preserve the range shape of. `offset: undefined` still
+    // records "the model has not read this", which is the honest state.
     readFileState.set(fullFilePath, {
       ...entry,
       offset: undefined,
       limit: undefined,
+      refreshedBehindModel: true,
     })
     return
   }
@@ -67,5 +65,6 @@ export function writeReadFileState(
     offset: existing.offset,
     limit: existing.limit,
     ...(existing.isPartialView ? { isPartialView: true } : {}),
+    refreshedBehindModel: true,
   })
 }

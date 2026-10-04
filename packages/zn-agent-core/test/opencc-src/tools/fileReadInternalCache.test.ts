@@ -47,6 +47,7 @@ const readEntry = (over: Partial<ReadFileStateEntry> = {}): ReadFileStateEntry =
   timestamp: 2000,
   offset: 1,
   limit: undefined,
+  contentNotInModelContext: false,
   ...over,
 })
 
@@ -55,7 +56,13 @@ const dedupGateFires = (
   e: ReadFileStateEntry | undefined,
   offset: number,
   limit: number | undefined,
-): boolean => !!e && !e.isPartialView && e.offset !== undefined && e.offset === offset && e.limit === limit
+): boolean =>
+  !!e &&
+  !e.isPartialView &&
+  !e.refreshedBehindModel &&
+  e.offset !== undefined &&
+  e.offset === offset &&
+  e.limit === limit
 
 describe('writeReadFileState — internal reads must not fake a model-visible Read', () => {
   it('internal read leaves a Write-seeded entry (offset: undefined) in Write shape', () => {
@@ -98,6 +105,33 @@ describe('writeReadFileState — internal reads must not fake a model-visible Re
     const after = cache.map.get('/f.txt')!
     expect(after.offset).toBe(1)
     expect(after.content).toBe('what the model sees')
+    // A model-initiated Read is not a behind-the-model refresh.
+    expect(after.refreshedBehindModel).toBeUndefined()
+    // …and the gate still fires for a repeat of the same range.
+    expect(dedupGateFires(after, 1, undefined)).toBe(true)
+  })
+
+  it('internal read marks the entry refreshedBehindModel', () => {
+    const cache = makeCache({ '/f.txt': { content: 'written', timestamp: 1000 } })
+
+    writeReadFileState(cache, '/f.txt', readEntry({ content: 'new' }), true)
+
+    expect(cache.map.get('/f.txt')!.refreshedBehindModel).toBe(true)
+  })
+
+  it('internal read carries contentNotInModelContext from the read itself', () => {
+    // The internal read must not clobber "the model's view is not a 1:1
+    // mirror" with a stale `false`.
+    const cache = makeCache({ '/f.txt': { content: 'written', timestamp: 1000 } })
+
+    writeReadFileState(
+      cache,
+      '/f.txt',
+      readEntry({ content: 'truncated by cap', contentNotInModelContext: true }),
+      true,
+    )
+
+    expect(cache.map.get('/f.txt')!.contentNotInModelContext).toBe(true)
   })
 
   it('internal read on an unseen file records offset: undefined, not 1', () => {
