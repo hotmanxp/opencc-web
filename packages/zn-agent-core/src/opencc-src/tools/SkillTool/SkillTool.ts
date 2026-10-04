@@ -26,6 +26,7 @@ import type {
   UserMessage,
 } from 'src/types/message.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { findClosestName } from 'src/utils/levenshtein.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { getRuleByContentsForTool } from 'src/utils/permissions/permissions.js'
 import {
@@ -37,6 +38,8 @@ import { z } from 'zod/v4'
 import {
   addInvokedSkill,
   clearInvokedSkillsForAgent,
+  getDisableSlashCommands,
+  getInvokedSkills,
   getSessionId,
 } from '../../bootstrap/state.js'
 import { COMMAND_MESSAGE_TAG } from '../../constants/xml.js'
@@ -46,7 +49,11 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
   logEvent,
 } from '../../services/analytics/index.js'
-import { getAgentContext } from '../../utils/agentContext.js'
+import { getAgentContext, runWithAgentContext } from '../../utils/agentContext.js'
+import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js'
+import { registerAsyncAgent } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
+import { asAgentId } from '../../types/ids.js'
+import { runAsyncAgentLifecycle } from '../AgentTool/agentToolUtils.js'
 import { errorMessage } from '../../utils/errors.js'
 import {
   extractResultText,
@@ -65,6 +72,7 @@ import {
   tagMessagesWithToolUseID,
 } from '../utils.js'
 import { SKILL_TOOL_NAME } from './constants.js'
+import { elideReinvocation } from './dedup.js'
 import { getPrompt } from './prompt.js'
 import {
   renderToolResultMessage,
@@ -91,6 +99,106 @@ async function getAllCommands(context: ToolUseContext): Promise<Command[]> {
   if (mcpSkills.length === 0) return getCommands(getProjectRoot())
   const localCommands = await getCommands(getProjectRoot())
   return uniqBy([...localCommands, ...mcpSkills], 'name')
+}
+
+/**
+ * Upstream stores `unqualifiedName` on every command and uses it to recognise
+ * that `deploy` was meant for `apps/web:deploy`. OpenCC has no such field
+ * (grep: zero hits), so derive the suffix from the colon-scoped name that
+ * loadSkillsDir's getSkillCommandName already produces (`dir/sub:skillname`).
+ */
+function getUnqualifiedSkillName(name: string): string {
+  const idx = name.lastIndexOf(':')
+  return idx === -1 ? name : name.slice(idx + 1)
+}
+
+/**
+ * Error text for an unrecognised skill name.
+ *
+ * Two suggestion sources, checked in this order (upstream's `if (!k)` chain
+ * returns on the first hit, so they are mutually exclusive):
+ *
+ *  1. Directory-scoped variants — a near-certain intent match, so it wins.
+ *  2. Typo within edit distance 2 — a guess, so it only fires when there is
+ *     nothing better.
+ *
+ * Upstream's variant list also excludes the skill currently being forked, so
+ * a running skill cannot suggest itself. That needs `spawnedBySkill`; without
+ * it a running skill's own name may appear in the list, which is harmless.
+ */
+export function buildUnknownSkillMessage(
+  name: string,
+  commands: Command[],
+): string {
+  const base = `Unknown skill: ${name}`
+
+  const scopedVariants = commands
+    .filter(
+      cmd =>
+        cmd.type === 'prompt' &&
+        !cmd.disableModelInvocation &&
+        cmd.name !== name &&
+        getUnqualifiedSkillName(cmd.name) === name,
+    )
+    .map(cmd => cmd.name)
+
+  if (scopedVariants.length === 1) {
+    return `${base}. Did you mean ${scopedVariants[0]}? Invoke it by that full name.`
+  }
+  if (scopedVariants.length > 1) {
+    return `${base}. Several skills match that name: ${scopedVariants.join(', ')} — invoke one by its full name; the directory-scoped variants apply to the files under their directory.`
+  }
+
+  const suggestion = findClosestName(
+    name,
+    commands
+      .filter(cmd => cmd.type === 'prompt' && cmd.name !== name)
+      .map(cmd => ({ name: cmd.name, aliases: cmd.aliases })),
+    2,
+  )
+  return suggestion ? `${base}. Did you mean ${suggestion}?` : base
+}
+
+/**
+ * True when `command` is the fork-context skill that this sub-agent is
+ * already running, so invoking it again would recurse forever.
+ *
+ * Compares against the resolved command's `name`, not the raw input string:
+ * the input may carry a leading slash or be an alias, and matching on it would
+ * let `Skill("/my-fork-alias")` slip past.
+ *
+ * `spawnedBySkill` / `spawnedByForkedSkill` are written onto the sub-agent's
+ * ToolUseContext by runAgent via a cast (ToolUseContext declares no slot).
+ */
+export function shouldBlockForkRecursion(
+  command: Command,
+  context: ToolUseContext,
+): boolean {
+  if (command.type !== 'prompt') return false
+  const forked = command.context === 'fork'
+  const ctx = context as {
+    spawnedBySkill?: string
+    spawnedByForkedSkill?: boolean | string
+  }
+  // Either condition identifies "we are inside a forked skill sub-agent":
+  // this command itself is a fork skill, or the caller was spawned by one.
+  if (!forked && ctx.spawnedByForkedSkill !== true && !ctx.spawnedByForkedSkill)
+    return false
+  return ctx.spawnedBySkill === command.name
+}
+
+/**
+ * True when this session's Skill calls are load-only.
+ *
+ * A coordinator orchestrates workers; its own use of this tool exists to read
+ * a skill's shape in order to decide who should run it. Executing there would
+ * fork from the coordinator, grant permissions the coordinator must not hold,
+ * and run preamble shell commands on the user's behalf. `agentId` is only set
+ * for subagents, so workers fall through and execute normally — the same
+ * predicate processSlashCommand already uses for its own coordinator branch.
+ */
+export function isCoordinatorReadOnly(context: ToolUseContext): boolean {
+  return isCoordinatorMode() && context.agentId === undefined
 }
 
 // Re-export Progress from centralized types to break import cycles
@@ -211,6 +319,101 @@ async function executeForkedSkill(
       ? { ...baseAgent, effort: command.effort }
       : baseAgent
 
+  // Detached mode (`background: true` in frontmatter): register the agent and
+  // return a handle instead of draining the generator here. The result reaches
+  // the model later as a <task-notification>, so nothing downstream may wait on
+  // this call.
+  if (command.runInBackground) {
+    const description = `/${commandName}${args ? ` ${args}` : ''}`.trim()
+    const backgroundTask = registerAsyncAgent({
+      agentId,
+      description,
+      prompt: skillContent,
+      selectedAgent: agentDefinition,
+      // Don't link to the parent's abort controller: an ESC on the main thread
+      // should not kill a skill the user explicitly launched in the background.
+      // Killed explicitly via the task controls instead.
+      setAppState:
+        context.setAppStateForTasks ?? context.setAppState,
+    })
+
+    const agentName = `${commandName}-${agentId.slice(0, 8)}`
+    context.setAppStateForTasks?.(prev => {
+      const next = new Map(prev.agentNameRegistry)
+      next.set(agentName, asAgentId(backgroundTask.agentId))
+      return { ...prev, agentNameRegistry: next }
+    })
+
+    void runWithAgentContext(
+      {
+        agentId: backgroundTask.agentId,
+        parentSessionId: undefined,
+        agentType: 'subagent' as const,
+        subagentName: agentDefinition.agentType,
+        isBuiltIn: false,
+        invocationKind: 'spawn' as const,
+        invocationEmitted: false,
+      },
+      // No cwd override here (unlike AgentTool): a skill fork never carries a
+      // worktree, so it runs in the session's own cwd.
+      () =>
+        runAsyncAgentLifecycle({
+          taskId: backgroundTask.agentId,
+          abortController: backgroundTask.abortController!,
+          makeStream: onCacheSafeParams =>
+            runAgent({
+              agentDefinition,
+              promptMessages,
+              toolUseContext: {
+                ...context,
+                getAppState: modifiedGetAppState,
+              },
+              canUseTool,
+              isAsync: true,
+              querySource: 'agent:custom',
+              model: command.model as ModelAlias | undefined,
+              availableTools: context.options.tools,
+              override: {
+                agentId: asAgentId(backgroundTask.agentId),
+                abortController: backgroundTask.abortController!,
+              },
+              spawnedBySkill: commandName,
+              spawnedByForkedSkill: commandName,
+              onCacheSafeParams,
+            }),
+          metadata: {
+            prompt: skillContent,
+            resolvedAgentModel: agentDefinition.model ?? '',
+            isBuiltInAgent: false,
+            startTime,
+            agentType: agentDefinition.agentType,
+            isAsync: true,
+          },
+          description,
+          toolUseContext: context,
+          rootSetAppState: context.setAppStateForTasks ?? context.setAppState,
+          // runAsyncAgentLifecycle clears the invoked-skill state for this
+          // agent in its own finally — the blocking path's `finally` below
+          // would otherwise fire at detach and release state the still-running
+          // agent depends on.
+          agentIdForCleanup: backgroundTask.agentId,
+          enableSummarization: false,
+          getWorktreeResult: async () => ({}),
+        }),
+    )
+
+    return {
+      data: {
+        success: true,
+        commandName,
+        status: 'forked',
+        background: true,
+        agentId: backgroundTask.agentId,
+        result: `Running in the background as @${agentName}`,
+      },
+    }
+  }
+
   // Collect messages from the forked agent
   const agentMessages: Message[] = []
 
@@ -311,6 +514,16 @@ export const outputSchema = lazySchema(() => {
       .describe('Tools allowed by this skill'),
     model: z.string().optional().describe('Model override if specified'),
     status: z.literal('inline').optional().describe('Execution status'),
+    readOnly: z
+      .boolean()
+      .optional()
+      .describe(
+        'Set in coordinator mode: the instructions were loaded for triage only and nothing was executed',
+      ),
+    background: z
+      .boolean()
+      .optional()
+      .describe('Whether the fork is running detached in the background'),
   })
 
   // Output schema for forked skills
@@ -322,6 +535,10 @@ export const outputSchema = lazySchema(() => {
       .string()
       .describe('The ID of the sub-agent that executed the skill'),
     result: z.string().describe('The result from the forked skill execution'),
+    background: z
+      .boolean()
+      .optional()
+      .describe('Whether the fork is running detached in the background'),
   })
 
   return z.union([inlineOutputSchema, forkedOutputSchema])
@@ -334,6 +551,15 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
   name: SKILL_TOOL_NAME,
   searchHint: 'invoke a slash-command skill',
   maxResultSizeChars: 100_000,
+  // A skill expands into a full prompt the main loop must process before
+  // continuing, so it always runs in the foreground — it never detaches
+  // itself to the background the way Bash/Agent may.
+  backgrounding: 'never',
+  // Read lazily: the flag is written to STATE during startup, after this
+  // module is evaluated. Mirrors upstream's `!Mh()` guard.
+  isEnabled() {
+    return !getDisableSlashCommands()
+  },
   get inputSchema(): InputSchema {
     return inputSchema()
   },
@@ -415,7 +641,7 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     if (!foundCommand) {
       return {
         result: false,
-        message: `Unknown skill: ${normalizedCommandName}`,
+        message: buildUnknownSkillMessage(normalizedCommandName, commands),
         errorCode: 2,
       }
     }
@@ -426,6 +652,20 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
         result: false,
         message: `Skill ${normalizedCommandName} cannot be used with ${SKILL_TOOL_NAME} tool due to disable-model-invocation`,
         errorCode: 4,
+      }
+    }
+
+    // A fork-context skill's own sub-agent must not re-invoke the skill it is
+    // already running — that is unbounded recursion by construction.
+    if (shouldBlockForkRecursion(foundCommand, context)) {
+      logEvent('tengu_skill_tool_fork_recursion_blocked', {})
+      return {
+        result: false,
+        message:
+          `Skill ${normalizedCommandName} is already executing in this forked context — ` +
+          `you are the subagent running it. Execute the instructions in the skill body ` +
+          `directly instead of re-invoking the ${SKILL_TOOL_NAME} tool.`,
+        errorCode: 9,
       }
     }
 
@@ -457,6 +697,17 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     // Look up the command object to pass as metadata
     const commands = await getAllCommands(context)
     const commandObj = findCommand(commandName, commands)
+
+    // Coordinator mode never executes the skill — it only reads its shape to
+    // route the work. Asking the user to authorise something that will not run
+    // is noise, and a deny here would block routing entirely.
+    if (isCoordinatorReadOnly(context)) {
+      return {
+        behavior: 'allow',
+        updatedInput: { skill, args },
+        decisionReason: undefined,
+      }
+    }
 
     // Helper function to check if a rule matches the skill
     // Normalizes both inputs by stripping leading slashes for consistent matching
@@ -578,11 +829,23 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       },
     ]
 
+    // Third-party plugin skills are code the user installed but did not
+    // author, and a plugin update can swap their contents. Offering a
+    // persistent allow rule for one is a privilege escalation, so withhold
+    // "always allow" and name the plugin in the prompt instead.
+    // Upstream gates this on GrowthBook flags OpenCC does not have; the
+    // meaningful predicate here is "comes from a plugin with pluginInfo".
+    const pluginName =
+      commandObj?.type === 'prompt' && commandObj.pluginInfo
+        ? commandObj.pluginInfo.pluginManifest.name
+        : undefined
+
     // Default behavior: ask user for permission
     return {
       behavior: 'ask',
-      message: `Execute skill: ${commandName}`,
+      message: `Execute skill: ${commandName}${pluginName ? ` — from plugin ${pluginName}` : ''}`,
       decisionReason: undefined,
+      suppressAlwaysAllowRule: pluginName !== undefined,
       suggestions,
       updatedInput: { skill, args },
       metadata: commandObj ? { command: commandObj } : undefined,
@@ -630,6 +893,22 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     // Track skill usage for ranking
     recordSkillUsage(commandName)
 
+    // Coordinator mode: load the skill's shape, do not run it. This returns
+    // before the fork branch — a coordinator must never spawn a sub-agent for
+    // a skill it is only supposed to be routing. Also skips
+    // processPromptSlashCommand, whose coordinator branch would attach a
+    // delegation summary the coordinator does not need as a tool result.
+    if (isCoordinatorReadOnly(context)) {
+      return {
+        data: {
+          success: true,
+          commandName,
+          status: 'inline' as const,
+          readOnly: true,
+        },
+      }
+    }
+
     // Check if skill should run as a forked sub-agent
     if (command?.type === 'prompt' && command.context === 'fork') {
       return executeForkedSkill(
@@ -642,6 +921,17 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
         onProgress,
       )
     }
+    // Snapshot the previously-rendered body BEFORE expansion. processSlashCommand
+    // writes the freshly-rendered content into the same map (keyed
+    // `${agentId}:${command.name}`), so reading it again afterwards yields the
+    // current expansion — prior vs rendered from one source of truth.
+    const invokedSkillsKey =
+      command?.type === 'prompt'
+        ? `${context.agentId ?? ''}:${command.name}`
+        : undefined
+    const priorContent = invokedSkillsKey
+      ? getInvokedSkills().get(invokedSkillsKey)?.content
+      : undefined
 
     // Process the skill with optional args
     const { processPromptSlashCommand } = await import(
@@ -657,6 +947,10 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     if (!processedCommand.shouldQuery) {
       throw new Error('Command processing failed')
     }
+
+    const renderedContent = invokedSkillsKey
+      ? getInvokedSkills().get(invokedSkillsKey)?.content
+      : undefined
 
     // Extract metadata from the command
     const allowedTools = processedCommand.allowedTools || []
@@ -745,24 +1039,31 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
 
     // Tag user messages with sourceToolUseID so they stay transient until this tool resolves
     const newMessages = tagMessagesWithToolUseID(
-      processedCommand.messages.filter(
-        (m): m is UserMessage | AttachmentMessage | SystemMessage => {
-          if (m.type === 'progress') {
-            return false
-          }
-          // Filter out command-message since SkillTool handles display
-          if (m.type === 'user' && 'message' in m) {
-            const content = m.message.content
-            if (
-              typeof content === 'string' &&
-              content.includes(`<${COMMAND_MESSAGE_TAG}>`)
-            ) {
+      elideReinvocation({
+        messages: processedCommand.messages.filter(
+          (m): m is UserMessage | AttachmentMessage | SystemMessage => {
+            if (m.type === 'progress') {
               return false
             }
-          }
-          return true
-        },
-      ),
+            // Filter out command-message since SkillTool handles display
+            if (m.type === 'user' && 'message' in m) {
+              const content = m.message.content
+              if (
+                typeof content === 'string' &&
+                content.includes(`<${COMMAND_MESSAGE_TAG}>`)
+              ) {
+                return false
+              }
+            }
+            return true
+          },
+        ),
+        contextMessages: context.messages,
+        commandName,
+        args,
+        priorContent,
+        renderedContent,
+      }),
       toolUseID,
     )
 
@@ -861,7 +1162,19 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       return {
         type: 'tool_result' as const,
         tool_use_id: toolUseID,
-        content: `Skill "${result.commandName}" completed (forked execution).\n\nResult:\n${result.result}`,
+        content: result.background
+          ? `Skill "${result.commandName}" launched (forked execution, running in the background).\n\n${result.result}`
+          : `Skill "${result.commandName}" completed (forked execution).\n\nResult:\n${result.result}`,
+      }
+    }
+
+    // Coordinator mode: nothing was executed, so say that rather than
+    // reporting a launch that never happened.
+    if ('readOnly' in result && result.readOnly) {
+      return {
+        type: 'tool_result' as const,
+        tool_use_id: toolUseID,
+        content: `Loaded skill instructions (read-only): ${result.commandName}. Nothing was executed; delegate execution to a worker.`,
       }
     }
 
@@ -897,6 +1210,7 @@ const SAFE_SKILL_PROPERTIES = new Set([
   'disableNonInteractive',
   'skillRoot',
   'context',
+  'runInBackground',
   'agent',
   'getPromptForCommand',
   'frontmatterKeys',

@@ -81,6 +81,11 @@ type State = {
   // trajectories fail fast rather than conditioning the model on fake
   // tool_results.
   strictToolResultPairing: boolean
+  // Set from the --disable-slash-commands CLI option at startup. SkillTool
+  // reads this lazily in isEnabled(): the REPL only filters the command
+  // list, so without this the tool stays advertised and the model can
+  // still invoke skills the user asked to disable.
+  disableSlashCommands: boolean
   sdkAgentProgressSummariesEnabled: boolean
   userMsgOptIn: boolean
   clientType: string
@@ -307,6 +312,7 @@ function getInitialState(): State {
     isInteractive: true,
     kairosActive: false,
     strictToolResultPairing: false,
+    disableSlashCommands: false,
     sdkAgentProgressSummariesEnabled: false,
     userMsgOptIn: false,
     clientType: 'cli',
@@ -1282,6 +1288,14 @@ export function getStrictToolResultPairing(): boolean {
 
 export function setStrictToolResultPairing(value: boolean): void {
   STATE.strictToolResultPairing = value
+}
+
+export function getDisableSlashCommands(): boolean {
+  return STATE.disableSlashCommands
+}
+
+export function setDisableSlashCommands(value: boolean): void {
+  STATE.disableSlashCommands = value
 }
 
 // Field name 'userMsgOptIn' avoids excluded-string substrings ('BriefTool',

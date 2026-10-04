@@ -962,6 +962,23 @@ export async function* runAgent({
     ).persistedToolResultFiles = persistedToolResultFiles
   }
 
+  // Fork provenance. SkillTool's recursion guard reads these off the
+  // sub-agent's ToolUseContext to detect "you are the subagent running this
+  // skill, do not re-invoke it". Without this a fork-context skill that calls
+  // SkillTool on itself recurses forever. Written via cast for the same
+  // reason as the fields above — ToolUseContext declares no slot, and
+  // createSubagentContext returns an explicit field-by-field literal, so an
+  // undeclared field would otherwise be dropped.
+  if (spawnedBySkill) {
+    ;(agentToolUseContext as unknown as { spawnedBySkill?: string }).spawnedBySkill =
+      spawnedBySkill
+  }
+  if (spawnedByForkedSkill) {
+    ;(
+      agentToolUseContext as unknown as { spawnedByForkedSkill?: boolean }
+    ).spawnedByForkedSkill = spawnedByForkedSkill
+  }
+
   // Expose cache-safe params for background summarization (prompt cache sharing)
   if (onCacheSafeParams) {
     onCacheSafeParams({

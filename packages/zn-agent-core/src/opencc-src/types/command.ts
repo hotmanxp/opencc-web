@@ -49,6 +49,12 @@ export type PromptCommand = {
   // 'inline' = skill content expands into the current conversation
   // 'fork' = skill runs in a sub-agent with separate context and token budget
   context?: 'inline' | 'fork'
+  // Detach a fork-context skill and return immediately instead of blocking.
+  // Defaults to false — unlike upstream, where forked skills background by
+  // default. Flipping that default would silently narrow every fork skill's
+  // tool pool to ASYNC_AGENT_ALLOWED_TOOLS and turn its permission prompts into
+  // auto-denials, so it stays opt-in per skill.
+  runInBackground?: boolean
   // Agent type to use when forked (e.g., 'Bash', 'general-purpose')
   // Only applicable when context is 'fork'
   agent?: string
