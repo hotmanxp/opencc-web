@@ -55,39 +55,7 @@ const CLAWD_HEIGHT = 3;
  * elsewhere this renders and behaves identically to plain `<Clawd />`.
  */
 export function AnimatedClawd() {
-  const $ = _c(8);
-  const {
-    pose,
-    bounceOffset,
-    onClick
-  } = useClawdAnimation();
-  let t0;
-  if ($[0] !== pose) {
-    t0 = <Clawd pose={pose} />;
-    $[0] = pose;
-    $[1] = t0;
-  } else {
-    t0 = $[1];
-  }
-  let t1;
-  if ($[2] !== bounceOffset || $[3] !== t0) {
-    t1 = <Box marginTop={bounceOffset} flexShrink={0}>{t0}</Box>;
-    $[2] = bounceOffset;
-    $[3] = t0;
-    $[4] = t1;
-  } else {
-    t1 = $[4];
-  }
-  let t2;
-  if ($[5] !== onClick || $[6] !== t1) {
-    t2 = <Box height={CLAWD_HEIGHT} flexDirection="column" onClick={onClick}>{t1}</Box>;
-    $[5] = onClick;
-    $[6] = t1;
-    $[7] = t2;
-  } else {
-    t2 = $[7];
-  }
-  return t2;
+  return null;
 }
 function useClawdAnimation(): {
   pose: ClawdPose;

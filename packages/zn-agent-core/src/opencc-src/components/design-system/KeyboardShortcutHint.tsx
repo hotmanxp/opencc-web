@@ -39,49 +39,5 @@ type Props = {
  * </Text>
  */
 export function KeyboardShortcutHint(t0) {
-  const $ = _c(10);
-  const {
-    shortcut,
-    action,
-    parens: t1,
-    bold: t2,
-    preposition: t3
-  } = t0;
-  const parens = t1 === undefined ? false : t1;
-  const bold = t2 === undefined ? false : t2;
-  const preposition = t3 === undefined ? 'to' : t3;
-  let t4;
-  if ($[0] !== bold || $[1] !== shortcut) {
-    t4 = bold ? <Text bold={true}>{shortcut}</Text> : shortcut;
-    $[0] = bold;
-    $[1] = shortcut;
-    $[2] = t4;
-  } else {
-    t4 = $[2];
-  }
-  const shortcutText = t4;
-  if (parens) {
-    let t5;
-    if ($[3] !== action || $[4] !== shortcutText || $[5] !== preposition) {
-      t5 = <Text>({shortcutText}{preposition ? ' ' + preposition + ' ' : ' '}{action})</Text>;
-      $[3] = action;
-      $[4] = shortcutText;
-      $[5] = preposition;
-      $[6] = t5;
-    } else {
-      t5 = $[6];
-    }
-    return t5;
-  }
-  let t5;
-  if ($[6] !== action || $[7] !== shortcutText || $[8] !== preposition) {
-    t5 = <Text>{shortcutText}{preposition ? ' ' + preposition + ' ' : ' '}{action}</Text>;
-    $[6] = action;
-    $[7] = shortcutText;
-    $[8] = preposition;
-    $[9] = t5;
-  } else {
-    t5 = $[9];
-  }
-  return t5;
+  return null;
 }

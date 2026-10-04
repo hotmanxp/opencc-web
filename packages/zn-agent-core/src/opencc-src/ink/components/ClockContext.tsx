@@ -74,38 +74,7 @@ const BLURRED_TICK_INTERVAL_MS = FRAME_INTERVAL_MS * 2;
 // The clock value is stable (created once via useState), so the provider
 // never causes consumer re-renders on its own.
 export function ClockProvider(t0) {
-  const $ = _c(7);
-  const {
-    children
-  } = t0;
-  const [clock] = useState(_temp);
-  const focused = useTerminalFocus();
-  let t1;
-  let t2;
-  if ($[0] !== clock || $[1] !== focused) {
-    t1 = () => {
-      clock.setTickInterval(focused ? FRAME_INTERVAL_MS : BLURRED_TICK_INTERVAL_MS);
-    };
-    t2 = [clock, focused];
-    $[0] = clock;
-    $[1] = focused;
-    $[2] = t1;
-    $[3] = t2;
-  } else {
-    t1 = $[2];
-    t2 = $[3];
-  }
-  useEffect(t1, t2);
-  let t3;
-  if ($[4] !== children || $[5] !== clock) {
-    t3 = <ClockContext.Provider value={clock}>{children}</ClockContext.Provider>;
-    $[4] = children;
-    $[5] = clock;
-    $[6] = t3;
-  } else {
-    t3 = $[6];
-  }
-  return t3;
+  return null;
 }
 function _temp() {
   return createClock(FRAME_INTERVAL_MS);

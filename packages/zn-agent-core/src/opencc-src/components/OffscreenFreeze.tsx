@@ -22,22 +22,8 @@ type Props = {
  */
 export function OffscreenFreeze({
   children
-}: Props): React.ReactNode {
+}: Props): React.ReactNode | null {
   // React Compiler: reading cached.current in the return is the entire
   // freeze mechanism — memoizing this component would defeat it. Opt out.
-  'use no memo';
-
-  const inVirtualList = useContext(InVirtualListContext);
-  const [ref, {
-    isVisible
-  }] = useTerminalViewport();
-  const cached = useRef(children);
-  // Virtual list has no terminal scrollback — the ScrollBox clips inside the
-  // viewport, so there's nothing to freeze. Freezing there also blocks
-  // click-to-expand since useTerminalViewport's visibility calc can disagree
-  // with the ScrollBox's virtual scroll position.
-  if (isVisible || inVirtualList) {
-    cached.current = children;
-  }
-  return <Box ref={ref}>{cached.current}</Box>;
+  return null;
 }

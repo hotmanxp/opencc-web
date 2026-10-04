@@ -6,5 +6,5 @@ export const call: LocalJSXCommandCall = async (onDone, {
     commands
   }
 }) => {
-  return <HelpV2 commands={commands} onClose={onDone} />;
+  return Promise.resolve(null);
 };

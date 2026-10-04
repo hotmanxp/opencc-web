@@ -185,89 +185,8 @@ function PromptInputFooter({
   setHistoryQuery,
   historyFailedMatch,
   onOpenTasksDialog
-}: Props): ReactNode {
-  const settings = useSettings();
-  const {
-    columns,
-    rows
-  } = useTerminalSize();
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
-  const lastAssistantMessageId = useMemo(() => getLastAssistantMessageId(messages), [messages]);
-  const isNarrow = columns < 80;
-  // In fullscreen the bottom slot is flexShrink:0, so every row here is a row
-  // stolen from the ScrollBox. Drop the optional StatusLine first. Non-fullscreen
-  // has terminal scrollback to absorb overflow, so we never hide StatusLine there.
-  const isFullscreen = isFullscreenEnvEnabled();
-  const isShort = isFullscreen && rows < 24;
-  const footerOverlay = resolveFooterOverlay({
-    hasInlineSuggestions: suggestions.length > 0 && !isFullscreen,
-    helpOpen,
-    isSearching
-  });
-  const hideRegularFooter = footerOverlay !== null;
-
-  // Pill highlights when tasks is the active footer item AND no specific
-  // agent row is selected. When coordinatorTaskIndex >= 0 the pointer has
-  // moved into CoordinatorTaskPanel, so the pill should un-highlight.
-  // coordinatorTaskCount === 0 covers the bash-only case (no agent rows
-  // exist, pill is the only selectable item).
-  const coordinatorTaskCount = useCoordinatorTaskCount();
-  const coordinatorTaskIndex = useAppState(s => s.coordinatorTaskIndex);
-  const pillSelected = tasksSelected && (coordinatorTaskCount === 0 || coordinatorTaskIndex < 0);
-
-  // Which status line (if any) actually renders below the prompt. Together
-  // with the search flag and caller suppression, this drives the
-  // `? for shortcuts` discoverability hint — see shouldSuppressShortcutsHint.
-  // Plumbed in even though OpenCC has no builtin status line today so a
-  // future builtin can drop in without reshuffling call sites.
-  // (Substance ported from upstream PR #1862.)
-  const footerStatusLine = resolveFooterStatusLine(settings, {
-    isPromptMode: mode === 'prompt',
-    isShort,
-    exitMessageShown: exitMessage.show,
-    isPasting,
-  });
-  const configuredFooterStatusLine = resolveConfiguredFooterStatusLine(settings);
-  // Hide `? for shortcuts` during ctrl-r search, or — for established users
-  // only — when a status line actually renders. A custom status line is
-  // explicit user configuration, so it always wins. See
-  // shouldSuppressShortcutsHint for the full rules.
-  const suppressHint = shouldSuppressShortcutsHint({
-    suppressedByCaller: suppressHintFromProps,
-    footerStatusLine,
-    isSearching,
-    numStartups: getGlobalConfig().numStartups,
-  });
-  // Fullscreen: portal data to FullscreenLayout — see promptOverlayContext.tsx
-  const overlayData = useMemo(() => isFullscreen && suggestions.length ? {
-    suggestions,
-    selectedSuggestion,
-    maxColumnWidth
-  } : null, [isFullscreen, suggestions, selectedSuggestion, maxColumnWidth]);
-  useSetPromptOverlay(overlayData);
-  return <>
-      <KeepMounted hidden={hideRegularFooter}>
-        <Box flexDirection={isNarrow ? 'column' : 'row'} justifyContent={isNarrow ? 'flex-start' : 'space-between'} paddingX={2} gap={isNarrow ? 0 : 1}>
-          <Box flexDirection="column" flexShrink={isNarrow ? 0 : 1}>
-          <KeepMounted hidden={footerStatusLine === null}>
-{configuredFooterStatusLine === 'custom' ? <StatusLine active={footerStatusLine === 'custom'} messagesRef={messagesRef} lastAssistantMessageId={lastAssistantMessageId} vimMode={vimMode} /> : null}
-          </KeepMounted>
-          <PromptInputFooterLeftSide active={!hideRegularFooter} exitMessage={exitMessage} vimMode={vimMode} mode={mode} toolPermissionContext={toolPermissionContext} suppressHint={suppressHint} isLoading={isLoading} tasksSelected={pillSelected} teamsSelected={teamsSelected} teammateFooterIndex={teammateFooterIndex} tmuxSelected={tmuxSelected} isPasting={isPasting} isSearching={isSearching} historyQuery={historyQuery} setHistoryQuery={setHistoryQuery} historyFailedMatch={historyFailedMatch} onOpenTasksDialog={onOpenTasksDialog} />
-          </Box>
-          <Box flexShrink={1} gap={1}>
-          {isFullscreen ? null : <Notifications apiKeyStatus={apiKeyStatus} autoUpdaterResult={autoUpdaterResult} debug={debug} isAutoUpdating={isAutoUpdating} verbose={verbose} messages={messages} onAutoUpdaterResult={onAutoUpdaterResult} onChangeIsUpdating={onChangeIsUpdating} ideSelection={ideSelection} mcpClients={mcpClients} isInputWrapped={isInputWrapped} isNarrow={isNarrow} />}
-          {isAntEmployee() && isUndercover() && <Text dimColor>undercover</Text>}
-          <BridgeStatusIndicator bridgeSelected={bridgeSelected} />
-          <GoalStatusIndicator />
-          </Box>
-        </Box>
-      </KeepMounted>
-      {footerOverlay === 'suggestions' ? <Box paddingX={2} paddingY={0}>
-          <PromptInputFooterSuggestions suggestions={suggestions} selectedSuggestion={selectedSuggestion} maxColumnWidth={maxColumnWidth} />
-</Box> : footerOverlay === 'help' ? <PromptInputHelpMenu dimColor={true} fixedWidth={true} paddingX={2} /> : null}
-      {isAntEmployee() && <CoordinatorTaskPanel />}
-    </>;
+}: Props): ReactNode | null {
+  return null;
 }
 export default memo(PromptInputFooter);
 
@@ -276,79 +195,10 @@ type BridgeStatusProps = {
 };
 function BridgeStatusIndicator({
   bridgeSelected
-}: BridgeStatusProps): React.ReactNode {
-  if (!false) return null;
-
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
-  const enabled = useAppState(s => s.replBridgeEnabled);
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
-  const connected = useAppState(s_0 => s_0.replBridgeConnected);
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
-  const sessionActive = useAppState(s_1 => s_1.replBridgeSessionActive);
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
-  const reconnecting = useAppState(s_2 => s_2.replBridgeReconnecting);
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
-  const explicit = useAppState(s_3 => s_3.replBridgeExplicit);
-
-  // Failed state is surfaced via notification (useReplBridge), not a footer pill.
-  if (!isBridgeEnabled() || !enabled) return null;
-  const status = getBridgeStatus({
-    error: undefined,
-    connected,
-    sessionActive,
-    reconnecting
-  });
-
-  // For implicit (config-driven) remote, only show the reconnecting state
-  if (!explicit && status.label !== 'Remote Control reconnecting') {
-    return null;
-  }
-  return <Text color={bridgeSelected ? 'background' : status.color} inverse={bridgeSelected} wrap="truncate">
-      {status.label}
-      {bridgeSelected && <Text dimColor> · Enter to view</Text>}
-    </Text>;
+}: BridgeStatusProps): React.ReactNode | null {
+  return null;
 }
-function GoalStatusIndicator(): React.ReactNode {
-  const goal = useAppState(s => s.activeGoal);
-  // 1Hz tick to keep the elapsed-seconds display fresh while the goal is
-  // active. Skipped once the goal transitions to the achieved summary
-  // (frozen duration, no need to re-render).
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!goal || goal.achievedAt) return;
-    const id = setInterval(() => setTick(t => (t + 1) % 1_000_000), 1000);
-    return () => clearInterval(id);
-  }, [goal?.achievedAt]);
-
-  if (!goal) return null;
-
-  // Achieved summary: `✔ Goal achieved (Xs · Y turn(s) · Zk tokens)`. The
-  // `iterations` field counts Stop-hook rejections; if it's still 0 the
-  // LLM approved on first try, so we show "1 turn" as the floor.
-  if (goal.achievedAt) {
-    const durSec = Math.max(
-      0,
-      Math.round((goal.achievedAt - goal.setAt) / 1000),
-    );
-    const turns = goal.iterations > 0 ? goal.iterations : 1;
-    const turnText = turns === 1 ? '1 turn' : `${turns} turns`;
-    const tokens = Math.max(0, (goal.tokensAtEnd ?? 0) - goal.tokensAtStart);
-    return (
-      <Text color="suggestion" wrap="truncate">
-        ✔ Goal achieved ({formatGoalDuration(durSec)} · {turnText} ·{' '}
-        {formatTokenCount(tokens)} tokens)
-      </Text>
-    );
-  }
-
-  // Active: `◎ /goal active (Ns · Xm Ys)`, ticking every second. Duration
-  // switches from `Ns` to `Xm Ys` once the goal has been running for ≥60s so
-  // the pill width stays bounded as time accumulates.
-  const durSec = Math.max(0, Math.floor((Date.now() - goal.setAt) / 1000));
-  return (
-    <Text color="suggestion" wrap="truncate">
-      ◎ /goal active ({formatGoalDuration(durSec)})
-    </Text>
-  );
+function GoalStatusIndicator(): React.ReactNode | null {
+  return null;
 }
 

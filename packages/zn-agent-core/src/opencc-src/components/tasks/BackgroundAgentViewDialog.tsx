@@ -234,68 +234,8 @@ export const INSTALL_HINT =
  */
 export function BackgroundAgentViewDialog({
   onDone,
-}: BackgroundAgentViewDialogProps): React.ReactNode {
-  const { exit } = useApp()
-  // Static-importing `getSockPath` from `socket.js` at module top would
-  // eagerly execute the darwin-only guard at file-load time, which is
-  // fine in production but trips bun:test on non-darwin CI. Lazy import
-  // defers the call until first render.
-  const [sockApi, setSockApi] = useState<
-    { getSockPath: () => string } | null
-  >(null)
-  const [sockApiError, setSockApiError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    void import('../../utils/daemon/socket.js')
-      .then(mod => {
-        if (cancelled) return
-        setSockApi({ getSockPath: mod.getSockPath })
-      })
-      .catch(err => {
-        if (cancelled) return
-        setSockApiError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!sockApi && !sockApiError) {
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        <Text bold>Background agents</Text>
-        <Text dimColor>Loading…</Text>
-      </Box>
-    )
-  }
-
-  if (sockApiError) {
-    return (
-      <BackgroundErrorView message={sockApiError} onDone={onDone} />
-    )
-  }
-
-  // `getSockPath` is darwin-only and throws on other platforms.
-  let resolvedPath: string
-  try {
-    resolvedPath = resolveBackgroundAgentSockPath(sockApi!.getSockPath)
-  } catch (err) {
-    return (
-      <BackgroundErrorView
-        message={err instanceof Error ? err.message : String(err)}
-        onDone={onDone}
-      />
-    )
-  }
-
-  return (
-    <BackgroundAgentViewDialogInner
-      sockPath={resolvedPath}
-      onDone={onDone}
-      exit={exit}
-    />
-  )
+}: BackgroundAgentViewDialogProps): React.ReactNode | null {
+  return null;
 }
 
 function BackgroundErrorView({
@@ -304,22 +244,8 @@ function BackgroundErrorView({
 }: {
   message: string
   onDone: (note?: string) => void
-}): React.ReactNode {
-  useInput((input, key) => {
-    if (key.escape || input === 'q') {
-      onDone('Background agents dialog dismissed')
-    }
-  })
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      <Text bold>Background agents</Text>
-      <Text color="warning">{message}</Text>
-      <Text dimColor>{INSTALL_HINT}</Text>
-      <Box marginTop={1}>
-        <Text dimColor>Press Esc or q to close.</Text>
-      </Box>
-    </Box>
-  )
+}): React.ReactNode | null {
+  return null;
 }
 
 interface InnerProps {
@@ -338,68 +264,8 @@ function BackgroundAgentViewDialogInner({
   sockPath,
   onDone,
   exit,
-}: InnerProps): React.ReactNode {
-  const getSockPath = useMemo(() => () => sockPath, [sockPath])
-  const { jobs, loading, error, refresh, kill } = useBackgroundAgentJobs(
-    getSockPath,
-  )
-  const [selectedIdx, setSelectedIdx] = useState(0)
-
-  // Clamp the selection when the list shrinks (e.g. after a kill).
-  useEffect(() => {
-    if (selectedIdx >= jobs.length && jobs.length > 0) {
-      setSelectedIdx(jobs.length - 1)
-    }
-  }, [jobs.length, selectedIdx])
-
-  const close = (note?: string) => {
-    onDone(note)
-    // `exit` is a safety net for the case where the parent doesn't
-    // unmount us (it always does in practice). Reference it so a
-    // future change to `onDone` semantics doesn't break compilation.
-    void exit
-  }
-
-  useInput((input, key) => {
-    if (key.escape || input === 'q') {
-      close('Background agents dialog dismissed')
-      return
-    }
-    if (input === 'r' || key.return) {
-      void refresh()
-      return
-    }
-    if (key.upArrow) {
-      setSelectedIdx(prev => Math.max(0, prev - 1))
-      return
-    }
-    if (key.downArrow) {
-      setSelectedIdx(prev => Math.min(Math.max(0, jobs.length - 1), prev + 1))
-      return
-    }
-    if (input === 'x') {
-      const job = jobs[selectedIdx]
-      if (job) void kill(job.short)
-      return
-    }
-    if (input === 'f') {
-      const job = jobs[selectedIdx]
-      if (job) {
-        onDone(
-          `Foreground attach for ${job.short} is not yet supported (planned for v2).`,
-        )
-      }
-    }
-  })
-
-  return (
-    <BackgroundAgentViewDialogBody
-      jobs={jobs}
-      loading={loading}
-      error={error}
-      selectedIdx={selectedIdx}
-    />
-  )
+}: InnerProps): React.ReactNode | null {
+  return null;
 }
 
 interface BodyProps {
@@ -418,80 +284,8 @@ function BackgroundAgentViewDialogBody({
   loading,
   error,
   selectedIdx,
-}: BodyProps): React.ReactNode {
-  const runningCount = jobs.filter(j => !j.dying).length
-
-  let body: React.ReactNode
-  if (loading && jobs.length === 0) {
-    body = <Text dimColor>Loading background agents…</Text>
-  } else if (error) {
-    body = (
-      <Box flexDirection="column">
-        <Text color="warning">Error: {error}</Text>
-        <Text dimColor>{INSTALL_HINT}</Text>
-      </Box>
-    )
-  } else if (jobs.length === 0) {
-    body = (
-      <Box flexDirection="column">
-        <Text dimColor>No background agents running.</Text>
-        <Text dimColor>
-          Use a <Text color="cyan">BackgroundAgent</Text> tool call to start
-          one.
-        </Text>
-      </Box>
-    )
-  } else {
-    body = (
-      <Box flexDirection="column">
-        <Text dimColor>
-          {runningCount} running, {jobs.length - runningCount} dying
-        </Text>
-        <Box flexDirection="column" marginTop={1}>
-          {jobs.map((job, idx) => (
-            <BackgroundAgentRow
-              key={job.short}
-              job={job}
-              isSelected={idx === selectedIdx}
-            />
-          ))}
-        </Box>
-      </Box>
-    )
-  }
-
-  return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box>
-        <Text bold>Background agents</Text>
-        {jobs.length > 0 ? <Text dimColor> ({jobs.length})</Text> : null}
-      </Box>
-      {body}
-      <Box marginTop={1} flexDirection="column">
-        <Text dimColor>
-          ↑/↓ select · x kill · r refresh · f foreground (v2) · Esc/q close
-        </Text>
-      </Box>
-      <Box marginTop={1}>
-        <Text dimColor>
-          [selection {selectedIdx + 1}/{Math.max(jobs.length, 1)}]
-          {loading ? ' · refreshing' : ''}
-        </Text>
-      </Box>
-      <Box marginTop={1} flexDirection="row" gap={2}>
-        <Text>
-          <Text color="cyan" underline>
-            refresh
-          </Text>
-          <Text dimColor> (r/Enter) · </Text>
-          <Text color="cyan" underline>
-            close
-          </Text>
-          <Text dimColor> (Esc/q)</Text>
-        </Text>
-      </Box>
-    </Box>
-  )
+}: BodyProps): React.ReactNode | null {
+  return null;
 }
 
 /**
@@ -504,23 +298,6 @@ function BackgroundAgentRow({
 }: {
   job: JobRecord
   isSelected: boolean
-}): React.ReactNode {
-  const pointer = isSelected ? `${figures.pointer} ` : '  '
-  const created = new Date(job.createdAt).toLocaleTimeString()
-  const isolation = job.isolation === 'worktree' ? ' [worktree]' : ''
-  const statusLabel = job.dying ? 'dying' : 'running'
-  const statusColor = job.dying ? 'warning' : 'success'
-  const color = isSelected ? 'suggestion' : undefined
-
-  return (
-    <Box flexDirection="row" gap={1}>
-      <Text dimColor={!isSelected}>{pointer}</Text>
-      <Text color={color}>
-        {job.short} · {job.source.padEnd(6)} · {job.cwd}
-        {isolation}
-      </Text>
-      <Text dimColor>· {created}</Text>
-      <Text color={statusColor}>{statusLabel}</Text>
-    </Box>
-  )
+}): React.ReactNode | null {
+  return null;
 }

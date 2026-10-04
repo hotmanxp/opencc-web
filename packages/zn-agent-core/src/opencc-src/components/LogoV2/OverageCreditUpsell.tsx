@@ -84,64 +84,7 @@ type Props = {
   twoLine?: boolean;
 };
 export function OverageCreditUpsell(t0) {
-  const $ = _c(8);
-  const {
-    maxWidth,
-    twoLine
-  } = t0;
-  let t1;
-  let t2;
-  if ($[0] !== maxWidth || $[1] !== twoLine) {
-    t2 = Symbol.for("react.early_return_sentinel");
-    bb0: {
-      const info = getCachedOverageCreditGrant();
-      if (!info) {
-        t2 = null;
-        break bb0;
-      }
-      const amount = formatGrantAmount(info);
-      if (!amount) {
-        t2 = null;
-        break bb0;
-      }
-      if (twoLine) {
-        const title = getFeedTitle(amount);
-        let t3;
-        if ($[4] !== maxWidth) {
-          t3 = maxWidth ? truncate(FEED_SUBTITLE, maxWidth) : FEED_SUBTITLE;
-          $[4] = maxWidth;
-          $[5] = t3;
-        } else {
-          t3 = $[5];
-        }
-        let t4;
-        if ($[6] !== t3) {
-          t4 = <Text dimColor={true}>{t3}</Text>;
-          $[6] = t3;
-          $[7] = t4;
-        } else {
-          t4 = $[7];
-        }
-        t2 = <><Text color="claude">{maxWidth ? truncate(title, maxWidth) : title}</Text>{t4}</>;
-        break bb0;
-      }
-      const text = getUsageText(amount);
-      const display = maxWidth ? truncate(text, maxWidth) : text;
-      const highlightLen = Math.min(getFeedTitle(amount).length, display.length);
-      t1 = <Text dimColor={true}><Text color="claude">{display.slice(0, highlightLen)}</Text>{display.slice(highlightLen)}</Text>;
-    }
-    $[0] = maxWidth;
-    $[1] = twoLine;
-    $[2] = t1;
-    $[3] = t2;
-  } else {
-    t1 = $[2];
-    t2 = $[3];
-  }
-  if (t2 !== Symbol.for("react.early_return_sentinel")) {
-    return t2;
-  }
-  return t1;
+  return null;
 }
 
 /**

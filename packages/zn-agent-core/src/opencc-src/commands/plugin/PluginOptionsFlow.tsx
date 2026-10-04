@@ -60,75 +60,8 @@ export function PluginOptionsFlow({
   plugin,
   pluginId,
   onDone
-}: Props): React.ReactNode {
+}: Props): React.ReactNode | null {
   // Build the step list once at mount. Re-calling after a save would drop the
   // item we just configured.
-  const [steps] = React.useState<ConfigStep[]>(() => {
-    const result: ConfigStep[] = [];
-
-    // Top-level manifest.userConfig
-    const unconfigured = getUnconfiguredOptions(plugin);
-    if (Object.keys(unconfigured).length > 0) {
-      result.push({
-        key: 'top-level',
-        title: `Configure ${plugin.name}`,
-        subtitle: 'Plugin options',
-        schema: unconfigured,
-        load: () => loadPluginOptions(pluginId),
-        save: values => savePluginOptions(pluginId, values, plugin.manifest.userConfig!)
-      });
-    }
-
-    // Per-channel userConfig (assistant-mode channels)
-    const channels: UnconfiguredChannel[] = getUnconfiguredChannels(plugin);
-    for (const channel of channels) {
-      result.push({
-        key: `channel:${channel.server}`,
-        title: `Configure ${channel.displayName}`,
-        subtitle: `Plugin: ${plugin.name}`,
-        schema: channel.configSchema,
-        load: () => loadMcpServerUserConfig(pluginId, channel.server) ?? undefined,
-        save: values_0 => saveMcpServerUserConfig(pluginId, channel.server, values_0, channel.configSchema)
-      });
-    }
-    return result;
-  });
-  const [index, setIndex] = React.useState(0);
-
-  // Latest-ref: lets the effect close over the current onDone without
-  // re-running when the parent re-renders.
-  const onDoneRef = React.useRef(onDone);
-  onDoneRef.current = onDone;
-
-  // Nothing to configure → tell the caller and render nothing. Effect,
-  // not inline call: calling setState in the parent during our render
-  // is a React rules-of-hooks violation.
-  React.useEffect(() => {
-    if (steps.length === 0) {
-      onDoneRef.current('skipped');
-    }
-  }, [steps.length]);
-  if (steps.length === 0) {
-    return null;
-  }
-  const current = steps[index]!;
-  function handleSave(values_1: PluginOptionValues): void {
-    try {
-      current.save(values_1);
-    } catch (err) {
-      onDone('error', errorMessage(err));
-      return;
-    }
-    const next = index + 1;
-    if (next < steps.length) {
-      setIndex(next);
-    } else {
-      onDone('configured');
-    }
-  }
-
-  // key forces a remount when advancing to the next step — React would
-  // otherwise reuse the instance and carry PluginOptionsDialog's
-  // internal useState (field index, typed values) over.
-  return <PluginOptionsDialog key={current.key} title={current.title} subtitle={current.subtitle} configSchema={current.schema} initialValues={current.load()} onSave={handleSave} onCancel={() => onDone('skipped')} />;
+  return null;
 }

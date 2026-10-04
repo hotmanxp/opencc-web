@@ -13,16 +13,5 @@ type Props = {
 // Dumping the whole rules block into the transcript is noise; render a compact
 // marker with just the directive.
 export function UserForkBoilerplateMessage({ addMargin, param }: Props) {
-  const text = param.text ?? ''
-  const prefixIdx = text.indexOf(FORK_DIRECTIVE_PREFIX)
-  const directive =
-    prefixIdx === -1
-      ? ''
-      : text.slice(prefixIdx + FORK_DIRECTIVE_PREFIX.length).trim()
-  return (
-    <Box flexDirection="row" marginTop={addMargin ? 1 : 0}>
-      <Text dimColor={true}>⑂ forked worker</Text>
-      {directive ? <Text color="text">{`: ${directive}`}</Text> : null}
-    </Box>
-  )
+  return null;
 }

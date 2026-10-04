@@ -28,22 +28,6 @@ export function AgentDetailDialog({
   title,
   onCancel,
   hideInputGuide,
-}: Props): React.ReactNode {
-  const [routing, setRouting] = React.useState(false)
-  return (
-    <Dialog
-      title={title}
-      onCancel={onCancel}
-      hideInputGuide={hideInputGuide}
-      isCancelActive={!routing}
-    >
-      <AgentDetail
-        agent={agent}
-        tools={tools}
-        allAgents={allAgents}
-        onBack={onBack}
-        onRoutingChange={setRouting}
-      />
-    </Dialog>
-  )
+}: Props): React.ReactNode | null {
+  return null;
 }

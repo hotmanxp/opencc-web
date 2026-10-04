@@ -80,43 +80,7 @@ type Props = {
 // Threshold for when we show a full-line diff instead of word-level diffing
 const CHANGE_THRESHOLD = 0.4;
 export function StructuredDiffFallback(t0) {
-  const $ = _c(10);
-  const {
-    patch,
-    dim,
-    width
-  } = t0;
-  const [theme] = useTheme();
-  let t1;
-  if ($[0] !== dim || $[1] !== patch.lines || $[2] !== patch.oldStart || $[3] !== theme || $[4] !== width) {
-    t1 = formatDiff(patch.lines, patch.oldStart, width, dim, theme);
-    $[0] = dim;
-    $[1] = patch.lines;
-    $[2] = patch.oldStart;
-    $[3] = theme;
-    $[4] = width;
-    $[5] = t1;
-  } else {
-    t1 = $[5];
-  }
-  const diff = t1;
-  let t2;
-  if ($[6] !== diff) {
-    t2 = diff.map(_temp);
-    $[6] = diff;
-    $[7] = t2;
-  } else {
-    t2 = $[7];
-  }
-  let t3;
-  if ($[8] !== t2) {
-    t3 = <Box flexDirection="column" flexGrow={1}>{t2}</Box>;
-    $[8] = t2;
-    $[9] = t3;
-  } else {
-    t3 = $[9];
-  }
-  return t3;
+  return null;
 }
 
 // Transform lines to line objects with type information

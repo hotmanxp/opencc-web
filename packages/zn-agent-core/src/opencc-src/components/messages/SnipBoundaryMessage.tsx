@@ -9,18 +9,5 @@ export function SnipBoundaryMessage({
 }: {
   message: { snipMetadata?: { removedUuids?: string[] } }
 }) {
-  const historyShortcut = useShortcutDisplay(
-    'app:toggleTranscript',
-    'Global',
-    'ctrl+o',
-  )
-  const count = message?.snipMetadata?.removedUuids?.length ?? 0
-  const label = count === 1 ? '1 message' : `${count} messages`
-  return (
-    <Box marginY={1}>
-      <Text dimColor={true}>
-        ✂ Conversation history snipped ({label}, {historyShortcut} for history)
-      </Text>
-    </Box>
-  )
+  return null;
 }

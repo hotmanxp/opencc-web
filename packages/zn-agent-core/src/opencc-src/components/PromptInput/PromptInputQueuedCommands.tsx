@@ -68,62 +68,7 @@ function processQueuedCommands(queuedCommands: QueuedCommand[]): QueuedCommand[]
   };
   return [...otherCommands, ...visibleNotifications, overflowCommand];
 }
-function PromptInputQueuedCommandsImpl(): React.ReactNode {
-  const queuedCommands = useCommandQueue();
-  const viewingAgent = useAppState((s: AppState) => !!s.viewingAgentTaskId);
-  // Brief layout: dim queue items + skip the paddingX (brief messages
-  // already indent themselves). Gate mirrors the brief-spinner/message
-  // check elsewhere — no teammate-view override needed since this
-  // component early-returns when viewing a teammate.
-  const useBriefLayout = false || false ?
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
-  useAppState((s_0: AppState) => s_0.isBriefOnly) : false;
-
-  // createUserMessage mints a fresh UUID per call; without memoization, streaming
-  // re-renders defeat Message's areMessagePropsEqual (compares uuid) → flicker.
-  const queuedPromptCount = useMemo(
-    () =>
-      queuedCommands.filter(
-        cmd => isQueuedCommandEditable(cmd) && cmd.mode === 'prompt',
-      ).length,
-    [queuedCommands],
-  );
-
-  const messages = useMemo(() => {
-    if (queuedCommands.length === 0) return null;
-    // task-notification is shown via useInboxNotification; most isMeta commands
-    // (scheduled tasks, proactive ticks) are system-generated and hidden.
-    // Channel messages are the exception — isMeta but shown so the keyboard
-    // user sees what arrived.
-    const visibleCommands = queuedCommands.filter(isQueuedCommandVisible);
-    if (visibleCommands.length === 0) return null;
-    const processedCommands = processQueuedCommands(visibleCommands);
-    return normalizeMessages(processedCommands.map(cmd => {
-      let content = cmd.value;
-      if (cmd.mode === 'bash' && typeof content === 'string') {
-        content = `<bash-input>${content}</bash-input>`;
-      }
-      // [Image #N] placeholders are inline in the text value (inserted at
-      // paste time), so the queue preview shows them without stub blocks.
-      return createUserMessage({
-        content
-      });
-    }));
-  }, [queuedCommands]);
-
-  // Don't show leader's queued commands when viewing any agent's transcript
-  if (viewingAgent || messages === null) {
-    return null;
-  }
-  return <Box marginTop={1} flexDirection="column">
-      {queuedPromptCount > 0 && <Box marginLeft={2} marginBottom={1}>
-          <Text dimColor>
-            {queuedPromptCount === 1 ? '1 message queued for next turn' : `${queuedPromptCount} messages queued for next turn`}
-          </Text>
-        </Box>}
-      {messages.map((message, i) => <QueuedMessageProvider key={i} isFirst={i === 0} useBriefLayout={useBriefLayout}>
-          <Message message={message} lookups={EMPTY_LOOKUPS} addMargin={false} tools={[]} commands={[]} verbose={false} inProgressToolUseIDs={EMPTY_SET} progressMessagesForMessage={[]} shouldAnimate={false} shouldShowDot={false} isTranscriptMode={false} isStatic={true} />
-        </QueuedMessageProvider>)}
-    </Box>;
+function PromptInputQueuedCommandsImpl(): React.ReactNode | null {
+  return null;
 }
 export const PromptInputQueuedCommands = React.memo(PromptInputQueuedCommandsImpl);

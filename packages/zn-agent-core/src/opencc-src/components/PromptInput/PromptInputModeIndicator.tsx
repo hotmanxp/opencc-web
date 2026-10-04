@@ -43,51 +43,8 @@ type PromptCharProps = {
  * Teammate color overrides the default color when set.
  */
 function PromptChar(t0) {
-  const $ = _c(3);
-  const {
-    isLoading,
-    themeColor
-  } = t0;
-  const teammateColor = themeColor;
-  const color = teammateColor ?? (false ? "subtle" : undefined);
-  let t1;
-  if ($[0] !== color || $[1] !== isLoading) {
-    t1 = <Text color={color} dimColor={isLoading}>{figures.pointer} </Text>;
-    $[0] = color;
-    $[1] = isLoading;
-    $[2] = t1;
-  } else {
-    t1 = $[2];
-  }
-  return t1;
+  return null;
 }
 export function PromptInputModeIndicator(t0) {
-  const $ = _c(6);
-  const {
-    mode,
-    isLoading,
-    viewingAgentName,
-    viewingAgentColor
-  } = t0;
-  let t1;
-  if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
-    t1 = getTeammateThemeColor();
-    $[0] = t1;
-  } else {
-    t1 = $[0];
-  }
-  const teammateColor = t1;
-  const viewedTeammateThemeColor = viewingAgentColor ? AGENT_COLOR_TO_THEME_COLOR[viewingAgentColor] : undefined;
-  let t2;
-  if ($[1] !== isLoading || $[2] !== mode || $[3] !== viewedTeammateThemeColor || $[4] !== viewingAgentName) {
-    t2 = <Box alignItems="flex-start" alignSelf="flex-start" flexWrap="nowrap" justifyContent="flex-start">{viewingAgentName ? <PromptChar isLoading={isLoading} themeColor={viewedTeammateThemeColor} /> : mode === "bash" ? <Text color="bashBorder" dimColor={isLoading}>! </Text> : <PromptChar isLoading={isLoading} themeColor={isAgentSwarmsEnabled() ? teammateColor : undefined} />}</Box>;
-    $[1] = isLoading;
-    $[2] = mode;
-    $[3] = viewedTeammateThemeColor;
-    $[4] = viewingAgentName;
-    $[5] = t2;
-  } else {
-    t2 = $[5];
-  }
-  return t2;
+  return null;
 }
