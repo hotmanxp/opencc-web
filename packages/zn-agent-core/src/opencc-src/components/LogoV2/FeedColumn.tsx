@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { calculateFeedWidth } from './Feed.js'
 export function FeedColumn(t0) {
   return null;

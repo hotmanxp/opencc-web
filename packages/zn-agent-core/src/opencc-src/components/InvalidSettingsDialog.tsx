@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { ValidationError } from '../utils/settings/validation.js';
 type Props = {
   settingsErrors: ValidationError[];

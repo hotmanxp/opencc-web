@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { StructuredPatchHunk } from 'diff';
 type Props = {
   filePath: string;

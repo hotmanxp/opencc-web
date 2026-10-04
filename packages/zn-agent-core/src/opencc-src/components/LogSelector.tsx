@@ -1,4 +1,3 @@
-// @ts-nocheck
 import chalk from 'chalk';
 import React from 'react';
 import { getSessionId } from '../bootstrap/state.js'

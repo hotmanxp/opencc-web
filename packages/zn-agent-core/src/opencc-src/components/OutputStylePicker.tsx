@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { type OutputStyleConfig } from '../constants/outputStyles.js'
 import type { OutputStyle } from '../utils/config.js';
 import type { OptionWithDescription } from './CustomSelect/select.js';

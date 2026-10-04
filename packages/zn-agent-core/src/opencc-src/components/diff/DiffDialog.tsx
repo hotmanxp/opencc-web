@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { StructuredPatchHunk } from 'diff';
 import type { CommandResultDisplay } from '../../commands.js';
 import { type DiffData } from '../../hooks/useDiffData.js'

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input

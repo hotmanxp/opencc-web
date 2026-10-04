@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { ToolPermissionContext } from '../../../Tool.js';
 type Props = {
   directoryPath: string;

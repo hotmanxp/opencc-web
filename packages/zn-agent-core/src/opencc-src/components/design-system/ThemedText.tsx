@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { ReactNode } from 'react';
 import React, { useContext } from 'react';
 import type { Color, Styles } from '../../ink/styles.js';

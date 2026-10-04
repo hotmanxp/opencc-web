@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 type Props = {

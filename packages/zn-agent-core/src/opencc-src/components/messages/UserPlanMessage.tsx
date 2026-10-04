@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   addMargin: boolean;
   planContent: string;

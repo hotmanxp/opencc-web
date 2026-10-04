@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React from 'react';
 type Props = {
   /** The key or chord to display (e.g., "ctrl+o", "Enter", "↑/↓") */

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { createContext, useEffect, useState } from 'react';
 import { FRAME_INTERVAL_MS } from '../constants.js';
 export type Clock = {

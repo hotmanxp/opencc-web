@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useRef } from 'react'
 import type { RemoteAgentTaskState } from 'src/tasks/RemoteAgentTask/RemoteAgentTask.js';
 const TICK_MS = 80;

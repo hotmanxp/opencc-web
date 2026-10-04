@@ -1,4 +1,3 @@
-// @ts-nocheck
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import { Text } from '../../ink.js'
 import * as React from 'react';

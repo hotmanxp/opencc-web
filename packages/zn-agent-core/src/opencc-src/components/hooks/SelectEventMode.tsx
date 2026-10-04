@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * SelectEventMode is the entrypoint of the Hooks config menu, where the user
  * sees the list of available hook events.

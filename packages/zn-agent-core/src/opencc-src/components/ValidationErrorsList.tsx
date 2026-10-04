@@ -1,4 +1,3 @@
-// @ts-nocheck
 import setWith from 'lodash-es/setWith.js';
 import * as React from 'react';
 import { Box, Text } from '../ink.js'

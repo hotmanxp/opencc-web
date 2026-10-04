@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   initialLanguage: string | undefined;
   onComplete: (language: string | undefined) => void;

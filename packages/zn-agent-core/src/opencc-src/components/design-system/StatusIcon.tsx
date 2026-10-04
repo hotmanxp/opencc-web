@@ -1,4 +1,3 @@
-// @ts-nocheck
 import figures from 'figures';
 import React from 'react';
 type Status = 'success' | 'error' | 'warning' | 'info' | 'pending' | 'loading';

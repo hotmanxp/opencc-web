@@ -1,4 +1,3 @@
-// @ts-nocheck
 export type Props = {
   currentValue: boolean;
   onSelect: (enabled: boolean) => void;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * SelectHookMode shows all hooks configured for a given event+matcher pair.
  *

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw 'd' key for disconnect, not a configurable keybinding action

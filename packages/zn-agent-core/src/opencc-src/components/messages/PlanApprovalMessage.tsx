@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import { jsonParse } from '../../utils/slowOperations.js';
 import { type IdleNotificationMessage, isIdleNotification, isPlanApprovalRequest, isPlanApprovalResponse } from '../../utils/teammateMailbox.js'

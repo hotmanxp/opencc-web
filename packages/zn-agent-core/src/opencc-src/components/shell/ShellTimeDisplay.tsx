@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   elapsedTimeSeconds?: number;
   timeoutMs?: number;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { ConfigScope, McpServerConfig } from '../services/mcp/types.js'
 type Props = {
   servers: Record<string, McpServerConfig>;

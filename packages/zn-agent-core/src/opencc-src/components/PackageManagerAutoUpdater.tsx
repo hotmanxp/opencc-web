@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { type AutoUpdaterResult } from '../utils/autoUpdater.js'
 import { type PackageManager } from '../utils/nativeInstaller/packageManagers.js'
 type Props = {

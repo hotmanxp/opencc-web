@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Question } from '../../../tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js';
 type Props = {

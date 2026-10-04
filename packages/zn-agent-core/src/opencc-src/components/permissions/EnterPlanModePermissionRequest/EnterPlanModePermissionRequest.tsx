@@ -1,4 +1,3 @@
-// @ts-nocheck
 export function EnterPlanModePermissionRequest(t0) {
   return null;
 }

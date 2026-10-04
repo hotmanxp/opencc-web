@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { homedir } from 'os';
 import { relative } from 'path';
 import { getCwd } from '../../utils/cwd.js';

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React from 'react';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { Box, Text } from '../../ink.js';

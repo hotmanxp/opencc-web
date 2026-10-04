@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 type Props = {
   children: React.ReactNode;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { envDynamic } from 'src/utils/envDynamic.js';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { type IDEExtensionInstallationStatus } from '../utils/ide.js'

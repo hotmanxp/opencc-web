@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   isError: boolean;
   isUnresolved: boolean;

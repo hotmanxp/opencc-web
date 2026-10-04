@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { createContext, useMemo, useSyncExternalStore } from 'react';
 import { type TerminalFocusState } from '../terminal-focus-state.js'
 export type { TerminalFocusState };

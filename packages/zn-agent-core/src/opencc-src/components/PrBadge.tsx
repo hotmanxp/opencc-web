@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React from 'react';
 import type { PrReviewState } from '../utils/ghPrStatus.js';
 type Props = {

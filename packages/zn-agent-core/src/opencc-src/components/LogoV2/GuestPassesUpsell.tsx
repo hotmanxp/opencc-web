@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useState } from 'react';
 import { logEvent } from '../../services/analytics/index.js';
 import { checkCachedPassesEligibility, getCachedRemainingPasses } from '../../services/api/referral.js'

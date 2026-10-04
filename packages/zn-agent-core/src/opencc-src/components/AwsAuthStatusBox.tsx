@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useEffect, useState } from 'react';
 import { Link, Text } from '../ink.js'
 const URL_RE = /https?:\/\/\S+/;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { NormalizedMessage } from '../types/message.js';
 type Props = {
   message: NormalizedMessage;

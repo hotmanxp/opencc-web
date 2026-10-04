@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { getGlobalConfig } from '../../utils/config.js'
 import { getInitialSettings } from '../../utils/settings/settings.js';
 import { isVoiceModeEnabled } from '../../voice/voiceModeEnabled.js';

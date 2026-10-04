@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { isFastModeEnabled } from 'src/utils/fastMode.js'
 import { convertEffortValueToLevel, type EffortLevel, getDefaultEffortForModel } from '../utils/effort.js'
 import { getDefaultMainLoopModel, type ModelSetting, parseUserSpecifiedModel } from '../utils/model/model.js'

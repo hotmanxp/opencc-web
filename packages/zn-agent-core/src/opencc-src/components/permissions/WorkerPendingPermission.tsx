@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   toolName: string;
   description: string;

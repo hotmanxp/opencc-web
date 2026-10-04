@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   onBackgroundSession: () => void;
   isLoading: boolean;

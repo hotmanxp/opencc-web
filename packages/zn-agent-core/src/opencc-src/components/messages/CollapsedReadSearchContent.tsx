@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useRef } from 'react';
 import { type Tools } from '../../Tool.js'
 import type { CollapsedReadSearchGroup } from '../../types/message.js'

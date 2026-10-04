@@ -1,4 +1,3 @@
-// @ts-nocheck
 import chalk from 'chalk';
 import { LIGHTNING_BOLT } from '../constants/figures.js';
 import { getGlobalConfig } from '../utils/config.js';

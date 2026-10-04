@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import { type Tool, type Tools } from '../../../Tool.js'
 import type { ProgressMessage } from '../../../types/message.js';

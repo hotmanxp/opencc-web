@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useMemo } from 'react';
 import type { ValidationError } from 'src/utils/settings/validation.js';
 import { Box, Text } from '../../ink.js'

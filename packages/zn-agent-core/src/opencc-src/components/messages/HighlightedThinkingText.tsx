@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   text: string;
   useBriefLayout?: boolean;

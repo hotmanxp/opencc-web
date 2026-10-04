@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useCallback, useState } from 'react'
 import type { OptionWithDescription } from '../CustomSelect/select.js'
 import { type UnaryEvent } from './hooks.js'

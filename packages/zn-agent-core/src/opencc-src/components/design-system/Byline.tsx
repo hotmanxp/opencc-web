@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { Children, isValidElement } from 'react';
 import { Text } from '../../ink.js';
 type Props = {

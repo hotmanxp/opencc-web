@@ -1,4 +1,3 @@
-// @ts-nocheck
 export type ChannelDowngradeChoice = 'downgrade' | 'stay' | 'cancel';
 type Props = {
   currentVersion: string;

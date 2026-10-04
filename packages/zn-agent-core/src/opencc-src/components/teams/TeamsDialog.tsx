@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { randomUUID } from 'crypto';
 import figures from 'figures';
 import * as React from 'react';

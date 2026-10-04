@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { stringWidth } from '../../../ink/stringWidth.js';
 import { type CliHighlight } from '../../../utils/cliHighlight.js'
 type PreviewBoxProps = {

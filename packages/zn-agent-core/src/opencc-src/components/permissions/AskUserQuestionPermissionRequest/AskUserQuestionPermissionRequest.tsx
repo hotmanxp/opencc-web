@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Base64ImageSource, ImageBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
 import type { QuestionOption } from '../../../tools/AskUserQuestionTool/AskUserQuestionTool.js'
 import { type CliHighlight } from '../../../utils/cliHighlight.js'

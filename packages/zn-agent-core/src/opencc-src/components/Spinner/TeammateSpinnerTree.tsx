@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   selectedIndex?: number;
   isInSelectionMode?: boolean;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { type ReactNode } from 'react';
 import type { Tools } from '../../../../Tool.js';
 type Props = {

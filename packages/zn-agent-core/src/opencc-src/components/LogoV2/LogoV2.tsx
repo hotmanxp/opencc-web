@@ -1,4 +1,3 @@
-// @ts-nocheck
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 
 // Conditional require so ChannelsNotice.tsx tree-shakes when both flags are

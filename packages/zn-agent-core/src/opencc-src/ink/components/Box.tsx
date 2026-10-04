@@ -1,4 +1,3 @@
-// @ts-nocheck
 import '../global.d.ts';
 import React, { type PropsWithChildren } from 'react';
 import type { Except } from 'type-fest';

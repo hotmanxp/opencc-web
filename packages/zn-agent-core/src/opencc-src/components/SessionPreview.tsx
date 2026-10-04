@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { LogOption } from '../types/logs.js';
 type Props = {
   log: LogOption;

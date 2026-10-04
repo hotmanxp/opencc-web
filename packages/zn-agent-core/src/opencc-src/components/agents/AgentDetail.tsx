@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Tools } from '../../Tool.js';
 import { type AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
 type Props = {

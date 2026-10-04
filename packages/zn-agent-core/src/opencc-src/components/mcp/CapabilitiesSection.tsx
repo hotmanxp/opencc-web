@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   serverToolsCount: number;
   serverPromptsCount: number;

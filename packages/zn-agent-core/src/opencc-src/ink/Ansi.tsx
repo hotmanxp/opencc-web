@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React from 'react';
 import type { Color } from './styles.js';
 import { type NamedColor, Parser, type Color as TermioColor, type TextStyle } from './termio.js';

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import capitalize from 'lodash-es/capitalize.js';
 import * as React from 'react';
 import { useMemo } from 'react';

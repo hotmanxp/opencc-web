@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   onComplete: (result?: string) => void;
   path?: string;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import sample from 'lodash-es/sample.js';
 function getSavingMessage(): string {
   return sample(['Got it.', 'Good to know.', 'Noted.']);

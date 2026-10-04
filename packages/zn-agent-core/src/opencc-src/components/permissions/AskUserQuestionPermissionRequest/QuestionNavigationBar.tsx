@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { stringWidth } from '../../../ink/stringWidth.js';
 import type { Question } from '../../../tools/AskUserQuestionTool/AskUserQuestionTool.js';
 type Props = {

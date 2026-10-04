@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React from 'react';
 import type { AdvisorBlock } from '../../utils/advisor.js';
 type Props = {

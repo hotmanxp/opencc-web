@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useMemo, useState } from 'react';
 import type { LocalJSXCommandContext } from '../../commands.js'
 import type { ToolUseContext } from '../../Tool.js';

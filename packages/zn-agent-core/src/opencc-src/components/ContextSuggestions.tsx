@@ -1,4 +1,3 @@
-// @ts-nocheck
 import figures from 'figures';
 import { Box, Text } from '../ink.js';
 import type { ContextSuggestion } from '../utils/contextSuggestions.js';

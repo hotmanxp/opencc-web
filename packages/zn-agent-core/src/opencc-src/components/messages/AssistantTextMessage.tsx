@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 const MAX_API_ERROR_CHARS = 1000;
 type Props = {

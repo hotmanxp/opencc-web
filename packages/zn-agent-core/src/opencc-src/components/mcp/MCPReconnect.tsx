@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { CommandResultDisplay } from '../../commands.js';
 type Props = {
   serverName: string;

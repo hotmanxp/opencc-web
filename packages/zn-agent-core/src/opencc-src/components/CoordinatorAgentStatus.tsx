@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * CoordinatorTaskPanel — Steerable list of background agents.
  *

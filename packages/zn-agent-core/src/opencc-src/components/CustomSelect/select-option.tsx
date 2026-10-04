@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { type ReactNode } from 'react'
 export type SelectOptionProps = {
   /**

@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   serverName: string;
   onDone(): void;

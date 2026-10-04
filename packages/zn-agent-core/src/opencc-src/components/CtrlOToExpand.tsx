@@ -1,4 +1,3 @@
-// @ts-nocheck
 import chalk from 'chalk';
 import React, { useContext } from 'react';
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';

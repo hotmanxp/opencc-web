@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { getViewedTeammateTask } from '../state/selectors.js';
 
 /**

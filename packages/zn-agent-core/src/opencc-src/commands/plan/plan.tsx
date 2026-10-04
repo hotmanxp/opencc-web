@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import { handlePlanModeTransition } from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext } from '../../commands.js';

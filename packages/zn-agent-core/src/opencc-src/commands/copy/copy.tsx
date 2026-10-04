@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { mkdir, writeFile } from 'fs/promises';
 import { marked, type Tokens } from 'marked';
 import { tmpdir } from 'os';

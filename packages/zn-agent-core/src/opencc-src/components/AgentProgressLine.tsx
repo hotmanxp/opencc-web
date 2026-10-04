@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Theme } from '../utils/theme.js';
 type Props = {
   agentType: string;

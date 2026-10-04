@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { diffWordsWithSpace, type StructuredPatchHunk } from 'diff';
 import * as React from 'react';
 import { useMemo } from 'react';

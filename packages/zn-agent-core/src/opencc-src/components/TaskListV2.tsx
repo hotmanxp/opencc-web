@@ -1,4 +1,3 @@
-// @ts-nocheck
 import figures from 'figures';
 import * as React from 'react';
 import { type Task } from '../utils/tasks.js'

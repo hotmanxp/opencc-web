@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { PermissionBehavior, PermissionRuleValue } from '../../../utils/permissions/PermissionRule.js';
 export type PermissionRuleInputProps = {
   onCancel: () => void;

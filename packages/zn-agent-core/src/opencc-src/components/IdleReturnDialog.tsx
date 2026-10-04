@@ -1,4 +1,3 @@
-// @ts-nocheck
 type IdleReturnAction = 'continue' | 'clear' | 'dismiss' | 'never';
 type Props = {
   idleMinutes: number;

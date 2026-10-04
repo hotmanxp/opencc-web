@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { isENOENT } from 'src/utils/errors.js';
 export function SedEditPermissionRequest(t0) {
   return null;

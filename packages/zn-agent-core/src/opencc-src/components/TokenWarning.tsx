@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   tokenUsage: number;
   model: string;

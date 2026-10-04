@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { PromptRequest } from '../../types/hooks.js';
 type Props = {
   title: string;

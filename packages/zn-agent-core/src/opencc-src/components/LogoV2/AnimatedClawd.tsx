@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { useEffect, useRef, useState } from 'react';
 import { getInitialSettings } from '../../utils/settings/settings.js';
 import { type ClawdPose } from './Clawd.js'

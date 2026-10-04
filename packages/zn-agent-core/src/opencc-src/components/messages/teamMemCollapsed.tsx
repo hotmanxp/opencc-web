@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { CollapsedReadSearchGroup } from '../../types/message.js';
 
 /**

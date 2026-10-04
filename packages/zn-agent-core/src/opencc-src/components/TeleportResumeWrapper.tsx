@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 /**
  * Wrapper component that manages the full teleport resume flow,

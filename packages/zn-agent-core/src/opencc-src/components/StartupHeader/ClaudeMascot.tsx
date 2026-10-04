@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 // 3-row mascot sprite for the REPL startup header.
 // Each row is a fixed string; do NOT edit characters — they are designed

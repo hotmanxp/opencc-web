@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React from 'react';
 import type { PermissionOption, PermissionOptionWithLabel } from './permissions/FilePermissionDialog/permissionOptions.js';
 type Props<A> = {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import chalk from 'chalk';
 import type { UUID } from 'crypto';
 import * as React from 'react';

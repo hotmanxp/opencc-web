@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { StructuredPatchHunk } from 'diff';
 import { count } from '../utils/array.js';
 type Props = {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   voiceState: 'idle' | 'recording' | 'processing';
 };

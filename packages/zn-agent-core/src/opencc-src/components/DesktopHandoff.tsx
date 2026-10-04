@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { CommandResultDisplay } from '../commands.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw input for "any key" dismiss and y/n prompt
 import { gracefulShutdown } from '../utils/gracefulShutdown.js';

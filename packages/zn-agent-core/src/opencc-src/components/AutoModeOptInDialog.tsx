@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { logEvent } from 'src/services/analytics/index.js';
 
 // NOTE: This copy is legally reviewed — do not modify without Legal team approval.

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import type { UnifiedInstalledItem } from './unifiedTypes.js';
 type Props = {

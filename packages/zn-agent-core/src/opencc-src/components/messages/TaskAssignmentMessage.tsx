@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import { isTaskAssignment, type TaskAssignmentMessage } from '../../utils/teammateMailbox.js';
 type Props = {

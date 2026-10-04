@@ -1,4 +1,3 @@
-// @ts-nocheck
 export type TranscriptShareResponse = 'yes' | 'no' | 'dont_ask_again';
 type Props = {
   onSelect: (option: TranscriptShareResponse) => void;

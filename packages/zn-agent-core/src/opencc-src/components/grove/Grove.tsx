@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useEffect, useState } from 'react';
 import { logEvent } from 'src/services/analytics/index.js'
 import { Text } from '../../ink.js'

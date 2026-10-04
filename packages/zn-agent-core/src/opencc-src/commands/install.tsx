@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import React, { useEffect, useState } from 'react';

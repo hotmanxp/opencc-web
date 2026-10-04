@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   output: string;
   fullOutput: string;

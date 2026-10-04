@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useMemo } from 'react';
 import type { z } from 'zod/v4';
 import { FileWriteTool } from '../../../tools/FileWriteTool/FileWriteTool.js';

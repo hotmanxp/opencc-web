@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { ToolInput } from '../FilePermissionDialog/useFilePermissionDialog.js';
 import type { ToolUseConfirm } from '../PermissionRequest.js'
 function pathFromToolUse(toolUseConfirm: ToolUseConfirm): string | null {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 /**
  * Format a context-window token count for display after the model name.

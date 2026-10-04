@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { ChannelEntry } from '../bootstrap/state.js';
 import { gracefulShutdownSync } from '../utils/gracefulShutdown.js';
 type Props = {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { StructuredPatchHunk } from 'diff';
 import * as React from 'react';
 const MAX_LINES_TO_RENDER = 10;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * HooksConfigMenu is a read-only browser for configured hooks.
  *

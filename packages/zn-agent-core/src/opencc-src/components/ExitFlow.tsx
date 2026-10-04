@@ -1,4 +1,3 @@
-// @ts-nocheck
 import sample from 'lodash-es/sample.js';
 const GOODBYE_MESSAGES = ['Goodbye!', 'See ya!', 'Bye!', 'Catch you later!'];
 function getRandomGoodbyeMessage(): string {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React from 'react';
 import type { z } from 'zod/v4';
 import { FileEditTool } from '../../../tools/FileEditTool/FileEditTool.js';

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';

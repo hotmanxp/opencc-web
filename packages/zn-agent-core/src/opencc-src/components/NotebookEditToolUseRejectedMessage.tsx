@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   notebook_path: string;
   cell_id: string | undefined;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { stringWidth } from 'src/ink/stringWidth.js';
 import { isPanelAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
 import { isBackgroundTask } from 'src/tasks/types.js'

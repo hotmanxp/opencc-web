@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { type PropsWithChildren } from 'react';
 import type { DOMElement } from '../../ink/dom.js';
 import type { ClickEvent } from '../../ink/events/click-event.js';

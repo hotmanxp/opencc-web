@@ -1,4 +1,3 @@
-// @ts-nocheck
 export function CondensedLogo() {
   return null;
 }

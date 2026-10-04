@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { CommandResultDisplay } from '../../../commands.js';
 import type { ToolPermissionContext } from '../../../Tool.js';
 type Props = {

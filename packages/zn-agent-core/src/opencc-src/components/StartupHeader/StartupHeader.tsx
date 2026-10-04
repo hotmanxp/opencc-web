@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react'
 import { useMemo } from 'react'
 import { getSdkBetas } from '../../bootstrap/state.js'

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import { useState } from 'react';
 import type { Root } from '../ink.js';

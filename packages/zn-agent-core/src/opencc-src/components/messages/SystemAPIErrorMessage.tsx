@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { SystemAPIErrorMessage } from 'src/types/message.js';
 const MAX_API_ERROR_CHARS = 1000;
 type Props = {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import type { AgentDefinitionsResult } from '../tools/AgentTool/loadAgentsDir.js';
 import type { MemoryFileInfo } from '../utils/claudemd.js';

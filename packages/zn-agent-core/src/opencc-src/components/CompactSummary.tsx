@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Screen } from '../screens/REPL.js';
 import type { NormalizedUserMessage } from '../types/message.js';
 type Props = {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { logError } from 'src/utils/log.js';
 import { SkillTool } from '../../../tools/SkillTool/SkillTool.js';
 export function SkillPermissionRequest(props) {

@@ -1,4 +1,3 @@
-// @ts-nocheck
  // Used for /mock-limits command
 type UpsellParams = {
   shouldShowUpsell: boolean;

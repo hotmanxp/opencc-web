@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { StructuredPatchHunk } from 'diff';
 import * as React from 'react';
 import { memo } from 'react';

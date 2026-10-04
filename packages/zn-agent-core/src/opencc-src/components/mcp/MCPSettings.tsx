@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useEffect, useMemo } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 type Props = {

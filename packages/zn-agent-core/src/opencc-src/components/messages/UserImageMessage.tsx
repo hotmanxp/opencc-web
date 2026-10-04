@@ -1,4 +1,3 @@
-// @ts-nocheck
 type Props = {
   imageId?: number;
   addMargin?: boolean;

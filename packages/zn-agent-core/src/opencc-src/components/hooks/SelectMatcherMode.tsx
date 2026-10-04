@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * SelectMatcherMode shows the configured matchers for a selected hook event.
  *

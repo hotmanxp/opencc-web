@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { type Theme } from '../../utils/theme.js'
 import { getDefaultCharacters } from './utils.js'
 const DEFAULT_CHARACTERS = getDefaultCharacters();

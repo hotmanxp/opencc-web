@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useEffect, useRef } from 'react';
 import { BULLET_OPERATOR } from '../constants/figures.js'
 import { Text } from '../ink.js'

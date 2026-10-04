@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { AutoUpdaterResult } from '../utils/autoUpdater.js';
 type Props = {
   isUpdating: boolean;

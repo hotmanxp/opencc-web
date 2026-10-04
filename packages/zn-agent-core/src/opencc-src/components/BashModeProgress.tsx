@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { ShellProgress } from '../types/tools.js';
 type Props = {
   input: string;

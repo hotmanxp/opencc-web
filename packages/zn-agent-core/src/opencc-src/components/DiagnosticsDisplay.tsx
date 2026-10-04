@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { relative } from 'path';
 import React from 'react';
 import { Text } from '../ink.js'

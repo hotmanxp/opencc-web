@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { getGlobalConfig } from '../utils/config.js'
 import { isSupportedTerminal } from '../utils/ide.js';
 export function IdeAutoConnectDialog(t0) {

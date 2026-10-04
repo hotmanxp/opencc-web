@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { WebFetchTool } from '../../../tools/WebFetchTool/WebFetchTool.js';
 function inputToPermissionRuleContent(input: {
   [k: string]: unknown;

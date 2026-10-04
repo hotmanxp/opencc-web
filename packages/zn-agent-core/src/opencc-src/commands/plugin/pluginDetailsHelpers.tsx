@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Shared helper functions and types for plugin details views
  *

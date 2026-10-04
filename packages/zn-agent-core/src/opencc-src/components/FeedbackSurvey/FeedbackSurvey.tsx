@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { TranscriptShareResponse } from './TranscriptSharePrompt.js';
 import type { FeedbackSurveyResponse } from './utils.js';
 type Props = {

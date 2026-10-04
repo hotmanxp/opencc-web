@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { type PropsWithChildren } from 'react';
 import { type Props as BoxProps } from './Box.js'
 type Props = Omit<BoxProps, 'noSelect'> & {

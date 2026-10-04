@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { ReactNode } from 'react';
 import { type StatsStore } from '../context/stats.js'
 import { type AppState } from '../state/AppState.js'

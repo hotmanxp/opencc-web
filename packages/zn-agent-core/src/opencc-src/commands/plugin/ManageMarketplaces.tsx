@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as React from 'react';
 import { useEffect, useRef, useState } from 'react';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for marketplace-specific u/r shortcuts and y/n confirmation not in keybinding schema

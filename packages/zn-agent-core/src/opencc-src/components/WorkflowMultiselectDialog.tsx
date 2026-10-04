@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useCallback, useState } from 'react';
 import { BRAND_NAME } from '../constants.js';
 import type { Workflow } from '../commands/install-github-app/types.js';

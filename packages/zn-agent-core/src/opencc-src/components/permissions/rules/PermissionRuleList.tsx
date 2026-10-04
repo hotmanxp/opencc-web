@@ -1,4 +1,3 @@
-// @ts-nocheck
 import chalk from 'chalk';
 import type { CommandResultDisplay } from '../../../commands.js';
 import type { PermissionBehavior } from '../../../utils/permissions/PermissionRule.js'

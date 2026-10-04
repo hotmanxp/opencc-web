@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * ViewHookMode shows read-only details for a single configured hook.
  *

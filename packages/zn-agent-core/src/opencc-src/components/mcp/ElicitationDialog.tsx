@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { ElicitResult, PrimitiveSchemaDefinition } from '@modelcontextprotocol/sdk/types.js'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw text input for elicitation form

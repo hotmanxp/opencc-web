@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { getGlobalConfig } from '../../utils/config.js'
 import { isOpus1mMergeEnabled } from '../../utils/model/model.js';
 const MAX_SHOW_COUNT = 6;

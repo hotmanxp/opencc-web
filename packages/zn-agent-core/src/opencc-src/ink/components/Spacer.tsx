@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 /**
  * A flexible space that expands along the major axis of its containing layout.

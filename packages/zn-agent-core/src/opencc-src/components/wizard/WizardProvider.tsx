@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { createContext, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import type { WizardContextValue, WizardProviderProps } from './types.js';
 

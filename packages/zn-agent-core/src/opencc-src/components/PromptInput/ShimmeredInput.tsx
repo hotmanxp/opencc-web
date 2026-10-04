@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { type TextHighlight } from '../../utils/textHighlighting.js'
 type Props = {
   text: string;

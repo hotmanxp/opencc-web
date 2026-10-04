@@ -1,4 +1,3 @@
-// @ts-nocheck
 export type ClawdPose = 'default' | 'arms-up' // both arms raised (used during jump)
 | 'look-left' // both pupils shifted left
 | 'look-right'; // both pupils shifted right

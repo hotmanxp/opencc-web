@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React, { useCallback, useState } from 'react';
 import { Text } from '../ink.js'
 import { getDisplayPath } from '../utils/file.js';

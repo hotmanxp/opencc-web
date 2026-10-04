@@ -1,4 +1,3 @@
-// @ts-nocheck
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw text input for config dialog
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import type { PluginOptionSchema, PluginOptionValues } from '../../utils/plugins/pluginOptionsStorage.js';

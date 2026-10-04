@@ -1,4 +1,3 @@
-// @ts-nocheck
 import React from 'react';
 type Props = {
   /** The absolute file path */

@@ -1,4 +1,3 @@
-// @ts-nocheck
 const WELCOME_V2_WIDTH = 58;
 export function WelcomeV2() {
   return null;
