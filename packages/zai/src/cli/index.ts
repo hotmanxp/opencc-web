@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerProcessOutputErrorHandlers } from '@zn-ai/zn-agent-core';
-import { logHttp } from '../server/services/accessLog.js';
+import { installProcessGuards } from './processGuards.js';
 import { runDev } from './dev.js';
 import { runStart } from './start.js';
 
@@ -13,29 +13,10 @@ import { runStart } from './start.js';
 // 因为 unhandled 'error' event 直接 crash.
 registerProcessOutputErrorHandlers();
 
-// 进程级 unhandledRejection 兜底 (2026-10-05, bug
-// `async-handler-rejection-kills-process`).
-//
-// zai 跑 Express 4 —— 它**不**转发 async handler 返回的 rejected promise,
-// 于是任何一个 async 路由里没 catch 的 await 都会变成 unhandledRejection。
-// Node 15+ 的默认行为是 `throw` 终止进程:一个请求的 ENOENT/EACCES 就能把
-// 整个 server 带走,连带所有会话的 SSE、在跑的 turn、后台 runtime 全部消失。
-// index.ts 的 catch-all error handler 对 async 路径完全无效,救不了这个。
-//
-// 这里只记日志、**不退出**:unhandledRejection 绝大多数是「某个 await 挂了」
-// 而不是「进程状态已损坏」,保住进程与其它会话、让受影响的请求降级成 500
-// 明显优于整服重启。这是 R2-a,一处覆盖所有现有及未来路由 —— 逐路由补
-// try/catch(R2-c)修的是根因,但止血必须先有。
-//
-// 刻意**不**加 `uncaughtException` 后静默继续:同步异常意味着进程状态可能已经
-// 不一致,继续跑是另一个量级的决定,需要单独讨论。
-process.on('unhandledRejection', (reason) => {
-  const err = reason as Error | undefined;
-  logHttp(
-    `[zai-fatal] unhandledRejection: ${reason}\n${err?.stack ?? '(no stack — non-Error rejection)'}`,
-    'error',
-  );
-});
+// 进程级 unhandledRejection 兜底(2026-10-05, bug
+// `async-handler-rejection-kills-process`)。理由见 processGuards.ts 注释。
+// 必须在这里、任何服务代码跑起来之前装上 —— 装晚了就漏掉了启动期的 rejection。
+installProcessGuards();
 
 // bun run / pnpm 追加参数给脚本时会留下一个裸 `--` (例如
 // `pnpm dev -- --sdk` → `bun run src/cli/index.ts dev -- --sdk`, bun
