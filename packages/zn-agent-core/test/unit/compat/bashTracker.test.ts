@@ -98,3 +98,59 @@ describe('BashBackgroundTracker — markTaskNotified 终态不再触发 debounce
     expect(notified).toEqual([false, true])
   })
 })
+
+/**
+ * zai patch (2026-10-05): markFinished 透传终态输出。
+ *
+ * 此前 BashTaskInfo.stdout/stderr 恒为空串 —— appendOutput() 在生产代码里
+ * 零调用方,真实输出只落盘到 /tmp 的 task output 文件。后台 bash 通知因此
+ * 拿不到任何命令输出,模型每次都得再 Read 一次那个文件
+ * (现场 sess-1791173729117-ntgf8hz6:两次后台 push 通知后各 Read 一次)。
+ * 现在由 LocalShellTask 的三处 markFinished 调用点把 result 里的输出带进来。
+ */
+describe('BashBackgroundTracker — markFinished 透传终态输出', () => {
+  let tracker: BashBackgroundTracker
+  let emits: Array<unknown>
+
+  beforeEach(() => {
+    resetStateChangeBusForTests()
+    tracker = new BashBackgroundTracker()
+    emits = []
+    stateChangeBus.on('bash_task.changed', (e) => emits.push(e))
+  })
+
+  afterEach(() => {
+    tracker.__resetForTests()
+    resetStateChangeBusForTests()
+  })
+
+  it('info 里的 stdout/stderr 写入 task,并出现在 emit 快照里', () => {
+    tracker.register('t1', { sessionId: 's1', command: 'git push', description: 'push', startedAt: 1 })
+    const t = tracker.markFinished('t1', 'failed', {
+      exitCode: 128,
+      stdout: 'fatal: Could not read from remote repository.',
+      stderr: 'banner exchange timed out',
+    })
+    expect(t?.stdout).toBe('fatal: Could not read from remote repository.')
+    expect(t?.stderr).toBe('banner exchange timed out')
+    // emit 出去的快照必须带输出 —— BashNotifier 正是从这个事件里取 task
+    const ev = emits[0] as { task: { stdout: string; stderr: string; status: string } }
+    expect(ev.task.status).toBe('failed')
+    expect(ev.task.stdout).toBe('fatal: Could not read from remote repository.')
+    expect(ev.task.stderr).toBe('banner exchange timed out')
+  })
+
+  it('不传 stdout/stderr 时保持空串,不覆盖已有值', () => {
+    tracker.register('t1', { sessionId: 's1', command: 'echo', description: 'd', startedAt: 1 })
+    const t = tracker.markFinished('t1', 'completed', { exitCode: 0 })
+    expect(t?.stdout).toBe('')
+    expect(t?.stderr).toBe('')
+  })
+
+  it('空串输出不覆盖已有值(防 result.stdout 为空时清掉 appendOutput 累积的数据)', () => {
+    tracker.register('t1', { sessionId: 's1', command: 'echo', description: 'd', startedAt: 1 })
+    tracker.appendOutput('t1', { stdout: 'streamed-chunk' })
+    tracker.markFinished('t1', 'completed', { exitCode: 0, stdout: '' })
+    expect(tracker.list().find((t) => t.taskId === 't1')?.stdout).toBe('streamed-chunk')
+  })
+})

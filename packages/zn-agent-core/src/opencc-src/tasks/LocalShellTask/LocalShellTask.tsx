@@ -282,7 +282,7 @@ export async function spawnShellTask(input: LocalShellSpawnInput & {
       };
     });
     // zai patch: 终态同步到 compat tracker, 触发 bash_task.changed 推送。
-    zaiBashTracker().markFinished(taskId, wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed', { exitCode: result.code });
+    zaiBashTracker().markFinished(taskId, wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed', { exitCode: result.code, stdout: result.stdout, stderr: result.stderr });
     zaiBashTracker().markTaskNotified(taskId);
     enqueueShellNotification(taskId, description, wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed', result.code, setAppState, toolUseId, kind, agentId);
     void evictTaskOutput(taskId);
@@ -411,7 +411,7 @@ function backgroundTask(taskId: string, getAppState: () => AppState, setAppState
     // Call cleanup outside of the state updater (avoid side effects in updater)
     cleanupFn?.();
     // zai patch: 终态同步到 compat tracker (Ctrl+B 后台化任务)。
-    zaiBashTracker().markFinished(taskId, wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed', { exitCode: result.code });
+    zaiBashTracker().markFinished(taskId, wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed', { exitCode: result.code, stdout: result.stdout, stderr: result.stderr });
     zaiBashTracker().markTaskNotified(taskId);
     if (wasKilled) {
       enqueueShellNotification(taskId, description, 'killed', result.code, setAppState, toolUseId, kind, agentId);
@@ -527,7 +527,7 @@ export function backgroundExistingForegroundTask(taskId: string, shellCommand: S
     cleanupFn?.();
     const finalStatus = wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed';
     // zai patch: 终态同步到 compat tracker, 触发 bash_task.changed 推送。
-    zaiBashTracker().markFinished(taskId, finalStatus, { exitCode: result.code });
+    zaiBashTracker().markFinished(taskId, finalStatus, { exitCode: result.code, stdout: result.stdout, stderr: result.stderr });
     zaiBashTracker().markTaskNotified(taskId);
     enqueueShellNotification(taskId, description, finalStatus, result.code, setAppState, toolUseId, undefined, agentId);
     void evictTaskOutput(taskId);

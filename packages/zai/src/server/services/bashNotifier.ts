@@ -153,6 +153,14 @@ export function __resetBashNotifierPendingForTests(): void {
 /**
  * 构造单个 <task-notification> 块(不含引导语)。
  * summary 对齐 LocalShellTask.enqueueShellNotification 的措辞。
+ *
+ * zai patch (2026-10-05): 内联 `<result>` 块。此前通知只有 task-id/status/
+ * summary 三行,模型拿不到命令输出,被迫再 Read 一次 /tmp 下的 output 文件
+ * (现场 sess-1791173729117-ntgf8hz6:两次后台 push 通知后各 Read 一次)。
+ * 对齐 SubagentNotifier.renderTaskNotificationMessage 的 <result> 约定。
+ *
+ * 输出内容由 markFinished 从 result.stdout 带入,已按 BASH_MAX_OUTPUT_LENGTH
+ * (默认 30KB)截断,这里不再二次截断。
  */
 export function renderBashNotificationBlock(task: BashTaskInfo): string {
   const status = task.status
@@ -171,12 +179,21 @@ export function renderBashNotificationBlock(task: BashTaskInfo): string {
     default:
       summary = `Background command "${task.description}" ${status}`
   }
+  // file mode 下 stdout/stderr 合并进同一 fd,stdout 即全量输出;stderr 仅在前台
+  // 路径非空,一并兜底。getStdout() 读盘失败时会返回一段
+  // "<bash output unavailable: ...>" 诊断串 —— 照样内联,让模型知道输出丢了。
+  const output = [task.stdout, task.stderr].filter((s) => s && s.trim()).join('\n').trim()
+  if (output) {
+    summary += ` The command output is inlined in the result block below.`
+  }
+  const resultSection = output ? `\n<result>${escapeXml(output)}</result>` : ''
   return (
     `<task-notification>\n` +
     `<task-id>${escapeXml(task.taskId)}</task-id>\n` +
     `<status>${status}</status>\n` +
-    `<summary>${escapeXml(summary)}</summary>\n` +
-    `</task-notification>`
+    `<summary>${escapeXml(summary)}</summary>` +
+    resultSection +
+    `\n</task-notification>`
   )
 }
 
