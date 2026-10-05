@@ -6,6 +6,17 @@ const CAPACITY = 256
 let counter = 0
 const nextId = () => `evt_${Date.now().toString(36)}_${(++counter).toString(36)}`
 
+/**
+ * 本进程启动标识,随 `server.connected` 下发给客户端。
+ *
+ * Why: `seqCounter` 是**进程内**计数器,重启后从 0 重数。客户端的
+ * `lastSeqBySession` 高水位守卫(`guardSeq <= prev` 就丢弃)若跨重启保留,
+ * 重启后所有新事件都被当成旧事件丢弃 —— 页面 spinner 转、文本空白、
+ * 静默无提示(重启路径不刷新页面,连 setCurrentSession 都不会触发)。
+ * 客户端比对 bootId,变了就清空高水位。
+ */
+export const SERVER_BOOT_ID = nextId()
+
 // Indexed-mapping input type: distributes ServerEvent variants by `type` discriminator
 // so inline object literals narrow correctly without excess property checks rejecting
 // variant-specific fields. eventId/ts/seq remain optional (filled in by emit).

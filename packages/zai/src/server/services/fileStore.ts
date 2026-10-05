@@ -3,6 +3,9 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { AgentsMdFile, ConfigFile, ConfigTool } from '../../shared/types.js';
 import { atomicWriteFile } from '../utils/atomicWrite.js';
+import { threeWayMerge } from '../utils/threeWayMerge.js';
+import { mutateZaiSettings, zaiSettingsPath } from './zaiSettingsStore.js';
+import type { ZaiSettings } from '../../shared/settings.js';
 
 const CONFIG_PATHS: Record<ConfigTool, () => string> = {
   nova: () => join(homedir(), '.nova', 'settings.json'),
@@ -60,13 +63,46 @@ export async function readConfig(tool: ConfigTool): Promise<ConfigFile> {
   }
 }
 
+/**
+ * 写 tool 的配置文件。
+ *
+ * 语义是 **合并,不是整对象覆盖** —— 这是 `settings-tmp-path-collision` 的
+ * 主因(见 docs/bugs/fix-plan-10-05.md H1)。Config 页面 PUT 的是**打开编辑器
+ * 时读到的整份 JSON**,到点保存时这个缓冲可能已经过时:设置抽屉 / 另一个 zai
+ * 进程早就改过同一个文件。按整对象写会把那些改动**静默回滚**。
+ *
+ * `base` 是编辑器打开时的磁盘快照(由客户端回传)。带 base 时走
+ * **三路合并**(`utils/threeWayMerge.ts`):
+ *   - 用户改过 / 新增的键 → 写入
+ *   - 用户在编辑器里删掉的键 → 从结果删除(浅合并表达不了删除)
+ *   - 用户**没动过**的键 → 保留磁盘现值(★ 这一条才是防回滚的关键)
+ * 不带 base(旧客户端 / 调用方刚读过 disk 就自己负责全量语义)→ 退回两路浅合并。
+ *
+ * `zai` / `opencc` 两个 tab 都指向 `~/.zai/settings.json`,与 zaiSettingsStore
+ * 是同一个文件 → 走 `mutateZaiSettings`,把「读最新磁盘 → 三路合并」整个放进
+ * 它内部的串行 mutation 链(既避免同进程内两个写者互相踩 tmp,又保证合并
+ * 基准是队列内的最新值,顺带刷新进程内缓存)。
+ */
 export async function writeConfig(
   tool: ConfigTool,
   content: Record<string, unknown>,
+  base?: Record<string, unknown>,
 ): Promise<{ ok: true }> {
   const path = CONFIG_PATHS[tool]();
+  if (path === zaiSettingsPath()) {
+    await mutateZaiSettings((disk) =>
+      threeWayMerge(disk as unknown as Record<string, unknown>, base, content) as ZaiSettings,
+    );
+    return { ok: true };
+  }
+  const current = await readConfig(tool);
+  const merged = threeWayMerge(
+    (current.missing ? {} : current.content) as Record<string, unknown>,
+    base,
+    content,
+  );
   await mkdir(dirname(path), { recursive: true });
-  await atomicWriteFile(path, JSON.stringify(content, null, 2));
+  await atomicWriteFile(path, JSON.stringify(merged, null, 2));
   return { ok: true };
 }
 

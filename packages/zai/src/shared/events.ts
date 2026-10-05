@@ -168,7 +168,11 @@ const PromptEvent = z.discriminatedUnion('type', [
 
 const SystemEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('server.connected'),
-             sessionId: z.string().nullable() }),
+             sessionId: z.string().nullable(),
+             // 本进程启动标识。seq 是进程内计数器,重启后从 0 重数;客户端
+             // 拿它判断「seq 高水位是否已失效」并重置 lastSeqBySession
+             // (见 useAgentStore.noteServerBootId)。可选,兼容老服务端。
+             bootId: z.string().optional() }),
   z.object({ ...Base.shape, type: z.literal('server.error'),
              message: z.string() }),
   z.object({ ...Base.shape, type: z.literal('toast'),

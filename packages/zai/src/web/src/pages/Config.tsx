@@ -524,6 +524,8 @@ function JsonFileEditor({
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  // 编辑器打开时的磁盘快照 —— 保存时回传给服务端做三路合并(见 openEditor 注释)
+  const [mergeBase, setMergeBase] = useState<Record<string, unknown> | undefined>(undefined);
   // 2026-09-27:与 FsTab 同样的 editorRef 模式,MonacoCodeView onReady 注入 api;
   // handleSave 优先从 editorRef 取最新内容(JSON 编辑器可能实时改但 state 还没
   // commit),fallback 到 draft state。
@@ -552,6 +554,14 @@ function JsonFileEditor({
     // When the file is missing, seed the editor with `defaultContent` (or {})
     // so the user can adjust before clicking save to create the file.
     const seed = missing ? (defaultContent ?? {}) : (content ?? {});
+    // Remember what the editor was seeded with. On save we send it back as
+    // `base` so the server can do a THREE-WAY merge (see
+    // docs/bugs/fix-plan-10-05.md H1): the editor buffer goes stale while the
+    // user edits it — the settings drawer or another zai process may write the
+    // same file meanwhile. A plain two-way merge would silently roll those
+    // writes back; with `base` the server knows which keys the user actually
+    // touched and leaves the rest at the on-disk value.
+    setMergeBase(seed as Record<string, unknown>);
     setDraft(JSON.stringify(seed, null, 2));
     setModalOpen(true);
   };
@@ -576,7 +586,11 @@ function JsonFileEditor({
     }
     setSaving(true);
     try {
-      await api.put(endpoint, parsed as Record<string, unknown>);
+      await api.put(endpoint, {
+        __editorMerge: true,
+        content: parsed as Record<string, unknown>,
+        base: mergeBase,
+      });
       message.success('配置已保存');
       setModalOpen(false);
       await fetchContent();

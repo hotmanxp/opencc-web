@@ -214,6 +214,8 @@ export default function Instances(): JSX.Element {
   // re-render 但视觉上肉眼无差异。一个 1 小时的实例跑 60s 后才多 1 分钟,
   // tick 频率足够。
   const [now, setNow] = useState(() => Date.now())
+  // 正在飞行的 start/stop/restart 请求的实例 id —— 期间禁用该行的生命周期按钮。
+  const [pendingIds, setPendingIds] = useState<string[]>([])
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(id)
@@ -240,13 +242,30 @@ export default function Instances(): JSX.Element {
   }, [portEditRow?.id, instances, portForm])
 
   async function act(method: 'POST' | 'DELETE', id: string, action?: 'start' | 'stop' | 'restart'): Promise<void> {
-    const url = action ? `/api/instances/${id}/${action}` : `/api/instances/${id}`
-    const res = await fetch(url, { method })
-    if (!res.ok && res.status !== 204) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string }
-      message.error(data.error ?? '操作失败')
+    // Per-row in-flight 守卫(fix-plan-10-05 H3):`loadInstances()` 只在整条请求
+    // 完成后才刷新,所以整个重启/停止期间 `effectiveState` 仍是旧值 ——
+    // 按钮全程可点,用户连点两下就把两个请求都发到服务端。服务端已有
+    // per-instance 串行闸兜底,这里再加一层,让 UI 立即反映出「正在处理」。
+    if (action) {
+      if (pendingIds.includes(id)) return
+      setPendingIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
     }
-    void loadInstances()
+    const url = action ? `/api/instances/${id}/${action}` : `/api/instances/${id}`
+    try {
+      const res = await fetch(url, { method })
+      if (!res.ok && res.status !== 204) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        message.error(data.error ?? '操作失败')
+      }
+    } finally {
+      if (action) {
+        setPendingIds((prev) => {
+          const next = prev.filter((x) => x !== id)
+          return next.length ? next : []
+        })
+      }
+      void loadInstances()
+    }
   }
 
   // Toggle the persisted `lan` flag on a definition. Optimistic update
@@ -415,15 +434,17 @@ export default function Instances(): JSX.Element {
     // "启动"按钮可点,让用户能重新拉起。"停止"/"重启"对死了 3 分钟的实例
     // 都没意义(进程已经没了),disable。
     const es = effectiveState(row)
-    const canStart = !row.isCurrent && (es === 'stopped' || es === 'down')
-    const canStop = !row.isCurrent && (es === 'running' || es === 'starting')
-    const canRestart = !row.isCurrent && es === 'running'
+    const busy = pendingIds.includes(row.id)
+    const canStart = !busy && !row.isCurrent && (es === 'stopped' || es === 'down')
+    const canStop = !busy && !row.isCurrent && (es === 'running' || es === 'starting')
+    const canRestart = !busy && !row.isCurrent && es === 'running'
     const canDelete = !row.isCurrent
     return (
       <Space wrap>
         <Button
           size="small"
           icon={<CirclePlayIcon />}
+          loading={busy}
           disabled={!canStart}
           onClick={() => void act('POST', row.id, 'start')}
         >
@@ -432,6 +453,7 @@ export default function Instances(): JSX.Element {
         <Button
           size="small"
           icon={<SquareIcon />}
+          loading={busy}
           disabled={!canStop}
           onClick={() => void act('POST', row.id, 'stop')}
         >
@@ -440,6 +462,7 @@ export default function Instances(): JSX.Element {
         <Button
           size="small"
           icon={<RotateCwIcon />}
+          loading={busy}
           disabled={!canRestart}
           onClick={() => void act('POST', row.id, 'restart')}
         >

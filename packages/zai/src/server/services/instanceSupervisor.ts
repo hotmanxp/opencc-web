@@ -436,7 +436,15 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
 
     const doStop = async (id: string) => {
       const entry = getEntry(id); const child = entry.child; const childState = entry.childState
-      if (!child || !childState) { setStatus(entry, { state: 'stopped', port: null, pid: null }); emit(id, entry.status); persistSafe(); return snapshotOf(entry) }
+      if (!child || !childState) {
+        // `starting` 期间 entry.child 仍是 null(还在端口探测 / spawn 之前),
+        // 此时无条件翻成 stopped 会**撤销 in-flight start 设的 starting 态**;
+        // 那个 doStart 随后会穿过 doStart 顶部的 state 守卫直接 spawn,
+        // 叠加上另一个已排队的 start → 双 child(见 fix-plan-10-05 H3)。
+        // 正确做法:不碰状态,让 in-flight start 自己跑完(或失败后落 down)。
+        if (entry.status.state === 'starting') return snapshotOf(entry)
+        setStatus(entry, { state: 'stopped', port: null, pid: null }); emit(id, entry.status); persistSafe(); return snapshotOf(entry)
+      }
       setStatus(entry, { state: 'stopping' }); emit(id, entry.status); persistSafe()
       childState.userStopping = true
       // Resolve only from the actual `exit` event (or already-exited state).

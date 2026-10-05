@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from 'express'
 import type { ServerEvent } from '../../shared/events.js'
-import { eventBus, ServerEventBus } from '../services/eventBus.js'
+import { eventBus, ServerEventBus, SERVER_BOOT_ID } from '../services/eventBus.js'
 import { writeSse, SSE_HEADERS } from '../services/sse.js'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 
@@ -49,8 +49,22 @@ router.get('/event', async (req: Request, res: Response) => {
 
   let unsubscribe: (() => void) | undefined
   let heartbeat: ReturnType<typeof setInterval> | undefined
+  let markClosed: () => void = () => {}
 
   try {
+    // close 监听必须在第一个 await **之前**注册。Node 的 'close' 是一次性事件:
+    // 客户端已经断开之后再注册监听器,它永远不会触发。原先注册在
+    // `await bg.list()` 之后,客户端在那段窗口里断开时:
+    //   - `closed` promise 永久挂起 → `finally` 永不执行
+    //   - → unsubscribe() 不调用(订阅泄漏在 eventBus.subs 里)
+    //   - → 心跳 setInterval 不 clearInterval(定时器泄漏)
+    // 心跳写失败也救不了:已 destroy 的 response 上 res.write 返回 false
+    // 而不抛异常,`:150` 的 catch 永不触发。
+    const closed = new Promise<void>((resolve) => {
+      markClosed = resolve
+    })
+    req.on('close', markClosed)
+
     for (const [k, v] of Object.entries(SSE_HEADERS)) res.setHeader(k, v)
     res.flushHeaders()
 
@@ -135,16 +149,14 @@ router.get('/event', async (req: Request, res: Response) => {
     }
 
     // 3. 立即发 server.connected (最后发, 这样它只进入 live subscriber, 不在 replay 切片中)
-    eventBus.emit({ type: 'server.connected', sessionId: null })
+    eventBus.emit({ type: 'server.connected', sessionId: null, bootId: SERVER_BOOT_ID })
 
     // 4. 心跳 + 挂起直到连接结束.
     //    timer 回调里不再自己 clearInterval — 写失败只负责 settle `closed`,
     //    真正的释放统一由 finally 做 (定时器回调抛出的异常无法被 finally 捕获,
     //    所以这里仍需就地 catch, 但不再承担清理职责).
-    let markClosed: () => void = () => {}
-    const closed = new Promise<void>((resolve) => {
-      markClosed = resolve
-    })
+    //    `markClosed` / `closed` 已在第一个 await 之前建好(见 try 开头),这里
+    //    只挂心跳,不再重复注册 close 监听。
     heartbeat = setInterval(() => {
       try {
         res.write(': heartbeat\n\n')
@@ -152,7 +164,6 @@ router.get('/event', async (req: Request, res: Response) => {
         markClosed()
       }
     }, HEARTBEAT_MS)
-    req.on('close', markClosed)
 
     await closed
   } catch {

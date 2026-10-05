@@ -393,10 +393,14 @@ describe('GET /api/event', () => {
         timeoutMs: 200,
       })
       // 第二次连接: synth 事件还会再触发一次 (因为它每次都从 bg.list 重新推),
-      // 但 eventBus history 里不应残留 synth eventId / seq
-      // 验证方法: 找第二份 body 里没有出现两次相同的 synth eventId
-      const matches = body.match(/synth-bgstate-pp1/g) ?? []
-      expect(matches.length).toBe(1) // 仅出现一次
+      // 但 eventBus history 里不应残留 synth eventId / seq —— 即该事件只作为
+      // 一次**实时 push** 出现,不被 replay 回来。
+      // 验证方法: 数 `data:` 行(SSE 的 `id:` 行也带 eventId,不能一起数)。
+      const dataLines = body
+        .split('\n\n')
+        .filter((chunk) => chunk.includes('synth-bgstate-pp1'))
+        .filter((chunk) => chunk.split('\n').some((line) => line.startsWith('data: ')))
+      expect(dataLines.length).toBe(1) // 仅作为一次实时 push 出现
     })
 
     test('bg runtime 未初始化时, 跳过 synth push 不报错 (兼容 dsh 模式)', async () => {

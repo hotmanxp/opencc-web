@@ -26,6 +26,36 @@ function badRequest(res: import('express').Response, msg: string): void {
   res.status(400).json({ error: msg })
 }
 
+/**
+ * Per-instance 生命周期操作的串行化闸。
+ *
+ * Why(fix-plan-10-05 H3):`doStart` / `doStop` / `doRestart` 各自读
+ * `entry.child` / `entry.status` 做 check-then-act,中间夹着
+ * `assertPortAvailable` / `probePort`(自动扫描最多 100 个候选,每个都是
+ * 真 connect + bind + close 的 await)这样的长 I/O 窗口。两个并发的
+ * start/stop 会在窗口中途被派发,看到过时的 entry 状态就各自往下走。
+ *
+ * 这里按 `id` 排队:同一实例的 start / stop / restart 严格顺序执行,
+ * 不丢请求也不改变返回值语义(后来的请求排到前面那个完成后再跑)。
+ * 不同 id 互不阻塞。
+ */
+const lifecycleQueues = new Map<string, Promise<unknown>>()
+
+function serializeLifecycle<T>(id: string, task: () => Promise<T>): Promise<T> {
+  const prev = lifecycleQueues.get(id) ?? Promise.resolve()
+  const run = prev.then(task, task)
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  lifecycleQueues.set(id, tail)
+  // 队列排空后删掉,避免 id 集合无界增长(实例数量有界但会 churn)。
+  void tail.then(() => {
+    if (lifecycleQueues.get(id) === tail) lifecycleQueues.delete(id)
+  })
+  return run
+}
+
 function handleError(res: import('express').Response, err: unknown): void {
   const code = (err as { code?: string } | null)?.code
   if (code === 'NOT_FOUND') {
@@ -188,9 +218,11 @@ router.post('/instances/:id/start', async (req, res) => {
     if (lan.value !== undefined) overrides.lan = lan.value
     if (port.value !== undefined) overrides.port = port.value
     if (aa.value !== undefined) overrides.aa = aa.value
-    const instance = await getInstanceSupervisor().startInstance(
-      req.params.id,
-      Object.keys(overrides).length > 0 ? overrides : undefined,
+    const instance = await serializeLifecycle(req.params.id, () =>
+      getInstanceSupervisor().startInstance(
+        req.params.id,
+        Object.keys(overrides).length > 0 ? overrides : undefined,
+      ),
     )
     res.json({ instance })
   } catch (err) {
@@ -202,7 +234,9 @@ router.post('/instances/:id/stop', async (req, res) => {
   if (!ensureNotInstanceChild(res)) return
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot stop current instance')
   try {
-    const instance = await getInstanceSupervisor().stopInstance(req.params.id)
+    const instance = await serializeLifecycle(req.params.id, () =>
+      getInstanceSupervisor().stopInstance(req.params.id),
+    )
     res.json({ instance })
   } catch (err) {
     handleError(res, err)
@@ -223,9 +257,11 @@ router.post('/instances/:id/restart', async (req, res) => {
     if (lan.value !== undefined) overrides.lan = lan.value
     if (port.value !== undefined) overrides.port = port.value
     if (aa.value !== undefined) overrides.aa = aa.value
-    const instance = await getInstanceSupervisor().restartInstance(
-      req.params.id,
-      Object.keys(overrides).length > 0 ? overrides : undefined,
+    const instance = await serializeLifecycle(req.params.id, () =>
+      getInstanceSupervisor().restartInstance(
+        req.params.id,
+        Object.keys(overrides).length > 0 ? overrides : undefined,
+      ),
     )
     res.json({ instance })
   } catch (err) {

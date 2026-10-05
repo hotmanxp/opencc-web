@@ -124,9 +124,25 @@ export function writeZaiSettings(settings: ZaiSettings): Promise<void> {
 export async function updateZaiSettings(
   patch: Partial<ZaiSettings>,
 ): Promise<ZaiSettings> {
+  return mutateZaiSettings((settings) => ({ ...settings, ...patch }))
+}
+
+/**
+ * Read-modify-write 的通用形态:把「怎么从磁盘现值算出下一个值」交给调用方,
+ * **整个 read → 算 → 写**在 mutation 队列内完成。
+ *
+ * Why 需要这个而不是先读再调 updateZaiSettings:调用方拿到的是**编辑器的
+ * 陈旧缓冲**(配置页打开时读的内容),而磁盘可能已经被设置抽屉 / 另一个进程
+ * 改过。`updateZaiSettings(patch)` 的浅合并对「patch 里带着、但值已过时」的
+ * 字段仍然会回滚 —— 只有让 recipe 拿到**队列内的最新磁盘值**做三方比对,
+ * 才能不吞掉别人写的东西。见 fileStore.writeConfig 的三路合并。
+ */
+export function mutateZaiSettings(
+  recipe: (disk: ZaiSettings) => ZaiSettings,
+): Promise<ZaiSettings> {
   return enqueueMutation(async () => {
     const settings = await readFreshSettingsFromDisk()
-    const next: ZaiSettings = { ...settings, ...patch }
+    const next = recipe(settings)
     await writeZaiSettingsUnlocked(next)
     return next
   })

@@ -338,6 +338,10 @@ interface AgentState {
   // 每 session 已应用的最大事件 seq (只升不降) — 重放/乱序事件被丢弃,
   // 替代部分手工 key 拼接防御 (手工 key 仍负责 React 渲染分组, 渐进式)。
   lastSeqBySession: Record<string, number>
+  // 服务端进程启动标识(server.connected.bootId)。seq 是进程内计数器,
+  // 重启后归零;见到新的 bootId 就清空 lastSeqBySession,否则高水位会把
+  // 重启后所有新事件当旧事件丢弃(页面空白且无提示)。
+  serverBootId: string | null
   // 投影值存储: sessionId → key → { value, seq }, higher-seq-wins 合并。
   // host 算完的派生值快照 (title / context.tokens), 重连后整体重发。
   projectionsBySession: Record<string, Record<string, { value: unknown; seq: number }>>
@@ -349,6 +353,12 @@ interface AgentState {
   applyPromptAsk: (event: ServerEvent) => void
   // queue.changed 事件 reducer: 用后端队列快照覆盖 queuedPrompts。
   applyQueueChanged: (event: { pending: QueuedPrompt[] }) => void
+  /**
+   * 收到 `server.connected` 时上报服务端 bootId。值变化 = 服务端重启过 →
+   * 清空 seq 高水位(事件会被当作新事件重新应用)。
+   * 传入 undefined(老服务端没有该字段)时什么都不做。
+   */
+  noteServerBootId: (bootId: string | undefined) => void
   // session/projection 帧 reducer: higher-seq-wins 写入投影存储 (T5)。
   applyProjection: (event: Extract<ServerEvent, { type: 'session/projection' }>) => void
 
@@ -709,6 +719,7 @@ export function createAgentStore() {
   contextTokensBySession: {},
   // seq 守卫 / 投影存储 (T5): 初始为空, 事件到达时惰性写入。
   lastSeqBySession: {},
+  serverBootId: null,
   projectionsBySession: {},
 
   setV2Tasks: (sessionId, tasks) => {
@@ -1038,7 +1049,22 @@ export function createAgentStore() {
   setStatus: (status: AgentStatus) => set({ status }),
   // queue.changed 快照覆盖排队列表 — 后端 per-session 串行队列的等待中
   // 命令 {id, text} 列表(不含正在执行的那条)。
-  applyQueueChanged: (event) => set({ queuedPrompts: event.pending }),
+  // queue.changed 只带当前会话的排队队列,必须按 sid 过滤 —— SSE
+  // reconnect 的 replay 切片可能带着别的会话的 queue 事件,不过滤会把
+  // A 的排队提示串到正在看 B 的页面上(与 applyRuntimeEvent 的 currentSid
+  // 守卫同源;useEventStream.ts:43-46 的注释也自认过这个缺口)。
+  applyQueueChanged: (event: any) =>
+    set((s) => {
+      const sid = (event as { sessionId?: string | null }).sessionId
+      if (sid && s.sessionId && sid !== s.sessionId) return s
+      return { queuedPrompts: event.pending }
+    }),
+
+  noteServerBootId: (bootId) =>
+    set((s) => {
+      if (!bootId || bootId === s.serverBootId) return s
+      return { serverBootId: bootId, lastSeqBySession: {} }
+    }),
   // session/projection 帧 — host 算完的派生值快照, higher-seq-wins 合并。
   // value 是完整快照(不是 diff); 重放/低 seq 直接丢弃, 高 seq 覆盖。
   applyProjection: (event) => set((s) => {
@@ -1076,6 +1102,9 @@ export function createAgentStore() {
         segmentedToolUseIds: {},
         sendSeq: 0,
         lastRuntimeTurnIndex: null,
+        // seq 高水位同样要重置:服务端 seq 是进程内计数器,清屏/切会话后
+        // 回到的可能是同一个 sid 的低 seq 事件,带着旧高水位会把它们全丢。
+        lastSeqBySession: {},
         v2TasksBySession: sid ? restV2 : s.v2TasksBySession,
       }
     }),
@@ -1123,7 +1152,7 @@ export function createAgentStore() {
   },
 
   setCurrentSession: (sessionId: string) => {
-    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0, lastRuntimeTurnIndex: null })
+    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0, lastRuntimeTurnIndex: null, lastSeqBySession: {} })
     // 同步 URL ?sid=..., 让刷新/分享链接落到同一会话.
     writeUrlSid(sessionId)
     // ★ Cold-start 快照补全: 切会话时 fire-and-forget 拉一次 4 字段快照,
@@ -1970,6 +1999,10 @@ export function createAgentStore() {
   }),
   applyPromptAsk: (event) => set((state) => {
     if (event.type !== 'prompt.ask') return state
+    // currentSid 守卫(与 applyRuntimeEvent 一致):ask 卡片是**单槽**的
+    // pendingAsk,不带过滤的话 A 会话弹出的提问会盖到正在看 B 的页面上,
+    // 并卡住 B 的发送按钮 / 输入框(AgentInputBox 读 pendingAsk 决定禁用)。
+    if (state.sessionId && event.sessionId && event.sessionId !== state.sessionId) return state
     // 必须初始化 status / answers / annotations: QuestionCard 拿到 pendingAsk
     // 后, `questions.every((q) => answers[q.question])` 立刻读 answers, 缺
     // 字段直接抛 TypeError → 组件崩溃 → 用户看到 "卡片不渲染". 旧实现
@@ -1993,6 +2026,7 @@ export function createAgentStore() {
   // shows a loading state (fetchStatus: 'loading').
   applyPromptApprove: (event) => set((state) => {
     if (!event || event.type !== 'prompt.approve') return state
+    if (state.sessionId && event.sessionId && event.sessionId !== state.sessionId) return state
     const filePath = String((event as any).filePath ?? '')
     return {
       ...state,
@@ -2090,6 +2124,7 @@ export function createAgentStore() {
   // renders toolName/description/input and lets the user allow/deny.
   applyPromptPermission: (event) => set((state) => {
     if (!event || event.type !== 'prompt.permission') return state
+    if (state.sessionId && event.sessionId && event.sessionId !== state.sessionId) return state
     return {
       ...state,
       pendingPermission: {
@@ -2155,9 +2190,12 @@ export function createAgentStore() {
   // pattern 一致.
 
   applyCwdChanged: (event) => {
-    set((s) => ({
-      cwdBySession: { ...s.cwdBySession, [event.sessionId]: event.cwd },
-    }))
+    set((s) => {
+      if (s.sessionId && event.sessionId && event.sessionId !== s.sessionId) return s
+      return {
+        cwdBySession: { ...s.cwdBySession, [event.sessionId]: event.cwd },
+      }
+    })
   },
 
   applyBashTaskChanged: (event) => {

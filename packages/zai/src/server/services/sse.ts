@@ -47,7 +47,14 @@ export function writeSse(
   event: { seq?: string | number; type: string } & Record<string, unknown>,
 ): void {
   if (resSseBroken.has(res)) return
-  const id = event.seq ?? (event as { eventId?: string | number }).eventId
+  // SSE `id:` 必须与 eventBus 的断点续传匹配口径一致。
+  // `getHistoryAfterForSid(lastEventId, sid)` 走的是 `e.eventId === lastEventId`
+  // (eventBus.ts `_sliceAfter`),而 eventId 形如 `evt_<base36>_<base36>` ——
+  // 与数字型 seq 永不相等,之前的 `event.seq ?? eventId` 等于「右分支死代码 +
+  // 断点续传 100% miss → 退化成全量重放」。统一用 eventId。
+  // 客户端的 seq 去重(upsertToolCall / upsertStreamBlock 的高水位)读的是
+  // data 里的 `seq` 字段,与这里的 id 无关,不受影响。
+  const id = (event as { eventId?: string | number }).eventId ?? event.seq
   if (id !== undefined) safeResWrite(res, `id: ${id}\n`)
   safeResWrite(res, `event: ${event.type}\n`)
   safeResWrite(res, `data: ${JSON.stringify(event)}\n\n`)

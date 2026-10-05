@@ -150,6 +150,7 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
   // 详见 docs/superpowers/specs/2026-07-23-session-cold-state-design.md §5.1。
   const connected = ordered.find((e) => e.type === 'server.connected')
   if (connected) {
+    store.getState().noteServerBootId((connected as { bootId?: string }).bootId)
     useAppStore.getState().setConnected(true)
     useAppStore.getState().setStreamState('connected', 0)
     const _connectedSid = store.getState().sessionId

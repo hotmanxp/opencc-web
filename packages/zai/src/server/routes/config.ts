@@ -174,13 +174,44 @@ router.get('/config/:tool', async (req, res) => {
   }
 });
 
+/**
+ * 三路合并请求信封的判别键。
+ *
+ * `PUT /config/:tool` 的 body 有两种形态:
+ *   - 裸对象(旧客户端 / 调用方自己刚读过 disk)→ 两路浅合并
+ *   - `{ <ENVELOPE_KEY>: true, content, base }`(Config 页编辑器)→ 三路合并
+ * 用一个业务配置几乎不可能出现的显式键做判别,而不是靠「有没有 content 字段」
+ * 猜 —— 后者会跟真的 `{"content": "..."}` 配置项撞车。
+ */
+const ENVELOPE_KEY = '__editorMerge';
+
+function unwrapConfigBody(
+  body: unknown,
+): { content: Record<string, unknown>; base?: Record<string, unknown> } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new Error('config body must be a JSON object');
+  }
+  const b = body as Record<string, unknown>;
+  if (b[ENVELOPE_KEY] === true && typeof b.content === 'object' && b.content !== null) {
+    const base = b.base;
+    return {
+      content: b.content as Record<string, unknown>,
+      base: typeof base === 'object' && base !== null && !Array.isArray(base)
+        ? (base as Record<string, unknown>)
+        : undefined,
+    };
+  }
+  return { content: b };
+}
+
 router.put('/config/:tool', async (req, res) => {
   const parsed = ConfigToolSchema.safeParse(req.params.tool);
   if (!parsed.success) {
     return res.status(400).json({ error: `invalid tool: ${req.params.tool}` });
   }
   try {
-    await writeConfig(parsed.data as ConfigTool, req.body);
+    const { content, base } = unwrapConfigBody(req.body);
+    await writeConfig(parsed.data as ConfigTool, content, base);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });

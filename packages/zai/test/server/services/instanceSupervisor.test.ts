@@ -29,7 +29,7 @@ interface Deps {
   readFile?: () => Promise<{ definitions: Array<{ id: string; name: string; cwd: string; createdAt: string; port?: number | null }>; statuses: Record<string, unknown> }>
 }
 
-function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['emit']; readFile?: Deps['readFile']; assertPortAvailable?: Deps['assertPortAvailable'] }) {
+function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['emit']; readFile?: Deps['readFile']; assertPortAvailable?: Deps['assertPortAvailable']; probePort?: Deps['probePort'] }) {
   const events: ServerEventInput[] = []
   const writes: { def: unknown; statuses: Record<string, unknown> }[] = []
   let time = 1_000000
@@ -48,7 +48,7 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
       fakeChildren.push(c)
       return c as unknown as FakeChild
     },
-    probePort: vi.fn(async (start: number) => {
+    probePort: extra?.probePort ?? vi.fn(async (start: number) => {
       probeStart = start
       return start
     }),
@@ -126,6 +126,44 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(after.state).toBe('running')
     expect(after.port).toBe(9205)
     expect(after.pid).toBe(222)
+  })
+
+  // H3 (docs/bugs/fix-plan-10-05.md):doStop 在 `entry.child === null` 时原本
+  // 无条件把状态翻成 stopped,会**撤销 in-flight start 设的 starting 态**。自动
+  // 端口扫描路径(每个候选都是真 connect+bind+close 的 await)把这个 check-then-
+  // act 窗口拉到 I/O 阶段,一个已排队的 stop 在扫描中途被派发 → 状态被 clobber
+  // → 原来的 doStart 穿过顶部守卫直接 spawn,叠加另一个 start 就是双 child。
+  it('并发 start + stop:doStop 不 clobber in-flight start 的状态,只 spawn 一个 child', async () => {
+    let releaseProbe: (() => void) | null = null
+    const probeGate = new Promise<void>((resolve) => { releaseProbe = resolve })
+    let probeCalls = 0
+    const { deps, fakeChildren } = makeSupervisor({
+      // 把**第二次**端口扫描(createInstance 之后那次)卡住,制造真实的 I/O
+      // 窗口 —— 自动扫描路径正是 H3 里窗口最宽的那条:每个候选都真
+      // connect + bind + close。
+      probePort: async (start: number) => {
+        if (++probeCalls === 2) await probeGate
+        return start
+      },
+    })
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emitExit(0) // 回到 stopped,给并发留出起点
+
+    const startP = getInstanceSupervisor().startInstance(snap.id)
+    await new Promise((r) => setTimeout(r, 0)) // 让 doStart 跑到 probePort 并 await 住
+    // 此时 entry.child 仍是 null,状态是 starting
+    const stopSnap = await getInstanceSupervisor().stopInstance(snap.id)
+    expect(stopSnap.state).toBe('starting') // 关键断言:不被翻成 stopped
+
+    releaseProbe!()
+    await startP
+    // createInstance 1 个 + start 1 个 = 2;stop 没有穿透出额外 spawn
+    expect(fakeChildren).toHaveLength(2)
+    fakeChildren[1]!.emit('message', { type: 'ready', pid: 333, port: 9206 })
+    const after = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(after.state).toBe('running')
+    expect(after.pid).toBe(333)
   })
 
   it('non-user exit → state down + lastError; user stop → stopped', async () => {

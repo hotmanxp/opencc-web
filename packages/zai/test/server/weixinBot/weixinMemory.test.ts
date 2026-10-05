@@ -2,6 +2,7 @@
  * weixinMemory 测试 —— 轮转摘要落盘 + 冻结快照 + 长期记忆截断。
  */
 import { describe, it, expect, beforeEach } from 'vitest'
+import { sanitizePath } from '@zn-ai/zn-agent-core'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,17 +29,26 @@ describe('weixinMemory', () => {
     resetWeixinMemoryForTests()
   })
 
+  /**
+   * 落一份与**真实写方**布局一致的 transcript:
+   *   `${dataDir}/projects/${sanitizePath(cwd)}/${sid}.jsonl`
+   * 目录名用 core 导出的 `sanitizePath`(threshold 200 + djb2 减法哈希),
+   * 不能在测试里自己拼 —— 拼错就复现「读方读空」而不是验证读方(见
+   * docs/bugs/fix-plan-10-05.md H4)。混一条 session-meta 行验证非消息条目
+   * 被 extractReadable 过滤掉。
+   */
   function seedTranscript(sessionId: string): void {
-    const projDir = join(dataDir, 'transcripts', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
+    const projDir = join(dataDir, 'projects', sanitizePath(cwd))
     mkdirSync(projDir, { recursive: true })
-    const messages = [
-      { role: 'user', content: '帮我把项目构建脚本改成 pnpm' },
-      { role: 'assistant', content: '已把 build 脚本改成 pnpm build,并验证通过。' },
-      { role: 'user', content: '记住:这个项目以后都用 pnpm' },
-      { role: 'assistant', content: '好的,已记住。' },
-      { role: 'user', content: '下一步:把 CI 也切到 pnpm,还没做' },
+    const lines = [
+      JSON.stringify({ type: 'session-meta', sessionId, cwd }),
+      JSON.stringify({ role: 'user', content: '帮我把项目构建脚本改成 pnpm' }),
+      JSON.stringify({ role: 'assistant', content: '已把 build 脚本改成 pnpm build,并验证通过。' }),
+      JSON.stringify({ role: 'user', content: '记住:这个项目以后都用 pnpm' }),
+      JSON.stringify({ role: 'assistant', content: '好的,已记住。' }),
+      JSON.stringify({ role: 'user', content: '下一步:把 CI 也切到 pnpm,还没做' }),
     ]
-    writeFileSync(join(projDir, `${sessionId}.json`), JSON.stringify(messages))
+    writeFileSync(join(projDir, `${sessionId}.jsonl`), lines.join('\n') + '\n')
   }
 
   it('recordRotationSummary(skipLlm) 读取 transcript → 落盘 rotations → 快照可见', async () => {
