@@ -25,13 +25,14 @@ import {
 } from '../../../shared/weixin.js'
 import { ensureWeixinDirs } from '../paths.js'
 import { registerBuiltinWeixinCommands } from './weixinCommands.js'
-import { writeFile, mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import QRCode from 'qrcode'
 import { isManagedChild } from '../../../cli/managedChild.js'
 import { isWeixinChannelHost, DEFAULT_WEIXIN_INSTANCE_PORT } from './channelProfile.js'
 import { getCachedZaiSettingsSync } from '../zaiSettingsStore.js'
+import { atomicWriteFile } from '../../utils/atomicWrite.js'
 import {
   WeixinOwnerLock,
   buildSelfOwnerInfo,
@@ -609,7 +610,9 @@ export class WeixinBotManager {
       ilinkUserId,
       createdAt: new Date().toISOString(),
     }
-    await writeFile(path, JSON.stringify(payload, null, 2), { mode: 0o600 })
+    // tmp+rename;`mode` 落在 tmp inode 上并被 rename 带过去,所以凭据文件
+    // 仍然是 0600(既不会短暂 world-readable,也不会在写崩时变成 0 字节)。
+    await atomicWriteFile(path, JSON.stringify(payload, null, 2), { mode: 0o600 })
   }
 
   async loadAccount(accountId: string): Promise<{ token: string; baseUrl?: string; ilinkUserId?: string } | null> {

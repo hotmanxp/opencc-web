@@ -1,8 +1,9 @@
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
+import { readFile, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
+import { atomicWriteFile } from '../utils/atomicWrite.js'
 // Re-export the cache API so existing `zaiSettingsStore` importers can reach
 // it without a second import path.
 export {
@@ -49,13 +50,16 @@ export async function readZaiSettings(): Promise<ZaiSettings> {
 /**
  * In-process serialisation chain for every settings.json mutation.
  *
- * Why: `writeZaiSettings` is tmp+rename, and the tmp path is a fixed
+ * Why: `writeZaiSettings` is tmp+rename, and the tmp path used to be a fixed
  * `${path}.tmp`. Concurrent PUTs (e.g. SettingsDrawer's work-mode effect
  * firing `work-mode` + `main-agent` back-to-back, or Desktop.tsx's office
  * auto-switch racing a manual theme change) used to interleave
  * writeFile/rename on the same tmp file — the first rename consumes it and
  * the second rename fails with `ENOENT ... settings.json.tmp -> settings.json`
- * (500 to the client, and the loser's update dropped).
+ * (500 to the client, and the loser's update dropped). The tmp name now also
+ * carries a per-process counter (`atomicWriteFile`), so writers outside this
+ * chain — notably `fileStore.writeConfig`, which maps the `zai` tool onto the
+ * same `~/.zai/settings.json` — can no longer collide even without the queue.
  *
  * The chain makes each mutation atomic w.r.t. the others: only one task
  * touches disk (and the cache) at a time. A rejected task must not break
@@ -82,9 +86,7 @@ function enqueueMutation<T>(task: () => Promise<T>): Promise<T> {
 async function writeZaiSettingsUnlocked(settings: ZaiSettings): Promise<void> {
   const path = zaiSettingsPath()
   await mkdir(dirname(path), { recursive: true })
-  const tmpPath = `${path}.tmp`
-  await writeFile(tmpPath, JSON.stringify(settings, null, 2), 'utf-8')
-  await rename(tmpPath, path)
+  await atomicWriteFile(path, JSON.stringify(settings, null, 2))
   refreshCache(settings)
 }
 

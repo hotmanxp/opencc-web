@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, mkdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -82,6 +82,75 @@ describe('writeTextFile', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe('ENOENT');
+  });
+
+  // ===== 2026-10-05: tmp+rename 原子写(bug `non-atomic-write-data-loss`) =====
+  // 这条路径写的是**用户源码**(分屏编辑器保存)。旧的 writeFile(path, ...) 用
+  // 默认 flag 'w' = O_WRONLY|O_CREAT|O_TRUNC —— fd 打开瞬间目标即截断为 0
+  // 字节、内容才开始写;此后任何失败(SIGKILL / ENOSPC / EIO / 断电)都留下
+  // 0 字节或半截文件且原内容不可恢复,而 UI 只收到一个干净的 500。
+
+  test('写入失败 → 目标文件内容保持不变(不被截断成 0 字节)', async () => {
+    // 目录不可写 → 写 tmp 即失败。旧实现在这里已经把目标截断了。
+    const roDir = join(dir, 'ro');
+    mkdirSync(roDir);
+    const target = join(roDir, 'source.ts');
+    writeFileSync(target, 'ORIGINAL SOURCE', 'utf8');
+    chmodSync(roDir, 0o500);
+    try {
+      const result = await writeTextFile(target, 'NEW CONTENT');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe('EACCES');
+      // 关键断言:原内容完好。
+      expect(readFileSync(target, 'utf8')).toBe('ORIGINAL SOURCE');
+    } finally {
+      chmodSync(roDir, 0o700);
+    }
+  });
+
+  test('写入失败时不留 tmp 残留', async () => {
+    const roDir = join(dir, 'ro2');
+    mkdirSync(roDir);
+    const target = join(roDir, 'source.ts');
+    writeFileSync(target, 'ORIGINAL SOURCE', 'utf8');
+    chmodSync(roDir, 0o500);
+    try {
+      await writeTextFile(target, 'NEW CONTENT');
+    } finally {
+      chmodSync(roDir, 0o700);
+    }
+    expect(readdirSync(roDir)).toEqual(['source.ts']);
+  });
+
+  test('写入成功后目录内只有目标文件(无 .tmp 残留)', async () => {
+    const file = join(dir, 'clean.ts');
+    await writeTextFile(file, 'content');
+    expect(readdirSync(dir)).toEqual(['clean.ts']);
+  });
+
+  test('ifMatch 不匹配 → CONFLICT 且不碰磁盘(无 tmp 残留)', async () => {
+    const file = join(dir, 'locked.txt');
+    writeFileSync(file, 'v1', 'utf8');
+    const result = await writeTextFile(file, 'v2', { ifMatch: sha256OfString('WRONG') });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('CONFLICT');
+    expect(readFileSync(file, 'utf8')).toBe('v1');
+    expect(readdirSync(dir)).toEqual(['locked.txt']);
+  });
+
+  test('连续覆盖写 → 内容正确,mtime/size/sha256 与实际一致', async () => {
+    const file = join(dir, 'overwrite.txt');
+    for (const body of ['a', 'bb', 'ccc']) {
+      const result = await writeTextFile(file, body);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.size).toBe(body.length);
+      expect(result.sha256).toBe(sha256OfString(body));
+    }
+    expect(readFileSync(file, 'utf8')).toBe('ccc');
+    expect(readdirSync(dir)).toEqual(['overwrite.txt']);
   });
 });
 

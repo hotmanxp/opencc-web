@@ -121,4 +121,34 @@ describe('ApproveRegistry', () => {
       process.off('warning', onWarn)
     }
   })
+
+  // ========== abortAll 的 sessionId 过滤(2026-10-05) ==========
+  // bug `prompt-close-aborts-all-approvals--by-zai`(与
+  // `prompt-close-aborts-all-sessions` 同一处代码,已合并处理):审批是进程级
+  // 单例,原先一个会话断开就把别人正在等的审批一起 reject 掉。
+
+  test('abortAll 传 sessionId → 只 abort 该会话的审批', async () => {
+    const reg = new ApproveRegistry()
+    const ctrl = new AbortController()
+    const mine = reg.register('t1', 'sess-A', 'docs/spec.md', ctrl.signal)
+    const theirs = reg.register('t2', 'sess-B', 'docs/plan.md', ctrl.signal)
+
+    reg.abortAll('client_disconnect', 'sess-A')
+    await expect(mine).rejects.toThrow('client_disconnect')
+
+    // 别的会话的审批仍然可答 —— 修复前这里已被连带 abort,answer 返回 false。
+    expect(reg.getFilePath('t2')).toBe('docs/plan.md')
+    expect(reg.answer('t2', { decision: 'approved' })).toBe(true)
+    await expect(theirs).resolves.toEqual({ decision: 'approved' })
+  })
+
+  test('abortAll 不传 sessionId → 仍是全量 abort(重启 drain 需要)', async () => {
+    const reg = new ApproveRegistry()
+    const ctrl = new AbortController()
+    const p1 = reg.register('t1', 'sess-A', 'docs/spec.md', ctrl.signal)
+    const p2 = reg.register('t2', 'sess-B', 'docs/plan.md', ctrl.signal)
+    reg.abortAll('restart_drain_timeout')
+    await expect(p1).rejects.toThrow('restart_drain_timeout')
+    await expect(p2).rejects.toThrow('restart_drain_timeout')
+  })
 })

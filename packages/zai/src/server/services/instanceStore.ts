@@ -1,9 +1,10 @@
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { lock } from 'proper-lockfile'
 import type { InstanceDefinition, InstanceStatus } from '../../shared/instances.js'
+import { atomicWriteFile } from '../utils/atomicWrite.js'
 
 export interface InstancesFile {
   definitions: InstanceDefinition[]
@@ -111,14 +112,10 @@ export async function writeInstancesFile(
   // 打中,留下一个空文件 —— 下次启动所有实例定义凭空消失,这就是
   // 2026-09-28 那次 `instances.json` 变成 0 字节的机制。
   // 写 tmp 也在锁内,避免两个进程交错产出半截内容。
-  const tmp = `${path}.${process.pid}.tmp`
+  // (2026-10-05: tmp+rename 抽成共享的 `atomicWriteFile`,同一文件的其他
+  //  写入点此前各写各的,现已统一;proper-lockfile 仍是跨进程串行化的来源。)
   try {
-    await writeFile(tmp, JSON.stringify(file, null, 2), 'utf-8')
-    await rename(tmp, path)
-  } catch (err) {
-    // 失败时别把 tmp 留在数据目录里(下次写会撞同一个文件名)。
-    await unlink(tmp).catch(() => {})
-    throw err
+    await atomicWriteFile(path, JSON.stringify(file, null, 2))
   } finally {
     await release()
   }

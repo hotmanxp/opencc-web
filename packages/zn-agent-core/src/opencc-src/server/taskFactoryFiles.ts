@@ -5,6 +5,35 @@ import { join } from 'node:path'
 import { createHash, randomInt } from 'node:crypto'
 import YAML from 'yaml'
 
+/**
+ * 读一个可选文本文件:不存在 → null,其它错误照抛。
+ *
+ * zai patch (2026-10-05, bug `async-handler-rejection-kills-process`):
+ * 本文件多处 `existsSync(p) ? readFile(p) : fallback` 是 check-then-act ——
+ * existsSync 与 readFile 之间文件被删(用户删任务 / 归档清扫)就 ENOENT 抛出。
+ * 抛出的 rejected promise 经 async 路由一路冒泡成 unhandledRejection,在
+ * Express 4 下直接终止整个进程。所有「存在才读」的地方统一走这里,让上层
+ * 忘了 catch 也只是拿到 null,不会炸进程。
+ */
+async function readFileOrNull(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf-8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
+}
+
+/** readdir 的 ENOENT 兜底:目录不存在/被删 → 空列表。其它错误照抛。 */
+async function readdirOrEmpty(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw err
+  }
+}
+
 export type TaskStatus = 'queued' | 'processing' | 'paused' | 'verifying' | 'done' | 'failed'
 export type TaskBucketName = 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'
 export interface TaskSummary {
@@ -570,13 +599,15 @@ async function readTaskMeta(id: string, bucket: TaskBucketName): Promise<TaskYam
   const dir = taskDir(bucket, id)
   const yamlPath = join(dir, TASK_YAML_FILENAME)
   const legacyPath = join(dir, LEGACY_INDEX_MD_FILENAME)
-  if (existsSync(yamlPath)) {
-    const text = await readFile(yamlPath, 'utf-8')
-    return parseTaskYaml(text)
+  // 单次 readFile 而非 existsSync 后再读:两者之间的删除会让 readFile 抛
+  // ENOENT(rejected promise → 进程级事故)。
+  const yamlText = await readFileOrNull(yamlPath)
+  if (yamlText !== null) {
+    return parseTaskYaml(yamlText)
   }
-  if (existsSync(legacyPath)) {
-    const text = await readFile(legacyPath, 'utf-8')
-    const meta = parseLegacyIndexMd(text)
+  const legacyText = await readFileOrNull(legacyPath)
+  if (legacyText !== null) {
+    const meta = parseLegacyIndexMd(legacyText)
     // 迁移:尽力而为;失败不抛(下次再迁)
     try {
       await writeFile(yamlPath, serializeTaskYaml(meta), 'utf-8')
@@ -670,8 +701,8 @@ export function sortFinishedByCompletedDesc<T extends { completedAt?: string | n
 async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
   const root = taskFactoryRoot()
   const dir = join(root, bucket)
-  if (!existsSync(dir)) return []
-  const ids = (await readdir(dir)).filter((n) => !n.startsWith('.'))
+  // readdir 直接吃 ENOENT:existsSync 与 readdir 之间目录被删(归档清扫)不再炸。
+  const ids = (await readdirOrEmpty(dir)).filter((n) => !n.startsWith('.'))
   const out: TaskSummary[] = []
   for (const id of ids) {
     const meta = await readTaskMeta(id, bucket)
@@ -795,10 +826,12 @@ async function writeTaskMeta(id: string, bucket: TaskBucketName, patch: Partial<
   const legacyPath = join(dir, LEGACY_INDEX_MD_FILENAME)
   // 读旧 meta(task.yaml 优先;否则走 legacy 一次性迁移)
   let base: TaskYaml
-  if (existsSync(yamlPath)) {
-    base = parseTaskYaml(await readFile(yamlPath, 'utf-8'))
-  } else if (existsSync(legacyPath)) {
-    base = parseLegacyIndexMd(await readFile(legacyPath, 'utf-8'))
+  const yamlText = await readFileOrNull(yamlPath)
+  const legacyText = yamlText === null ? await readFileOrNull(legacyPath) : null
+  if (yamlText !== null) {
+    base = parseTaskYaml(yamlText)
+  } else if (legacyText !== null) {
+    base = parseLegacyIndexMd(legacyText)
   } else {
     throw new Error(`task ${id} not found in ${bucket}`)
   }
@@ -810,10 +843,8 @@ async function writeTaskMeta(id: string, bucket: TaskBucketName, patch: Partial<
     next[k] = v
   }
   await writeFile(yamlPath, serializeTaskYaml(next), 'utf-8')
-  // 旧文件存在则一并清掉
-  if (existsSync(legacyPath)) {
-    await rm(legacyPath).catch(() => {})
-  }
+  // 旧文件存在则一并清掉(rm 的 ENOENT 本来就被 catch,无需先 existsSync)
+  await rm(legacyPath).catch(() => {})
   return next
 }
 
@@ -871,7 +902,7 @@ export async function getTaskDetails(id: string, bucket?: TaskBucketName): Promi
   const dir = taskDir(summary.bucket, id)
   const read = async (name: string, fallback: string) => {
     const f = join(dir, name)
-    return existsSync(f) ? readFile(f, 'utf-8') : fallback
+    return (await readFileOrNull(f)) ?? fallback
   }
   const [specMd, planMd, processMd, verificationMd, brainstormMd] = await Promise.all([
     read('docs/spec.md', ''), read('docs/plan.md', ''), read('process.md', ''),

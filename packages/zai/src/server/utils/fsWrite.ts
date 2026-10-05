@@ -1,5 +1,6 @@
-import { stat, writeFile, readFile } from 'node:fs/promises';
+import { stat, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { atomicWriteFile } from './atomicWrite.js';
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
@@ -39,11 +40,16 @@ export interface WriteTextFileOptions {
  *   - 注:readFile → writeFile 之间存在 TOCTOU(zai 单机单用户,风险低;
  *     强化方案 follow-up,见 plan §风险点)。
  *
+ * Durability (2026-10-05, bug `non-atomic-write-data-loss`): the write goes
+ * through `atomicWriteFile` (tmp + rename), so a failure mid-write leaves the
+ * previous file contents intact instead of a 0-byte truncation. The ifMatch
+ * read above and the error mapping below are unchanged by that.
+ *
  * Error mapping:
  *   - readFile ENOENT → { ok:false, code:'ENOENT' }  (parent dir missing)
- *   - writeFile ENOENT → { ok:false, code:'ENOENT' }
- *   - writeFile EACCES / EPERM → { ok:false, code:'EACCES' }
- *   - writeFile ENOSPC → { ok:false, code:'ENOSPC' }
+ *   - write/rename ENOENT → { ok:false, code:'ENOENT' }
+ *   - write/rename EACCES / EPERM → { ok:false, code:'EACCES' }
+ *   - write/rename ENOSPC → { ok:false, code:'ENOSPC' }
  *   - everything else → { ok:false, code:'OTHER' }
  *
  * The caller turns `code` into an HTTP status: ENOENT → 404, EACCES / ENOSPC
@@ -81,8 +87,18 @@ export async function writeTextFile(
     }
   }
 
+  let info;
   try {
-    await writeFile(absPath, content, 'utf8');
+    // tmp+rename, not an in-place write: `writeFile(absPath, ...)` truncates the
+    // target to 0 bytes at open() and only then streams bytes, so a kill /
+    // ENOSPC / EIO in that window destroys the user's source with a clean 500 as
+    // the only symptom. atomicWriteFile keeps the old bytes intact until the
+    // rename commits.
+    await atomicWriteFile(absPath, content);
+    // Inside the try on purpose: a rejected `stat` must degrade to a mapped
+    // result, never an unhandled rejection (Express 4 does not catch async
+    // handler rejections — see the process-level unhandledRejection guard).
+    info = await stat(absPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
@@ -96,7 +112,6 @@ export async function writeTextFile(
     }
     return { ok: false, code: 'OTHER', error: `写入失败: ${(err as Error).message}` };
   }
-  const info = await stat(absPath);
   return {
     ok: true,
     mtime: info.mtime.toISOString(),

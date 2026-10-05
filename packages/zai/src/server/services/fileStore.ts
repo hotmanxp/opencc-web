@@ -1,7 +1,8 @@
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { AgentsMdFile, ConfigFile, ConfigTool } from '../../shared/types.js';
+import { atomicWriteFile } from '../utils/atomicWrite.js';
 
 const CONFIG_PATHS: Record<ConfigTool, () => string> = {
   nova: () => join(homedir(), '.nova', 'settings.json'),
@@ -42,9 +43,7 @@ export async function writeTopLevelJson(
 ): Promise<{ ok: true }> {
   const path = TOP_LEVEL_JSON_PATHS[key]();
   await mkdir(dirname(path), { recursive: true });
-  const tmpPath = `${path}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(content, null, 2), 'utf-8');
-  await rename(tmpPath, path);
+  await atomicWriteFile(path, JSON.stringify(content, null, 2));
   return { ok: true };
 }
 
@@ -67,9 +66,7 @@ export async function writeConfig(
 ): Promise<{ ok: true }> {
   const path = CONFIG_PATHS[tool]();
   await mkdir(dirname(path), { recursive: true });
-  const tmpPath = `${path}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(content, null, 2), 'utf-8');
-  await rename(tmpPath, path);
+  await atomicWriteFile(path, JSON.stringify(content, null, 2));
   return { ok: true };
 }
 
@@ -114,8 +111,6 @@ export async function writeAgentsMd(
 ): Promise<{ ok: true }> {
   const path = AGENTS_MD_PATHS[tool]();
   await mkdir(dirname(path), { recursive: true });
-  const tmpPath = `${path}.tmp`;
-  await writeFile(tmpPath, content, 'utf-8');
-  await rename(tmpPath, path);
+  await atomicWriteFile(path, content);
   return { ok: true };
 }

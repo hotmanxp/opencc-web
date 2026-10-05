@@ -17,7 +17,7 @@
  * 通用的「仅注入指令」语义供前端面板/测试使用。
  */
 
-import { Router, type IRouter } from 'express'
+import { Router, type IRouter, type Request, type Response } from 'express'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { existsSync, statSync } from 'node:fs'
@@ -46,6 +46,38 @@ const execFileAsync = promisify(execFile)
 const router: IRouter = Router()
 const ALLOWED_ACTIONS = ['dispatch', 'resume', 'accept', 'pause'] as const
 type InjectAction = (typeof ALLOWED_ACTIONS)[number]
+
+/**
+ * 包一层,把 async handler 的 rejection 变成 500 响应(2026-10-05, bug
+ * `async-handler-rejection-kills-process` / R2-c)。
+ *
+ * 背景:Express 4 **不**转发 async handler 返回的 rejected promise,`index.ts`
+ * 的 catch-all error handler 对 async 路径也无效。任何一处漏 catch 的 await
+ * 都会升级成 unhandledRejection(进程级兜底已在 cli/index.ts 注册,但那只是
+ * 止血:请求仍然静默挂死,前端只看到转圈)。本文件 16 个路由里原先只有 9 处
+ * 显式 try/catch —— 缺的那几处正是 `GET /super-tasks` 3s 轮询与逐 id 操作,
+ * ENOSPC / EACCES / EROFS 下一次调用即可稳定触发。
+ *
+ * 统一包装而不是逐个手写 try/catch:漏写一个就是一次整服进程级事故,且
+ * 新增路由会重新引入同一个缺口。路由内部若需要把特定错误映射成 400/404/409,
+ * 仍然保留自己的 try/catch —— 这里只是最后一道网。
+ */
+type AsyncHandler = (req: Request, res: Response) => Promise<unknown>
+
+function guarded(fn: AsyncHandler): AsyncHandler {
+  return async (req, res) => {
+    try {
+      await fn(req, res)
+    } catch (err) {
+      // 响应已开始(理论上本文件没有流式端点)就不能再写状态码,只能记日志。
+      if (res.headersSent) {
+        console.error('[superTasks] async handler rejected after headers sent:', err)
+        return
+      }
+      res.status(500).json({ error: (err as Error).message })
+    }
+  }
+}
 
 /** cliAgent provider 白名单(注册/探测端点共用;向导架构可扩展)。 */
 const CLI_AGENT_NAMES = ['opencc', 'dsh', 'opencode'] as const
@@ -79,7 +111,7 @@ function isDirectory(p: string): boolean {
  * buckets/managed/supervisorSessionId),前端据此跳过重渲染。不带 since 的
  * 旧调用方拿到 modified:true + 原有全部字段,向后兼容。
  */
-router.get('/super-tasks', async (req, res) => {
+router.get('/super-tasks', guarded(async (req, res) => {
   // 返回列表前先扫一次过期终态归档(finished-tasks → history-tasks,tf-xrlcxuoi)。
   // sweep 内部 try/catch + in-flight 去重,永不抛出;此处 catch 为双保险,
   // 绝不阻塞/拖垮 3s 轮询。
@@ -97,7 +129,7 @@ router.get('/super-tasks', async (req, res) => {
     managed: state.managedEnabled,
     supervisorSessionId: state.supervisorSessionId,
   })
-})
+}))
 
 // ─── 工厂设置(~/.zai/factory-settings.json)────────────────────────────
 // 注意:这些静态段路由必须注册在 /super-tasks/:id 之前,否则 `settings` /
@@ -107,20 +139,20 @@ router.get('/super-tasks', async (req, res) => {
  * GET /api/super-tasks/settings — 当前工厂配置(含默认值合并)+ 目录存在性
  * 徽标(docsDirExists / repoRootExists 为派生字段,不进 PUT schema)。
  */
-router.get('/super-tasks/settings', async (_req, res) => {
+router.get('/super-tasks/settings', guarded(async (_req, res) => {
   const s = await getFactorySettings()
   res.json({
     ...s,
     docsDirExists: isDirectory(s.docsDir),
     repoRootExists: isDirectory(s.repoRoot),
   })
-})
+}))
 
 /**
  * PUT /api/super-tasks/settings — partial patch + zod 校验(含 maxParallelTasks
  * 2–8),非法值 400。成功返回合并后的完整配置。
  */
-router.put('/super-tasks/settings', async (req, res) => {
+router.put('/super-tasks/settings', guarded(async (req, res) => {
   const parsed = factorySettingsPatchSchema.safeParse(req.body ?? {})
   if (!parsed.success) {
     return res.status(400).json({
@@ -141,7 +173,7 @@ router.put('/super-tasks/settings', async (req, res) => {
     }
     return res.status(500).json({ error: (err as Error).message })
   }
-})
+}))
 
 /**
  * GET /api/super-tasks/spawn-agents — opencc / dsh / opencode 三个 cliAgent
@@ -154,7 +186,7 @@ router.put('/super-tasks/settings', async (req, res) => {
  *
  * 注:端点路径保留 `/spawn-agents` 不改,避免对前端调用造成 breaking change。
  */
-router.get('/super-tasks/spawn-agents', async (_req, res) => {
+router.get('/super-tasks/spawn-agents', guarded(async (_req, res) => {
   let settings: Awaited<ReturnType<typeof readZaiSettings>> | null = null
   try {
     settings = await readZaiSettings()
@@ -179,7 +211,7 @@ router.get('/super-tasks/spawn-agents', async (_req, res) => {
     })
   }
   res.json({ agents })
-})
+}))
 
 /**
  * POST /api/super-tasks/spawn-agents/:name/register — 一键注册:merge 写
@@ -190,7 +222,7 @@ router.get('/super-tasks/spawn-agents', async (_req, res) => {
  *
  * 注:端点路径保留 `/spawn-agents` 不改,避免对前端调用造成 breaking change。
  */
-router.post('/super-tasks/spawn-agents/:name/register', async (req, res) => {
+router.post('/super-tasks/spawn-agents/:name/register', guarded(async (req, res) => {
   const name = req.params.name
   if (!(CLI_AGENT_NAMES as readonly string[]).includes(name)) {
     return res.status(404).json({ error: `unknown cli agent: ${name}` })
@@ -209,13 +241,13 @@ router.post('/super-tasks/spawn-agents/:name/register', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }
-})
+}))
 
-router.get('/super-tasks/:id', async (req, res) => {
+router.get('/super-tasks/:id', guarded(async (req, res) => {
   const d = await getTaskDetails(req.params.id)
   if (!d) return res.status(404).json({ error: `task ${req.params.id} not found` })
   res.json({ task: d })
-})
+}))
 
 /**
  * GET /super-tasks/:id/intake-check — intake 文档强校验(2026-09-03)。
@@ -223,13 +255,13 @@ router.get('/super-tasks/:id', async (req, res) => {
  * docs/brainstorm.md 是否已填实质内容,返回 { ok, missing }。
  * 缺失时前端拦截关闭并把清单回流给 task-intake 会话补全。
  */
-router.get('/super-tasks/:id/intake-check', async (req, res) => {
+router.get('/super-tasks/:id/intake-check', guarded(async (req, res) => {
   const check = await checkTaskIntakeDocs(req.params.id)
   if (!check) return res.status(404).json({ error: `task ${req.params.id} not found` })
   res.json(check)
-})
+}))
 
-router.delete('/super-tasks', async (req, res) => {
+router.delete('/super-tasks', guarded(async (req, res) => {
   const { ids } = (req.body ?? {}) as { ids?: unknown }
   if (!Array.isArray(ids) || ids.length === 0 || ids.some((x) => typeof x !== 'string')) {
     return res.status(400).json({ error: 'ids: 非空字符串数组必填' })
@@ -241,14 +273,14 @@ router.delete('/super-tasks', async (req, res) => {
     const msg = (err as Error).message
     res.status(msg.includes('processing') ? 409 : 404).json({ error: msg })
   }
-})
+}))
 
-router.post('/super-tasks/managed', async (req, res) => {
+router.post('/super-tasks/managed', guarded(async (req, res) => {
   const { enabled } = (req.body ?? {}) as { enabled?: unknown }
   if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled: boolean 必填' })
   await setTaskFactoryState({ managedEnabled: enabled })
   res.json({ ok: true })
-})
+}))
 
 /**
  * POST /api/super-tasks/supervisor — 上报任务调度器会话 id(2026-09-02)。
@@ -256,14 +288,14 @@ router.post('/super-tasks/managed', async (req, res) => {
  * state.json,托管循环 injectSupervisorCommand 与手工 start/pause 等注入
  * 才始终打在用户可见的调度器会话上。
  */
-router.post('/super-tasks/supervisor', async (req, res) => {
+router.post('/super-tasks/supervisor', guarded(async (req, res) => {
   const { sessionId } = (req.body ?? {}) as { sessionId?: unknown }
   if (typeof sessionId !== 'string' || sessionId.trim() === '') {
     return res.status(400).json({ error: 'sessionId: 非空字符串必填' })
   }
   await setTaskFactoryState({ supervisorSessionId: sessionId.trim() })
   res.json({ ok: true })
-})
+}))
 
 /**
  * POST /api/super-tasks/supervisor/reset — 清空调度器会话 id + 同步关托管(2026-09-02)。
@@ -279,20 +311,20 @@ router.post('/super-tasks/supervisor', async (req, res) => {
  * injectSupervisorCommand 在 sid 为空/null 时有 console.warn 护栏,
  * 这里把 supervisorSessionId 置 null 是有意为之,不是 bug。
  */
-router.post('/super-tasks/supervisor/reset', async (_req, res) => {
+router.post('/super-tasks/supervisor/reset', guarded(async (_req, res) => {
   await setTaskFactoryState({
     supervisorSessionId: null,
     managedEnabled: false,
   })
   res.json({ ok: true })
-})
+}))
 
 /**
  * POST /api/super-tasks/inject — 向任务调度器会话注入指令。
  * action 白名单 dispatch/resume/accept/pause;可附 task id(存在性校验),
  * 标题中的 `<` 替换为全角 `＜` 防止被解析为 XML 起始标签。
  */
-router.post('/super-tasks/inject', async (req, res) => {
+router.post('/super-tasks/inject', guarded(async (req, res) => {
   const { action, id } = (req.body ?? {}) as { action?: unknown; id?: unknown }
   if (typeof action !== 'string' || !(ALLOWED_ACTIONS as readonly string[]).includes(action)) {
     return res.status(400).json({ error: `action: ${ALLOWED_ACTIONS.join('/')} 之一必填` })
@@ -307,18 +339,18 @@ router.post('/super-tasks/inject', async (req, res) => {
     : `\n<task-command action="${typedAction}">Handle per the command: ${typedAction}</task-command>`
   injectSupervisorCommand(body)
   res.json({ ok: true })
-})
+}))
 
 /**
  * POST /api/super-tasks/:id/start — 手工启动：校验在队列后注入 dispatch 指令，
  * 由任务调度器按任务 cwd 委派执行子 Agent（优先 CliAgent）。
  */
-router.post('/super-tasks/:id/start', async (req, res) => {
+router.post('/super-tasks/:id/start', guarded(async (req, res) => {
   const t = await getTaskSummary(req.params.id)
   if (!t || t.bucket !== 'queue-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在队列` })
   injectSupervisorCommand(buildTaskCommand('dispatch', t, `Dispatch task ${t.id} for execution.`))
   res.json({ ok: true })
-})
+}))
 
 /**
  * POST /api/super-tasks/:id/pause — 暂停：kill 执行子任务（保留其会话），
@@ -327,7 +359,7 @@ router.post('/super-tasks/:id/start', async (req, res) => {
  * 仅 processing 桶 + status=processing 允许暂停：verifying 桶中验证 subagent 正在跑,
  * 暂停会破坏验证闭环, 直接 400 拒绝(用户应改用 verifying 桶的强制 accept 走归档)。
  */
-router.post('/super-tasks/:id/pause', async (req, res) => {
+router.post('/super-tasks/:id/pause', guarded(async (req, res) => {
   const t = await getTaskSummary(req.params.id)
   if (!t || t.bucket !== 'processing-tasks' || t.status !== 'processing') {
     return res.status(400).json({ error: `task ${req.params.id} 不在执行中(processing+processing)` })
@@ -344,18 +376,18 @@ router.post('/super-tasks/:id/pause', async (req, res) => {
   }
   injectSupervisorCommand(`\n<task-command action="pause" id="${t.id}">Task paused (executor subagent has been killed). Reply to resume when needed.</task-command>`)
   res.json({ ok: true })
-})
+}))
 
 /**
  * POST /api/super-tasks/:id/resume — 继续：注入 resume 指令，
  * 任务调度器 resume 原执行会话或重新委派。
  */
-router.post('/super-tasks/:id/resume', async (req, res) => {
+router.post('/super-tasks/:id/resume', guarded(async (req, res) => {
   const t = await getTaskSummary(req.params.id)
   if (!t || t.bucket !== 'processing-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在执行中` })
   injectSupervisorCommand(`\n<task-command action="resume" id="${t.id}" title="${(t.title ?? '').replace(/</g, '＜')}">Continue executing the task (resume the original executor session or re-delegate).</task-command>`)
   res.json({ ok: true })
-})
+}))
 
 /**
  * POST /api/super-tasks/:id/accept — 人工验收入口：注入 accept 指令，
@@ -367,7 +399,7 @@ router.post('/super-tasks/:id/resume', async (req, res) => {
  * - verifying → 「强制通过」语义,跳过 verifier 直接 MarkDone。
  * queue/finished/不存在 → 400 拒绝。
  */
-router.post('/super-tasks/:id/accept', async (req, res) => {
+router.post('/super-tasks/:id/accept', guarded(async (req, res) => {
   const t = await getTaskSummary(req.params.id)
   if (!t || (t.bucket !== 'processing-tasks' && t.bucket !== 'verifying-tasks')) {
     return res.status(400).json({ error: `task ${req.params.id} 不在执行中或验证中(processing/verifying)` })
@@ -378,6 +410,6 @@ router.post('/super-tasks/:id/accept', async (req, res) => {
     : 'Accept the task deliverables and call SuperTasksMarkDone.'
   injectSupervisorCommand(buildTaskCommand(action as 'forced-accept' | 'accept', t, msg))
   res.json({ ok: true })
-})
+}))
 
 export default router

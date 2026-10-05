@@ -917,12 +917,31 @@ export function getServerCwd(): string {
   return serverCwd
 }
 
-export async function abortAgentSession(reason?: string): Promise<void> {
-  askRegistry.abortAll(reason ?? 'session_aborted')
-  approveRegistry.abortAll(reason ?? 'session_aborted')
-  permissionRegistry.abortAll(reason ?? 'session_aborted')
-  if (currentSessionId) {
-    abortSessionController(currentSessionId, reason)
+/**
+ * Abort one session's turn + every pending AskUserQuestion / RequestApprove /
+ * `behavior:'ask'` decision belonging to it.
+ *
+ * `sessionId` (2026-10-05, bug `abort-uses-global-session-id--by-zai`): the
+ * function used to read the module-global `currentSessionId`, so aborting
+ * session A also killed whatever turn `currentSessionId` happened to point at.
+ * `/agent/abort` was the worst offender — it correctly resolved the sid from the
+ * `x-session-id` header, then immediately called this function, which undid that
+ * precision. The front end sends that header precisely to avoid cross-session
+ * kills. Pass the session id; omitting it falls back to `currentSessionId` for
+ * the legacy callers that have no sid of their own (e.g. the `/clear` builtin).
+ */
+export async function abortAgentSession(
+  reason?: string,
+  sessionId?: string | null,
+): Promise<void> {
+  // Resolve once and use the resolved value everywhere below — reading the
+  // global at three separate points could observe three different sessions.
+  const sid = sessionId ?? currentSessionId
+  askRegistry.abortAll(reason ?? 'session_aborted', sid ?? undefined)
+  approveRegistry.abortAll(reason ?? 'session_aborted', sid ?? undefined)
+  permissionRegistry.abortAll(reason ?? 'session_aborted', sid ?? undefined)
+  if (sid) {
+    abortSessionController(sid, reason)
     // 覆盖"turn 已结束但后台任务还在跑"的场景:此时 sessionControllers 里
     // 可能没有该 sid 的 controller(abortSessionController 会直接 return
     // false),但后台任务仍应被终止,否则会继续向共享 API key 发请求。
@@ -931,7 +950,7 @@ export async function abortAgentSession(reason?: string): Promise<void> {
         './backgroundRuntime.js'
       )
       await cancelBackgroundTasksByParentSession(
-        currentSessionId,
+        sid,
         reason ?? 'session_aborted',
       )
     } catch (err) {
@@ -943,7 +962,7 @@ export async function abortAgentSession(reason?: string): Promise<void> {
     const r = runtime
     if (r) {
       try {
-        await r.abort(currentSessionId, reason ?? 'session_aborted')
+        await r.abort(sid, reason ?? 'session_aborted')
       } catch (err) {
         console.warn('[abortAgentSession] runtime.abort failed:', err)
       }

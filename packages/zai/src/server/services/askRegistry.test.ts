@@ -37,6 +37,47 @@ describe('AskRegistry', () => {
     await expect(p2).rejects.toThrow('session_aborted')
   })
 
+  // ========== abortAll 的 sessionId 过滤(2026-10-05) ==========
+  // bug `prompt-close-aborts-all-sessions`:registry 是进程级单例,abortAll
+  // 原先无条件遍历全表 → 一个会话正常发 prompt 结束时的 close 事件会把
+  // **别的会话**正挂着的 ask 一起 reject 掉。
+
+  test('abortAll 传 sessionId → 只 abort 该会话,其它会话的 pending 不受影响', async () => {
+    const reg = new AskRegistry()
+    const ctrl = new AbortController()
+    const mine = reg.register('t1', 'sess-A', ctrl.signal)
+    const theirs = reg.register('t2', 'sess-B', ctrl.signal)
+
+    reg.abortAll('client_disconnect', 'sess-A')
+    await expect(mine).rejects.toThrow('client_disconnect')
+
+    // 关键断言:别的会话仍然挂着,还能正常作答。
+    expect(reg.peek('t2')?.sessionId).toBe('sess-B')
+    expect(reg.answer('t2', { answers: { q1: 'ok' } })).toBe(true)
+    await expect(theirs).resolves.toEqual({ answers: { q1: 'ok' } })
+  })
+
+  test('abortAll 传一个不存在的 sessionId → 不 abort 任何东西', async () => {
+    const reg = new AskRegistry()
+    const ctrl = new AbortController()
+    const p = reg.register('t1', 'sess-A', ctrl.signal)
+    reg.abortAll('client_disconnect', 'sess-ZZZ')
+    // 没有 pending 被清掉
+    expect(reg.peek('t1')).toBeDefined()
+    expect(reg.answer('t1', { answers: { q1: 'still alive' } })).toBe(true)
+    await expect(p).resolves.toEqual({ answers: { q1: 'still alive' } })
+  })
+
+  test('abortAll 不传 sessionId → 仍是全量 abort(重启 drain 需要)', async () => {
+    const reg = new AskRegistry()
+    const ctrl = new AbortController()
+    const p1 = reg.register('t1', 'sess-A', ctrl.signal)
+    const p2 = reg.register('t2', 'sess-B', ctrl.signal)
+    reg.abortAll('restart_drain_timeout')
+    await expect(p1).rejects.toThrow('restart_drain_timeout')
+    await expect(p2).rejects.toThrow('restart_drain_timeout')
+  })
+
   test('answer 不存在的 toolUseId → 返回 false 不抛错', () => {
     const reg = new AskRegistry()
     expect(reg.answer('nonexistent', { answers: {} })).toBe(false)

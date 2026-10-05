@@ -100,8 +100,17 @@ export class ApproveRegistry {
     return true
   }
 
-  abortAll(reason = 'session_aborted'): void {
+  /**
+   * Reject every pending approval, optionally narrowed to one session.
+   *
+   * `sessionId` (2026-10-05, bug `prompt-close-aborts-all-sessions`): the
+   * registry is a process-wide singleton, so the client-disconnect path used to
+   * abort approvals belonging to *other* sessions too. Pass the session id to
+   * scope it; omit it only for a genuine process-wide abort (restart drain).
+   */
+  abortAll(reason = 'session_aborted', sessionId?: string): void {
     for (const p of this.pending.values()) {
+      if (sessionId !== undefined && p.sessionId !== sessionId) continue
       this.pending.delete(p.toolUseId)
       p.reject(new Error(reason))
     }

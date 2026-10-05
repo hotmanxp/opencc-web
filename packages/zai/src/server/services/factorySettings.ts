@@ -15,10 +15,11 @@
  * core 侧(mainAgents-taskFactory.ts)独立读同一文件,纯 core 环境文件缺失
  * 时全部默认值 no-op。
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
+import { atomicWriteFile } from '../utils/atomicWrite.js'
 
 export interface FactorySettings {
   /** 需求文档目录 = 需求讨论(task-intake)会话的 cwd。空串 = 未配置。 */
@@ -180,7 +181,7 @@ export async function setFactorySettings(patch: FactorySettingsPatch): Promise<F
   }
   const path = factorySettingsPath()
   await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(merged, null, 2), 'utf-8')
+  await atomicWriteFile(path, JSON.stringify(merged, null, 2))
   cached = merged
   return merged
 }

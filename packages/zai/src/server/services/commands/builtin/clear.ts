@@ -17,7 +17,10 @@ export const clearCommand: LocalCommand = {
       (context && typeof context.sessionId === 'string' && context.sessionId) ||
       getCurrentSessionId()
     if (sessionId) {
-      await abortAgentSession('user_clear')
+      // 传 sid(2026-10-05, `abort-uses-global-session-id--by-zai`):不传的话
+      // abortAgentSession 读模块级 currentSessionId,多 tab 下会连别的会话的
+      // turn 一起停掉 —— 与上面特意解析 context.sessionId 的用意正好相反。
+      await abortAgentSession('user_clear', sessionId)
       const store = getTranscriptStore()
       try {
         // 保留 transcript 文件,只清空 messages。这是关键修复:

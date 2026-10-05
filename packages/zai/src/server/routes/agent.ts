@@ -1964,26 +1964,49 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     }
   }
 
-  req.on("close", () => {
-    if (process.env.ZAI_DEBUG === "1") {
-      console.error(
-        "[zai.agent.prompt] req.close (no abort — fire-and-forget)",
-        { sessionId },
-      );
+  // 客户端真的断开时才释放 pending 提问 / 审批 / 权限确认。
+  //
+  // 2026-10-05, bug `prompt-close-aborts-all-sessions`(合并
+  // `prompt-close-aborts-all-approvals--by-zai`)。原来的 `req.on("close")`
+  // 有两个独立缺陷:
+  //  1. **正常 200 响应也会触发 close。** fire-and-forget 设计下本路由立即
+  //     res.json() 返回,响应正常完成时 req 也发出 close —— close ≠ 客户端
+  //     异常断开。于是每一次正常发 prompt 都会走进下面的三个 abortAll。
+  //  2. **abortAll 是进程级的。** 三个 registry 都是单例,abortAll 无条件遍历
+  //     全表且不带 sessionId 过滤 → 任意一个会话的正常 prompt 结束,会把
+  //     **其它所有会话**正挂着的 AskUserQuestion / 审批 / 权限确认一起 reject
+  //     掉,表现为别处的卡片凭空消失、turn 报 aborted。
+  //
+  // 修法两步都在这里:① 改听 `res.on("close")` 并用 `res.writableFinished`
+  // 判别 —— 正常响应完成时它为 true,提前中断时为 false(探针实测
+  // `close fired=1 writableEnded=true socket.destroyed=false`);
+  // ② 三个 abortAll 都传 sessionId,即便真的断开也只释放本会话的 pending。
+  // 缺 ① 会漏掉「同会话内 pending ask 被正常响应误杀」,缺 ② 会误杀别的会话 ——
+  // 两个都要。
+  res.on("close", () => {
+    // 正常响应完成:writableFinished=true。这是绝大多数 close 的成因,
+    // 此时一切照常,不要碰任何 registry。
+    if (res.writableFinished) {
+      if (process.env.ZAI_DEBUG === "1") {
+        console.error("[zai.agent.prompt] res.close (response finished, no abort)", { sessionId });
+      }
+      return;
     }
-    // ★ 不要 abort: fire-and-forget 设计下, /agent/prompt 立即写完响应,
-    // HTTP/1.1 默认会 close res, client 关 body 是正常 lifecycle. abort 会让
-    // queryEngine 立即 yield runtime.aborted 提前 return, 永远走不到
-    // appendAssistantMessage — LLM 回复写不进 transcript, 刷新页面看不到.
-    // 真正兜底是 runQueryLoop 内的 HARD_TIMEOUT (现 2h, 见顶部常量).
-    // 但 askRegistry 仍要 abort — client 关掉页面时正在 ask 的 tool 必须释放.
-    getAskRegistry().abortAll("client_disconnect");
-    // ApproveRegistry 同样要在 client 断开时释放: 阻止 /api/agent/approve
-    // 路由对一个已经死掉的 client 永久挂起. spec §4.4.
-    getApproveRegistry().abortAll("client_disconnect");
-    // PermissionRegistry（behavior:'ask' 确认）同样释放，否则 pending 权限
-    // 会挂到 HARD_TIMEOUT。
-    getPermissionRegistry().abortAll("client_disconnect");
+    if (process.env.ZAI_DEBUG === "1") {
+      console.error("[zai.agent.prompt] res.close (client aborted → release pendings)", { sessionId });
+    }
+    // ★ 仍然不要 abort turn: abort 会让 queryEngine 立即 yield
+    // runtime.aborted 提前 return, 永远走不到 appendAssistantMessage ——
+    // LLM 回复写不进 transcript, 刷新页面看不到。真正兜底是 runQueryLoop
+    // 内的 HARD_TIMEOUT (现 2h, 见顶部常量)。
+    // 但 pending 的提问 / 审批 / 权限确认必须释放 —— client 真断开后没人能
+    // 再回答它们, 只能挂到 HARD_TIMEOUT。
+    getAskRegistry().abortAll("client_disconnect", sessionId);
+    // ApproveRegistry 同样要释放: 阻止 /api/agent/approve 路由对一个已经
+    // 死掉的 client 永久挂起. spec §4.4.
+    getApproveRegistry().abortAll("client_disconnect", sessionId);
+    // PermissionRegistry（behavior:'ask' 确认）同样释放。
+    getPermissionRegistry().abortAll("client_disconnect", sessionId);
   });
 
   // ★ 立即响应，事件通过 eventBus → /api/event SSE。
@@ -2291,13 +2314,18 @@ router.post("/agent/abort", async (req: Request, res: Response) => {
   // 兼容旧客户端.
   const headerSid = (req.headers["x-session-id"] as string | undefined) ?? undefined
   const sid = headerSid ?? getCurrentSessionId()
+  // 2026-10-05, bug `abort-uses-global-session-id--by-zai`: 之前这里先按
+  // header 精确 abort 了 sid, 紧接着又无参调 abortAgentSession —— 而后者读
+  // 模块级 currentSessionId, 把「只停当前会话」的精度整个废掉, 在另一个 tab
+  // 点了停止会把那边的 turn 一起杀掉。前端特意发这个 header 就是为了避免
+  // 误杀(见 useAgentStore.ts:1453 的注释)。现在把 sid 传进去。
+  // sid 为 null 时传 undefined, abortAgentSession 内部回落到 currentSessionId,
+  // 保留"没带 header 的旧前端"的行为。
   const aborted = sid ? abortSessionController(sid, "user_abort") : false
-  // 仍然调 askRegistry.abortAll 以解锁任何 pending AskUserQuestion.
-  // 注意: abortAgentSession 内部还会触发一次 currentSessionId 对应的
-  // abortSessionController, 但此时 sid 已 abort 完毕 (idempotent 返回
-  // false), 重复调用不会引入副作用. 保留是为了让"没带 header 的旧前端"
-  // 走 currentSessionId 兜底时仍然能 abort.
-  await abortAgentSession("user_abort")
+  // abortAgentSession 内部同样会 abortSessionController(sid) —— 此时已 abort
+  // 完毕 (idempotent 返回 false), 重复调用无副作用; 它额外负责解锁本会话
+  // pending 的 AskUserQuestion / 审批 / 权限确认。
+  await abortAgentSession("user_abort", sid)
   res.json({ ok: true, sessionId: sid, aborted })
 });
 
