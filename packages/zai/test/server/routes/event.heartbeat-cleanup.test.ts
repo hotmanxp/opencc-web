@@ -115,11 +115,17 @@ describe('GET /event heartbeat cleanup', () => {
 
     try {
       const { req, res, write, end } = makeReqRes(() => true)
+      // 直接量 eventBus 的订阅数 —— 泄漏的本质就是这里只增不减。
+      // (writeSse 吞掉 EPIPE 且返回 false 不抛,所以泄漏在运行期完全静默,
+      //  「之后不再收到写」是间接证据,这条才是直接断言。)
+      const subsBefore = (eventBus as unknown as { subs: unknown[] }).subs.length
       const pending = getEventHandler()(req, res)
 
       // 跑进 bg.list() 的 await(此时 close 监听是否已注册,正是被测的差异)
       await vi.advanceTimersByTimeAsync(0)
       expect(releaseList).not.toBeNull()
+      // 此刻订阅已注册但连接尚未结束 —— 必须比基线多 1,否则下面等于没测
+      expect((eventBus as unknown as { subs: unknown[] }).subs.length).toBe(subsBefore + 1)
 
       req.emit('close')
       releaseList?.()
@@ -127,6 +133,9 @@ describe('GET /event heartbeat cleanup', () => {
 
       expect(end).toHaveBeenCalled()
       expect(vi.getTimerCount()).toBe(0)
+
+      // 关键断言:订阅回落到基线
+      expect((eventBus as unknown as { subs: unknown[] }).subs.length).toBe(subsBefore)
 
       // unsubscribe 已执行: 新事件不会再写到这个 res
       const before = write.mock.calls.length
