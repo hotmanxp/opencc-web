@@ -91,11 +91,14 @@ describe('writeTextFile', () => {
   // 0 字节或半截文件且原内容不可恢复,而 UI 只收到一个干净的 500。
 
   test('写入失败 → 目标文件内容保持不变(不被截断成 0 字节)', async () => {
-    // 目录不可写 → 写 tmp 即失败。旧实现在这里已经把目标截断了。
+    // 目录 + 文件都只读:建不了 tmp,原地写也不行,两条路都失败。
+    // 旧实现在这里已经把目标截断了。
+    // (只把目录设只读不够 —— atomicWriteFile 会回退原地写,那条路是通的)
     const roDir = join(dir, 'ro');
     mkdirSync(roDir);
     const target = join(roDir, 'source.ts');
     writeFileSync(target, 'ORIGINAL SOURCE', 'utf8');
+    chmodSync(target, 0o444);
     chmodSync(roDir, 0o500);
     try {
       const result = await writeTextFile(target, 'NEW CONTENT');
@@ -106,6 +109,7 @@ describe('writeTextFile', () => {
       expect(readFileSync(target, 'utf8')).toBe('ORIGINAL SOURCE');
     } finally {
       chmodSync(roDir, 0o700);
+      chmodSync(target, 0o644);
     }
   });
 
@@ -114,11 +118,13 @@ describe('writeTextFile', () => {
     mkdirSync(roDir);
     const target = join(roDir, 'source.ts');
     writeFileSync(target, 'ORIGINAL SOURCE', 'utf8');
+    chmodSync(target, 0o444);
     chmodSync(roDir, 0o500);
     try {
       await writeTextFile(target, 'NEW CONTENT');
     } finally {
       chmodSync(roDir, 0o700);
+      chmodSync(target, 0o644);
     }
     expect(readdirSync(roDir)).toEqual(['source.ts']);
   });

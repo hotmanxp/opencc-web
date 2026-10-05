@@ -929,6 +929,13 @@ export function getServerCwd(): string {
  * precision. The front end sends that header precisely to avoid cross-session
  * kills. Pass the session id; omitting it falls back to `currentSessionId` for
  * the legacy callers that have no sid of their own (e.g. the `/clear` builtin).
+ *
+ * No session resolved → abort **nothing**. It must not fall through to an
+ * unscoped `abortAll`, which would reject every session's pendings — the very
+ * cross-session kill this function exists to stop. `/agent/abort` reaches that
+ * state whenever neither `x-session-id` nor `currentSessionId` is set.
+ * (Process-wide aborts stay available and intentional via `abortAllAgentPrompts`,
+ * the restart-drain path.)
  */
 export async function abortAgentSession(
   reason?: string,
@@ -937,10 +944,10 @@ export async function abortAgentSession(
   // Resolve once and use the resolved value everywhere below — reading the
   // global at three separate points could observe three different sessions.
   const sid = sessionId ?? currentSessionId
-  askRegistry.abortAll(reason ?? 'session_aborted', sid ?? undefined)
-  approveRegistry.abortAll(reason ?? 'session_aborted', sid ?? undefined)
-  permissionRegistry.abortAll(reason ?? 'session_aborted', sid ?? undefined)
   if (sid) {
+    askRegistry.abortAll(reason ?? 'session_aborted', sid)
+    approveRegistry.abortAll(reason ?? 'session_aborted', sid)
+    permissionRegistry.abortAll(reason ?? 'session_aborted', sid)
     abortSessionController(sid, reason)
     // 覆盖"turn 已结束但后台任务还在跑"的场景:此时 sessionControllers 里
     // 可能没有该 sid 的 controller(abortSessionController 会直接 return

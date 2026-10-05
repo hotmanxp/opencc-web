@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, readFile, readdir, stat, writeFile, chmod } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, stat, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { atomicWriteFile } from './atomicWrite.js'
@@ -44,16 +44,19 @@ describe('atomicWriteFile', () => {
     expect(await readdir(dir)).toEqual(['state.json'])
   })
 
-  test('rename 失败(EACCES 目标目录)→ 原文件内容保持不变', async () => {
+  test('写不动(目录只读 + 文件只读)→ 抛错且原文件内容保持不变', async () => {
     const path = join(dir, 'locked.json')
     await writeFile(path, 'PREVIOUS CONTENT', 'utf-8')
-    // 把目录改成只读 → 写 tmp 也失败。用于验证失败路径不吞掉原文件。
+    // 目录和文件都只读:建不了 tmp,原地写也不行,两条路都失败。
+    // (只把目录设只读是不够的 —— 那正是 atomicWriteFile 会回退原地写的场景)
+    await chmod(path, 0o444)
     await chmod(dir, 0o500)
     try {
-      await expect(atomicWriteFile(path, 'new')).rejects.toBeTruthy()
+      await expect(atomicWriteFile(path, 'new')).rejects.toMatchObject({ code: 'EACCES' })
       expect(await readFile(path, 'utf-8')).toBe('PREVIOUS CONTENT')
     } finally {
       await chmod(dir, 0o700)
+      await chmod(path, 0o644)
     }
   })
 
@@ -70,6 +73,51 @@ describe('atomicWriteFile', () => {
     await atomicWriteFile(path, 'second', { mode: 0o600 })
     expect(await readFile(path, 'utf-8')).toBe('second')
     expect((await stat(path)).mode & 0o777).toBe(0o600)
+  })
+
+  // rename 换的是**新 inode**,目标文件原有的 mode 不会跟过来。写用户源码的
+  // 路径(/api/fs/file PUT)能改任意文件,漏掉这条 = `chmod 600 .env` 存一次
+  // 就变世界可读,`chmod +x` 的脚本掉执行位。
+  test('覆盖写保留目标文件原有 mode(不把 0600 降成 0644)', async () => {
+    const path = join(dir, '.env')
+    await writeFile(path, 'SECRET=1', 'utf-8')
+    await chmod(path, 0o600)
+    await atomicWriteFile(path, 'SECRET=2')
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+    expect(await readFile(path, 'utf-8')).toBe('SECRET=2')
+  })
+
+  test('覆盖写保留可执行位', async () => {
+    const path = join(dir, 'deploy.sh')
+    await writeFile(path, '#!/bin/sh\n', 'utf-8')
+    await chmod(path, 0o755)
+    await atomicWriteFile(path, '#!/bin/sh\necho hi\n')
+    expect((await stat(path)).mode & 0o777).toBe(0o755)
+  })
+
+  test('显式 mode 优先于目标文件现有 mode', async () => {
+    const path = join(dir, 'account.json')
+    await writeFile(path, 'a', 'utf-8')
+    await chmod(path, 0o644)
+    await atomicWriteFile(path, 'b', { mode: 0o600 })
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+  })
+
+  // 「文件可写但所在目录不可写」时建不了 tmp —— 别人 root 所有的目录、
+  // sticky /tmp 里你拥有的文件。原先原地写能成功,纯 tmp+rename 会变 500,
+  // 属于行为回退,这里保证仍然能写。
+  test('目录不可写但文件可写 → 仍能覆盖写(回退原地写)', async () => {
+    const roDir = join(dir, 'ro')
+    await mkdir(roDir, { recursive: true })
+    const path = join(roDir, 'mine.txt')
+    await writeFile(path, 'OLD', 'utf-8')
+    await chmod(roDir, 0o500)
+    try {
+      await atomicWriteFile(path, 'NEW')
+      expect(await readFile(path, 'utf-8')).toBe('NEW')
+    } finally {
+      await chmod(roDir, 0o700)
+    }
   })
 
   // tmp 名必须带计数器:fileStore 与 zaiSettingsStore 是同进程内的两个并发

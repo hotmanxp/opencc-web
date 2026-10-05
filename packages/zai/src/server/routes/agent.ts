@@ -1951,19 +1951,13 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   const cwd = ctx.cwd
   const sessionId = existingSessionId ?? newSessionId()
 
-  // Prompt 携带已有 sessionId 时，必须在响应成功和启动 runtime 之前完成 cwd 校验
-  if (existingSessionId) {
-    try {
-      const t = await getTranscriptStore().read(existingSessionId, { cwd: ctx.cwd })
-      const resolved = t.meta.cwd ? path.resolve(t.meta.cwd) : null
-      if (resolved !== path.resolve(ctx.cwd)) {
-        return res.status(404).json({ error: 'Session not found' })
-      }
-    } catch {
-      return res.status(404).json({ error: 'Session not found' })
-    }
-  }
-
+  // ★ 注册时机:必须在下面第一个 await 之前。
+  // 'close' 是一次性事件 —— 客户端在这个 await 窗口里断开,响应随后 emit
+  // 'close' 时我们还没挂上监听,就永远收不到,那段时间挂起的 pending 提问
+  // 会一直 leak 到 HARD_TIMEOUT。routes/event.ts 的注释早就写了这条规矩
+  // ("close 监听必须在第一个 await 之前注册"),这里得守同样的规矩。
+  // sessionId 在上面是同步算出来的,所以现在就能拿到。
+  //
   // 客户端真的断开时才释放 pending 提问 / 审批 / 权限确认。
   //
   // 2026-10-05, bug `prompt-close-aborts-all-sessions`(合并
@@ -2008,6 +2002,19 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     // PermissionRegistry（behavior:'ask' 确认）同样释放。
     getPermissionRegistry().abortAll("client_disconnect", sessionId);
   });
+
+  // Prompt 携带已有 sessionId 时，必须在响应成功和启动 runtime 之前完成 cwd 校验
+  if (existingSessionId) {
+    try {
+      const t = await getTranscriptStore().read(existingSessionId, { cwd: ctx.cwd })
+      const resolved = t.meta.cwd ? path.resolve(t.meta.cwd) : null
+      if (resolved !== path.resolve(ctx.cwd)) {
+        return res.status(404).json({ error: 'Session not found' })
+      }
+    } catch {
+      return res.status(404).json({ error: 'Session not found' })
+    }
+  }
 
   // ★ 立即响应，事件通过 eventBus → /api/event SSE。
   // per-session 串行队列: 当前轮在跑或队列非空 → 本条 prompt 入队等待

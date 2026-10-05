@@ -40,6 +40,7 @@ import {
 } from '../services/factorySettings.js'
 import { sweepArchiveFinishedTasks } from '../services/historyArchive.js'
 import { readZaiSettings, updateZaiSettings } from '../services/zaiSettingsStore.js'
+import { logHttp } from '../services/accessLog.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -69,11 +70,14 @@ function guarded(fn: AsyncHandler): AsyncHandler {
     try {
       await fn(req, res)
     } catch (err) {
-      // 响应已开始(理论上本文件没有流式端点)就不能再写状态码,只能记日志。
-      if (res.headersSent) {
-        console.error('[superTasks] async handler rejected after headers sent:', err)
-        return
-      }
+      const msg = `${req.method} ${req.originalUrl} → ${(err as Error).message}`
+      // 走 logHttp 而非 console.error:这些 500 是「本来该由 Express error
+      // middleware 记录」的那一类,index.ts 的 error handler 对 async 路径
+      // 不生效,若只打 console 就没有 /tmp/zai-http.log 里带请求路径的记录,
+      // 排障时和其他 500 分开成了两套。
+      logHttp(`[superTasks] unhandled route rejection: ${msg}`, 'error')
+      // 响应已开始(理论上本文件没有流式端点)就不能再写状态码。
+      if (res.headersSent) return
       res.status(500).json({ error: (err as Error).message })
     }
   }
