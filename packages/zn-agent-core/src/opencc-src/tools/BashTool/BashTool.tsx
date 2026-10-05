@@ -261,6 +261,17 @@ const DISALLOWED_AUTO_BACKGROUND_COMMANDS = ['sleep' // Sleep should run in fore
 const isBackgroundTasksDisabled =
 // eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: schema must be defined at module load
 isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS);
+
+// Assistant-mode 2-second auto-background is OFF by default; opt in with
+// CLAUDE_BASH_AUTO_BACKGROUND=1 to match upstream default. The 30-minute
+// foreground timeout still hands long commands over to the background (see
+// ShellCommand.#handleTimeout), so disabling this only narrows the
+// threshold from 2s → 30min — it does not leave commands without a
+// backgrounding escape. Explicit run_in_background, Ctrl+B, and the
+// turn-abort rescue are unaffected.
+const isAssistantAutoBackgroundEnabled =
+// eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: gate evaluated at module load
+isEnvTruthy(process.env.CLAUDE_BASH_AUTO_BACKGROUND);
 const fullInputSchema = lazySchema(() => z.strictObject({
   command: z.string().describe('The command to execute'),
   timeout: semanticNumber(z.number().optional()).describe(`Optional timeout in milliseconds (max ${getMaxTimeoutMs()})`),
@@ -482,8 +493,13 @@ function isAutobackgroundingAllowed(command: string): boolean {
   const parts = splitCommand_DEPRECATED(command);
   if (parts.length === 0) return true;
 
-  // Get the first part which should be the base command
-  const baseCommand = parts[0]?.trim();
+  // Get the base command: the first whitespace-separated token of the
+  // first segment. splitCommand_DEPRECATED returns command SEGMENTS, not
+  // tokens — so the first word has to be split out again, otherwise
+  // "sleep 5" never matches the 'sleep' entry in
+  // DISALLOWED_AUTO_BACKGROUND_COMMANDS. Mirrors PowerShellTool's shape
+  // and upstream's qhr() in BashTool.tsx.
+  const baseCommand = parts[0]?.trim().split(/\s+/)[0];
   if (!baseCommand) return true;
   return !DISALLOWED_AUTO_BACKGROUND_COMMANDS.includes(baseCommand);
 }
@@ -1544,7 +1560,7 @@ async function* runShellCommand({
       // this check too. `autoBackgroundArmed` gates it to one fire per
       // command.
       if (
-        !isBackgroundTasksDisabled && shouldAutoBackground && run_in_background !== true && isMainThread && !autoBackgroundArmed && backgroundShellId === undefined && elapsedSeconds >= AUTO_BACKGROUND_AFTER_SECONDS
+        !isBackgroundTasksDisabled && isAssistantAutoBackgroundEnabled && shouldAutoBackground && run_in_background !== true && isMainThread && !autoBackgroundArmed && backgroundShellId === undefined && elapsedSeconds >= AUTO_BACKGROUND_AFTER_SECONDS
       ) {
         autoBackgroundArmed = true;
         assistantAutoBackgrounded = true;
