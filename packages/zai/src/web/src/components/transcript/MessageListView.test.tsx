@@ -5,8 +5,8 @@ import { render, screen } from "@testing-library/react"
 import { MessageListView } from "./MessageListView.js"
 import type { AgentMessage } from "../../store/useAgentStore.js"
 
-// MessageListView 从 useAgentStore 读 transcriptCollapsed 与 status —— mock 掉,
-// 让测试分别驱动 expanded (false) / collapsed (true) 两条渲染路径与产物块结算。
+// MessageListView 从 useAgentStore 读 transcriptCollapsed 与 status —— mock 掉。
+// transcriptCollapsed 现在的语义是「工具运行段是否自动展开」, 不再切换渲染器。
 const collapsed = vi.hoisted(() => ({ value: false }))
 const status = vi.hoisted(() => ({ value: "idle" as string }))
 vi.mock("../../store/useAgentStore.js", () => ({
@@ -43,92 +43,108 @@ function toolMsg(
   } as unknown as AgentMessage
 }
 
-function messages(): AgentMessage[] {
-  return [
-    { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "hello" },
-    toolMsg("tool_use:start", "tu-agent", "Agent", {
-      subagent_type: "general-purpose",
-      description: "list files",
-      prompt: "list /tmp",
-    }),
-    toolMsg("tool_use:done", "tu-agent", "Agent", undefined, "Done (3 tool uses)"),
-    toolMsg("tool_use:start", "tu-bash", "Bash", { command: "ls /tmp" }),
-    toolMsg("tool_use:done", "tu-bash", "Bash", undefined, "file1 file2"),
-    { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "done" },
-  ]
+function userText(id: string, text: string, turnIndex = 0): AgentMessage {
+  return { eventId: id, sessionId: "sess-1", ts: 1, turnIndex, type: "user.text", text }
+}
+
+function assistantText(id: string, text: string, turnIndex = 0): AgentMessage {
+  return { eventId: id, sessionId: "sess-1", ts: 2, turnIndex, type: "assistant.text", text }
 }
 
 describe("MessageListView — Agent 工具卡过滤", () => {
-  test("expanded 视图不渲染 Agent 内联工具卡, 其它工具保留", () => {
-    collapsed.value = false
-    render(<MessageListView messages={messages()} />)
-    // Agent 工具卡 (displayName = "general-purpose (agent)") 被过滤掉
-    expect(screen.queryByText(/general-purpose \(agent\)/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/list files/)).not.toBeInTheDocument()
-    // Bash 工具卡保留 (start + done 各渲染一个 pill)
-    expect(screen.getAllByText("Bash").length).toBeGreaterThan(0)
-  })
-
-  test("collapsed 视图工具组不含 Agent, 组摘要不列 Agent", () => {
-    collapsed.value = true
-    render(<MessageListView messages={messages()} />)
-    expect(screen.queryByText(/general-purpose \(agent\)/)).not.toBeInTheDocument()
-    // 组摘要只剩 Bash (原为 "Agent, Bash"), 不再出现 Agent
-    expect(screen.queryByText(/·\s*Agent/)).not.toBeInTheDocument()
-    expect(screen.getByText(/2 个工具调用/)).toBeInTheDocument()
-    expect(screen.getByText(/·\s*Bash/)).toBeInTheDocument()
-  })
-
-  test("纯文本对话不受影响", () => {
-    collapsed.value = false
+  test("Agent 工具调用不进入转录, 其它工具照常成段", () => {
     render(
       <MessageListView
         messages={[
-          { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" },
-          { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "hello back" },
+          userText("u1", "hello"),
+          toolMsg("tool_use:start", "tu-agent", "Agent", {
+            subagent_type: "general-purpose",
+            description: "list files",
+            prompt: "list /tmp",
+          }),
+          toolMsg("tool_use:done", "tu-bash", "Bash", { command: "ls /tmp" }),
         ]}
       />,
     )
+    expect(screen.queryByText(/general-purpose \(agent\)/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/list files/)).not.toBeInTheDocument()
+    // Agent 已被摘掉, 运行段里只剩 Bash 一条 → 「已执行 1 条命令」
+    expect(screen.getByText("已执行 1 条命令")).toBeInTheDocument()
+  })
+
+  test("纯文本对话不受影响", () => {
+    render(<MessageListView messages={[userText("u1", "hi"), assistantText("a1", "hello back")]} />)
     expect(screen.getByText("hi")).toBeInTheDocument()
     expect(screen.getByText("hello back")).toBeInTheDocument()
   })
 
-  test("collapsed 视图: 新消息 append 到同一 text bucket 不重挂载已渲染的消息", () => {
-    // 回归: 旧实现用 `txt-${startIndex}-${endIndex}-${i}` 作包裹 div key,
-    // 新消息并入同一 text node 会让 endIndex 变大 → key 变化 → 整棵子树
-    // 卸载重挂载 → CollapsedMessageBubble / AssistantTextBody 内部展开态丢失.
-    collapsed.value = true
+  test("新消息 append 到同一 text bucket 不重挂载已渲染的消息", () => {
+    // 回归: 包裹层 key 一旦随节点长度变化, 新消息并入同一 text node 就会
+    // 整棵子树卸载重挂载 → 子组件内部展开态丢失.
     const { rerender } = render(
-      <MessageListView
-        messages={[
-          { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" },
-          { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "long answer" },
-        ]}
-      />,
+      <MessageListView messages={[userText("u1", "hi"), assistantText("a1", "long answer")]} />,
     )
-    // forceExpanded 让 "long answer" 直接渲染, getByText 返回承载该文本的 DOM 节点.
     const before = screen.getByText("long answer")
-    // 新 turn: 用户再发一条 + 助手回复, 全部并入同一 text bucket (无工具边界).
     rerender(
       <MessageListView
         messages={[
-          { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" },
-          { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "long answer" },
-          { eventId: "u2", sessionId: "sess-1", ts: 3, turnIndex: 1, type: "user.text", text: "again" },
-          { eventId: "a2", sessionId: "sess-1", ts: 4, turnIndex: 1, type: "assistant.text", text: "second reply" },
+          userText("u1", "hi"),
+          assistantText("a1", "long answer"),
+          userText("u2", "again", 1),
+          assistantText("a2", "second reply", 1),
         ]}
       />,
     )
-    // 同一 DOM 节点 → 未被重挂载, 内部状态保留.
     expect(screen.getByText("long answer")).toBe(before)
     expect(screen.getByText("second reply")).toBeInTheDocument()
   })
 })
 
+describe("MessageListView — 工具运行段摘要", () => {
+  test("连续工具调用合并成一行分类计数摘要", () => {
+    render(
+      <MessageListView
+        messages={[
+          userText("u1", "go"),
+          toolMsg("tool_use:done", "tu-bash", "Bash", { command: "ls" }),
+          toolMsg("tool_use:done", "tu-bash2", "Bash", { command: "pwd" }),
+          toolMsg("tool_use:done", "tu-read", "Read", { file_path: "/a.ts" }),
+          toolMsg("tool_use:done", "tu-task", "TaskUpdate", { taskId: "1" }),
+        ]}
+      />,
+    )
+    // 一个运行段, 一行摘要, 按段内首次出现顺序拼接
+    expect(screen.getAllByTestId("tool-run-group")).toHaveLength(1)
+    expect(screen.getByText("已执行 2 条命令，已读取 1 个文件，已更新待办")).toBeInTheDocument()
+  })
+
+  test("中间夹了正文就断成两段", () => {
+    render(
+      <MessageListView
+        messages={[
+          toolMsg("tool_use:done", "tu-b1", "Bash", { command: "ls" }),
+          assistantText("a1", "中间说句话"),
+          toolMsg("tool_use:done", "tu-b2", "Bash", { command: "pwd" }),
+        ]}
+      />,
+    )
+    expect(screen.getAllByTestId("tool-run-group")).toHaveLength(2)
+    expect(screen.getByText("中间说句话")).toBeInTheDocument()
+  })
+
+  test("折叠时 (transcriptCollapsed=true) 运行中的段也不自动展开", () => {
+    collapsed.value = true
+    render(<MessageListView messages={[toolMsg("tool_use:start", "tu-b1", "Bash", { command: "ls" })]} />)
+    expect(screen.getByText("正在执行命令")).toBeInTheDocument()
+    // 明细行不出现 → 运行段保持折叠
+    expect(screen.queryByTestId("tool-run-row")).not.toBeInTheDocument()
+  })
+})
+
 describe("MessageListView — skipOuterGroup 路由", () => {
-  // presentFileRenderer.skipOuterGroup=true → collapsed 视图下跳过
-  // ToolGroupCard 外壳, 直接渲染 MessageBubble 列表. Bash 等未标记的
-  // 工具继续走 ToolGroupCard. 混合 / pending / error 状态回退带壳.
+  // presentFileRenderer.skipOuterGroup=true → 不进工具运行段外壳, 直接把
+  // 自包含的文件卡渲染出来. Bash 等未标记的工具继续走运行段. 混合 /
+  // pending / error 状态回退带壳。
 
   function presentFileDone(toolUseId: string): AgentMessage {
     return toolMsg(
@@ -150,61 +166,38 @@ describe("MessageListView — skipOuterGroup 路由", () => {
     )
   }
 
-  test("collapsed: PresentFile toolGroup 跳过 ToolGroupCard 外壳, 直接渲染文件卡", () => {
-    collapsed.value = true
-    const { container } = render(<MessageListView messages={[presentFileDone("tu-pf-1")]} />)
-    // ToolGroupCard 的 ant-card-head 不出现 → 外壳已跳过
-    expect(container.querySelector(".ant-card-head")).not.toBeInTheDocument()
-    expect(screen.queryByText(/个工具调用/)).not.toBeInTheDocument()
-    // 文件卡渲染
+  test("PresentFile 跳过运行段外壳, 直接渲染文件卡", () => {
+    render(<MessageListView messages={[presentFileDone("tu-pf-1")]} />)
+    expect(screen.queryByTestId("tool-run-group")).not.toBeInTheDocument()
     expect(screen.getByTestId("present-file-card")).toBeInTheDocument()
     expect(screen.getByText("a.ts")).toBeInTheDocument()
   })
 
-  test("collapsed: Bash 工具仍渲染 ToolGroupCard (未标记 skipOuterGroup)", () => {
-    collapsed.value = true
-    const { container } = render(
-      <MessageListView
-        messages={[
-          toolMsg("tool_use:start", "tu-bash-1", "Bash", { command: "ls" }),
-          toolMsg("tool_use:done", "tu-bash-1", "Bash", undefined, "ok"),
-        ]}
-      />,
-    )
-    expect(container.querySelector(".ant-card-head")).toBeInTheDocument()
-    expect(screen.getByText(/个工具调用/)).toBeInTheDocument()
-    expect(screen.getByText(/·\s*Bash/)).toBeInTheDocument()
+  test("Bash 仍渲染工具运行段", () => {
+    render(<MessageListView messages={[toolMsg("tool_use:done", "tu-bash-1", "Bash", { command: "ls" })]} />)
+    expect(screen.getByTestId("tool-run-group")).toBeInTheDocument()
+    expect(screen.getByText("已执行 1 条命令")).toBeInTheDocument()
   })
 
-  test("collapsed: PresentFile + Bash 混合 toolGroup 被拆成「组卡 + 文件卡」", () => {
-    collapsed.value = true
-    const { container } = render(
+  test("PresentFile + Bash 混合被拆成「运行段 + 文件卡」", () => {
+    render(
       <MessageListView
         messages={[
-          toolMsg("tool_use:start", "tu-bash-1", "Bash", { command: "ls" }),
-          toolMsg("tool_use:done", "tu-bash-1", "Bash", undefined, "ok"),
+          toolMsg("tool_use:done", "tu-bash-1", "Bash", { command: "ls" }),
           presentFileDone("tu-pf-1"),
         ]}
       />,
     )
-    // Bash 仍进组卡(start+done 两条 message → 2 entries),文件卡独立内联;
-    // 计数是 2 而非 3,证明 PresentFile 已被摘出组卡。
-    expect(container.querySelector(".ant-card-head")).toBeInTheDocument()
-    expect(screen.getByText(/2 个工具调用/)).toBeInTheDocument()
+    // 运行段只数 Bash 一条 → 证明 PresentFile 已被摘出
+    expect(screen.getByText("已执行 1 条命令")).toBeInTheDocument()
     expect(screen.getByTestId("present-file-card")).toBeInTheDocument()
   })
 
-  test("collapsed: pending PresentFile 仍渲染 ToolGroupCard (状态优先)", () => {
-    // pending / error / invalid / denied 状态保留外壳, 让用户看到
-    // 「工具调用中…」或红色「N 个失败」Tag 状态提示.
-    collapsed.value = true
-    const { container } = render(
-      <MessageListView
-        messages={[toolMsg("tool_use:start", "tu-pf-1", "PresentFile", { path: "/a.ts" })]}
-      />,
+  test("pending PresentFile 仍进运行段 (状态优先)", () => {
+    render(
+      <MessageListView messages={[toolMsg("tool_use:start", "tu-pf-1", "PresentFile", { path: "/a.ts" })]} />,
     )
-    expect(container.querySelector(".ant-card-head")).toBeInTheDocument()
-    expect(screen.getByText(/个工具调用/)).toBeInTheDocument()
+    expect(screen.getByTestId("tool-run-group")).toBeInTheDocument()
     expect(screen.queryByTestId("present-file-card")).toBeNull()
   })
 })
@@ -213,43 +206,39 @@ describe("MessageListView — skipOuterGroup 路由", () => {
 // 语料:两轮对话,各自改过文件。产物块锚定在每轮最后一条消息之后。
 function artifactMessages(): AgentMessage[] {
   return [
-    { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "first" },
+    userText("u1", "first"),
     toolMsg("tool_use:start", "tu-w1", "Write", { file_path: "/abs/one.ts" }),
     toolMsg("tool_use:done", "tu-w1", "Write", undefined, "File created successfully"),
-    { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "done1" },
-    { eventId: "u2", sessionId: "sess-1", ts: 3, turnIndex: 1, type: "user.text", text: "second" },
+    assistantText("a1", "done1"),
+    userText("u2", "second", 1),
     toolMsg("tool_use:start", "tu-e1", "Edit", { file_path: "/abs/two.ts" }),
     toolMsg("tool_use:done", "tu-e1", "Edit", undefined, "ok"),
-    { eventId: "a2", sessionId: "sess-1", ts: 4, turnIndex: 1, type: "assistant.text", text: "done2" },
+    assistantText("a2", "done2", 1),
   ]
 }
 
 describe("MessageListView — 本轮产物块", () => {
-  test("expanded 视图:每轮末尾各渲染一个产物块", () => {
-    collapsed.value = false
-    status.value = "idle"
+  test("每轮末尾各渲染一个产物块", () => {
     render(<MessageListView messages={artifactMessages()} />)
     expect(screen.getAllByTestId("turn-artifacts-block")).toHaveLength(2)
     expect(screen.getByText("one.ts")).toBeInTheDocument()
     expect(screen.getByText("two.ts")).toBeInTheDocument()
   })
 
-  test("collapsed 视图:同样插入两个产物块", () => {
+  test("collapsed 态同样插入两个产物块", () => {
     collapsed.value = true
-    status.value = "idle"
     render(<MessageListView messages={artifactMessages()} />)
     expect(screen.getAllByTestId("turn-artifacts-block")).toHaveLength(2)
   })
 
   test("流式中的最后一轮不出产物块,已结束的上一轮仍有", () => {
-    collapsed.value = false
     status.value = "streaming"
     render(
       <MessageListView
         messages={[
-          { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "first" },
+          userText("u1", "first"),
           toolMsg("tool_use:start", "tu-w1", "Write", { file_path: "/abs/one.ts" }),
-          { eventId: "u2", sessionId: "sess-1", ts: 2, turnIndex: 1, type: "user.text", text: "second" },
+          userText("u2", "second", 1),
           toolMsg("tool_use:start", "tu-e1", "Edit", { file_path: "/abs/two.ts" }),
         ]}
       />,
@@ -260,150 +249,72 @@ describe("MessageListView — 本轮产物块", () => {
   })
 
   test("无文件改动的轮次不渲染产物块", () => {
-    collapsed.value = false
-    status.value = "idle"
-    render(
-      <MessageListView
-        messages={[
-          { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" },
-          { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "hello back" },
-        ]}
-      />,
-    )
+    render(<MessageListView messages={[userText("u1", "hi"), assistantText("a1", "hello back")]} />)
     expect(screen.queryByTestId("turn-artifacts-block")).not.toBeInTheDocument()
   })
 })
 
 describe("MessageListView — thinking live 判定", () => {
-  // 紫色"思考"pill 的流式动画在 MessageBubble.ThinkingBlock 内, 由 <style id="zai-think-glow-style">
-  // 注入到 document.head 控制. 我们这里不直接断言 DOM (RTL 在 happy-dom 下
-  // 抓不到 useEffect 注入的 <style>), 而是通过 MessageBubble 组件 spy: render
-  // 时给 ThinkingBlock 传 streaming={true/false} 的差别是 className (pill-active
-  // / dot-* 类) 与 useEffect 的 cleanup 时机. 用 mock MessageBubble 抓 props
-  // 是最稳的回归断言.
+  // 思考块的流式动画在 MessageBubble.ThinkingBlock 内 (useEffect 往 head 注入
+  // <style>), happy-dom 抓不到注入的 style, 所以 mock MessageBubble 直接断言
+  // 传下去的 streaming prop —— 这是最稳的回归断言。
   const bubbleProps: Array<{ streaming?: boolean; msg: AgentMessage }> = []
   const MockMessageBubble = (props: { msg: AgentMessage; streaming?: boolean }) => {
     bubbleProps.push(props)
     return <div data-testid="bubble" />
   }
-  const MockCollapsed = () => <div data-testid="collapsed" />
-  const MockToolGroup = () => <div data-testid="tool-group" />
+  const MockToolRunGroup = () => <div data-testid="tool-run" />
 
   beforeEach(() => {
     bubbleProps.length = 0
     vi.resetModules()
   })
 
-  test("expanded: thinking 在 text 之前 → MessageBubble streaming={true}", async () => {
-    collapsed.value = false
+  async function renderWithMockedBubble(props: {
+    streaming?: boolean
+    messages: AgentMessage[]
+  }) {
     vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
-    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsed }))
-    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
+    vi.doMock("./ToolRunGroup.js", () => ({ ToolRunGroup: MockToolRunGroup }))
     const { MessageListView: MLV } = await import("./MessageListView.js")
-    render(
-      <MLV
-        messages={[
-          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
-          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
-        ]}
-      />,
-    )
-    const thinkingProp = bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.thinking")
-    expect(thinkingProp?.streaming).toBe(true)
+    render(<MLV streaming={props.streaming} messages={props.messages} />)
+  }
+
+  const thinkingMsg = {
+    eventId: "t1",
+    sessionId: "s1",
+    ts: 2,
+    turnIndex: 0,
+    type: "assistant.thinking",
+    thinking: "reasoning",
+  } as unknown as AgentMessage
+
+  test("thinking 在 text 之前 → MessageBubble streaming={true}", async () => {
+    await renderWithMockedBubble({ messages: [userText("u1", "hi"), thinkingMsg] })
+    expect(bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.thinking")?.streaming).toBe(true)
   })
 
-  test("expanded: thinking 之后出现 text → MessageBubble streaming={false}", async () => {
-    collapsed.value = false
-    vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
-    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsed }))
-    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
-    const { MessageListView: MLV } = await import("./MessageListView.js")
-    render(
-      <MLV
-        streaming={true}
-        messages={[
-          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
-          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
-          { eventId: "a1", sessionId: "s1", ts: 3, turnIndex: 0, type: "assistant.text", text: "reply" } as unknown as AgentMessage,
-        ]}
-      />,
-    )
-    const thinkingProp = bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.thinking")
-    expect(thinkingProp?.streaming).toBe(false)
-    const textProp = bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.text")
-    expect(textProp?.streaming).toBe(true) // 最后一条 text + streaming=true
+  test("thinking 之后出现 text → thinking 失活, text 转 live", async () => {
+    await renderWithMockedBubble({
+      streaming: true,
+      messages: [
+        userText("u1", "hi"),
+        thinkingMsg,
+        { ...assistantText("a1", "reply"), sessionId: "s1" } as AgentMessage,
+      ],
+    })
+    expect(bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.thinking")?.streaming).toBe(false)
+    expect(bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.text")?.streaming).toBe(true)
   })
 
-  test("expanded: 历史回放 [thinking, text] → thinking streaming={false}", async () => {
-    collapsed.value = false
-    vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
-    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsed }))
-    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
-    const { MessageListView: MLV } = await import("./MessageListView.js")
-    render(
-      <MLV
-        messages={[
-          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
-          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
-          { eventId: "a1", sessionId: "s1", ts: 3, turnIndex: 0, type: "assistant.text", text: "reply" } as unknown as AgentMessage,
-        ]}
-      />,
-    )
-    const thinkingProp = bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.thinking")
-    expect(thinkingProp?.streaming).toBe(false)
-  })
-
-  test("collapsed: thinking 在 text 之前 → CollapsedMessageBubble streaming={false}", async () => {
-    // assistant.thinking 走 text bucket (deriveTranscriptNodes 只把 legacy
-    // 'assistant' + thinking 字段提为 kind:'thinking' 节点); 因此 collapsed
-    // 视图下通过 CollapsedMessageBubble 渲染. 这里 spy 它的 props.
-    const collapsedProps: Array<{ streaming?: boolean; message: AgentMessage }> = []
-    const MockCollapsedSpy = (props: { message: AgentMessage; streaming?: boolean }) => {
-      collapsedProps.push(props)
-      return <div data-testid="collapsed-spy" />
-    }
-    collapsed.value = true
-    vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
-    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsedSpy }))
-    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
-    const { MessageListView: MLV } = await import("./MessageListView.js")
-    render(
-      <MLV
-        streaming={true}
-        messages={[
-          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
-          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
-          { eventId: "a1", sessionId: "s1", ts: 3, turnIndex: 0, type: "assistant.text", text: "reply" } as unknown as AgentMessage,
-        ]}
-      />,
-    )
-    const thinkingProp = collapsedProps.find((p) => (p.message as { type?: string }).type === "assistant.thinking")
-    // text 已经切到 (最后一条是 assistant.text) → thinking 不再 live
-    expect(thinkingProp?.streaming).toBe(false)
-  })
-
-  test("collapsed: thinking 之后无 text (即尾部) → CollapsedMessageBubble streaming={true}", async () => {
-    const collapsedProps: Array<{ streaming?: boolean; message: AgentMessage }> = []
-    const MockCollapsedSpy = (props: { message: AgentMessage; streaming?: boolean }) => {
-      collapsedProps.push(props)
-      return <div data-testid="collapsed-spy" />
-    }
-    collapsed.value = true
-    vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
-    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsedSpy }))
-    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
-    const { MessageListView: MLV } = await import("./MessageListView.js")
-    render(
-      <MLV
-        streaming={true}
-        messages={[
-          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
-          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
-        ]}
-      />,
-    )
-    const thinkingProp = collapsedProps.find((p) => (p.message as { type?: string }).type === "assistant.thinking")
-    // text 还没切到 → thinking 块 live (走 isThinkingLive)
-    expect(thinkingProp?.streaming).toBe(true)
+  test("历史回放 [thinking, text] (无 streaming) → thinking streaming={false}", async () => {
+    await renderWithMockedBubble({
+      messages: [
+        userText("u1", "hi"),
+        thinkingMsg,
+        { ...assistantText("a1", "reply"), sessionId: "s1" } as AgentMessage,
+      ],
+    })
+    expect(bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.thinking")?.streaming).toBe(false)
   })
 })

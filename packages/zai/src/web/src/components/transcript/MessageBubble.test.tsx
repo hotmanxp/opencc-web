@@ -287,8 +287,8 @@ describe("MessageBubble — Skill tool pill", () => {
 describe("MessageBubble — thinking_delta streaming 透传", () => {
   test("content_block_delta + thinking_delta, 外层 streaming=true → 动画 className 挂上", () => {
     // 透传外层 streaming (由 MessageListView 决定: thinking 是 messages
-    // 末尾时为 true). 这里验证 streaming=true 时 .zai-thinking-pill-active
-    // 挂上 + 三个点渲染.
+    // 末尾时为 true). 思考行改成扁平单行后唯一的流式信号是三个点
+    // (紫色 pill 及其呼吸动画已随气泡一起撤掉).
     const { container } = render(
       <MessageBubble
         streaming={true}
@@ -302,7 +302,6 @@ describe("MessageBubble — thinking_delta streaming 透传", () => {
         }}
       />,
     )
-    expect(container.querySelector(".zai-thinking-pill-active")).not.toBeNull()
     expect(container.querySelector(".zai-think-dot-1")).not.toBeNull()
     expect(container.querySelector(".zai-think-dot-2")).not.toBeNull()
     expect(container.querySelector(".zai-think-dot-3")).not.toBeNull()
@@ -324,7 +323,6 @@ describe("MessageBubble — thinking_delta streaming 透传", () => {
         }}
       />,
     )
-    expect(container.querySelector(".zai-thinking-pill-active")).toBeNull()
     expect(container.querySelector(".zai-think-dot-1")).toBeNull()
   })
 })

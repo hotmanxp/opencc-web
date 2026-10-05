@@ -1648,25 +1648,26 @@ export default React.memo(function AgentInputBox({
         )}
         <SettingsButton />
         {!hideShareAndPlugin && <PluginButton />}
-        {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
-            图标在 collapsed=false 时显示 Maximize2Icon (可折叠), true 时显示
-            Minimize2Icon (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮
-            视觉风格保持一致 (icon-only + flexShrink:0).
+        {/* 工具调用展开按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
+            transcriptCollapsed 现在只控制「工具运行段是否自动展开」:
+            false(默认)时运行中的段展开成明细行, 跑完的段收成一行摘要;
+            true(compact 输出风格 / 右侧分屏锁定)时连运行中的段也不展开.
 
-            视觉态 = transcriptCollapsed, 初值由 Layout 根据 settings.outputStyle
-            设好(compact → true,其余 → false). 按钮只翻这一个布尔, 不依赖 settings,
-            因此在 compact 模式下点击也能正常切换. tooltip 在 outputStyle=compact 时
-            提示"刷新后回到 compact"以区分与 settings 持久化的关系. */}
+            图标沿用 Maximize2/Minimize2 的"可展开/可收起"语义, hover Tooltip
+            给完整文案, 与同行其他图标按钮视觉风格保持一致 (icon-only + flexShrink:0).
+            初值由 Layout 根据 settings.outputStyle 设好(compact → true,其余 → false).
+            按钮只翻这一个布尔, 不依赖 settings, 因此在 compact 模式下点击也能正常切换.
+            tooltip 在 outputStyle=compact 时提示"刷新后回到 compact"以区分与 settings 持久化的关系. */}
         {!transcriptLockActive && !isMobile && (
           <Tooltip
             title={
               outputStyle === "compact"
                 ? transcriptCollapsed
-                  ? "临时展开 transcript(刷新后回到 compact)"
-                  : "临时收起 transcript(刷新后回到 compact)"
+                  ? "临时展开工具调用(刷新后回到 compact)"
+                  : "临时收起工具调用(刷新后回到 compact)"
                 : transcriptCollapsed
-                  ? "展开 transcript"
-                  : "折叠 transcript"
+                  ? "展开工具调用"
+                  : "收起工具调用"
             }
             placement="top"
           >

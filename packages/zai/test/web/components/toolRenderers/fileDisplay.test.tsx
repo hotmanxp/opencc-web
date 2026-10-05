@@ -90,7 +90,7 @@ describe('fileDisplayRenderer.preview', () => {
 })
 
 describe('fileDisplayRenderer.skipOuterGroup', () => {
-  it('标记为 true 让 compact 视图跳过 ToolGroupCard 外壳', () => {
+  it('标记为 true 让渲染层跳过 ToolRunGroup 外壳', () => {
     // MessageListView.tsx:shouldSkipOuterGroup 依赖此标记把 DisplayFiles
     // 直接路由到 MessageBubble, 与 expanded 视图视觉一致.
     expect(fileDisplayRenderer.skipOuterGroup).toBe(true)

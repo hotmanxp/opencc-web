@@ -30,17 +30,21 @@
   --success-bg: rgba(82,196,26,0.06);
   --error-bg: rgba(255,77,79,0.06);
   --warning-bg: rgba(250,173,20,0.06);
-  /* Thinking 块 / ToolGroupCard dark 主题: 紫色降饱和 (#722ed1 → #8b5cf6)
-     + 透明度 14% → 10%, 让 pill + 卡片在深色背景上不抢眼.
+  /* Thinking 块 dark 主题: 紫色降饱和 (#722ed1 → #8b5cf6)
+     + 透明度 14% → 10%, 让思考体在深色背景上不抢眼.
      light 主题单独覆盖成主题橙, 见下方 :root[data-theme='light'] 块. */
   --thinking-accent: #8b5cf6;
   --thinking-bg: rgba(139, 92, 246, 0.10);
-  /* 非流式 "思考" pill 底色: dark 主题跟随 accent(紫), 与改动前一致;
-     light 主题覆写成淡灰(见下方 light 块)。文字两侧恒为白色. */
-  --thinking-pill-idle-bg: var(--thinking-accent);
-  --tool-group-bg: rgba(139, 92, 246, 0.08);
-  --tool-group-border: rgba(139, 92, 246, 0.40);
-  --tool-group-header-bg: rgba(139, 92, 246, 0.18);
+  /* 工具调用分类徽章的着色 (见 components/transcript/toolBuckets.ts).
+     一屏里往往并着好几类工具, 徽章颜色是"这行属于哪类"最快的识别位。 */
+  --tool-tint-command: #f97316;
+  --tool-tint-view: #38bdf8;
+  --tool-tint-search: #a78bfa;
+  --tool-tint-edit: #4ade80;
+  --tool-tint-todo: #fbbf24;
+  --tool-tint-skill: #f472b6;
+  --tool-tint-mcp: #22d3ee;
+  --tool-tint-other: #94a3b8;
   --text-dim-90: rgba(255,255,255,0.9);
   --text-dim-85: rgba(255,255,255,0.85);
   --text-dim-72: rgba(255,255,255,0.72);
@@ -141,20 +145,22 @@
   --success-bg: rgba(22, 163, 74, 0.12);
   --error-bg: rgba(220, 38, 38, 0.10);
   --warning-bg: rgba(217, 119, 6, 0.12);
-  /* Thinking / ToolGroupCard 主题橙统一: 浅色主题下用主题橙主色 (#f97316) +
+  /* Thinking 主题橙统一: 浅色主题下用主题橙主色 (#f97316) +
      更低透明度 6%/5%/4%, 避免橙色在白底上过于鲜艳. 边框 0.30 alpha 保留
      可见轮廓. */
   --thinking-accent: #f97316;
   --thinking-bg: rgba(249, 115, 22, 0.04);
-  /* 浅色主题: 非流式(思考已结束/历史回放)的 "思考" pill 改淡灰底, 不再用主题
-     橙 —— 一屏多个已完成思考块时橙色胶囊过于抢眼, 且与"正在思考"的橙色撞色.
-     pill 文字恒为白色, 灰底取 slate-400/300 之间的 #afbccc (用户逐轮调浅后的
-     取值); 再浅白字会明显发虚, 需要白字可读就得往 #94a3b8 (slate-400) 收.
-     流式期间不受影响, 仍走 --thinking-accent 橙底白字. */
-  --thinking-pill-idle-bg: #afbccc;
-  --tool-group-bg: rgba(249, 115, 22, 0.04);
-  --tool-group-border: rgba(249, 115, 22, 0.30);
-  --tool-group-header-bg: rgba(249, 115, 22, 0.08);
+  /* 浅色主题下徽章色整体压深一档 —— 浅底上原本的 pastel 亮度不够,
+     18% 混色的小方块会糊成灰块。命令/编辑沿用主题色系, 其余取
+     400~500 之间的实色。 */
+  --tool-tint-command: #ea580c;
+  --tool-tint-view: #0284c7;
+  --tool-tint-search: #7c3aed;
+  --tool-tint-edit: #16a34a;
+  --tool-tint-todo: #b45309;
+  --tool-tint-skill: #db2777;
+  --tool-tint-mcp: #0891b2;
+  --tool-tint-other: #64748b;
   --text-dim-90: rgba(0,0,0,0.9);
   --text-dim-85: rgba(0,0,0,0.85);
   --text-dim-72: rgba(0,0,0,0.72);
@@ -220,27 +226,30 @@
 /* 消息气泡卡片去描边. 全局 .ant-card 那条 1px 描边在浅色下是 20% 透明橙,
    一屏气泡排下来满眼碎线; 浅色下气泡靠 --bg-card 浅灰底 + 圆角已经能和
    --bg-body 白底对话区分层, 不需要再描一遍.
-   选择器带 .msg-bubble-card 标记类(MessageBubble / CollapsedMessageBubble
+   选择器带 .msg-bubble-card 标记类(MessageBubble 的 user 气泡
    的 user/AI 文本气泡); 设置抽屉 / 资源页 / 表格等卡片保持原样, 工具汇总卡
    见下方单独一条; 深色主题不动 — 深色下描边是气泡与背景的主要分界. */
 :root[data-theme='light'] .msg-bubble-card.ant-card {
   border: none !important;
 }
-/* 工具调用汇总卡(ToolGroupCard)同款处理: 浅色下去掉外圈描边 + 头部与内容
-   之间的分隔线, 靠 --tool-group-bg / --tool-group-header-bg 的浅橙分层区分;
-   身份标识改由左侧 3px 主题橙竖条承担 (ToolGroupCard.tsx 里 inline 写了
-   borderLeft, 但一直被全局 .ant-card 的 `border: 1px solid !important` 压掉,
-   实际没显示过 — 这里用同优先级更高的选择器把它显式恢复).
-   注意 border 与 border-left 的顺序: border 先收口, border-left 后写才生效.
-   竖条用 45% 主题橙 — 实色 #f97316 卡片上太抢眼, 淡一档刚好压住身份又不
-   跟头部/内容的浅橙底打架; 要更淡就把 alpha 往下调(0.30 = --tool-group-border). */
-:root[data-theme='light'] .tool-group-card.ant-card {
-  border: none !important;
-  border-left: 3px solid rgba(249, 115, 22, 0.45) !important;
+/* 助手扁平正文 (MessageBubble assistant.text / content_block_delta):
+   去掉气泡后 markdown 内部的排版由这一组 token 接管 —— 段间距比正文松,
+   列表/引用/表格不再依赖卡片内边距。 */
+.assistant-prose > :first-child { margin-top: 0; }
+.assistant-prose > :last-child { margin-bottom: 0; }
+.assistant-prose p { margin: 0.55em 0; line-height: 1.75; }
+.assistant-prose ul,
+.assistant-prose ol { margin: 0.55em 0; padding-left: 1.4em; }
+.assistant-prose li { margin: 0.2em 0; line-height: 1.75; }
+.assistant-prose pre { margin: 0.7em 0; }
+.assistant-prose blockquote { margin: 0.7em 0; }
+.assistant-prose table { margin: 0.7em 0; }
+.assistant-prose h1, .assistant-prose h2, .assistant-prose h3,
+.assistant-prose h4, .assistant-prose h5, .assistant-prose h6 {
+  margin: 1em 0 0.4em;
+  line-height: 1.4;
 }
-:root[data-theme='light'] .tool-group-card.ant-card .ant-card-head {
-  border-bottom: none !important;
-}
+.assistant-prose a { text-decoration: underline; }
 /* 任务摘要行(有任务时才渲染)比输入区再深一档, 保留它的可点击条带感. */
 :root[data-theme='light'] [data-testid='bottom-status-trigger'] {
   background: #e2e8f0 !important;
@@ -381,7 +390,7 @@ body {
 .ant-card-head { border-bottom: 1px solid var(--border-subtle) !important; }
 .ant-card-head-title { color: var(--text-primary) !important; }
 .ant-card-body { color: var(--text-primary) !important; }
-/* runtime.error Card (MessageBubble / CollapsedMessageBubble 共用): background 透明让对话
+/* runtime.error Card (MessageBubble): background 透明让对话
    背景 (--bg-body) 透出来,只保留 border + text 表达「错误」语义。否则默认 .ant-card 的
    var(--bg-card) 白底在浅色对话区 (--bg-body=#eef2f7) 上突兀跳出。tf-k93br2hc,2026-09-05。*/
 .ant-card.runtime-error-card { background: transparent !important; border-color: var(--accent-end) !important; }

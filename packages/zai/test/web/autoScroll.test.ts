@@ -185,7 +185,7 @@ describe('decideAutoScroll', () => {
     expect(r.reason).toBe('init')
   })
 
-  // 折叠视图 fallback (rule #3.5): CollapsedMessageBubble 的
+  // 折叠态 fallback (rule #3.5):
   // maxHeight:140 + overflow:hidden clamp 让 outer scrollHeight 在文字
   // 越过 ~6 行后停涨, contentGrew 在 streaming / tool_result 阶段恒为
   // false. 此时用 messages 引用变化作为 fallback 信号 — store 真的写过
@@ -194,7 +194,7 @@ describe('decideAutoScroll', () => {
 
   it('折叠视图 + length 不变 + contentGrew=false + 引用换了 + 在底部 → 滚动', () => {
     // 根因场景: 折叠态下 tool_use:done 是 in-place 更新, messages.length 不变,
-    // outer scrollHeight 因 ToolGroupCard 仍 compact 而停涨, 旧逻辑 stay.
+    // outer scrollHeight 不变 (原地 upsert), 旧逻辑 stay.
     const r = decide({
       prevLength: 5,
       nextLength: 5,

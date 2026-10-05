@@ -74,11 +74,15 @@ export const LIGHT_PAGE_VARS = {
   '--cmd-token-color': '#f97316',
   '--thinking-accent': '#f97316',
   '--thinking-bg': 'rgba(249, 115, 22, 0.04)',
-  // 非流式 "思考" pill 淡灰底: 与 index.css :root[data-theme='light'] 同值 ——
+  // 工具分类徽章色: 与 index.css :root[data-theme='light'] 同值 ——
   // 任务工厂页是页面级浅色(不依赖全局 data-theme), 这里的子组件也必须拿到,
-  // 否则会回退到暗色默认的紫底.
-  '--thinking-pill-idle-bg': '#afbccc',
-  '--tool-group-bg': 'rgba(249, 115, 22, 0.04)',
-  '--tool-group-border': 'rgba(249, 115, 22, 0.30)',
-  '--tool-group-header-bg': 'rgba(249, 115, 22, 0.08)',
+  // 否则会回退到暗色默认的 pastel 值, 在浅底上糊成灰块.
+  '--tool-tint-command': '#ea580c',
+  '--tool-tint-view': '#0284c7',
+  '--tool-tint-search': '#7c3aed',
+  '--tool-tint-edit': '#16a34a',
+  '--tool-tint-todo': '#b45309',
+  '--tool-tint-skill': '#db2777',
+  '--tool-tint-mcp': '#0891b2',
+  '--tool-tint-other': '#64748b',
 } as CSSProperties

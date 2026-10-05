@@ -99,7 +99,7 @@ export default function AgentConversation({
       return
     }
     // 补传 folded + messagesRef,激活 useAutoScrollToBottom 的折叠视图 fallback 路径:
-    //   - folded=true 时 CollapsedMessageBubble 的 maxHeight:140 clamp 让 outer
+    //   - folded=true 时(工具段全程折叠态)长内容收起, outer
     //     scrollHeight 失真, contentGrew=false 但 store 真的写过新数据 (引用换),
     //     hook 内部规则 #3.5 用 messagesRefChanged 兜底 follow。
     //   - expanded 视图下这两个 opts 是 noop (folded=false 走原路径, messagesRef

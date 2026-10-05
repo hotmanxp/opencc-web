@@ -27,10 +27,10 @@ export type ToolRenderer = {
    */
   renderFull?(msg: AgentMessage): ReactNode
   /**
-   * 自包含展示类工具标记：collapsed 视图下不被 ToolGroupCard 包外壳，
+   * 自包含展示类工具标记：不进 ToolRunGroup 外壳，
    * 由 MessageListView 直接路由到 MessageBubble 渲染，与 expanded
    * 视觉对齐。pending / error / invalid / denied 状态会忽略此标记,
-   * 仍走 ToolGroupCard 保留状态提示。
+   * 仍走 ToolRunGroup 保留状态提示。
    */
   skipOuterGroup?: boolean
 }

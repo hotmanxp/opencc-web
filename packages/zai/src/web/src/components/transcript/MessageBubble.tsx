@@ -120,12 +120,6 @@ function parseSkillInvocation(text: string): { skillName: string } | null {
 
 const THINKING_ACCENT = "var(--thinking-accent, #8b5cf6)"; // CSS var preferred, hardcoded fallback for tests/storybook
 const THINKING_BG = "var(--thinking-bg, rgba(139, 92, 246, 0.10))"; // CSS var preferred, hardcoded fallback for tests/storybook
-// 非流式(历史回放 / 思考已结束)的 "思考" pill 底色。dark 主题下等同 accent
-// (紫), 与改动前一致; light 主题在 index.css 与 lightThemeVars 里覆写成淡灰
-// —— 浅色下一屏多个已完成思考块时橙色 pill 过于抢眼, 且与"正在思考"的橙色
-// 无法区分。流式期间仍走 THINKING_ACCENT, 保留"进行中"的橙色信号。
-// 文字固定白色(见 pill 上的 text-white), 浅色下的灰底需要够深才托得住白字。
-const THINKING_PILL_IDLE_BG = "var(--thinking-pill-idle-bg, #8b5cf6)";
 const THINKING_PREVIEW_MAX = 80;
 
 // 模块级计数器: 当前有几个 ThinkingBlock 处于 streaming 状态。
@@ -164,50 +158,17 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
   // <style> 元素会被吃掉、不到 DOM. 通过 useEffect 注入更稳.
   // 用模块级 refcount: 第一个 streaming=true 挂载, 最后一个 streaming 消失
   // (含组件卸载) 才卸载 — 避免历史回放中也跟着跑动画.
-  // 折叠态四重视觉信号 (让用户明显感知"正在思考"):
-  //   - 灯泡 fill 颜色循环 (zai-think-glow, 1.4s) — 浅黄 → 亮白 + 缩放 0.8 → 1.1
-  //   - pill 背景透明度呼吸 (zai-think-pill-pulse, 1.6s)
-  //   - "思考" 后面三个点循环闪烁 (zai-think-dot, 1.2s, 错开 0.15s)
-  // prefers-reduced-motion: reduce 全部降级为静态, 颜色不变.
+  // 唯一的流式信号: "思考" 后面三个点循环 (zai-think-dot, 1.2s, 错开
+  // 0.15s), 与 StreamingMarkdown 末尾的光标呼应. prefers-reduced-motion
+  // 下全部降级为静态.
   useEffect(() => {
-    const id = "zai-think-glow-style";
+    const id = "zai-think-dot-style";
     if (streaming) {
       thinkGlowRefcount += 1;
       if (thinkGlowRefcount === 1) {
         const style = document.createElement("style");
         style.id = id;
         style.textContent = `
-          /* 灯泡 fill 颜色循环 + 缩放呼吸:
-             fill 范围 #f7d774 暗黄 → #ffffff 亮白 (对比度最大, 紫色 pill 上一眼可见),
-             transform scale 0.8 → 1.1 配合 fill-box 让灯泡"呼吸".
-             transform-origin: center + transform-box: fill-box 是 SVG path
-             缩放必须有的一对, 不然缩放中心是 SVG 容器 origin.
-
-             缩放下限 0.8 是为了收缩时也形成明显节拍, 不止是"放大→恢复";
-             上限 1.1 之前实测 SVG 默认 overflow:hidden 会裁切, 因此 svg
-             加 overflow:visible 兜底 (即便继续调大 scale 也不会被裁). */
-          @keyframes zai-think-glow {
-            0%, 100% { fill: #f7d774; transform: scale(0.8); }
-            50%      { fill: #ffffff; transform: scale(1.1); }
-          }
-          .zai-thinking-bulb-active svg {
-            overflow: visible;
-          }
-          .zai-thinking-bulb-active svg path {
-            animation: zai-think-glow 1.4s ease-in-out infinite;
-            transform-origin: center;
-            transform-box: fill-box;
-          }
-          /* pill 背景呼吸: opacity 1.0 ↔ 0.78, 让"思考"标签在折叠态视觉跳动 */
-          @keyframes zai-think-pill-pulse {
-            0%, 100% { opacity: 1; }
-            50%      { opacity: 0.78; }
-          }
-          .zai-thinking-pill-active {
-            animation: zai-think-pill-pulse 1.6s ease-in-out infinite;
-          }
-          /* "思考"后面三个点循环: 每个 dot opacity 0.2 → 1.0, 错开 0.15s
-             形成打字机"思考中"视觉, 跟 StreamingMarkdown 末尾光标呼应 */
           @keyframes zai-think-dot {
             0%, 80%, 100% { opacity: 0.2; }
             40%           { opacity: 1; }
@@ -216,11 +177,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
           .zai-think-dot-2 { animation: zai-think-dot 1.2s 0.15s infinite; }
           .zai-think-dot-3 { animation: zai-think-dot 1.2s 0.30s infinite; }
           @media (prefers-reduced-motion: reduce) {
-            @keyframes zai-think-glow {
-              0%, 100% { fill: #cacaca; transform: scale(1); }
-            }
-            @keyframes zai-think-pill-pulse { 0%, 100% { opacity: 1; } }
-            @keyframes zai-think-dot { 0%, 100% { opacity: 1; } }
+            @keyframes zai-think-dot { 0%, 80%, 100% { opacity: 1; } }
           }
         `;
         document.head.appendChild(style);
@@ -235,90 +192,52 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
   }, [streaming]);
 
   return (
-    // 思考块属于 LLM 正常回复节奏的一部分:
-    // - 不缩进 (贴齐主对话流, 与正式文字回答同级宽度)
-    // - 箭头紧贴 pill 后 (手动渲染, 不靠 expandIconPosition)
-    <div className="mb-2 max-w-full">
-        <Collapse
-        size="small"
-        ghost
-        bordered={false}
-        activeKey={active ? ["thinking"] : []}
-        onChange={(keys) =>
-          setActive((Array.isArray(keys) ? keys : [keys]).includes("thinking"))
-        }
-        // 抹掉 Collapse 默认箭头, 用我们在 label 里手动渲染的那一个
-        expandIcon={() => null}
-        items={[
-          {
-            // 固定 key, 避免 Math.random 导致每次渲染重新挂载丢失展开态
-            key: "thinking",
-            label: (
-              <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
-                {/* pill: 仿 opencc userFacingNameBackgroundColor,
-                    把 "思考" 标签用实底背景包裹, 视觉权重高于纯文字标签.
-                    底色分流: 流式中 = accent 橙, 非流式 = idle 底
-                    (dark 下同为 accent 紫, light 下为淡灰); 文字恒为白色. */}
-                <span
-                  className={
-                    (streaming ? "zai-thinking-pill-active " : "") +
-                    "inline-flex items-center gap-0.5 px-1.5 py-px rounded-[10px] text-white text-[11px] font-semibold leading-[1.6] flex-shrink-0"
-                  }
-                  style={{ background: streaming ? THINKING_ACCENT : THINKING_PILL_IDLE_BG }}
-                >
-                  <LightbulbIcon
-                    className={streaming ? "zai-thinking-bulb zai-thinking-bulb-active" : "zai-thinking-bulb"}
-                    style={{ fontSize: 11 }}
-                  />
-                  思考
-                  {/* 三个点循环: streaming 时让"思考"标签尾部有打字机视觉,
-                      折叠态用户一眼能看出模型还在思考. 历史回放/流式结束
-                      时点不渲染, 不会残留. */}
-                  {streaming && (
-                    <span
-                      aria-hidden="true"
-                      className="inline-flex gap-px ml-px"
-                    >
-                      <span className="zai-think-dot-1">.</span>
-                      <span className="zai-think-dot-2">.</span>
-                      <span className="zai-think-dot-3">.</span>
-                    </span>
-                  )}
-                </span>
-                {/* 箭头: 折叠态 › (CaretRight), 展开态 ⌄ (CaretDown).
-                    紧贴 pill 之后, 视觉顺序: pill → 箭头 → 预览文字.
-                    注意: 颜色必须用浅色 — ThinkingBlock 直接挂在 #000000
-                    消息容器下, 用 var(--text-dim-45) 会与背景同色不可见 */}
-                <span
-                  className="text-[13px] text-[var(--text-secondary)] inline-flex items-center flex-shrink-0 leading-[1.6]"
-                >
-                  {active ? <ChevronDownIcon /> : <ChevronRightIcon />}
-                </span>
-                <span
-                  className="text-xs text-[var(--text-secondary)] italic overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0"
-                  title={firstLine}
-                >
-                  {preview}
-                </span>
-              </div>
-            ),
-            children: (
-              <div
-                className="text-xs px-3 py-2.5 rounded italic whitespace-pre-wrap leading-[1.6] text-[var(--text-secondary)]"
-                style={{
-                  background: THINKING_BG,
-                  borderLeft: `3px solid ${THINKING_ACCENT}`,
-                  fontFamily:
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                }}
-              >
-                {linkifyText(text)}
-              </div>
-            ),
-          },
-        ]}
-      />
-      </div>
+    // 思考行: 与工具调用行同一视觉层级的单行 —— [灯泡] 思考 [点] [›] [预览].
+    // 不再包 Collapse / 紫色 pill: 思考只是"助手这一轮在做什么"的一个注解,
+    // 和工具调用是同级信号, 不该比工具更像一个卡片。
+    <div className="mb-1.5 max-w-full">
+      <button
+        type="button"
+        data-testid="thinking-toggle"
+        aria-expanded={active}
+        onClick={() => setActive((x) => !x)}
+        className="flex items-center gap-1.5 w-full min-w-0 text-left text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] py-0.5"
+      >
+        <LightbulbIcon style={{ fontSize: 12, flexShrink: 0 }} />
+        <span className="flex-shrink-0">思考</span>
+        {/* 三个点循环: streaming 时让"思考"尾部有打字机视觉, 折叠态用户一眼
+            能看出模型还在思考. 结束 / 历史回放时不渲染, 不会残留. */}
+        {streaming && (
+          <span aria-hidden="true" className="inline-flex gap-px">
+            <span className="zai-think-dot-1">.</span>
+            <span className="zai-think-dot-2">.</span>
+            <span className="zai-think-dot-3">.</span>
+          </span>
+        )}
+        <span className="inline-flex items-center flex-shrink-0">
+          {active ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+        </span>
+        <span
+          className="text-xs italic overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0"
+          title={firstLine}
+        >
+          {preview}
+        </span>
+      </button>
+      {active && (
+        <div
+          className="text-xs px-3 py-2 mt-1 rounded italic whitespace-pre-wrap leading-[1.6] text-[var(--text-secondary)]"
+          style={{
+            background: THINKING_BG,
+            borderLeft: `3px solid ${THINKING_ACCENT}`,
+            fontFamily:
+              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+          }}
+        >
+          {linkifyText(text)}
+        </div>
+      )}
+    </div>
   );
 });
 
@@ -350,7 +269,7 @@ export function MessageCopyButton({
 }: {
   text: string;
   variant: "ai" | "user";
-  placement?: "absolute" | "inline";
+  placement?: "absolute" | "inline" | "hover";
 }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -379,7 +298,11 @@ export function MessageCopyButton({
   const className =
     placement === "absolute"
       ? "absolute top-1 right-0.5 z-[1] bg-transparent rounded"
-      : "bg-transparent rounded flex-shrink-0";
+      : placement === "hover"
+        // 扁平正文没有气泡做视觉锚点, 复制按钮常驻会抢注意力 —— 只在
+        // 悬停该段时淡入 (父级 .group/prose 的 group-hover 触发).
+        ? "absolute top-0 right-0 z-[1] bg-transparent rounded opacity-0 transition-opacity group-hover/prose:opacity-100 focus-visible:opacity-100"
+        : "bg-transparent rounded flex-shrink-0";
 
   return (
     <IconButton
@@ -433,6 +356,96 @@ function ToolUsePill({ name, status }: { name: string; status: ToolStatus }) {
 }
 
 
+// 工具调用详情体: 参数 / 结果 / 错误三段.
+// 折叠态的 chrome (pill + 状态 Tag + chevron + preview) 不在这里 —— 那是
+// ToolCallBlock / ToolRunRow 的 header 职责. 拆出来是为了让「运行段展开后的
+// 单条明细行」能复用同一份详情渲染, 不必走完整 Collapse。
+export const ToolCallDetail = React.memo(function ToolCallDetail({
+  msg,
+}: {
+  msg: AgentMessage;
+}) {
+  const rawName = ((msg.name as string) || "").trim();
+  const input = (msg.input as Record<string, unknown>) || {};
+  const renderer = getRenderer(rawName);
+  const output = msg.output;
+  const errorField = msg.error as string | { message?: string } | undefined;
+  const reasonField = msg.reason as string | undefined;
+  const errorText =
+    typeof errorField === "string"
+      ? errorField
+      : errorField?.message || reasonField || "";
+  const inputKeys = Object.keys(input);
+
+  return (
+    <div className="pl-1">
+      {inputKeys.length > 0 && (
+        // 自定义 renderer 自带 FieldLabel (e.g. "命令"/"文件"), 不重复套 "参数" 标题;
+        // 仅 generic fallback 显示 "参数" 给 JSON 兜底一份上下文.
+        renderer.renderInput ? (
+          renderer.renderInput(input)
+        ) : (
+          <div className="mb-2">
+            <Text
+              type="secondary"
+              className="text-[11px] uppercase tracking-[0.5px]"
+            >
+              参数
+            </Text>
+            <pre
+              className="text-xs mt-1 p-2 rounded bg-[var(--bg-card)] whitespace-pre-wrap break-words"
+              style={{ fontFamily: CODE_FONT_FAMILY }}
+            >
+              {linkifyText(JSON.stringify(input, null, 2))}
+            </pre>
+          </div>
+        )
+      )}
+      {output !== undefined && output !== null && (
+        <div className="mb-2">
+          <Text type="secondary" className="text-[11px] uppercase tracking-[0.5px]">
+            结果
+          </Text>
+          {renderer.renderOutput ? (
+            renderer.renderOutput(output, errorField != null)
+          ) : (
+            <pre
+              className="text-xs mt-1 p-2 rounded whitespace-pre-wrap break-words max-h-[360px] overflow-auto"
+              style={{
+                background: "var(--success-bg, rgba(82,196,26,0.06))",
+                borderLeft: "2px solid var(--accent-start)",
+                fontFamily: CODE_FONT_FAMILY,
+              }}
+            >
+              {typeof output === "string"
+                ? linkifyText(output)
+                : linkifyText(JSON.stringify(output, null, 2))}
+            </pre>
+          )}
+        </div>
+      )}
+      {errorText && (
+        <div>
+          <Text type="secondary" className="text-[11px] uppercase tracking-[0.5px]">
+            错误
+          </Text>
+          <pre
+            className="text-xs mt-1 p-2 rounded whitespace-pre-wrap break-words"
+            style={{
+              background: "var(--error-bg, rgba(255,77,79,0.06))",
+              borderLeft: "2px solid var(--accent-end)",
+              color: "var(--accent-end)",
+              fontFamily: CODE_FONT_FAMILY,
+            }}
+          >
+            {linkifyText(errorText)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+});
+
 // 工具调用块: 把 tool_use:start / done / error / invalid / denied
 // 统一成单一可折叠面板. 由于 React key 按 toolUseId 锁定 (见调用处),
 // 同一次调用的 start/done/error 事件会复用同一个 DOM 节点, 折叠态不丢.
@@ -471,9 +484,6 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   if (renderer.renderFull) {
     return <>{renderer.renderFull(msg)}</>
   }
-  const output = msg.output
-  const errorField = msg.error as string | { message?: string } | undefined;
-  const reasonField = msg.reason as string | undefined;
   const toolUseId =
     (msg.toolUseId as string) || (msg.eventId as string) || "tool";
 
@@ -487,50 +497,8 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   )
     status = "error";
 
-  // 折叠态预览: 直接展示第一个 input 字段的值, 不带 "key: " 前缀.
-  // 工具名已通过 pill (Read/Edit/Glob…) 表达, 再写 file_path/pattern 等
-  // 字段名属于冗余; 路径/pattern 本身就是用户最关心的辨识信息.
-  // 每个工具的预览策略由对应 renderer.preview(input) 决定; Bash 优先
-  // description, Agent 优先 description, 其余工具则回退到第一个字段的值.
-  const inputKeys = Object.keys(input);
-  // 注意: preview 在上面 (Skill 特判) 已经被 const 声明过了, 不要再 shadow.
-
-  const errorText =
-    typeof errorField === "string"
-      ? errorField
-      : errorField?.message || reasonField || "";
-
   // 同 ThinkingBlock: 受控 + 抹掉默认箭头 + 手动渲染, 让箭头紧贴 pill 之后.
   const [active, setActive] = useState(false);
-
-  // 泛型输入/输出渲染: 当 renderer 没有自定义 renderInput/renderOutput
-  // 时回退到这里. 风格刻意与 bash/error 等专用 renderer 保持一致
-  // (字体/字号/背景圆角), 让用户在 "generic" 与 "specific" 之间的视觉
-  // 跳跃最小.
-  const renderGenericInput = () => (
-    <pre
-      className="text-xs mt-1 p-2 rounded bg-[var(--bg-card)] whitespace-pre-wrap break-words"
-      style={{ fontFamily: CODE_FONT_FAMILY }}
-    >
-      {linkifyText(JSON.stringify(input, null, 2))}
-    </pre>
-  )
-
-  const renderGenericOutput = () =>
-    output === undefined || output === null ? null : (
-      <pre
-        className="text-xs mt-1 p-2 rounded-l-none rounded whitespace-pre-wrap break-words max-h-[360px] overflow-auto"
-        style={{
-          background: "var(--success-bg, rgba(82,196,26,0.06))",
-          borderLeft: "2px solid var(--accent-start)",
-          fontFamily: CODE_FONT_FAMILY,
-        }}
-      >
-        {typeof output === "string"
-          ? linkifyText(output)
-          : linkifyText(JSON.stringify(output, null, 2))}
-      </pre>
-    )
 
   return (
     // 不缩进 (贴齐主对话流); 视觉上与 assistant.text 气泡同列.
@@ -576,61 +544,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                   input.file_path && <ReadPreviewIcon path={input.file_path} />}
               </div>
             ),
-            children: (
-              <div className="pl-1">
-                {inputKeys.length > 0 && (
-                  // 自定义 renderer 自带 FieldLabel (e.g. "命令"/"文件"), 不重复套 "参数" 标题;
-                  // 仅 generic fallback 显示 "参数" 给 JSON 兜底一份上下文.
-                  renderer.renderInput
-                    ? renderer.renderInput(input)
-                    : (
-                      <div className="mb-2">
-                        <Text
-                          type="secondary"
-                          className="text-[11px] uppercase tracking-[0.5px]"
-                        >
-                          参数
-                        </Text>
-                        {renderGenericInput()}
-                      </div>
-                    )
-                )}
-                {output !== undefined && output !== null && (
-                  <div className="mb-2">
-                    <Text
-                      type="secondary"
-                      className="text-[11px] uppercase tracking-[0.5px]"
-                    >
-                      结果
-                    </Text>
-                    {renderer.renderOutput
-                      ? renderer.renderOutput(output, errorField != null)
-                      : renderGenericOutput()}
-                  </div>
-                )}
-                {errorText && (
-                  <div>
-                    <Text
-                      type="secondary"
-                      className="text-[11px] uppercase tracking-[0.5px]"
-                    >
-                      错误
-                    </Text>
-                    <pre
-                      className="text-xs mt-1 p-2 rounded whitespace-pre-wrap break-words"
-                      style={{
-                        background: "var(--error-bg, rgba(255,77,79,0.06))",
-                        borderLeft: "2px solid var(--accent-end)",
-                        color: "var(--accent-end)",
-                        fontFamily: CODE_FONT_FAMILY,
-                      }}
-                    >
-                      {linkifyText(errorText)}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            ),
+            children: <ToolCallDetail msg={msg} />,
           },
         ]}
       />
@@ -818,24 +732,20 @@ export const MessageBubble = React.memo(function MessageBubble({
     if (!text.trim()) return null;
     // 流式期间跳过 ReactMarkdown 重解析 (每次 delta 都跑一次 unified pipeline 太重),
     // 用 pre-wrap 渲染纯文本; 状态切回 idle 后才解析 markdown, 利用 React 自动重渲.
+    //
+    // 扁平正文: 不再包 Card 气泡 / 不再画 BotIcon —— 助手的话与工具调用行
+    // 同处一条左对齐的流里, 靠行距和字重分层, 不靠底色分块。复制按钮改为
+    // 悬停淡入 (见 MessageCopyButton placement="hover")。
     return (
-      <div className="flex justify-start mb-4">
-        <Card
-          size="small"
-          className="msg-bubble-card w-full max-w-full mr-5 bg-[var(--bg-card)] rounded-xl relative"
-        >
-          <MessageCopyButton text={text} variant="ai" />
-          <Space align="start" size={8} className="w-full">
-            <BotIcon style={{ color: "var(--accent-start)", fontSize: 18 }} />
-            <div className="flex-1 min-w-0">
-              {streaming ? (
-                <StreamingMarkdown text={text} />
-              ) : (
-                <MarkdownText text={text} />
-              )}
-            </div>
-          </Space>
-        </Card>
+      <div className="group/prose relative mb-3 mr-5">
+        <MessageCopyButton text={text} variant="ai" placement="hover" />
+        <div className="assistant-prose min-w-0">
+          {streaming ? (
+            <StreamingMarkdown text={text} />
+          ) : (
+            <MarkdownText text={text} />
+          )}
+        </div>
       </div>
     );
   }
@@ -969,20 +879,12 @@ export const MessageBubble = React.memo(function MessageBubble({
     if (delta?.type === "thinking_delta") {
       return <ThinkingBlock text={delta.thinking || ""} streaming={streaming ?? false} />;
     }
-    // text_delta: 可见回复正文
+    // text_delta: 可见回复正文 (与 assistant.text 同一扁平形态)
     const text = delta?.text || "";
     if (!text) return null;
     return (
-      <div className="flex justify-start mb-4">
-        <Card
-          size="small"
-          className="msg-bubble-card w-full max-w-full mr-5 bg-[var(--bg-card)] rounded-xl"
-        >
-          <Space align="start" size={8}>
-            <BotIcon style={{ color: "var(--accent-start)", fontSize: 18 }} />
-            <MarkdownText text={text} />
-          </Space>
-        </Card>
+      <div className="mb-3 mr-5 assistant-prose min-w-0">
+        <MarkdownText text={text} />
       </div>
     );
   }

@@ -130,14 +130,17 @@ export function decideAutoScroll(
     return { decision: 'follow', reason: 'contentGrewInBottom' }
   }
 
-  // 3.5) 折叠视图 fallback: CollapsedMessageBubble 的 maxHeight:140 +
-  //    overflow:hidden clamp 让 outer scrollHeight 在文字越过 ~6 行后
-  //    停涨, contentGrew 失真. 但 store 里 messages 真的写过 (引用换了),
-  //    UI 必须跟 — 不然用户看不到 tool_result 已完成 / 后续 streaming
-  //    delta. 仅在用户已在底部时触发, 用户上滚 (>80px) 仍 stay.
+  // 3.5) 折叠态 fallback: store 里 messages 真的写过 (引用换了) 但容器
+  //    没长高 (同一条消息原地被 upsert, 例如 tool_use:start → done,
+  //    长度与 scrollHeight 都不变), 此时不能让 UI 落后于 store。仅在用户
+  //    已在底部时跟随, 用户上滚 (>80px) 仍 stay。
+  //    历史由来: 这条规则最初是给 CollapsedMessageBubble 的 maxHeight:140
+  //    clamp 兜底 (文字越过 ~6 行后 scrollHeight 停涨, contentGrew 失真)。
+  //    助手正文改成扁平散文后 clamp 已移除, 但「原地 upsert 不长高」这
+  //    一类更新依然存在, 所以规则保留, 只是触发理由换了。
   //    nextLength > prevLength 已由外层 caller 兜底覆盖 "新增消息"
-  //    路径, 此处专门救 length 不变 + contentGrew=false 的折叠态
-  //    streaming delta / tool_result.
+  //    路径, 此处专门救 length 不变 + contentGrew=false 的
+  //    streaming delta / tool_result。
   if (
     folded &&
     messagesRefChanged &&
