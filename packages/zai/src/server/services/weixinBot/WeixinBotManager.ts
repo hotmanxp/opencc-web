@@ -464,6 +464,21 @@ export class WeixinBotManager {
       return
     }
 
+    // 入站媒体只增不删(实测 ~/.zai/weixin/media/ 已 79MB),启动时按 30 天
+    // 保留期清扫。失败不阻断启动 —— 回收是 housekeeping,不是启动前提。
+    try {
+      const { sweepAllMedia } = await import('./stores/MediaRetention.js')
+      const swept = await sweepAllMedia()
+      if (swept.removed > 0) {
+        weixinDiag(
+          `[weixin] media retention: removed ${swept.removed}/${swept.scanned} file(s), ` +
+          `${(swept.freedBytes / 1024 / 1024).toFixed(1)}MB freed`,
+        )
+      }
+    } catch (err) {
+      console.warn('[weixin] media retention sweep failed:', err)
+    }
+
     this.setState('connecting')
 
     // ── P5:机器级全局单实例锁 ───────────────────────────────────────
@@ -677,7 +692,7 @@ export class WeixinBotManager {
 
   // ─── 内部:入站派发 ──────────────────────────────────────────
 
-  private _onInbound(msg: InternalWeixinMessage): void {
+  private _onInbound(msg: InternalWeixinMessage): void | Promise<void> {
     if (!this.adapter) return
     // 面板「最近入站消息」数据源(环形缓冲,最多 50 条)。放在最前面:
     // 即使后面 deliver 抛错,用户也能在面板看到「消息到了」。
@@ -717,8 +732,10 @@ export class WeixinBotManager {
       this.lastError = `eventBus.emit weixin.inbound failed: ${(err as Error).message}`
     }
     // P0:注入 agent 运行时。deliver 内部自带幂等 + 异常兜底,
-    // 绝不向上抛打挂 poll loop。
-    void this.bridge.deliver(msg)
+    // 绝不向上抛打挂 poll loop。返回它的 promise —— adapter 靠这个返回值
+    // 作为「本条消息已落 pending」的屏障,落盘完成前不推进持久化游标
+    // (见 WeixinAdapter._advanceCursor)。
+    return this.bridge.deliver(msg)
   }
 
   // ─── 出站镜像:订阅 runtime.* ─────────────────────────────────

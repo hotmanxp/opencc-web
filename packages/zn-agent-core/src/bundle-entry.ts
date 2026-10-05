@@ -210,7 +210,12 @@ export {
   getTaskListStore,
   setTaskListStore,
 } from './compat/taskListStore.js'
-export type { TaskItem, TaskStatus } from './compat/taskListStore.js'
+// 这里的 `TaskStatus` 是 vendored TaskUpdateTool 的那套
+// ('pending' | 'in_progress' | 'completed' | 'deleted'),与下面 taskFactoryFiles
+// 导出的那套 ('queued' | 'processing' | ... ) 是**同名不同义**的两个类型。
+// 主入口只能承载一个 `TaskStatus`,故把 taskFactoryFiles 的(语义更全,覆盖
+// paused/verifying)留在 `TaskStatus`,本套改用 `TaskListStatus` 出口。
+export type { TaskItem, TaskStatus as TaskListStatus } from './compat/taskListStore.js'
 
 // ./compat/vendor/ripgrep
 export {
@@ -248,7 +253,10 @@ export type * from './opencc-src/server/index.js'
 // 中"在主入口 graph 内未被引用"的符号砍掉;taskFactoryFiles.ts 内部只有
 // createPoolTask/getTaskSummary/deleteTasks/getTaskDetails 互相调用,
 // moveTask/markTaskStatus/emitTaskFactoryEvent/taskFactoryRoot/taskDir/
-// generateTaskId/bodyAfterFrontmatter 仅做出口,会被 tree-shake 掉。
+// generateTaskId 仅做出口,会被 tree-shake 掉。
+// (原注释还列了 `bodyAfterFrontmatter` —— 它在 taskFactoryFiles.ts 里根本
+//  不存在,是个幽灵导出:类型侧因为 bundle-entry.ts 被 typecheck exclude
+//  一直没人发现,运行时取到 undefined。已删除。)
 // 显式 export 把它们钉成活的。
 //
 // listTasks 与 vendor `utils/tasks.ts:listTasks(taskListId)` 同名重载冲突
@@ -273,7 +281,6 @@ export {
   taskFactoryRoot,
   taskDir,
   generateTaskId,
-  bodyAfterFrontmatter,
   // zai patch (2026-09-03, intake 文档强校验):新建任务弹窗关闭前校验用。
   checkTaskIntakeDocs,
 } from './opencc-src/server/taskFactoryFiles.js'

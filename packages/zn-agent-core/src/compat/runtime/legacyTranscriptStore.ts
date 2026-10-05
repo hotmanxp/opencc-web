@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getDefaultMode } from '../permissions.js'
+import { isSessionDeleted, markSessionDeleted } from './deletedSessions.js'
 
 // 与 opencc-src/utils/sessionStoragePortable.ts 的 sanitizePath 保持一致的
 // 内联实现 (compat 不能 import opencc-src, 否则把整个 vendor 图拖进
@@ -123,6 +124,9 @@ export class TranscriptStore {
   }
 
   private async appendEntry(sessionId: string, cwd: string, entry: unknown): Promise<void> {
+    // stale 守卫:会话已删 → 丢弃这次写。下面的 mkdir + append 会把刚删掉的
+    // transcript 重新创建出来(被删的会话自己复活)。
+    if (isSessionDeleted(sessionId)) return
     const fp = this.filePathFor(sessionId, cwd)
     await mkdir(join(fp, '..'), { recursive: true, mode: 0o700 })
     await writeFile(fp, JSON.stringify(entry) + '\n', { flag: 'a', mode: 0o600 })
@@ -475,6 +479,9 @@ export class TranscriptStore {
   }
 
   async removeSession(id: string, opts?: { cwd?: string }) {
+    // 标记在删文件**之前**:从这一刻起,任何还在跑的 turn 的 append 都会被
+    // appendEntry 的 stale 守卫丢弃,不会把 transcript 重新 mkdir 出来。
+    markSessionDeleted(id)
     if (opts?.cwd) {
       REGISTRY.delete(this.key(id, opts.cwd))
       try {

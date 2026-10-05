@@ -16,12 +16,13 @@
  * (openccRuntime-transcript-persist.test.ts)各自独立。
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { TranscriptStore, sanitizePath } from '../../../src/compat/runtime/legacyTranscriptStore.js'
+import { __resetDeletedSessionsForTests } from '../../../src/compat/runtime/deletedSessions.js'
 
 let dataDir: string
 
@@ -463,6 +464,72 @@ describe('sanitizePath (跨包导出)', () => {
       const store = new TranscriptStore(dir)
       await store.create({ cwd, model: 'm' }, { cwd })
       expect(existsSync(join(dir, 'projects', sanitizePath(cwd)))).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  // ========== 已删会话的 stale 守卫(M4 / `delete-session-resurrects--by-zai`) ==========
+  //
+  // DELETE /agent/sessions/:id 删掉 transcript 后,一个**仍在跑**的 turn 会在
+  // 自己的 finally 里继续 append。而 appendEntry 是 `mkdir + append` ——
+  // 目录和文件被重新创建,被删的会话自己复活。路由侧已经把
+  // abortSessionController 挪到 store.remove 之前(主修法),但 abort 是异步
+  // 生效的,turn 可能在收到 signal 前已排队一次写;这个集合是第二道闸。
+
+  it('remove 之后再 append 不会把 transcript 写回来', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-stale-append-'))
+    try {
+      __resetDeletedSessionsForTests()
+      const cwd = '/Users/foo/code/stale'
+      const store = new TranscriptStore(dir)
+      await store.create({ cwd, model: 'm' }, { cwd })
+      const sid = 'sess-to-delete'
+      await store.appendMessageEntry(sid, { type: 'user', text: 'before' }, { cwd })
+      const file = join(dir, 'projects', sanitizePath(cwd), `${sid}.jsonl`)
+      expect(existsSync(file)).toBe(true)
+
+      await store.remove(sid, { cwd })
+      expect(existsSync(file)).toBe(false)
+
+      // 模拟被删会话的 turn 迟到地 finally append
+      await store.appendMessageEntry(sid, { type: 'assistant', text: 'late write' }, { cwd })
+
+      expect(existsSync(file)).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('未删除的会话照常 append(守卫不误伤)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-stale-append-ok-'))
+    try {
+      __resetDeletedSessionsForTests()
+      const cwd = '/Users/foo/code/stale-ok'
+      const store = new TranscriptStore(dir)
+      await store.create({ cwd, model: 'm' }, { cwd })
+      const sid = 'sess-alive'
+      await store.appendMessageEntry(sid, { type: 'user', text: 'hi' }, { cwd })
+      const file = join(dir, 'projects', sanitizePath(cwd), `${sid}.jsonl`)
+      expect(existsSync(file)).toBe(true)
+      expect(readFileSync(file, 'utf-8')).toContain('hi')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('删 A 不影响 B —— 守卫按 sid 生效', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-stale-append-ab-'))
+    try {
+      __resetDeletedSessionsForTests()
+      const cwd = '/Users/foo/code/stale-ab'
+      const store = new TranscriptStore(dir)
+      await store.create({ cwd, model: 'm' }, { cwd })
+      await store.appendMessageEntry('sess-A', { type: 'user', text: 'a' }, { cwd })
+      await store.remove('sess-A', { cwd })
+
+      await store.appendMessageEntry('sess-B', { type: 'user', text: 'b' }, { cwd })
+      expect(existsSync(join(dir, 'projects', sanitizePath(cwd), 'sess-B.jsonl'))).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

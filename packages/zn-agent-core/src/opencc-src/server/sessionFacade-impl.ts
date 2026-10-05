@@ -46,6 +46,9 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, stat as statAsync, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+// zai patch (2026-10-05, bug `delete-session-resurrects--by-zai`): 已删会话的
+// append 守卫。跨 vendor/compat 边界的 import 在本仓已有先例(见 createOpenccRuntime-impl.ts)。
+import { isSessionDeleted, markSessionDeleted } from '../../compat/runtime/deletedSessions.js'
 import type {
   SessionCompactResult,
   SessionCreateResult,
@@ -253,6 +256,10 @@ export async function createSessionFacadeImpl(
       sessionId: string,
       entry: SessionTranscriptEntry,
     ): Promise<void> {
+      // zai patch (2026-10-05, bug `delete-session-resurrects--by-zai`):
+      // 已删会话不再 append —— appendEntryAsync 的 ENOENT 分支会 mkdir 重建
+      // 文件,把刚删掉的 transcript 复活。
+      if (isSessionDeleted(sessionId)) return
       const filePath = resolvePath(sessionId)
       await appendEntryAsync(filePath, entry)
     },
@@ -265,11 +272,16 @@ export async function createSessionFacadeImpl(
       // (e.g. `custom-title`, `tag`, `agent-name`). We reuse
       // `appendEntryAsync` so the patch lands in the same stream as
       // the transcript — no separate metadata file.
+      if (isSessionDeleted(sessionId)) return
       const filePath = resolvePath(sessionId)
       await appendEntryAsync(filePath, patch)
     },
 
     async removeSession(sessionId: string): Promise<boolean> {
+      // zai patch (2026-10-05, bug `delete-session-resurrects--by-zai`):删会话
+      // 时**先**上守卫,再删文件。反序留窗口:在跑的 turn 可能在此刻 append,
+      // 把文件重建出来。守卫是 append/patchSession 的前置条件,故必须在这里 arm。
+      markSessionDeleted(sessionId)
       const filePath = resolvePath(sessionId)
       try {
         await rm(filePath, { force: false })

@@ -54,6 +54,7 @@ import {
   listSessionInboxIds,
   type InboxMessage,
 } from "../services/sessionInbox.js";
+import { disposeSessionAgents } from "../services/sessionAgentRegistry.js";
 import { drainInboxReminder } from "../services/inboxReminder.js"; // (no longer used here — see agentRuntime.ts registerExtraReminderProvider for the per-API-call hook)
 // zai patch (2026-09-13, weixin-bot): 微信会话默认派专用主 agent 'weixin-bot'
 // (指派型调度助手,见 zn-agent-core mainAgents-weixin.ts)。
@@ -2202,12 +2203,20 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
     if (resolved !== path.resolve(ctx.cwd)) {
       return res.status(404).json({ error: 'Session not found' })
     }
+    // 先中断在跑的 turn,再删文件。反序会让运行中的 turn 继续 append ——
+    // vendor 的 sessionStorage.appendDirectlyToFile 直接 mkdir + append,
+    // 把刚 rm 掉的 transcript 重新写回来,被删的会话自己复活。
+    abortSessionController(req.params.id, 'session_deleted')
+    disposeSessionInbox(req.params.id)
     await store.remove(req.params.id, { cwd: ctx.cwd })
     // 同时清掉 per-session cwd map(防内存泄漏 + 防止 stale data)
     CwdStore.delete(req.params.id)
     // zai patch (2026-08-29, plan §3.5): unregistryAgent 释放
     // AgentRegistry.sessionBindings 该 sid 条目,避免内存泄漏。
     getAgentRegistry().unregistryAgent(req.params.id)
+    // per-session agent 绑定表(Zai patch):该 sid 名下的 agentIds 一起释放,
+    // 否则 DELETE 之后条目永久滞留。
+    disposeSessionAgents(req.params.id)
     // 会话被删除 → 它名下的持久 PTY 终端也一并回收(否则会留下没人认领的
     // shell 进程)。失败不影响删除本身:进程已在关闭路径上,只记日志。
     try {

@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import eventRouter from '../../../src/server/routes/event.js'
 import { eventBus } from '../../../src/server/services/eventBus.js'
 import { resetSseResBrokenForTests } from '../../../src/server/services/sse.js'
+import {
+  __setBackgroundRuntime,
+  type RestartAwareBackgroundRuntime,
+} from '../../../src/server/services/backgroundRuntime.js'
 
 const HEARTBEAT_MS = 15_000
 
@@ -93,5 +97,43 @@ describe('GET /event heartbeat cleanup', () => {
     expect(write.mock.calls.length).toBe(before)
 
     void req
+  })
+
+  it('unsubscribes when the client closes during the bg.list() await window', async () => {
+    // Regression: close 监听原先注册在 `await bg.list()` **之后**。Node 的
+    // 'close' 是一次性事件 —— 客户端在那个窗口里断开时,监听器永不触发,
+    // `closed` promise 永久挂起 → finally 不执行 → unsubscribe 不调用、
+    // 心跳 timer 不清。订阅就永久留在 eventBus 里。
+    //
+    // 必须注入一个真正挂起的 bg.list():没有它,handler 在到达
+    // `await closed` 之前没有任何挂起点,emit('close') 落在注册之后,
+    // 测试就会在有 bug 的代码上照样通过(已验证)。
+    let releaseList: (() => void) | null = null
+    __setBackgroundRuntime({
+      list: () => new Promise((resolve) => { releaseList = () => resolve([]) }),
+    } as unknown as RestartAwareBackgroundRuntime)
+
+    try {
+      const { req, res, write, end } = makeReqRes(() => true)
+      const pending = getEventHandler()(req, res)
+
+      // 跑进 bg.list() 的 await(此时 close 监听是否已注册,正是被测的差异)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(releaseList).not.toBeNull()
+
+      req.emit('close')
+      releaseList?.()
+      await pending
+
+      expect(end).toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
+
+      // unsubscribe 已执行: 新事件不会再写到这个 res
+      const before = write.mock.calls.length
+      eventBus.emit({ type: 'toast', sessionId: null, level: 'info', message: 'after-early-close' })
+      expect(write.mock.calls.length).toBe(before)
+    } finally {
+      __setBackgroundRuntime(null)
+    }
   })
 })

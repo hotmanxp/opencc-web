@@ -1,5 +1,5 @@
 {
-  "//": "类型检查闸门专用配置(non-build 模式)。tsconfig.json 的 exclude 把 src/opencc-src 移出 root file set —— `exclude` 只裁剪 root file set,不影响 import 传递闭包,所以 vendor 文件仍然会被检查、报错仍然会被报出;但 `tsc -b` 的 up-to-date 判定只看 root file set,于是「只改 vendor」不会让 tsbuildinfo 失效,build 模式直接报 up to date 跳过重检。本配置用 `-p --noEmit`(非 build 模式)绕开缓存判定,每次全量检查。`incremental: false` 保证不写 tsbuildinfo,与 build 模式的 tsconfig.tsbuildinfo 零交互。`noEmit` 下 `exclude` 的原始动机(不往 dist 发射 vendor d.ts)不再适用,所以 vendor 可以留在 root file set 里,把闭包外的 vendor 文件也纳入检查。",
+  "//": "类型检查闸门专用配置(non-build 模式)。tsconfig.json 的 exclude 把 src/opencc-src 移出 root file set —— `exclude` 只裁剪 root file set,不影响 import 传递闭包,所以 vendor 文件仍然会被检查、报错仍然会被报出;但 `tsc -b` 的 up-to-date 判定只看 root file set,于是「只改 vendor」不会让 tsbuildinfo 失效,build 模式直接报 up to date 跳过重检。本配置用 `-p --noEmit`(非 build 模式)绕开缓存判定,每次全量检查。`incremental: false` 保证不写 tsbuildinfo,与 build 模式的 tsconfig.tsbuildinfo 零交互。`noEmit` 下 `exclude` 的原始动机(不往 dist 发射 vendor d.ts)不再适用,所以 vendor 可以留在 root file set 里,把闭包外的 vendor 文件也纳入检查。`src/bundle-entry.ts` **必须**留在检查范围内(2026-10-05 移出 exclude):它是发布面,一旦被排除,主入口的导出漂移(幽灵导出、同名类型冲突)就没有闸门能拦住 —— `bodyAfterFrontmatter` 幽灵导出与两套 `TaskStatus` 冲突都是这么漏出去的。",
 
   "extends": "./tsconfig.json",
 
@@ -16,7 +16,6 @@
     "node_modules",
     "dist",
     "test",
-    "**/*.test.ts",
-    "src/bundle-entry.ts"
+    "**/*.test.ts"
   ]
 }

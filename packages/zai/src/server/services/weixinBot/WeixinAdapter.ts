@@ -124,7 +124,12 @@ export interface InternalWeixinMessage {
   raw: unknown
 }
 
-export type InternalEmit = (msg: InternalWeixinMessage) => void
+/**
+ * 入站派发回调。返回 promise 是为了给游标推进提供屏障:调用方 await 它
+ * 才代表「这条消息已落 pending」。空实现 / void 返回视为不阻塞(不保证落盘),
+ * 仅适合观测面消费者。
+ */
+export type InternalEmit = (msg: InternalWeixinMessage) => void | Promise<void>
 
 /** Adapter 状态订阅 — 给 UI/B3 manager 使用 */
 export type StatusListener = (status: AdapterStatus) => void
@@ -169,6 +174,17 @@ export class WeixinAdapter {
 
   /** B3 阶段接入;未注入时 inbound 仅落 disk / console */
   private emitInternal: InternalEmit | null = null
+
+  /**
+   * 尚未落盘的游标 —— debounce 里还有文本消息没派发时,游标不能持久化。
+   *
+   * 内存里的 `syncBuf` 照常立即推进(否则下一轮 getUpdates 会把同一批消息
+   * 再拉一遍,消息被 dedup 吞掉);但**写盘**必须等到这批消息真正走完
+   * `_emit` → bridge `pending.save`。崩在这里服务端会重投,不会丢。
+   */
+  private unpersistedSyncBuf: string | null = null
+  /** 仍在 debounce 缓冲区里、尚未落盘的 sessionKey。非空时游标不落盘。 */
+  private readonly debouncePendingKeys = new Set<string>()
 
   constructor(options: WeixinAdapterOptions) {
     this.opts = {
@@ -291,7 +307,14 @@ export class WeixinAdapter {
       try { await this.pollLoopPromise } catch { /* loop should swallow */ }
       this.pollLoopPromise = null
     }
-    this.debounce.flushAll(() => { /* drop */ })
+    // 缓冲区里的文本必须**真正派发**,不能丢弃:游标已经推进过,丢弃即永久
+    // 丢失(服务端不会重投)。flushAll 用每个 key 自己 enqueue 时注册的闭包
+    // 派发并 await 完成,所以 disconnect 返回时它们已走到 bridge 的 pending.save。
+    await this.debounce.flushAll()
+    // flushAll 里的 onFlush 会逐个清掉 pending key;这里再兜一次底,防止
+    // 某个 key 的 handler 抛错导致 key 残留 —— 残留会让重连后的游标永远写不下去。
+    this.debouncePendingKeys.clear()
+    await this._flushUnpersistedSyncBuf()
     this.typingCache.destroy()
     this.dedup.destroy()
     if (this.lock) {
@@ -371,10 +394,8 @@ export class WeixinAdapter {
 
       this.consecutiveFailures = 0
       const newBuf = response.get_updates_buf
-      if (newBuf) {
-        syncBuf = newBuf
-        try { await this.syncStore.save(this.opts.accountId, syncBuf) } catch { /* disk only */ }
-      }
+      // 内存游标立即推进(下轮 getUpdates 要用它),落盘推迟到这批消息派发完成。
+      if (newBuf) syncBuf = newBuf
 
       const msgs = response.msgs ?? []
       // diag:启动后前 3 个 cycle msgs=0 时 dump 完整 raw 响应(排查
@@ -382,12 +403,30 @@ export class WeixinAdapter {
       if (msgs.length === 0 && cycle <= 3) {
         weixinDiag(`[weixin.adapter] getUpdates empty cycle=${cycle} raw=${JSON.stringify(response).slice(0, 600)}`)
       }
-      // 并发派发,互不阻塞
-      for (const m of msgs) {
-        // 异步,不等待
-        this._processMessageSafe(m).catch(() => { /* already swallowed */ })
-      }
+      // 并发派发,互不阻塞 —— 但要收齐 promise:游标落盘必须等这批消息
+      // 全部走完落盘屏障(见下面 _advanceCursor 的不变量)。
+      const dispatched = msgs.map((m) =>
+        this._processMessageSafe(m).catch(() => { /* already swallowed */ }),
+      )
+      if (dispatched.length > 0) await Promise.all(dispatched)
+
+      // 游标落盘:先等本批消息的落盘屏障(媒体路径 await 到 pending.save),
+      // 再等 debounce 排空。任一环节崩在前面,游标没写盘 → 服务端重投。
+      if (newBuf) await this._advanceCursor(newBuf)
     }
+  }
+
+  /**
+   * 推进持久化游标。debounce 里还有未落盘的文本时先暂存,等排空再写
+   * (见 `unpersistedSyncBuf`)。
+   */
+  private async _advanceCursor(buf: string): Promise<void> {
+    if (this.debouncePendingKeys.size > 0) {
+      this.unpersistedSyncBuf = buf
+      return
+    }
+    this.unpersistedSyncBuf = null
+    try { await this.syncStore.save(this.opts.accountId, buf) } catch { /* disk only */ }
   }
 
   private async _sleep(seconds: number): Promise<void> {
@@ -480,12 +519,11 @@ export class WeixinAdapter {
 
     if (!text && mediaPaths.length === 0) return
 
-    // 内容指纹二次去重
-    if (text) {
-      const contentKey = `content:${senderId}:${createHash('md5').update(text).digest('hex')}`
-      if (this.dedup.isDuplicate(contentKey)) return
-    }
-
+    // 去重只有 message_id 一层。不要再加内容指纹(`content:<sender>:<md5(text)>`):
+    // 两条 message_id 不同、文本相同的合法消息(「ok」/「好的」被连发两次)会撞在
+    // 指纹上,第二条被静默丢弃;而 MessageDeduplicator 命中时续期,用户每重发一次
+    // 就把 key 往后推一个 TTL,该指纹被永久锁死。服务端重投同一条消息时
+    // message_id 不变,单层已经够用。
     const internal: InternalWeixinMessage = {
       accountId: this.opts.accountId,
       chatId,
@@ -502,27 +540,54 @@ export class WeixinAdapter {
     const sessionKey = `weixin:${this.opts.accountId}:${chatType}:${chatId}`
     // 文本走 debounce,媒体直接 flush
     if (text && mediaPaths.length === 0) {
+      // debounce 的 onFlush 是 fire-and-forget(静默期到了才触发),这里返回的
+      // promise 无法回传给调用方 —— 改用「有 key 还在缓冲区」的信号,让 poll
+      // loop 知道「这批文本还没落盘,游标先别写」。
+      //
+      // 用 Set 而非计数器:同一 sessionKey 的多条消息会**合并成一次** flush,
+      // 计数器会只减一次而永远停在 >0(游标再也写不下去)。
+      this.debouncePendingKeys.add(sessionKey)
       this.debounce.enqueue(sessionKey, {
         text,
         mediaPaths: [],
         mediaTypes: [],
       }, (item) => {
-        this._emit({
-          ...internal,
-          text: item.text,
-          mediaPaths: item.mediaPaths,
-          mediaTypes: item.mediaTypes,
-        })
+        const p = Promise.resolve(
+          this._emit({
+            ...internal,
+            text: item.text,
+            mediaPaths: item.mediaPaths,
+            mediaTypes: item.mediaTypes,
+          }),
+        ).catch(() => {}).finally(() => { this._onDebouncedFlushed(sessionKey) })
+        return p
       })
     } else {
-      this._emit(internal)
+      // 媒体直接派发,返回 promise 让调用方拿到落盘屏障。
+      await this._emit(internal)
     }
   }
 
-  private _emit(msg: InternalWeixinMessage): void {
+  /** debounce 排空一个 key 后,若缓冲区已空就把暂存的游标写盘。 */
+  private _onDebouncedFlushed(sessionKey: string): void {
+    this.debouncePendingKeys.delete(sessionKey)
+    if (this.debouncePendingKeys.size === 0) void this._flushUnpersistedSyncBuf()
+  }
+
+  private async _flushUnpersistedSyncBuf(): Promise<void> {
+    const buf = this.unpersistedSyncBuf
+    if (buf === null || this.debouncePendingKeys.size > 0) return
+    this.unpersistedSyncBuf = null
+    try { await this.syncStore.save(this.opts.accountId, buf) } catch { /* disk only */ }
+  }
+
+  private _emit(msg: InternalWeixinMessage): void | Promise<void> {
     if (this.emitInternal) {
-      try { this.emitInternal(msg) } catch { /* emitter must not throw */ }
+      // emitter 抛错不能让 poll loop 死掉,但 promise rejection 同样要吞 ——
+      // 落盘失败的消息会靠服务端重投补回(游标未推进)。
+      try { return this.emitInternal(msg) } catch { /* emitter must not throw */ }
     }
+    return undefined
   }
 
   private async _refreshTypingTicket(userId: string, contextToken: string | null): Promise<void> {

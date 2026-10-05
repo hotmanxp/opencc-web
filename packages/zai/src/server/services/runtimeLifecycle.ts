@@ -87,6 +87,32 @@ export async function closeServer(): Promise<void> {
     console.warn('[runtimeLifecycle] terminalService disposeAll failed:', err);
   }
 
+  // 移动端快捷 Bash / 命令历史走的 `sh -c` REPL —— 与上面的 PTY 终端是两条
+  // 独立路径。ReplRegistry 的 dispose() 全仓只有测试 seam 可达,不接这里就
+  // 永远不会被回收:`sh -c` + piped stdio 的子进程是普通同进程组进程,父进程
+  // 干净 exit(0) 时收不到任何信号,会被 init 收养继续存活。managed child 以
+  // detached:false spawn 按 pid kill,supervisor 驱动的重启也扫不到这些孙进程。
+  // (PTY 路径不受影响:node-pty 走 forkpty,PTY shell 是 session leader 且以
+  //  slave 为控制终端,master 关闭时内核自动发 SIGHUP。)
+  try {
+    const { getReplRegistry } = await import('./repl/ReplRegistry.js');
+    getReplRegistry().disposeAll();
+  } catch (err) {
+    console.warn('[runtimeLifecycle] replRegistry disposeAll failed:', err);
+  }
+
+  // per-session 注册表 —— 这两个 dispose* 全仓原本只有测试 seam 可达,
+  // 删会话和进程退出都不释放,长期运行的 dev 实例会一直累积。
+  // (DELETE /agent/sessions/:id 侧的调用见 routes/agent.ts。)
+  try {
+    const { disposeAllSessionAgents } = await import('./sessionAgentRegistry.js');
+    disposeAllSessionAgents();
+    const { disposeSessionInbox, listSessionInboxIds } = await import('./sessionInbox.js');
+    for (const sid of listSessionInboxIds()) disposeSessionInbox(sid);
+  } catch (err) {
+    console.warn('[runtimeLifecycle] session registries dispose failed:', err);
+  }
+
   // zai patch (2026-08-29, plan §3.6): 清 AgentRegistry sessionBindings,
   // 释放 per-session agent 绑定。agents map 保留,下次 init 时 builtin
   // + loadUserAgents 是 idempotent 重入。

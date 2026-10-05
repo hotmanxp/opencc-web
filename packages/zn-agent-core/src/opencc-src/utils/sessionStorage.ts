@@ -1,6 +1,10 @@
 // @ts-nocheck
 
 import { runtimeFeature } from '../utils/envUtils'
+// zai patch (2026-10-05, bug `delete-session-resurrects--by-zai`): 已删会话的
+// append 守卫。跨 vendor/compat 边界的 import 在本仓已有先例(见 hooks.ts、
+// createOpenccRuntime-impl.ts 等)。
+import { isSessionDeleted } from '../../compat/runtime/deletedSessions.js'
 import type { UUID } from 'crypto'
 import type { Dirent } from 'fs'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
@@ -1768,6 +1772,14 @@ class Project {
 
   async appendEntry(entry: Entry, sessionId: UUID = getSessionId() as UUID) {
     if (this.shouldSkipPersistence()) {
+      return
+    }
+    // zai patch (2026-10-05, bug `delete-session-resurrects--by-zai`):会话被
+    // DELETE 后,仍在跑的 turn 会在自己的 finally 里继续 append。真正的重建者
+    // 就是这条链(materializeSessionFile → appendEntry → appendDirectlyToFile,
+    // 后者是 `mkdir(dirname) + appendFile`,会把刚删掉的 transcript 重新创建)。
+    // 守卫必须落在这里 —— 只护 compat 侧 legacyTranscriptStore 拦不住本链路。
+    if (isSessionDeleted(sessionId)) {
       return
     }
 
