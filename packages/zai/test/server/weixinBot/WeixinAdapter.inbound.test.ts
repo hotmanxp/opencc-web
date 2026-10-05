@@ -248,6 +248,57 @@ describe('WeixinAdapter — inbound', () => {
     await a.disconnect()
   })
 
+  it('上一代迟到 settle 不会误删新一代的 pending 标记', async () => {
+    // Regression(验证 agent 实测复现):debouncePendingKeys 原先按 key 记账。
+    // 第 N-1 代的 emit promise 迟到 settle,其 .finally 里的 delete(sessionKey)
+    // 会把第 N 代**刚加回来**的同一个 key 删掉 → Set 变空 → 游标被写下,
+    // 而第 N 代消息还在缓冲区里没送达。崩溃即永久丢失(内存 dedup 让服务端
+    // 重投变成 no-op)。修法:每个 key 记代号,settle 时只删自己那一代。
+    const saves: string[] = []
+    const a = new WeixinAdapter({
+      accountId: 'acct',
+      token: 'token-gen',
+      baseUrl: 'https://test.local',
+      fetchImpl: mockFetchOk({ ret: 0, errcode: 0, msgs: [] }, 0),
+      mediaDir,
+      dmPolicy: 'pairing',
+    })
+    const syncStore = (a as unknown as { syncStore: { save: (id: string, b: string) => Promise<void> } }).syncStore
+    syncStore.save = async (_id, buf) => { saves.push(buf) }
+
+    // 第一次 emit 慢(模拟 bridge.deliver 耗时),第二代入队会发生在它 settle 之前
+    let releaseEmit: (() => void) | null = null
+    const firstEmitStarted = new Promise<void>((r) => { releaseEmit = r })
+    a.setEmitter(async (msg) => {
+      if (msg.text === 'first') {
+        releaseEmit?.()
+        await new Promise((r) => setTimeout(r, 60))
+      }
+    })
+    await a.connect()
+
+    const proc = (a as unknown as { _processMessage(m: unknown): Promise<void> })._processMessage.bind(a)
+    await proc({ message_id: 'g1', from_user_id: 'u1', item_list: [{ type: 1, text_item: { text: 'first' } }] })
+    // 等第一代进入 flush 并卡在慢 emit 上
+    await firstEmitStarted
+    // 第二代在第一代 settle 之前入队
+    await proc({ message_id: 'g2', from_user_id: 'u1', item_list: [{ type: 1, text_item: { text: 'second' } }] })
+
+    const advance = (a as unknown as { _advanceCursor(b: string): Promise<void> })._advanceCursor.bind(a)
+    await advance('buf-gen')
+
+    // 等第一代那个 60ms 的慢 emit settle —— 跨代误删就发生在这一刻。
+    // 必须等到它之后才断言:第二代仍在缓冲区(3s 静默期),游标不能落盘。
+    await new Promise((r) => setTimeout(r, 400))
+    expect(saves).toEqual([])
+
+    // 让第二代自然排空
+    await new Promise((r) => setTimeout(r, 3200))
+    expect(saves).toEqual(['buf-gen'])
+
+    await a.disconnect()
+  })
+
   it('dmPolicy=allowlist filters out non-listed senders', async () => {
     const internal: InternalWeixinMessage[] = []
     const fetchImpl = mockFetchOk({

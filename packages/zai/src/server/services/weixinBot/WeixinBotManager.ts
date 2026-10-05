@@ -466,13 +466,18 @@ export class WeixinBotManager {
 
     // 入站媒体只增不删(实测 ~/.zai/weixin/media/ 已 79MB),启动时按 30 天
     // 保留期清扫。失败不阻断启动 —— 回收是 housekeeping,不是启动前提。
+    //
+    // 必须把会话 cwd 传进去:镜像目录 `<cwd>/.zai/weixin-media/` 才是
+    // transcript 实际引用的那一份,清主目录清不到它们(那也是占空间的一半)。
     try {
       const { sweepAllMedia } = await import('./stores/MediaRetention.js')
-      const swept = await sweepAllMedia()
+      const bindings = await this.listSessionBindings()
+      const cwds = [...new Set(bindings.map((b) => b.cwd).filter((c): c is string => !!c))]
+      const swept = await sweepAllMedia(cwds)
       if (swept.removed > 0) {
         weixinDiag(
-          `[weixin] media retention: removed ${swept.removed}/${swept.scanned} file(s), ` +
-          `${(swept.freedBytes / 1024 / 1024).toFixed(1)}MB freed`,
+          `[weixin] media retention: removed ${swept.removed}/${swept.scanned} file(s) ` +
+          `across ${cwds.length} session cwd(s), ${(swept.freedBytes / 1024 / 1024).toFixed(1)}MB freed`,
         )
       }
     } catch (err) {

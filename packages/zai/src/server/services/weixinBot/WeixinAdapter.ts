@@ -185,6 +185,8 @@ export class WeixinAdapter {
   private unpersistedSyncBuf: string | null = null
   /** 仍在 debounce 缓冲区里、尚未落盘的 sessionKey。非空时游标不落盘。 */
   private readonly debouncePendingKeys = new Set<string>()
+  /** 每个 pending key 的代号,用于识别迟到的跨代 settle(见 _onDebouncedFlushed)。 */
+  private readonly debounceKeyGen = new Map<string, number>()
 
   constructor(options: WeixinAdapterOptions) {
     this.opts = {
@@ -314,6 +316,7 @@ export class WeixinAdapter {
     // flushAll 里的 onFlush 会逐个清掉 pending key;这里再兜一次底,防止
     // 某个 key 的 handler 抛错导致 key 残留 —— 残留会让重连后的游标永远写不下去。
     this.debouncePendingKeys.clear()
+    this.debounceKeyGen.clear()
     await this._flushUnpersistedSyncBuf()
     this.typingCache.destroy()
     this.dedup.destroy()
@@ -546,6 +549,14 @@ export class WeixinAdapter {
       //
       // 用 Set 而非计数器:同一 sessionKey 的多条消息会**合并成一次** flush,
       // 计数器会只减一次而永远停在 >0(游标再也写不下去)。
+      //
+      // 但 Set 按 key 记账仍有跨代串扰:第 N-1 代的 emit promise 迟到 settle,
+      // 其 .finally 里的 delete(sessionKey) 会把第 N 代**刚加回来**的同一个
+      // key 删掉 → Set 变空 → 游标被写下,而第 N 代消息还在缓冲区里没送达,
+      // 崩溃即永久丢失(内存 dedup 还会让服务端重投变成 no-op)。
+      // 故每个 key 记一个单调递增的代号,settle 时只在自己仍是当前代号时才删。
+      const gen = (this.debounceKeyGen.get(sessionKey) ?? 0) + 1
+      this.debounceKeyGen.set(sessionKey, gen)
       this.debouncePendingKeys.add(sessionKey)
       this.debounce.enqueue(sessionKey, {
         text,
@@ -559,7 +570,7 @@ export class WeixinAdapter {
             mediaPaths: item.mediaPaths,
             mediaTypes: item.mediaTypes,
           }),
-        ).catch(() => {}).finally(() => { this._onDebouncedFlushed(sessionKey) })
+        ).catch(() => {}).finally(() => { this._onDebouncedFlushed(sessionKey, gen) })
         return p
       })
     } else {
@@ -568,8 +579,15 @@ export class WeixinAdapter {
     }
   }
 
-  /** debounce 排空一个 key 后,若缓冲区已空就把暂存的游标写盘。 */
-  private _onDebouncedFlushed(sessionKey: string): void {
+  /**
+   * debounce 排空一个 key 后,若缓冲区已空就把暂存的游标写盘。
+   *
+   * `gen` 是入队时记下的代号:只在自己仍是该 key 的**当前**代号时才删。
+   * 否则上一代迟到的 settle 会误删新一代的标记(见入队处注释)。
+   */
+  private _onDebouncedFlushed(sessionKey: string, gen: number): void {
+    if (this.debounceKeyGen.get(sessionKey) !== gen) return
+    this.debounceKeyGen.delete(sessionKey)
     this.debouncePendingKeys.delete(sessionKey)
     if (this.debouncePendingKeys.size === 0) void this._flushUnpersistedSyncBuf()
   }
