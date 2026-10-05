@@ -170,13 +170,37 @@ export default defineConfig({
             id.includes('highlight.js')
           )
             return 'syntax-highlight';
-          // Mermaid 只在 ```mermaid 块首次出现时才 dynamic import
-          // (MermaidBlock.tsx → mermaidRenderer.ts),单独拆 chunk 便于浏览器
-          // 长期 cache。曾用的 mermaid 官方库(d3/dagre 等)已移除,但注意
-          // beautiful-mermaid 自己依赖 elkjs(见 package.json dependencies),
-          // 实测该 chunk ~1.59MB / gzip ~490KB——不是早先注释里写的 ~30KB。
-          // sanitize 走自写正则,不再单独拆 chunk。
-          if (id.includes('beautiful-mermaid')) return 'mermaid-beautiful';
+          // Mermaid(2026-10-05 从 beautiful-mermaid 换成官方 mermaid.js 全量
+          // 运行时 + dagre 布局)。它只在 ```mermaid 块首次出现时才 dynamic
+          // import(MermaidBlock.tsx → mermaidRenderer.ts 的 `import("mermaid")`)。
+          //
+          // 这里 **返回 undefined 而不是给它一个 chunk 名** —— 让打包器按
+          // dynamic import 边界自然切。给名字反而会出事,两种都实测过:
+          //  1. 完全不写规则 → mermaid 自己切对了,但依赖链落进下面的
+          //     `return 'vendor'`(静态 chunk)→ 首屏 +5MB。
+          //  2. 写 `if (id.includes('/mermaid/')) return 'mermaid'` → rolldown
+          //     把 Vite 的 **__vitePreload helper 一并塞进这个手写 chunk**;
+          //     入口里每个 React.lazy() 都要 import 它,于是入口静态 import 了
+          //     3.5MB 的 mermaid chunk,index.html 还给它加了
+          //     <link rel="modulepreload">,懒加载彻底失效。
+          // 两者都是本文件 pdfjs 那段注释记的同一类事故:**手写 chunk 边界会
+          // 惊动 preload helper,拆了也白拆**。
+          //
+          // 所以策略是「**负向**认领」:只拦住这些包不去掉底部的
+          // `return 'vendor'`(静态),return undefined 让它们跟着 mermaid 的
+          // 动态边界走。改完请用这两条复核:
+          //   - `grep -oE 'assets/[a-z-]+\.js' dist/web/index.html | grep -i mermaid`
+          //     必须无输出(没有 preload = 懒加载生效);
+          //   - `grep -c cytoscape dist/web/assets/vendor-*.js` 必须为 0。
+          if (id.includes('/mermaid/') || id.includes('/@mermaid-js/')
+            || id.includes('/d3-') || id.includes('/d3/') || id.includes('/internmap/')
+            || id.includes('/delaunator/') || id.includes('/robust-predicates/')
+            || id.includes('/cytoscape') || id.includes('/dagre') || id.includes('/elkjs/')
+            || id.includes('/dagre-d3-es/') || id.includes('/layout-base/')
+            || id.includes('/roughjs/') || id.includes('/khroma/') || id.includes('/marked/')
+            || id.includes('/chevrotain/') || id.includes('/d3-sankey/')
+            || id.includes('/@upsetjs/') || id.includes('/@braintree/')
+            || id.includes('/es-toolkit/')) return undefined;
           // 文档预览(2026-09-21)。这几个库全部只在 DocumentPreview 里
           // dynamic import,必须各自拆 chunk —— 落到下面的 `return 'vendor'`
           // 会被并进**静态** vendor chunk,等于把 5 个库(含 echarts ~1MB)

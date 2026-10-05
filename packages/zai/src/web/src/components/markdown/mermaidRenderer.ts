@@ -1,26 +1,31 @@
-// mermaidRenderer.ts — beautiful-mermaid lazy-load + SVG sanitize + rect 色块修正
+// mermaidRenderer.ts — mermaid.js lazy-load + SVG sanitize + 主题映射
 //
 // 复用 packages/zai/src/web/src/components/markdown/syntaxHighlighter.ts 的
 // 模块级 cache + subscribers 模式:首次遇到 ```mermaid 块触发 import,所有
 // MarkdownText 实例共享同一引用,避免重渲时反复 fetch。
 //
-// 只保留 beautiful-mermaid 单 renderer,覆盖 flowchart/graph、sequenceDiagram、
-// classDiagram、stateDiagram(-v2)、erDiagram、xychart-beta 这 6 类最常见图表。
-// **体积实测(2026-09-14)**:beautiful-mermaid 的 dist/index.js ~335KB,但它
-// 依赖 elkjs(~1.2MB 布局引擎),Vite 打出来的 mermaid-beautiful chunk
-// ~1.59MB / gzip ~490KB —— 早先注释里的 "~30KB" 是错的。
+// **2026-10-05 换库**:原先是 beautiful-mermaid(只认 6 类图 + 自绘 SVG,
+// 质量对不齐)。现在换成官方 mermaid.js 全量运行时,布局走 dagre/d3-dag,
+// 覆盖 flowchart / sequence / class / state / er / gantt / pie / mindmap /
+// journey / quadrant / timeline / sankey / gitGraph / requirement 等全谱系。
 //
-// 历史上这里还有一条 `mermaid` 官方库的 fallback(mermaidjs,支撑 block-beta/
-// gantt/pie/gitGraph/journey/C4*/kanban/radar/treemap 等冷门类型)。该依赖已被
-// 移除:遇到不在这 6 类白名单里的图类型时直接返回 {ok:false, kind:'unsupported'},
-// 由 MermaidBlock 走 <details> 源码降级。
+// 体积实测(换库前后都是懒加载,口径一致):gzip 483KB → 597KB,净 +114KB。
+// 比预想小很多,因为 beautiful-mermaid 本来就拖了 elkjs —— 而 elk 恰好也是
+// mermaid 布局 flowchart 的引擎,同一份依赖换了个前端。首次真正见到 ```mermaid
+// 才会下载这 597KB。
 //
-// sanitize 用极简自写正则(剥 <script>/<foreignObject> 标签 + on* 事件属性 +
+// 历史上这里还有「双 renderer」结构(beautiful-mermaid 主力 + 官方库兜底
+// 冷门类型),在 60d5f906 被合并成单 renderer 并删掉官方库;本次是把它换回来,
+// 但作为**唯一**渲染器而非 fallback。
+//
+// sanitize 仍用极简自写正则(剥 <script>/<foreignObject> + on* 事件属性 +
 // javascript: href),不复用 dompurify:happy-dom 下 dompurify 会把含 <style>
 // 标签的 SVG 整段剥光(测试环境 over-aggressive,生产行为不一致);自写
-// sanitizer 在 happy-dom / jsdom / 真实浏览器三个环境行为一致。
+// sanitizer 在 happy-dom / jsdom / 真实浏览器三个环境行为一致。mermaid 自身
+// 的 securityLevel:'strict' 是第一道防线,这里是第二道。
 
-// 主题 token 集合——对齐 beautiful-mermaid RenderOptions 的 6 个 + line
+// 主题 token 集合——从 CSS 变量读出(见 MermaidBlock.readThemeTokens),
+// 映射到 mermaid 的 themeVariables。
 export interface MermaidTheme {
   bg: string;
   fg: string;
@@ -29,10 +34,8 @@ export interface MermaidTheme {
   muted: string;
   surface: string;
   border: string;
-  /**
-   * 浅/深色标记,只影响 `rect` 色块的透明度(见 applyRectBands)。
-   * 缺省时按 bg 的亮度推断,所以老调用方不传也能跑。
-   */
+  /** 浅/深色标记。mermaid 的 themeVariables 里很多 token 没有"自动反色"语义,
+   * 需要按 mode 分别给值。缺省时按 bg 亮度推断,所以老调用方不传也能跑。 */
   mode?: "light" | "dark";
 }
 
@@ -44,19 +47,11 @@ export interface MermaidRenderResult {
   message?: string;
   /**
    * Which path produced the result:
-   *   'beautiful'   — beautiful-mermaid 渲染(成功或渲染中报错)
-   *   'unsupported' — 图类型不在支持白名单,未经渲染直接降级
+   *   'mermaid'    — 官方 mermaid.js 渲染(成功或解析报错)
+   *   'unsupported' — 连图类型都认不出(空 / 非 mermaid 语法),降级为源码
    */
-  kind?: "beautiful" | "unsupported";
+  kind?: "mermaid" | "unsupported";
 }
-
-// ---- supported-type gate ---------------------------------------------------
-//
-// beautiful-mermaid 的 parseMermaid 只认这 6 类子图;把白名单前置到 import
-// 之前,冷门类型(block-beta/gantt/pie/...)既不用等 dynamic import,也不会
-// 让 parser 抛一堆难懂的错——直接给出可读的降级原因。
-const SUPPORTED_HEADER_RE =
-  /^\s*(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(-v2)?|erDiagram|xychart-beta)\b/i;
 
 /** 取首行有效声明(跳过空行与 %% 注释)。 */
 function firstMeaningfulLine(code: string): string {
@@ -66,21 +61,22 @@ function firstMeaningfulLine(code: string): string {
   );
 }
 
-/**
- * 该 mermaid 源码的类型是否在 beautiful-mermaid 支持范围内。export 给单测用。
- */
-export function isSupportedMermaid(code: string): boolean {
-  return SUPPORTED_HEADER_RE.test(firstMeaningfulLine(code));
-}
-
 // 图类型 → 中文标签,只用于容器头部条的标题展示(不参与渲染决策)。
+// 这里**不做**支持与否的判断 —— 全谱系都交给 mermaid 自己解析,认不出的
+// 类型由它抛错,再走 error 降级。
 const TYPE_LABELS: Array<[RegExp, string]> = [
   [/^sequenceDiagram\b/i, "时序图"],
   [/^(flowchart|graph)\b/i, "流程图"],
   [/^classDiagram\b/i, "类图"],
   [/^stateDiagram(-v2)?\b/i, "状态图"],
   [/^erDiagram\b/i, "ER 图"],
-  [/^xychart-beta\b/i, "图表"],
+  [/^(pie|xychart|quadrantChart|requirementDiagram)\b/i, "图表"],
+  [/^gantt\b/i, "甘特图"],
+  [/^(mindmap|gitGraph)\b/i, "思维导图"],
+  [/^(journey|timeline)\b/i, "旅程图"],
+  [/^(sankey-beta|sankey)\b/i, "桑基图"],
+  [/^(C4Context|C4Container|C4Component|C4Dynamic|C4Deployment)\b/i, "架构图"],
+  [/^(block-beta|packet-beta|architecture-beta|kanban|radar|treemap|zenuml)\b/i, "图"],
 ];
 
 /** 取图类型的中文名;识别不出返回「图表」。export 给单测用。 */
@@ -89,24 +85,38 @@ export function mermaidDiagramLabel(code: string): string {
   return TYPE_LABELS.find(([re]) => re.test(first))?.[1] ?? "图表";
 }
 
+/**
+ * 这段源码看起来是否像一段 mermaid 声明。用于在**调用 mermaid 之前**挡掉
+ * 空串 / 纯文本,避免为一个必然失败的图白等一次 dynamic import + 解析。
+ * 真正的类型合法性交给 mermaid 自己判断。
+ */
+export function isSupportedMermaid(code: string): boolean {
+  const first = firstMeaningfulLine(code).trim();
+  if (!first) return false;
+  // mermaid 声明要么是 `type ...` 开头,要么是 %%{init}%% 指令块
+  return /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|xychart|pie|gantt|mindmap|journey|timeline|sankey|gitGraph|quadrantChart|requirementDiagram|C4\w+|block|packet|architecture|kanban|radar|treemap|zenuml|%%\{)/i.test(
+    first,
+  );
+}
+
 // ---- cache + subscribers --------------------------------------------------
 //
 // 模块级引用 + Set<callback> 模式跟 syntaxHighlighter.ts 一致;每个
 // MarkdownText 实例独立订阅,首个解析完成时统一 setState 触发重渲。
-type BeautifulRenderer = {
-  renderMermaidSVG: (text: string, options?: Record<string, unknown>) => string;
-  DEFAULTS?: { bg?: string; fg?: string };
+type MermaidLib = {
+  initialize: (cfg: Record<string, unknown>) => void;
+  render: (id: string, code: string) => Promise<{ svg: string }>;
 };
 
-let cachedBeautiful: BeautifulRenderer | null = null;
+let cachedMermaid: MermaidLib | null = null;
 const subscribers = new Set<() => void>();
 
-function ensureBeautiful(): Promise<BeautifulRenderer> {
-  if (cachedBeautiful) return Promise.resolve(cachedBeautiful);
-  return import(/* webpackChunkName: "mermaid-beautiful" */ "beautiful-mermaid").then((m) => {
-    cachedBeautiful = m as unknown as BeautifulRenderer;
+function ensureMermaid(): Promise<MermaidLib> {
+  if (cachedMermaid) return Promise.resolve(cachedMermaid);
+  return import(/* webpackChunkName: "mermaid" */ "mermaid").then((m) => {
+    cachedMermaid = (m as { default?: MermaidLib }).default ?? (m as unknown as MermaidLib);
     notifyAll();
-    return cachedBeautiful;
+    return cachedMermaid;
   });
 }
 
@@ -115,16 +125,112 @@ function notifyAll(): void {
   subscribers.clear();
 }
 
+// ---- theme → themeVariables ------------------------------------------------
+
+/** 相对亮度(0=黑,1=白);仅用于 mode 缺省时按 bg 推断明暗。 */
+function relativeLuminance(hex: string): number | null {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  let h = m[1]!;
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const rgb = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  if (rgb.some((c) => !Number.isFinite(c))) return null;
+  return (0.2126 * rgb[0]! + 0.7152 * rgb[1]! + 0.0722 * rgb[2]!) / 255;
+}
+
+/** 主题是否为深色:优先用显式 mode,否则按 bg 亮度推断(解析不出则当浅色)。 */
+function isDarkTheme(theme: MermaidTheme): boolean {
+  if (theme.mode) return theme.mode === "dark";
+  const lum = relativeLuminance(theme.bg);
+  return lum !== null ? lum < 0.5 : false;
+}
+
+/**
+ * 把 7 个 zai token 映射到 mermaid 的 themeVariables。
+ *
+ * mermaid 的 base 主题 token 远比 zai 的 7 个多,这里只覆盖视觉上真正会
+ * 被看到的那些;其余走 mermaid base 默认值,靠 `theme: 'base'` 兜底 ——
+ * base 的所有 token 都可被 themeVariables 逐项覆盖,没覆盖的保持默认。
+ *
+ * 深浅色分别给值:序列图 actor、note、rect 色带在深色下用 theme.bg 兜底会
+ * 看不见,所以 dark 走深一档的 surface。
+ */
+export function buildThemeVariables(theme: MermaidTheme): Record<string, string> {
+  const dark = isDarkTheme(theme);
+  return {
+    // 画布
+    background: theme.bg,
+    mainBkg: theme.surface,
+    secondBkg: dark ? theme.bg : theme.muted,
+    // 线与字
+    lineColor: theme.line,
+    textColor: theme.fg,
+    // 节点
+    nodeBorder: theme.border,
+    mainColor: theme.fg,
+    // 强调
+    primaryColor: theme.accent,
+    primaryBorderColor: theme.accent,
+    primaryTextColor: dark ? "#0a0a0f" : "#ffffff",
+    // 次级 / 第三级配色(gantt / pie / quadrant 多系列)
+    secondaryColor: dark ? theme.muted : theme.surface,
+    tertiaryColor: theme.muted,
+    // 字体 —— 与 CODE_FONT_FAMILY 保持同一族,避免图内文字和代码块跳字体
+    fontFamily:
+      'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontSize: "14px",
+    // 时序图
+    actorBkg: theme.surface,
+    actorBorder: theme.border,
+    actorTextColor: theme.fg,
+    actorLineColor: theme.muted,
+    signalColor: theme.fg,
+    signalTextColor: theme.fg,
+    labelBoxBkgColor: theme.surface,
+    labelBoxBorderColor: theme.border,
+    labelTextColor: theme.fg,
+    loopTextColor: theme.fg,
+    noteBkgColor: dark ? "#1f2937" : "#fffbeb",
+    noteBorderColor: theme.border,
+    noteTextColor: theme.fg,
+    activationBkgColor: theme.muted,
+    activationBorderColor: theme.border,
+    // 类图
+    classText: theme.fg,
+    // 状态图
+    labelColor: theme.fg,
+    // 统计图 / 甘特
+    pie1: theme.accent,
+    pie2: theme.muted,
+    pie3: theme.fg,
+    todayLineColor: theme.accent,
+    taskBkgColor: theme.surface,
+    taskBorderColor: theme.border,
+    taskTextColor: theme.fg,
+    taskTextDarkColor: theme.fg,
+    taskTextLightColor: theme.bg,
+    activeTaskBkgColor: theme.accent,
+    activeTaskBorderColor: theme.accent,
+    doneTaskBkgColor: theme.muted,
+    gridColor: theme.border,
+    sectionBkgColor: theme.surface,
+    altSectionBkgColor: theme.bg,
+  };
+}
+
 // ---- SVG sanitize ----------------------------------------------------------
 //
 // 极简自写 sanitizer——不依赖 dompurify,行为在所有环境(happy-dom / jsdom /
 // 真实浏览器)一致。剥三类威胁:
 //   1. <script> 标签
 //   2. <foreignObject> 标签(可嵌入任意 HTML)
-//   3. on* 事件属性(onclick / onerror / onload 等)+ javascript: / data: 的 href/xlink:href
+//   3. on* 事件属性(onclick / onerror / onload 等)+ javascript: 的 href/xlink:href
 //
-// 不剥 <style>(SVG 内嵌样式是合法且必要的,beautiful-mermaid 大量使用
-// `style` 属性 + `<style>` 块注入 CSS variables)。
+// 不剥 <style>(SVG 内嵌样式是合法且必要的,mermaid 靠它注入 CSS variables)。
+//
+// 注意 mermaid 默认 htmlLabels:true 会用 <foreignObject> 包标签 —— 我们在
+// initialize 里显式关掉(htmlLabels:false),所以这里剥掉 foreignObject 不会
+// 误伤正常标签文本。
 const FORBID_TAG_RE = /<\/?(script|foreignObject)\b[^>]*>/gi;
 const ON_ATTR_RE = /\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
 const JS_HREF_RE = /\s+(?:xlink:)?href\s*=\s*(?:"\s*javascript:[^"]*"|'\s*javascript:[^']*'|javascript:[^\s>]+)/gi;
@@ -139,152 +245,17 @@ export function sanitizeSvg(svg: string): string {
     .replace(JS_HREF_RE, "");
 }
 
-// ---- rect band post-process ------------------------------------------------
-//
-// mermaid 的 sequenceDiagram 里 `rect <color> ... end` 是"底色带":给一段消息
-// 铺一层背景色,本身不显示任何文字。beautiful-mermaid(1.1.3)虽然把 `rect`
-// 收进了 block 类型白名单(`loop|alt|opt|par|critical|break|rect`),但渲染
-// 走的是通用 block 分支:
-//   <rect ... fill="none" stroke="var(--_node-stroke)" />   ← 块底 = 不填充
-//   <rect ... fill="var(--_group-hdr)" />                    ← 左上角 tab
-//   <text ...>rect [rgb(245,245,245)]</text>                 ← 把颜色字面量当标题
-// 于是 LLM 生成的 `rect rgb(245,245,245)` 既没铺底色,又在左上角多出一串
-// "rect [rgb(245,245,245)]" 垃圾文本(2026-09-14 用户反馈的截图)。
-//
-// 在 sanitize 之后补一道字符串后处理,把 rect 块改回语义:
-//   1. 块底 rect 用 label 里的颜色填充;
-//   2. 删掉 tab rect 与标题文本。
-//
-// 颜色只接受严格合法的 CSS 字面量(hex / rgb[a]() / 字母颜色名),不接受任意
-// 字符串——data-label 的内容最终会写进 fill 属性,不能当自由文本用。
-//
-// 透明度:深色主题下压到 DARK_BAND_OPACITY。LLM 写 mermaid 时默认面向浅色
-// 画布,颜色几乎都是 `rgb(245,245,245)` 这类高亮度值;深色主题下原样铺满会
-// 把深色文字压死,所以深色一律走低调底色(浅色主题保持原色,与官方 mermaid
-// 行为一致)。
-//
-// 对比度下限:浅色画布 + `rgb(245,245,245)` 这类颜色,原样铺上去跟画布几乎
-// 同色(白底上的 #f5f5f5),看上去"还是没有底色"。所以当色块颜色与画布底色
-// 的亮度差 < BAND_MIN_LUM_DELTA 时,朝文字色混 BAND_CONTRAST_MIX 比例,保证
-// 这条带看得见。
-export const DARK_BAND_OPACITY = 0.18;
-const BAND_MIN_LUM_DELTA = 0.05;
-const BAND_CONTRAST_MIX = 0.12;
-
-const RECT_BLOCK_RE = /<g class="block" data-type="rect"([^>]*)>([\s\S]*?)<\/g>/g;
-/** 左上角的 tab rect(beautiful-mermaid 固定用 --_group-hdr 填充,height=18)。 */
-const RECT_TAB_RE = /\s*<rect\b[^>]*fill="var\(--_group-hdr\)"[^>]*\/>/;
-/** rect 块内唯一的文本元素就是那句 "rect [color]" 标题,整段删掉。 */
-const TEXT_EL_RE = /\s*<text\b[^>]*>[\s\S]*?<\/text>/g;
-const HEX_COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
-const RGB_COLOR_RE = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*[\d.]+\s*)?\)$/i;
-const NAMED_COLOR_RE = /^[a-z]{3,20}$/i;
-
-interface ParsedColor {
-  /** 归一化后可以直接写进 fill 的字符串。 */
-  css: string;
-  /** 可解析的 RGB 分量;字母颜色名为 null。 */
-  rgb: [number, number, number] | null;
-}
-
-/** 解析 data-label 里的颜色字面量;非法则返回 null。 */
-function parseCssColor(raw: string): ParsedColor | null {
-  const v = raw.trim();
-  if (!v || /["'<>;\\]/.test(v)) return null;
-  if (HEX_COLOR_RE.test(v)) {
-    const hex = v.slice(1);
-    const full =
-      hex.length <= 4
-        ? hex
-            .slice(0, 3)
-            .split("")
-            .map((c) => c + c)
-            .join("")
-        : hex.slice(0, 6);
-    const rgb: [number, number, number] = [
-      parseInt(full.slice(0, 2), 16),
-      parseInt(full.slice(2, 4), 16),
-      parseInt(full.slice(4, 6), 16),
-    ];
-    return { css: `rgb(${rgb.join(",")})`, rgb };
-  }
-  const m = RGB_COLOR_RE.exec(v);
-  if (m) {
-    const rgb = [Number(m[1]), Number(m[2]), Number(m[3])] as [number, number, number];
-    if (rgb.some((c) => c > 255)) return null;
-    return { css: `rgb(${rgb.join(",")})`, rgb };
-  }
-  if (NAMED_COLOR_RE.test(v)) return { css: v, rgb: null };
-  return null;
-}
-
-/** 相对亮度(0=黑,1=白);用于判断主题明暗 / 解析 bg token。 */
-function relativeLuminance(rgb: [number, number, number]): number {
-  return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
-}
-
-/** 主题是否为深色:优先用显式 mode,否则按 bg 亮度推断(解析不出则当浅色)。 */
-function isDarkTheme(theme: MermaidTheme): boolean {
-  if (theme.mode) return theme.mode === "dark";
-  const bg = parseCssColor(theme.bg);
-  if (!bg?.rgb) return false;
-  return relativeLuminance(bg.rgb) < 0.5;
-}
-
-/**
- * 色块的最终填充色——与画布底色太接近时朝文字色混一点,避免"看不见的底色"。
- */
-function bandFill(parsed: ParsedColor, theme: MermaidTheme): string {
-  const bg = parseCssColor(theme.bg);
-  const fg = parseCssColor(theme.fg);
-  if (!parsed.rgb || !bg?.rgb || !fg?.rgb) return parsed.css;
-  const delta = Math.abs(relativeLuminance(parsed.rgb) - relativeLuminance(bg.rgb));
-  if (delta >= BAND_MIN_LUM_DELTA) return parsed.css;
-  const mixed = parsed.rgb.map((c, i) =>
-    Math.round(c + (fg.rgb![i]! - c) * BAND_CONTRAST_MIX),
-  );
-  return `rgb(${mixed.join(",")})`;
-}
-
-/**
- * 把生成 SVG 里的 `rect` 色块改成真正的底色带。export 给单测用。
- */
-export function applyRectBands(svg: string, theme: MermaidTheme): string {
-  if (!svg.includes('data-type="rect"')) return svg;
-  const opacity = isDarkTheme(theme) ? DARK_BAND_OPACITY : 1;
-
-  return svg.replace(RECT_BLOCK_RE, (whole, attrs: string, inner: string) => {
-    const labelMatch = /\bdata-label="([^"]*)"/.exec(attrs);
-    const parsed = labelMatch
-      ? parseCssColor(labelMatch[1]!.replace(/&quot;/g, '"').replace(/&amp;/g, "&"))
-      : null;
-
-    let body = inner.replace(RECT_TAB_RE, "").replace(TEXT_EL_RE, "");
-    if (parsed) {
-      const opacityAttr = opacity < 1 ? ` fill-opacity="${opacity}"` : "";
-      const fill = `fill="${bandFill(parsed, theme)}"${opacityAttr}`;
-      // 只替换块底 rect 的 fill="none",其它 rect(节点、tab)已在上一步删/不受影响
-      body = body.replace('fill="none"', fill);
-    } else {
-      // 没有颜色(裸 `rect`):用主题的 group header 底色兜底,至少是个可见的带
-      body = body.replace('fill="none"', 'fill="var(--_group-hdr)"');
-    }
-    return `<g class="block" data-type="rect"${attrs.replace(/\s*data-label="[^"]*"/, "")}>${body}</g>`;
-  });
-}
-
 // ---- responsive svg root ---------------------------------------------------
 //
-// beautiful-mermaid 按文本度量算出绝对画布尺寸,svg 根是
-// `<svg width="1370" height="628" viewBox="0 0 1370 628" style="--bg:…">` ——
-// 没有 max-width,宽图(多 participant / 长标签)直接比消息列还宽,会被裁在
-// 面板外面(信息真的丢了)。
+// mermaid 输出的根 svg 带绝对 width/height + viewBox,但**没有** max-width,
+// 宽图(多 participant / 长标签)直接比消息列还宽,会被裁在面板外面
+// (信息真的丢了)。
 //
 // 这里给根 svg 补两条内联样式,*强制*缩到容器内、整张可见:
 //   max-width:100% —— 不超出容器宽度
 //   height:auto    —— 等比缩放(靠 viewBox + preserveAspectRatio 维持比例)
 //
-// **不再设 min-width 下限**。旧实现留了 `min-width: 原宽 * 0.75` 的缩放下限 +
+// **不再设 min-width 下限**:旧实现留了 `min-width: 原宽 * 0.75` 的缩放下限 +
 // 外层 overflow-auto,结果是"缩不下就横向滚动"——图依旧被裁在可视区外,和用户
 // 诉求相反。现在一律缩到底(整图可见),缩太小(<100%)时图文交互层给出实时缩放
 // 百分比 + 「全屏预览」入口(见 MermaidBlock),放大读细节交给全屏。
@@ -308,7 +279,7 @@ export function makeSvgResponsive(svg: string): string {
 const SVG_ROOT_WIDTH_ATTR_RE = /<svg\b[^>]*\swidth="([\d.]+)"/;
 
 /**
- * 取根 svg 的原始(未缩放)画布宽度,即 beautiful-mermaid 算出的自然宽度。
+ * 取根 svg 的原始(未缩放)画布宽度,即 mermaid 算出的自然宽度。
  * MermaidBlock 用它除以实测渲染宽度算缩放百分比;取不到返回 null。
  */
 export function naturalSvgWidth(svg: string): number | null {
@@ -318,6 +289,10 @@ export function naturalSvgWidth(svg: string): number | null {
 }
 
 // ---- public render entry ---------------------------------------------------
+
+// mermaid 的 render(id, code) 会往 document.body 挂一个临时节点做测量,
+// id 必须全局唯一 —— 单调递增即可。
+let renderSeq = 0;
 
 /**
  * 渲染 mermaid 代码 → sanitized SVG。Promise 永远 resolve;失败走
@@ -332,38 +307,76 @@ export async function renderMermaidDiagram(
     return {
       ok: false,
       kind: "unsupported",
-      message: `不支持的图类型 "${header}" — 仅支持 flowchart / sequenceDiagram / classDiagram / stateDiagram / erDiagram / xychart`,
+      message: `无法识别的图类型 "${header}" — 请以 flowchart / sequenceDiagram / classDiagram / stateDiagram / erDiagram / gantt / pie 等类型声明开头`,
     };
   }
 
   try {
-    const lib = await ensureBeautiful();
-    const rawSvg = lib.renderMermaidSVG(code, {
-      bg: theme.bg,
-      fg: theme.fg,
-      line: theme.line,
-      accent: theme.accent,
-      muted: theme.muted,
-      surface: theme.surface,
-      border: theme.border,
-      font: "Inter",
+    const lib = await ensureMermaid();
+    // mermaid 是全局单例,主题在 render 时烘进产物 —— 主题切换要重新
+    // initialize,不能缓存上一次的配置。
+    //
+    // useMaxWidth:false(**所有图型都要显式写**,mermaid 的 per-diagram 配置
+    // 不继承顶层默认值,漏写一个就退回 width="100%")。开启时 mermaid 给根
+    // svg 输出 `width="100%"`,而我们的祖先链是 shrink-to-fit 的
+    // ant-space-item(flex:0 1 auto)—— 百分比宽度对 shrink-to-fit 容器解析成
+    // min-content,实测 2472px 的宽图被压到 116px(5%),文字完全不可读。
+    // 关掉后 mermaid 输出自然像素宽度,缩放交给 makeSvgResponsive 的
+    // max-width:100% + height:auto(那条路径容器宽度是确定的,比例正确)。
+    const diag = { htmlLabels: false, useMaxWidth: false };
+    lib.initialize({
+      startOnLoad: false,
+      // 不允许 click 回调 / 脚本执行;这是 mermaid 侧的第一道防线。
+      securityLevel: "strict",
+      // 关掉后 mermaid 用 <text> 而不是 <foreignObject> 画标签;我们的
+      // sanitizer 会剥掉 foreignObject,开着等于标签全丢。
+      htmlLabels: false,
+      useMaxWidth: false,
+      // 渲染失败时**不要**把 "Syntax error in text" 品牌 SVG 画进 DOM。
+      // mermaid 的 draw() 抛错路径默认会调 errorRenderer.draw(...),而
+      // removeTempElements() 在 throw 之后才执行 —— 于是那个临时节点
+      // (内含 1417px 宽的错误 SVG)留在 document.body 上,脱离 React root,
+      // 实际盖住输入框。流式输出时每个半截代码都会触发一次。
+      // 置 true 后走 removeTempElements() 分支,只 throw 不渲染。
+      suppressErrorRendering: true,
+      theme: "base",
+      themeVariables: buildThemeVariables(theme),
+      flowchart: { ...diag },
+      sequence: { ...diag },
+      class: { ...diag },
+      state: { ...diag },
+      er: { ...diag },
+      gantt: { useMaxWidth: false },
+      pie: { useMaxWidth: false },
+      mindmap: { useMaxWidth: false },
+      journey: { useMaxWidth: false },
+      timeline: { useMaxWidth: false },
+      gitGraph: { useMaxWidth: false },
+      quadrantChart: { useMaxWidth: false },
+      xychart: { useMaxWidth: false },
+      sankey: { useMaxWidth: false },
     });
-    const safeSvg = applyRectBands(makeSvgResponsive(sanitizeSvg(rawSvg)), theme);
-    if (!safeSvg || !safeSvg.includes("<svg")) {
-      // 调试用:把 raw 前 120 字符也带上,方便看出 beautiful 到底产出什么
-      const preview = rawSvg.replace(/\s+/g, " ").slice(0, 120);
+
+    const id = `zai-mermaid-${++renderSeq}`;
+    const { svg: rawSvg } = await lib.render(id, code);
+
+    if (!rawSvg) {
       return {
         ok: false,
-        message: `sanitize 后为空或不含 <svg>;raw[${rawSvg.length}]="${preview}"`,
-        kind: "beautiful",
+        message: "mermaid 渲染返回空 SVG(可能是测试环境缺少 layout 度量)",
+        kind: "mermaid",
       };
     }
-    return { ok: true, svg: safeSvg, kind: "beautiful" };
+    const safeSvg = makeSvgResponsive(sanitizeSvg(rawSvg));
+    if (!safeSvg.includes("<svg")) {
+      return { ok: false, message: "sanitize 后不含 <svg>", kind: "mermaid" };
+    }
+    return { ok: true, svg: safeSvg, kind: "mermaid" };
   } catch (err) {
     return {
       ok: false,
       message: err instanceof Error ? err.message : String(err),
-      kind: "beautiful",
+      kind: "mermaid",
     };
   }
 }
@@ -373,7 +386,7 @@ export async function renderMermaidDiagram(
  * dynamic import。
  */
 export function hasMermaidBundle(): boolean {
-  return cachedBeautiful !== null;
+  return cachedMermaid !== null;
 }
 
 /**
@@ -382,7 +395,7 @@ export function hasMermaidBundle(): boolean {
  * 同步 fire-and-forget,内部 Promise 由 cache + subscribers 接管。
  */
 export function ensureMermaidBundle(): void {
-  void ensureBeautiful();
+  void ensureMermaid();
 }
 
 /**

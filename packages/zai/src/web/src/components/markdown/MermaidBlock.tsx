@@ -12,7 +12,7 @@
 // 主题切换:<html data-theme> 变化时 MutationObserver 触发 themeKey++,
 // useEffect 依赖 themeKey 重渲 SVG。
 //
-// 尺寸:beautiful-mermaid 按文本度量算出绝对画布尺寸(如 1370x628),宽图会
+// 尺寸:mermaid.js 按文本度量算出绝对画布尺寸(如 1370x628),宽图会
 // 顶破消息列。这里由外层容器强制「缩到全部可见」:
 //   - svg 内联 max-width:100% + height:auto(见 mermaidRenderer.
 //     makeSvgResponsive),等比缩到容器宽度,不做横向滚动;
@@ -83,9 +83,8 @@ function readThemeTokens(): MermaidTheme {
     muted: get("--text-tertiary", "#94a3b8"),
     surface: get("--bg-card-hover", "#1a1a2e"),
     border: get("--border-subtle", "rgba(249, 115, 22, 0.18)"),
-    // rect 色块透明度按主题走(见 mermaidRenderer.applyRectBands)。
     // App.tsx 把生效主题写在 <html data-theme> 上,这里直接读,比从 CSS 颜色
-    // 反推亮度可靠。
+    // 反推亮度可靠(mermaid 的 themeVariables 需要按深浅给不同值)。
     mode: document.documentElement.dataset.theme === "light" ? "light" : "dark",
   };
 }

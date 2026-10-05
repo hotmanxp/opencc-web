@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { MarkdownText } from '../markdown/MarkdownText.js'
 import { MathBlock } from '../markdown/MathBlock.js'
+import { MermaidBlock } from '../markdown/MermaidBlock.js'
 import { remarkPlugins, rehypePlugins } from '../markdown/markdownPlugins.js'
 import { fetchSuperTaskDetail } from '../../lib/superTaskApi'
 import { subscribeTaskEvents } from '../../lib/taskApi'
@@ -65,8 +66,21 @@ const STATUS_BADGE: Record<string, { color: string; label: string }> = {
 // 与主 MarkdownText / TaskDrawer 共用同一个 MathBlock;只注册 math-block 这一
 // 个自定义元素,其它走 react-markdown 默认组件即可(任务事件流只关心 assistant
 // 文本与 thinking,不需要代码块 / 表格 / 引用块等自定义渲染)。
-const eventMarkdownComponents = {
+//
+// 唯一的例外是 ```mermaid```:任务事件流里 executor 常直接画架构图/时序图,
+// 不接的话这里只会显示一坨源码。文件页签(spec.md / plan.md / …)走的是
+// MarkdownText,本来就带 mermaid 路由,不受这里影响。
+//
+// 判据只用 className 就够,不需要 MarkdownText 那套 InFencedCode context:
+// 行内 code(`foo`)不带 language- 前缀,只有围栏块才会是 language-mermaid。
+export const eventMarkdownComponents = {
   'math-block': ({ children }: any) => <MathBlock>{children}</MathBlock>,
+  code: ({ className, children }: any) => {
+    if (/language-mermaid\b/.test(className || '')) {
+      return <MermaidBlock code={String(children ?? '').replace(/\n$/, '')} />
+    }
+    return <code className={className}>{children}</code>
+  },
 }
 
 /**
