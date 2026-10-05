@@ -1,4 +1,5 @@
-import { rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import type { Stats } from 'node:fs';
 
 /**
@@ -11,6 +12,65 @@ import type { Stats } from 'node:fs';
  * ENOENT,写者以为成功或直接 500。带计数器后同一进程内不重名。
  */
 let tmpCounter = 0;
+
+/**
+ * 已经扫过一次的目录。孤儿清扫每次写都做一遍太贵(readdir 在大目录不便宜),
+ * 而孤儿本身是 SIGKILL 恰好落在「写 tmp」与「rename」之间那几毫秒才会产生的
+ * 极低频事件 —— 每进程每目录扫一次已经能覆盖现实场景:上一个进程崩在写入中,
+ * 本进程第一次往同目录写任何文件时就把它带走。
+ *
+ * 残留:同一个进程长期存活后再崩,那次的孤儿要等**下一个进程**启动才会被扫到。
+ */
+const sweptDirs = new Set<string>();
+
+function isPidAlive(pid: number): boolean {
+  try {
+    // signal 0 = 只做存在性与权限检查,不真发信号
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM = 进程存在但不属于当前用户(仍是活着的)
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * 清掉同目录下属于**已死进程**的残留 tmp。
+ *
+ * 我们自己起的 tmp 叫 `<base>.<pid>.<counter>.tmp`。pid 死了就说明那个 tmp
+ * 永远等不到它的 rename 了 —— 留着只会在用户的 git status / 文件树里出现
+ * 莫名其妙的文件。用户项目目录同样受影响(走 fsWrite 写任意源码文件)。
+ *
+ * 只认我们自己的命名格式 + 只删死进程的,避免误伤用户手写的同名文件,以及
+ * 正在并发写同一目标的另一个活进程。
+ */
+async function sweepStaleSiblings(path: string): Promise<void> {
+  const dir = dirname(path);
+  if (sweptDirs.has(dir)) return;
+  sweptDirs.add(dir);
+
+  const base = basename(path);
+  // 转义 base 里的正则元字符:文件名可以含 . + [ ( 等
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^${escaped}\\.(\\d+)\\.\\d+\\.tmp$`);
+
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return; // 目录不可读 / 已删 —— 无从清扫
+  }
+  await Promise.all(
+    entries.map(async (name) => {
+      const m = re.exec(name);
+      if (!m) return;
+      const pid = Number(m[1]);
+      if (pid === process.pid) return; // 本进程自己的(含上一次计数器残留)
+      if (isPidAlive(pid)) return; // 还活着,可能正写到一半
+      await unlink(join(dir, name)).catch(() => {});
+    }),
+  );
+}
 
 export interface AtomicWriteOptions {
   /** 显式指定新文件的权限(微信凭据那种)。不给则沿用目标文件现有 mode。 */
@@ -56,6 +116,9 @@ export async function atomicWriteFile(
   }
 
   const tmpPath = `${path}.${process.pid}.${tmpCounter++}.tmp`;
+  // 清掉上一次崩溃留下的孤儿 tmp(每进程每目录只做一次,见 sweptDirs)。
+  // 放在 try 外:它是 housekeeping,失败也不该被当成写入失败。
+  await sweepStaleSiblings(path);
   try {
     await writeFile(tmpPath, data, mode !== undefined ? { mode } : 'utf-8');
     await rename(tmpPath, path);

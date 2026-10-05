@@ -140,4 +140,41 @@ describe('atomicWriteFile', () => {
     await atomicWriteFile(path, Buffer.from([1, 2, 3]))
     expect([...((await readFile(path)) as Buffer)]).toEqual([1, 2, 3])
   })
+
+  // ===== 孤儿 tmp 清扫 =====
+  // SIGKILL 恰好落在「写 tmp」与「rename」之间会留下 <base>.<pid>.<n>.tmp,
+  // 永远等不到 rename,在用户项目里表现为 git status 里凭空多出的文件。
+
+  test('清扫:删除属于已死进程的残留 tmp', async () => {
+    // pid 2^22 是内核保留的,几乎不可能有活进程
+    const orphan = join(dir, 'app.ts.4194303.0.tmp')
+    await writeFile(orphan, 'half-written', 'utf-8')
+    await atomicWriteFile(join(dir, 'app.ts'), 'real content')
+    expect(await readdir(dir)).toEqual(['app.ts'])
+  })
+
+  test('清扫:不动属于存活进程的 tmp(可能正写到一半)', async () => {
+    // process.pid 一定存活;另一个用 init(1) 的 pid 近似常驻
+    const mine = join(dir, 'keep.ts')
+    await writeFile(join(dir, `keep.ts.${process.pid}.99.tmp`), 'in flight', 'utf-8')
+    await atomicWriteFile(mine, 'x')
+    const left = await readdir(dir)
+    expect(left).toContain(`keep.ts.${process.pid}.99.tmp`)
+  })
+
+  test('清扫:不误伤名字相近但不符合命名格式的文件', async () => {
+    await writeFile(join(dir, 'note.ts.abc.0.tmp'), 'mine', 'utf-8')   // pid 非数字
+    await writeFile(join(dir, 'other.ts.4194303.0.tmp.bak'), 'x', 'utf-8') // 后缀不对
+    await atomicWriteFile(join(dir, 'note.ts'), 'a')
+    await atomicWriteFile(join(dir, 'other.ts'), 'b')
+    const left = await readdir(dir)
+    expect(left).toContain('note.ts.abc.0.tmp')
+    expect(left).toContain('other.ts.4194303.0.tmp.bak')
+  })
+
+  test('清扫:只删同名前缀的,别的文件的孤儿不碰', async () => {
+    await writeFile(join(dir, 'unrelated.txt.4194303.0.tmp'), 'x', 'utf-8')
+    await atomicWriteFile(join(dir, 'app.ts'), 'y')
+    expect(await readdir(dir)).toContain('unrelated.txt.4194303.0.tmp')
+  })
 })

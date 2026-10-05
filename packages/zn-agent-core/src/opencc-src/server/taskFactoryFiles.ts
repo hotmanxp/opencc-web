@@ -34,6 +34,33 @@ async function readdirOrEmpty(dir: string): Promise<string[]> {
   }
 }
 
+/**
+ * tmp + rename 写文件:读方要么看到完整旧内容,要么看到完整新内容。
+ *
+ * zai patch (2026-10-05, bug `non-atomic-write-data-loss` 同缺陷类)。task.yaml
+ * 用原地 `writeFile` 写时,fd 打开瞬间就把文件截断成 0 字节、内容才开始写。
+ * 对 task.yaml 尤其致命:`readTaskMeta` 优先读 task.yaml,读到空串会解析成
+ * `{id, status:'queued'}` 的最小 meta,**永久盖过**仍然完好的 legacy index.md ——
+ * 崩一次,一个任务的状态就归零且再也读不回来。
+ *
+ * 为什么在 vendor 里自带一份而不用 `compat/background/store/atomicWrite.ts`:
+ * 那份在 compat 树,本文件是 opencc-src vendor。这里刻意保持 vendor 不依赖
+ * compat —— 见 `scripts/verify-server-types-self-contained.mjs` 里 compat d.ts
+ * 会被 prune 的那套约束。10 行换零耦合,划算。
+ */
+let atomicTmpCounter = 0
+
+async function writeFileAtomic(path: string, content: string): Promise<void> {
+  const tmp = `${path}.${process.pid}.${atomicTmpCounter++}.tmp`
+  try {
+    await writeFile(tmp, content, 'utf-8')
+    await rename(tmp, path)
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {})
+    throw err
+  }
+}
+
 export type TaskStatus = 'queued' | 'processing' | 'paused' | 'verifying' | 'done' | 'failed'
 export type TaskBucketName = 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'
 export interface TaskSummary {
@@ -545,7 +572,7 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     ...(verificationScope ? { verificationScope } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
   }
-  await writeFile(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta), 'utf-8')
+  await writeFileAtomic(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta))
   if (mode === 'quick') {
     // quick 模式:只生成最小 spec.md(title/description/priority/cwd 快照),
     // 不生成 plan.md / brainstorm.md(intent:跳过 brainstorming,验收走轻量路径)。
@@ -610,7 +637,7 @@ async function readTaskMeta(id: string, bucket: TaskBucketName): Promise<TaskYam
     const meta = parseLegacyIndexMd(legacyText)
     // 迁移:尽力而为;失败不抛(下次再迁)
     try {
-      await writeFile(yamlPath, serializeTaskYaml(meta), 'utf-8')
+      await writeFileAtomic(yamlPath, serializeTaskYaml(meta))
       await rm(legacyPath)
     } catch {
       // ignore — 读取路径仍然成功,下次再试
@@ -842,7 +869,9 @@ async function writeTaskMeta(id: string, bucket: TaskBucketName, patch: Partial<
     }
     next[k] = v
   }
-  await writeFile(yamlPath, serializeTaskYaml(next), 'utf-8')
+  // 原子写:这是 markTaskStatus 的主路径,每次状态变更都走它。原地写一旦崩在
+  // 截断之后,0 字节的 task.yaml 会永久盖过 legacy index.md(见 writeFileAtomic)。
+  await writeFileAtomic(yamlPath, serializeTaskYaml(next))
   // 旧文件存在则一并清掉(rm 的 ENOENT 本来就被 catch,无需先 existsSync)
   await rm(legacyPath).catch(() => {})
   return next
