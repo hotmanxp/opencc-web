@@ -1210,3 +1210,57 @@ describe('instanceSupervisor (4f — stale running reset after supervisor restar
     expect(changed).toBe(true)
   })
 })
+
+// 子进程入口在 dev 下是 `src/cli/index.ts`(TypeScript 源文件),裸
+// `process.execPath` 起不来 —— 缺 loader 链,ESM 解析 `.js` 后缀的相对导入
+// 直接 ERR_MODULE_NOT_FOUND,实例永远停在 down。生产走纯 JS 的 bin/zai.js,
+// execArgv 为空,所以这个缺陷只在本仓库的 dev 工作流里暴露。
+describe('childExecArgv — 子进程继承 loader 链', () => {
+  async function load() {
+    const { childExecArgv } = await import('../../../src/server/services/instanceSupervisor.js')
+    return childExecArgv
+  }
+
+  it('原样透传父进程的 loader / preflight 链', async () => {
+    const childExecArgv = await load()
+    const argv = [
+      '--require', '/abs/tsx/dist/preflight.cjs',
+      '--import', 'file:///abs/tsx/dist/loader.mjs',
+      '--loader', '/abs/bun-protocol.mjs',
+    ]
+    expect(childExecArgv(argv, '/parent/cwd')).toEqual(argv)
+  })
+
+  it('相对 loader 路径按父进程 cwd 绝对化 —— 子进程 cwd 是实例目录,不绝对化必然解析失败', async () => {
+    const childExecArgv = await load()
+    const out = childExecArgv(['--loader', './node_modules/bun-protocol.mjs'], '/parent/pkg')
+    expect(out[0]).toBe('--loader')
+    expect(out[1]).toMatch(/^file:\/\/\/parent\/pkg\/node_modules\/bun-protocol\.mjs$/)
+  })
+
+  it('../ 相对路径同样绝对化', async () => {
+    const childExecArgv = await load()
+    const out = childExecArgv(['--import', '../shared/loader.mjs'], '/parent/pkg/sub')
+    expect(out[1]).toBe('file:///parent/pkg/shared/loader.mjs')
+  })
+
+  it('丢弃 --inspect* / --debug*:子进程会跟父进程抢同一个调试端口,起来就死', async () => {
+    const childExecArgv = await load()
+    const out = childExecArgv(
+      ['--inspect=9229', '--inspect-brk', '--debug', '--loader', '/abs/l.mjs'],
+      '/parent',
+    )
+    expect(out).toEqual(['--loader', '/abs/l.mjs'])
+  })
+
+  it('普通 V8 / node 开关不受影响', async () => {
+    const childExecArgv = await load()
+    const argv = ['--max-old-space-size=4096', '--enable-source-maps', '--no-warnings']
+    expect(childExecArgv(argv, '/parent')).toEqual(argv)
+  })
+
+  it('生产路径(execArgv 为空)不产生多余参数', async () => {
+    const childExecArgv = await load()
+    expect(childExecArgv([], '/parent')).toEqual([])
+  })
+})

@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { basename } from 'node:path'
+import { basename, resolve as resolvePath } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { eventBus, type ServerEventInput } from './eventBus.js'
 import {
   EMPTY_INSTANCE_STATUS,
@@ -36,6 +37,51 @@ export const POST_SIGKILL_EXIT_GRACE_MS = 1_500
 export class InstanceSupervisorError extends Error {
   readonly code: 'NOT_FOUND' | 'CURRENT_INSTANCE' | 'DUPLICATE_NAME' | 'INVALID_STATE'
   constructor(code: InstanceSupervisorError['code'], message: string) { super(message); this.code = code }
+}
+
+// Debugger / profiler flags bind a fixed port (or a fixed socket) for the
+// lifetime of the process. A child that inherits `--inspect` would try to bind
+// the same port the parent already holds and die at startup, so they are the
+// one category of `execArgv` that must NOT be propagated. Everything else
+// (loaders, `--require`/`--import` preflight hooks, `--enable-source-maps`,
+// V8 flags) is exactly what the child needs in order to run the same entry the
+// parent is running. Matches every form node accepts: `--inspect`,
+// `--inspect=host:port`, `--inspect-brk`, `--debug-port`.
+const NON_INHERITABLE_EXEC_ARGV = /^-{1,2}(inspect|debug)([-=]|$)/
+
+/**
+ * 把父进程的 `process.execArgv` 转成子进程可用的 node 参数。
+ *
+ * Why: 子进程的入口是 `cliEntry`(默认 `process.argv[1]`),dev 下就是
+ * `src/cli/index.ts` —— **TypeScript 源文件**。而 spawn 用的是裸
+ * `process.execPath`(node),不带任何 loader,于是 ESM 解析 `.js` 后缀的
+ * 相对导入时找不到对应的 `.ts` 实体文件,子进程一起来就
+ * `ERR_MODULE_NOT_FOUND: .../services/accessLog.js`,实例永远停在 `down`。
+ * 生产走 `bin/zai.js`(纯 JS、execArgv 为空)所以一直没暴露。
+ *
+ * 唯一忠实的修法是让子进程**继承父进程实际在用的 loader 链**:tsx 的
+ * `--require preflight.cjs` + `--import tsx/loader.mjs`,加上 zai 自己为了
+ * 拦 `bun:` 协议加的 `--loader bun-protocol.mjs`。
+ *
+ * Why 要绝对化:dev 下那条 bun-protocol loader 在 `execArgv` 里是**相对路径**
+ * (`./node_modules/@zn-ai/...`)。Node 按**进程 cwd** 解析它,而子进程的
+ * `cwd` 是用户给实例配的 `entry.def.cwd` —— 照抄过去必然解析失败,而且失败
+ * 方式跟原来的 bug 一模一样(loader 没挂上 → `.ts` 解析不了),非常难查。
+ * 所以凡是 `./` / `../` 开头的参数都相对**父进程 cwd** 绝对化成 file:// URL
+ * (URL 对 `--loader` 和 `--import` 都合法,不带协议反而有被当成 bare
+ * specifier 的风险)。
+ *
+ * @param execArgv 父进程参数,注入以便单测
+ * @param parentCwd 解析相对路径的基准,注入以便单测
+ */
+export function childExecArgv(execArgv: string[], parentCwd: string): string[] {
+  return execArgv
+    .filter((arg) => !NON_INHERITABLE_EXEC_ARGV.test(arg))
+    .map((arg) =>
+      arg.startsWith('./') || arg.startsWith('../')
+        ? pathToFileURL(resolvePath(parentCwd, arg)).href
+        : arg,
+    )
 }
 
 export type InstanceSupervisorDeps = {
@@ -334,7 +380,13 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         // exposure must be deliberate so a dev's machine doesn't leak
         // workspaces they didn't intend to share.
         const useLan = opts?.lan ?? entry.def.lan ?? false
-        const args: string[] = [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open']
+        const args: string[] = [
+          // Loader chain first: node requires every `--loader`/`--import` to
+          // appear before the entry script. See childExecArgv for why the
+          // child needs them at all (dev runs a .ts entry).
+          ...childExecArgv(process.execArgv, process.cwd()),
+          cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open',
+        ]
         if (useLan) args.push('--lan')
         // 应用 profile 透传：把 `--app <profile>` 传给 child，让 child 的
         // `cli/index.ts` action 落到 `process.env.ZAI_APP`。两个 profile 的
