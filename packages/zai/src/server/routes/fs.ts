@@ -1,10 +1,12 @@
 import { Router, type IRouter, type Request } from 'express';
 import { readdir, stat, readFile, rm, rmdir, mkdir, writeFile, access, open } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import type { Dirent } from 'node:fs';
 import { extname, basename, join, sep, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
+import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
 import { resolveSafePath } from '../utils/safePath.js';
 import { MAX_FILE_BYTES, sha256OfString, writeTextFile } from '../utils/fsWrite.js';
 import { resolveRgPath, runRipgrep } from '../services/ripgrep.js';
@@ -42,9 +44,16 @@ export function resolveUploadsDir(): string {
   return resolve(homedir(), '.zai', 'uploads')
 }
 // base64 请求体上限:express.json 全局是 20mb,留出 JSON envelope 余量。
+// **只管 JSON + base64 那条路**(web 端拖文件用),见下面 STREAM 分支。
 const MAX_UPLOAD_BASE64_LEN = 19 * 1024 * 1024;
 // 解码后的字节上限(base64 膨胀 ~1.33x 后仍落在 20mb JSON limit 内)。
 const MAX_UPLOAD_BYTES = 14 * 1024 * 1024;
+// 流式上传的字节上限。`application/octet-stream` 不过 express.json,
+// 没有 20mb 那道闸,内存是 O(1) —— 所以这里给一个**独立**的、更宽的
+// 天花板,覆盖 base64 路径永远够不到的大文件(模型权重 / 数据集 / 归档)。
+// 不是「不设限」:没有闸的话一个卡住的连接能把整台机器的磁盘写满,
+// 报错也比截停好排查。真要再大就调这一个常量。
+const MAX_STREAM_UPLOAD_BYTES = 1024 * 1024 * 1024; // 1 GiB
 
 const TEXT_EXTS = new Set([
   '.md', '.markdown', '.txt', '.json', '.jsonc', '.json5',
@@ -654,7 +663,23 @@ async function uniqueUploadPath(dir: string, name: string): Promise<string> {
 
 // 拖入的非图片文件落到 `~/.zai/uploads/`,返回副本的绝对路径
 // (FsUploadResult.absPath)作为「文件地址」插入对话输入框。
+//
+// **两条 wire,同一个响应契约**:
+//   1. `application/json` —— `{name, data(base64)}`。web 端拖文件走这条
+//      (AgentInputBox.tsx),受 express.json 20mb 全局闸约束 ≈ 14 MB。
+//   2. `application/octet-stream` —— 文件名走 `X-File-Name` 头,请求体就是
+//      原始字节,pipeline 流式落盘。express.json 只吃 json content-type,
+//      octet-stream 的 req 是未消费的 Readable,所以这条**绕开 20mb 闸**,
+//      内存 O(1),能传 GB 级。lan-agent 的「文件」通道走这条。
+//
+// 分流判据是 Content-Type 而非「有没有 body」—— req.is() 由 body-parser
+// 语义定义,传错 content-type 的客户端会落到 JSON 分支拿 400,而不是
+// 在流式分支里静默把字节当垃圾写盘。
 fsRouter.post('/fs/upload', async (req, res) => {
+  if (req.is('application/octet-stream')) {
+    await handleStreamUpload(req, res);
+    return;
+  }
   const { cwd } = ctx(req);
   const body = req.body ?? {};
   if (typeof body.data !== 'string' || !body.data) {
@@ -711,6 +736,91 @@ fsRouter.post('/fs/upload', async (req, res) => {
     size: buf.byteLength,
   } satisfies FsUploadResult);
 });
+
+/** 流式上传的 body 里带一个"超限"标记,给 handler 区分该回 413 还是 500。 */
+const STREAM_OVERSIZE = Symbol('stream-oversize');
+
+/**
+ * `POST /api/fs/upload` 的 `application/octet-stream` 分支。
+ *
+ * 文件名走 `X-File-Name` 头 —— 之所以不用 query:文件名要原样落盘成
+ * `~/.zai/uploads/<name>`,query 会被 express 的解码规则改写(空格的
+ * `+`、非 ASCII 的百分号编码),而 header 里的值由客户端自己 URL-encode
+ * 一次、服务端 decodeURIComponent 还原,是可控的。decode 失败一律当
+ * 非法文件名处理,不猜。
+ *
+ * 落盘用 `pipeline(req, 计数器, writeStream)`:计数器在超限时 destroy 自己,
+ * pipeline 随之把 writeStream 关掉并 reject,于是**半截文件不会留在磁盘上**
+ * —— 换句话说失败路径不需要额外清理,写出来的就是完整的。
+ */
+async function handleStreamUpload(req: Request, res: import('express').Response): Promise<void> {
+  const rawName = req.header('x-file-name');
+  let decoded: string | null = null;
+  if (typeof rawName === 'string' && rawName) {
+    try {
+      decoded = decodeURIComponent(rawName);
+    } catch {
+      decoded = null; // 非法百分号编码 → 按缺名字处理
+    }
+  }
+  const name = sanitizeUploadName(decoded);
+  if (!name) {
+    res.status(400).json({ ok: false, error: '缺少或非法的 X-File-Name 头' } satisfies FsUploadResult);
+    return;
+  }
+
+  try {
+    await mkdir(UPLOADS_DIR, { recursive: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `创建上传目录失败: ${err instanceof Error ? err.message : String(err)}` } satisfies FsUploadResult);
+    return;
+  }
+  const absPath = await uniqueUploadPath(UPLOADS_DIR, name);
+
+  let written = 0;
+  const counter = new Transform({
+    transform(chunk, _enc, cb) {
+      written += chunk.length;
+      if (written > MAX_STREAM_UPLOAD_BYTES) {
+        const err = new Error('文件过大') as Error & { [STREAM_OVERSIZE]?: true };
+        err[STREAM_OVERSIZE] = true;
+        cb(err);
+        return;
+      }
+      cb(null, chunk);
+    },
+  });
+
+  try {
+    await pipeline(req, counter, createWriteStream(absPath));
+  } catch (err) {
+    const oversize = (err as { [STREAM_OVERSIZE]?: boolean })?.[STREAM_OVERSIZE];
+    // 超限 / 中途断连都会在这里冒出来。destination 可能已被 pipeline 打开,
+    // rm force 掉这个半截文件(此刻还没有第二个请求能拿到同名 —— uniqueUploadPath
+    // 是在写之前算的,但同名前缀的并发上传本就不该发生,真发生了后者拿 -1)。
+    await rm(absPath, { force: true }).catch(() => {});
+    if (oversize) {
+      const gb = (MAX_STREAM_UPLOAD_BYTES / 1024 / 1024 / 1024).toFixed(0);
+      res.status(413).json({ ok: false, error: `文件过大 (上限 ${gb} GB)` } satisfies FsUploadResult);
+      return;
+    }
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOSPC') {
+      res.status(500).json({ ok: false, error: '磁盘空间不足' } satisfies FsUploadResult);
+      return;
+    }
+    res.status(500).json({ ok: false, error: `写入失败: ${err instanceof Error ? err.message : String(err)}` } satisfies FsUploadResult);
+    return;
+  }
+
+  res.json({
+    ok: true,
+    absPath,
+    relPath: absPath,
+    name: basename(absPath),
+    size: written,
+  } satisfies FsUploadResult);
+}
 
 fsRouter.get('/fs/search', async (req, res) => {
   const ctxVal = ctx(req);

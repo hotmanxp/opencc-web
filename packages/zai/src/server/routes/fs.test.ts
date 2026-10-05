@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'nod
 import { tmpdir, homedir } from 'node:os';
 import { join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
+import http from 'node:http';
 import fsRouter from './fs.js';
 
 vi.mock('node:child_process', async () => {
@@ -607,4 +608,160 @@ describe('POST /api/fs/upload — 拖入文件作为副本落盘 ~/.zai/uploads'
     expect(res.status).toBe(413);
     expect(res.body.ok).toBe(false);
   }, 30000);
+});
+
+// 2026-10-05:octet-stream 流式分支。存在的意义是**绕开 express.json 的
+// 20mb 全局闸** —— JSON+base64 那条路最多 14 MB,大文件(模型权重 / 数据集 /
+// 归档)根本上不去。这里钉的是:字节原样落盘、不经 base64 膨胀、文件名走
+// 头而非 query、非法文件名 / 超限时**不留半截文件**。
+describe('POST /api/fs/upload — octet-stream 流式分支(绕开 20mb JSON 闸)', () => {
+  let root: string;
+  const uploads = (p: string) => join(homedir(), '.zai', 'uploads', p);
+  const created: string[] = [];
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'zai-fs-stream-'));
+    created.length = 0;
+  });
+
+  afterEach(() => {
+    const { rmSync } = require('node:fs') as typeof import('node:fs')
+    for (const f of created) {
+      try { rmSync(f) } catch { /* ignore */ }
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  function expectCreated(name: string): void {
+    created.push(uploads(name))
+  }
+
+  test('原始字节落盘并返回绝对路径(不经 base64)', async () => {
+    expectCreated('stream.bin');
+    const bytes = Buffer.from([0x00, 0x01, 0xff, 0xfe, 0x42]); // 含 0x00,base64 会改写它
+    const res = await request(makeApp(root))
+      .post('/api/fs/upload')
+      .set('Content-Type', 'application/octet-stream')
+      .set('X-File-Name', 'stream.bin')
+      .send(bytes);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.absPath).toBe(uploads('stream.bin'));
+    expect(res.body.size).toBe(bytes.length);
+    // 关键:字节原样落盘,没有 base64 往返
+    expect(readFileSync(uploads('stream.bin'))).toEqual(bytes);
+  });
+
+  test('文件名走 X-File-Name 头,URL 编码的中文名能还原', async () => {
+    const name = '报告 final.pdf';
+    expectCreated(name);
+    const res = await request(makeApp(root))
+      .post('/api/fs/upload')
+      .set('Content-Type', 'application/octet-stream')
+      .set('X-File-Name', encodeURIComponent(name))
+      .send(Buffer.from('xlsx'));
+    expect(res.status).toBe(200);
+    expect(res.body.absPath).toBe(uploads(name));
+  });
+
+  test('内容里含 # 与 & 时文件名不被 query 规则改写', async () => {
+    // 这正是 DownloadManager 缓存名(u<ts>#orgname=dinods.zip)那类输入:
+    // 走 query 的话 `+` 与 `&` 会被 express 解码吃掉。
+    const name = 'u1688#orgname=dinods.zip';
+    expectCreated(name);
+    const res = await request(makeApp(root))
+      .post('/api/fs/upload')
+      .set('Content-Type', 'application/octet-stream')
+      .set('X-File-Name', encodeURIComponent(name))
+      .send(Buffer.from('PK'));
+    expect(res.status).toBe(200);
+    expect(res.body.absPath).toBe(uploads(name));
+  });
+
+  test('缺 X-File-Name → 400', async () => {
+    const res = await request(makeApp(root))
+      .post('/api/fs/upload')
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('x'));
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  test('非法 X-File-Name(控制符 / ..)→ 400,不落盘', async () => {
+    for (const bad of ['..', encodeURIComponent('a b.txt')]) {
+      const res = await request(makeApp(root))
+        .post('/api/fs/upload')
+        .set('Content-Type', 'application/octet-stream')
+        .set('X-File-Name', bad)
+        .send(Buffer.from('x'));
+      expect(res.status).toBe(400);
+    }
+  });
+
+  test('坏百分号编码 → 400 而不是抛异常', async () => {
+    const res = await request(makeApp(root))
+      .post('/api/fs/upload')
+      .set('Content-Type', 'application/octet-stream')
+      .set('X-File-Name', '%E0%A4%A') // 截断的 utf-8 序列
+      .send(Buffer.from('x'));
+    expect(res.status).toBe(400);
+  });
+
+  test('同名重复上传按 -1 递增,不覆盖先前副本', async () => {
+    expectCreated('dup-stream.bin');
+    expectCreated('dup-stream-1.bin');
+    const one = await request(makeApp(root))
+      .post('/api/fs/upload').set('Content-Type', 'application/octet-stream')
+      .set('X-File-Name', 'dup-stream.bin').send(Buffer.from('one'));
+    const two = await request(makeApp(root))
+      .post('/api/fs/upload').set('Content-Type', 'application/octet-stream')
+      .set('X-File-Name', 'dup-stream.bin').send(Buffer.from('two'));
+    expect(one.body.absPath).toBe(uploads('dup-stream.bin'));
+    expect(two.body.absPath).toBe(uploads('dup-stream-1.bin'));
+    expect(readFileSync(uploads('dup-stream.bin'), 'utf8')).toBe('one');
+  });
+
+  test('超过 1 GiB → 413 且不留半截文件', async () => {
+    // 不真造 1 GiB 文件:往流里灌 1 GiB + 1 字节,计数 Transform 在
+    // 落盘前 destroy 自己,pipeline 随之 reject,handler 收尾时 rm 掉目标。
+    const name = 'too-big.bin';
+    const app = makeApp(root);
+    const res = await new Promise<{ status: number; body: { ok: boolean; error?: string } }>(
+      (resolve, reject) => {
+        const server = app.listen(0, () => {
+          const port = (server.address() as { port: number }).port;
+          const req2 = http.request(
+            { host: '127.0.0.1', port, path: '/api/fs/upload', method: 'POST',
+              headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': name } },
+            (r) => {
+              let raw = '';
+              r.on('data', (c) => (raw += c));
+              r.on('end', () => {
+                server.close();
+                try { resolve({ status: r.statusCode ?? 0, body: JSON.parse(raw) }) }
+                catch (e) { reject(e) }
+              });
+            },
+          );
+          req2.on('error', (e) => { server.close(); reject(e) });
+          // 1 MiB 一块灌到超过 1 GiB 为止;背压交给 socket 自己,不 queue 整块
+          const chunk = Buffer.alloc(1024 * 1024);
+          let sent = 0;
+          const pump = () => {
+            while (sent <= 1024) {
+              sent += 1;
+              if (!req2.write(chunk)) { req2.once('drain', pump); return; }
+            }
+            req2.end();
+          };
+          pump();
+        });
+      },
+    );
+    expect(res.status).toBe(413);
+    expect(res.body.ok).toBe(false);
+    // 关键:失败路径不留垃圾
+    const { existsSync } = require('node:fs') as typeof import('node:fs')
+    expect(existsSync(uploads(name))).toBe(false);
+  }, 120000);
 });
