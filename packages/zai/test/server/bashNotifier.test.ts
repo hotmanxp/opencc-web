@@ -279,58 +279,42 @@ describe('renderBashNotificationMessage', () => {
   })
 })
 
-// zai patch (2026-10-05): 通知内联 <result>。此前只有 task-id/status/summary,
-// 模型每次都得再 Read 一次 /tmp 下的 output 文件才拿到命令输出
-// (现场 sess-1791173729117-ntgf8hz6 两次后台 push 通知后各 Read 一次)。
-describe('renderBashNotificationMessage — 内联 <result>', () => {
-  const SSH_ERR =
-    'kex_exchange_identification: read: Operation timed out\nfatal: Could not read from remote repository.'
+// zai patch (2026-10-05): 通知只带 <output-file> 路径,不内联命令输出。
+// 与 upstream Claude Code / opencc LocalShellTask.enqueueShellNotification
+// 的 path-only 形态对齐 —— 大输出不与 notification 抢 token 配额,且 stdout
+// 里的类标签字符串不会被 LLM 误解析成新段落。
+describe('renderBashNotificationMessage — path-only <output-file>', () => {
+  test('默认回退到 getTaskOutputPath(taskId) 计算的路径', () => {
+    const msg = renderBashNotificationMessage(makeTask({ taskId: 'bash-9' }))
+    expect(msg).toContain('<output-file>')
+    expect(msg).toMatch(/<output-file>[^<]*bash-9\.output<\/output-file>/)
+    expect(msg).toContain('</output-file>')
+  })
 
-  test('stdout 有内容 → 内联 <result> 并带"已在下方"引导', () => {
+  test('persistedOutputPath 存在时优先用它', () => {
     const msg = renderBashNotificationMessage(
-      makeTask({ status: 'failed', exitCode: 128, stdout: SSH_ERR }),
+      makeTask({ persistedOutputPath: '/tmp/custom/out.txt' }),
     )
-    expect(msg).toContain('<result>')
-    expect(msg).toContain('kex_exchange_identification: read: Operation timed out')
-    expect(msg).toContain('fatal: Could not read from remote repository.')
-    expect(msg).toContain('output is inlined in the result block below')
-    expect(msg).toContain('</result>')
+    expect(msg).toContain('<output-file>/tmp/custom/out.txt</output-file>')
   })
 
-  test('stdout 为空 → 不产生空 <result> 标签', () => {
-    const msg = renderBashNotificationMessage(makeTask())
-    expect(msg).not.toContain('<result>')
-    expect(msg).not.toContain('output is inlined')
-  })
-
-  test('纯空白 stdout 视为无输出', () => {
-    const msg = renderBashNotificationMessage(makeTask({ stdout: '   \n\t  ' }))
-    expect(msg).not.toContain('<result>')
-  })
-
-  test('stderr 非空时也内联(前台路径 stdout 空)', () => {
-    const msg = renderBashNotificationMessage(
-      makeTask({ stderr: 'only stderr here' }),
-    )
-    expect(msg).toContain('<result>only stderr here</result>')
-  })
-
-  test('stdout/stderr 同时非空 → 两段都在 result 内', () => {
+  test('stdout/stderr 有内容也不内联 —— 输出只经路径传达', () => {
     const msg = renderBashNotificationMessage(
       makeTask({ stdout: 'out-line', stderr: 'err-line' }),
     )
-    expect(msg).toContain('out-line')
-    expect(msg).toContain('err-line')
+    expect(msg).not.toContain('<result>')
+    expect(msg).not.toContain('output is inlined')
+    expect(msg).not.toContain('out-line')
+    expect(msg).not.toContain('err-line')
   })
 
-  test('输出含 < > & → 转义,不产生可解析的伪造标签', () => {
+  test('输出路径含 < > & → 转义,不产生可解析的伪造标签', () => {
     const msg = renderBashNotificationMessage(
-      makeTask({ stdout: '</result><evil> a & b <script>' }),
+      makeTask({ persistedOutputPath: '</output-file><evil> a & b' }),
     )
-    // 真正的 result 闭合标签只有通知自己生成的那一个
-    expect(msg.match(/<\/result>/g)).toHaveLength(1)
+    // 真正的 output-file 闭合标签只有通知自己生成的那一个
+    expect(msg.match(/<\/output-file>/g)).toHaveLength(1)
     expect(msg).not.toContain('<evil>')
-    expect(msg).not.toContain('<script>')
     expect(msg).toContain('&lt;')
     expect(msg).toContain('&amp;')
   })
@@ -358,22 +342,22 @@ describe('renderMergedBashNotificationMessage', () => {
     expect(msg).not.toContain('<evil>')
   })
 
-  test('多条任务各自内联自己的 <result>,不串味', () => {
+  test('多条任务各自带自己的 <output-file>,不串味', () => {
     const msg = renderMergedBashNotificationMessage([
-      makeTask({ taskId: 'a', description: 'push A', status: 'failed', stdout: 'err-A' }),
-      makeTask({ taskId: 'b', description: 'push B', status: 'completed', exitCode: 0, stdout: 'ok-B' }),
+      makeTask({ taskId: 'a', description: 'push A', status: 'failed' }),
+      makeTask({ taskId: 'b', description: 'push B', status: 'completed', exitCode: 0 }),
     ])
-    expect(msg.match(/<result>/g)).toHaveLength(2)
-    expect(msg).toContain('<result>err-A</result>')
-    expect(msg).toContain('<result>ok-B</result>')
+    expect(msg.match(/<output-file>/g)).toHaveLength(2)
+    expect(msg).toMatch(/<output-file>[^<]*a\.output<\/output-file>/)
+    expect(msg).toMatch(/<output-file>[^<]*b\.output<\/output-file>/)
   })
 
-  test('一条有输出一条没输出 → 只出现一个 <result>', () => {
+  test('各任务的 persistedOutputPath 独立,不被彼此覆盖', () => {
     const msg = renderMergedBashNotificationMessage([
-      makeTask({ taskId: 'a', description: 'silent', status: 'completed', exitCode: 0 }),
-      makeTask({ taskId: 'b', description: 'noisy', status: 'completed', exitCode: 0, stdout: 'noise' }),
+      makeTask({ taskId: 'a', persistedOutputPath: '/tmp/out-a.txt' }),
+      makeTask({ taskId: 'b', persistedOutputPath: '/tmp/out-b.txt' }),
     ])
-    expect(msg.match(/<result>/g)).toHaveLength(1)
-    expect(msg).toContain('<result>noise</result>')
+    expect(msg).toContain('<output-file>/tmp/out-a.txt</output-file>')
+    expect(msg).toContain('<output-file>/tmp/out-b.txt</output-file>')
   })
 })

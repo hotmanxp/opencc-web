@@ -1,4 +1,5 @@
 import type { BashTaskInfo } from '@zn-ai/zn-agent-core'
+import { getTaskOutputPath } from '@zn-ai/zn-agent-core'
 import {
   getRuntime,
   getCurrentSessionId,
@@ -154,13 +155,19 @@ export function __resetBashNotifierPendingForTests(): void {
  * 构造单个 <task-notification> 块(不含引导语)。
  * summary 对齐 LocalShellTask.enqueueShellNotification 的措辞。
  *
- * zai patch (2026-10-05): 内联 `<result>` 块。此前通知只有 task-id/status/
- * summary 三行,模型拿不到命令输出,被迫再 Read 一次 /tmp 下的 output 文件
- * (现场 sess-1791173729117-ntgf8hz6:两次后台 push 通知后各 Read 一次)。
- * 对齐 SubagentNotifier.renderTaskNotificationMessage 的 <result> 约定。
+ * 2026-10-05 之前的 zai patch 在通知里内联 `<result>` 块;已回退,改回与
+ * upstream Claude Code / opencc LocalShellTask.enqueueShellNotification
+ * 一致的 path-only 形态 —— 通知只带 `<output-file>` 路径,LLM 自己 Read
+ * 文件拿 stdout/stderr。
  *
- * 输出内容由 markFinished 从 result.stdout 带入,已按 BASH_MAX_OUTPUT_LENGTH
- * (默认 30KB)截断,这里不再二次截断。
+ * 原因:
+ * - 大输出吃光 notification token 配额;30KB 内联本身就比 path 多 1 个数量级。
+ * - stdout 里有 `<task-notification>` / `</...>` 之类字符串会被 LLM 误解析
+ *   为新段落(escapeXml 已挡,但语义噪音大)。
+ * - 与上游/上游 vendor 默认行为对齐,减少 zai 独有的 surface。
+ *
+ * 输出文件位置: `task.persistedOutputPath` 由 LocalShellTask 在 end-time
+ * 写入(目前未调,fallback 到 `getTaskOutputPath(taskId)` 计算)。
  */
 export function renderBashNotificationBlock(task: BashTaskInfo): string {
   const status = task.status
@@ -179,20 +186,13 @@ export function renderBashNotificationBlock(task: BashTaskInfo): string {
     default:
       summary = `Background command "${task.description}" ${status}`
   }
-  // file mode 下 stdout/stderr 合并进同一 fd,stdout 即全量输出;stderr 仅在前台
-  // 路径非空,一并兜底。getStdout() 读盘失败时会返回一段
-  // "<bash output unavailable: ...>" 诊断串 —— 照样内联,让模型知道输出丢了。
-  const output = [task.stdout, task.stderr].filter((s) => s && s.trim()).join('\n').trim()
-  if (output) {
-    summary += ` The command output is inlined in the result block below.`
-  }
-  const resultSection = output ? `\n<result>${escapeXml(output)}</result>` : ''
+  const outputPath = task.persistedOutputPath ?? getTaskOutputPath(task.taskId)
   return (
     `<task-notification>\n` +
     `<task-id>${escapeXml(task.taskId)}</task-id>\n` +
+    `<output-file>${escapeXml(outputPath)}</output-file>\n` +
     `<status>${status}</status>\n` +
     `<summary>${escapeXml(summary)}</summary>` +
-    resultSection +
     `\n</task-notification>`
   )
 }

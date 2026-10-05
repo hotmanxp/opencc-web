@@ -191,6 +191,12 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   // d.ts,镜像到 ./index.js(src/index.ts 提供 declare-only 契约);运行时值
   // 由 esbuild 打进 opencc-core.mjs。
   './opencc-src/utils/skills/skillChangeDetector.js': './index.js',
+  // zai patch (2026-10-05): background-bash notification output path. zai's
+  // BashNotifier needs `getTaskOutputPath` from opencc-src/utils/task/diskOutput
+  // to populate <output-file> in its self-rendered <task-notification> (the
+  // vendor module is excluded from main tsc, mirror to ./index.js — runtime
+  // value is inlined into the esbuild bundle; type mirror uses index.d.ts).
+  './opencc-src/utils/task/diskOutput.js': './index.js',
 }
 
 /** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。

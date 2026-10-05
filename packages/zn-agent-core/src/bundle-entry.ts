@@ -372,3 +372,15 @@ export {
   getDefaultReasoningEffortLevelForModel,
 } from './compat/model/reasoningEffortLevels.js'
 export type { ReasoningEffortLevel } from './compat/model/reasoningEffortLevels.js'
+
+// zai patch (2026-10-05): background-bash notification output path. zai's
+// BashNotifier builds its own <task-notification> (it cannot rely on vendor
+// commandQueue drain — see packages/zai/src/server/services/bashNotifier.ts
+// header), and after the 2026-10-05 revert it points the model at the task
+// output file instead of inlining stdout/stderr into a <result> block. It
+// needs the same path opencc's enqueueShellNotification computes, so expose
+// that helper rather than letting zai reach across the package boundary with
+// a relative import (which drags opencc-src/utils into zai's tsc program and
+// breaks its rootDir). Leaf export with no internal callers, so pin it
+// explicitly (same tree-shaking invariant as the blocks above).
+export { getTaskOutputPath } from './opencc-src/utils/task/diskOutput.js'
