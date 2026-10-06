@@ -178,6 +178,19 @@ export function dispose(): Promise<void> {
  */
 export const subscribe = skillsChanged.subscribe
 
+/**
+ * zai patch (2026-10-06, mods 同步):通知命令列表的消费方(useSkillsChange →
+ * REPL / zai 的 slash 列表),说有一个**文件 watcher 之外**的动态命令源变了
+ * —— 目前只有 mods 系统注册/卸载命令会走这里。
+ *
+ * 只清 memoization 层:与 onDynamicSkillsLoaded 同理,这里调
+ * `clearCommandsCache()` 会把刚注册好的动态源一起抹掉。
+ */
+export function notifyCommandsChanged(): void {
+  clearCommandMemoizationCaches()
+  skillsChanged.emit()
+}
+
 async function getWatchablePaths(): Promise<string[]> {
   const fs = getFsImplementation()
   const paths: string[] = []
@@ -317,5 +330,6 @@ export const skillChangeDetector = {
   initialize,
   dispose,
   subscribe,
+  notifyCommandsChanged,
   resetForTesting,
 }

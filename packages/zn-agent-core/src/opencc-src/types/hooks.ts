@@ -262,6 +262,27 @@ export type HookCallback = {
   timeout?: number
   /** Internal hooks (e.g. session file access analytics) are excluded from tengu_run_hook metrics */
   internal?: boolean
+  /**
+   * zai patch (2026-10-06, mods 同步):该 composite 代表的原始 per-mod handler 链。
+   *
+   * 存在时 `executeHooks` 把这个 composite 从扁平并行批次里提出,当作
+   * **外层 tier** 跑,terminal `next()` 执行核心 hooks 子集(两档 tier:
+   * mod 包 core,opencc `docs/mods-plan.md` §3.1)—— handler 因此对核心管线
+   * 有真正的 before/after 语义。非 mod 的 callback 永不带此字段。
+   */
+  modChain?: ModChainEntry[]
+}
+
+/**
+ * zai patch (2026-10-06, mods 同步):composite 链里的一个 mod handler。
+ * 同步自 opencc `src/types/hooks.ts`。
+ */
+export type ModChainEntry = {
+  modName: string
+  handler: (
+    e: Record<string, unknown>,
+    next: (e?: Record<string, unknown>) => Promise<Record<string, unknown>>,
+  ) => unknown
 }
 
 export type HookCallbackMatcher = {

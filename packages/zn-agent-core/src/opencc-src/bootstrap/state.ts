@@ -1660,6 +1660,33 @@ export function clearRegisteredPluginHooks(): void {
   STATE.registeredHooks = Object.keys(filtered).length > 0 ? filtered : null
 }
 
+/**
+ * zai patch (2026-10-06, mods 同步):按 identity 摘除指定的 matcher 条目。
+ *
+ * 供 `src/mods/hooks.ts` 在 unload / reload 时原子换掉 mod composite
+ * matcher —— 与 loadPluginHooks 的 clear-then-register 配对同构,但只动
+ * 自己注册的那几条(clearRegisteredPluginHooks 会连带清掉别的 callback
+ * hook)。没注册过的条目静默跳过。
+ *
+ * 同步自 opencc `src/bootstrap/state.ts`(mods-p1 分支)。
+ */
+export function unregisterHookMatchers(
+  toRemove: RegisteredHookMatcher[],
+): void {
+  if (!STATE.registeredHooks || toRemove.length === 0) {
+    return
+  }
+  const removeSet = new Set(toRemove)
+  const filtered: Partial<Record<HookEvent, RegisteredHookMatcher[]>> = {}
+  for (const [event, matchers] of Object.entries(STATE.registeredHooks)) {
+    const kept = (matchers ?? []).filter(m => !removeSet.has(m))
+    if (kept.length > 0) {
+      filtered[event as HookEvent] = kept
+    }
+  }
+  STATE.registeredHooks = Object.keys(filtered).length > 0 ? filtered : null
+}
+
 export function resetSdkInitState(): void {
   STATE.initJsonSchema = null
   STATE.registeredHooks = null

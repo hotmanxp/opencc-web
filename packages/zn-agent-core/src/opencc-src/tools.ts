@@ -5,6 +5,7 @@ import { toolMatchesName, type Tool, type Tools } from './Tool.js'
 // 但没再导出;`server/createHeadlessContext-impl.ts` 从 `../tools.js` 取它,
 // 在 @ts-nocheck 掩盖下一直是悬空引用。同上,纯类型层。
 export type { Tools }
+import { getModTools } from './mods/engine.js'
 import { AgentTool } from './tools/AgentTool/AgentTool.js'
 import { BackgroundAgentTool } from './tools/BackgroundAgentTool/index.js'
 import { BackgroundAgentResultTool } from './tools/BackgroundAgentResultTool/index.js'
@@ -387,6 +388,12 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
 export function assembleToolPool(
   permissionContext: ToolPermissionContext,
   mcpTools: Tools,
+  /**
+   * zai patch (2026-10-06, mods 同步):会话 id。用于 mainAgent `mods` 槽
+   * 的 per-session mod 门禁 —— 决定哪些 mod 贡献的工具进入本会话工具池。
+   * 省略时全部 mod 工具可见(= opencc 原始行为)。
+   */
+  sessionId?: string,
 ): Tools {
   const builtInTools = getTools(permissionContext)
 
@@ -403,8 +410,14 @@ export function assembleToolPool(
   // Avoid Array.toSorted (Node 20+) — we support Node 18. builtInTools is
   // readonly so copy-then-sort; allowedMcpTools is a fresh .filter() result.
   const byName = (a: Tool, b: Tool) => a.name.localeCompare(b.name)
+  // zai patch (2026-10-06, mods 同步):mod 工具并入 MCP 分区(内置前缀之后),
+  // 分区内排序 —— prompt-cache 不变式(内置连续)因此保持。名字前缀
+  // mods_<mod>_<tool>,所以 uniqBy 撞名时内置永远赢。
+  const modTools = getModTools(sessionId)
   return uniqBy(
-    [...builtInTools].sort(byName).concat(allowedMcpTools.sort(byName)),
+    [...builtInTools]
+      .sort(byName)
+      .concat(allowedMcpTools.sort(byName), modTools),
     'name',
   )
 }

@@ -15,7 +15,7 @@ import { pathToFileURL } from 'node:url'
 import { getBuiltinMainAgents } from './mainAgents.js'
 import type { MainAgentConfig, MainAgentLoadContext } from './mainAgents.js'
 
-export type AgentSlotId = 'systemPrompt' | 'tools' | 'mcp'
+export type AgentSlotId = 'systemPrompt' | 'tools' | 'mcp' | 'mods'
 
 export type AgentSlotFn<T> = (origin: T, sessionId: string) => T | Promise<T>
 
@@ -26,6 +26,11 @@ export interface AgentConfig {
     systemPrompt?: AgentSlotFn<string[]>
     tools?: AgentSlotFn<Tool[]>
     mcp?: AgentSlotFn<McpServerConfig[]>
+    /**
+     * zai patch (2026-10-06, mods 同步):内置 mod 白名单。origin = 已加载的
+     * 全部 mod 名,返回本会话启用的子集。不设 = 全部可见(= opencc 行为)。
+     */
+    mods?: AgentSlotFn<string[]>
   }
 }
 
@@ -185,6 +190,8 @@ function toAgentConfig(c: MainAgentConfig): AgentConfig {
       systemPrompt: c.systemPrompt as AgentSlotFn<string[]> | undefined,
       tools: c.tools as AgentSlotFn<Tool[]> | undefined,
       mcp: c.mcp as AgentSlotFn<McpServerConfig[]> | undefined,
+      // zai patch (2026-10-06, mods 同步):第四槽。
+      mods: c.mods as AgentSlotFn<string[]> | undefined,
     },
   }
 }

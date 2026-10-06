@@ -57,6 +57,64 @@ export { takePresentFileOutput } from './opencc-src/server/presentFileOpencc.js'
 // 共享 module 实例(STATE / commandQueue / bashTracker)。
 export { createHeadlessContext } from './opencc-src/server/createHeadlessContext.js'
 export { createSessionFacade } from './opencc-src/server/sessionFacade.js'
+// zai patch (2026-10-06, mods 同步): 用户 JS 扩展系统(src/mods/)的公共面。
+//
+// 加载本身已由 createHeadlessContext 内部触发(见
+// createHeadlessContext-impl.ts step 10b),这里导出的是 zai-server 可能
+// 要直接用的三块:
+//   - reloadMods / unloadMod / getModsDirectory —— 管理面(热重载、按需摘除)
+//   - buildModCommands                          —— 把 mod 命令并进 zai 的 slash 列表
+//   - getModTools / getModToolsVersion          —— 工具池变更信号(zai 侧要重算时)
+export {
+  unloadMod,
+  reloadMods,
+  loadMods,
+  getModsDirectory,
+  OPENCC_MODS_DIR_ENV,
+} from './opencc-src/mods/hooks.js'
+export type { ModLoadResult } from './opencc-src/mods/hooks.js'
+export { buildModCommands, getModTools } from './opencc-src/mods/engine.js'
+export {
+  getModToolsVersion,
+  subscribeModTools,
+  getLoadedMods,
+  unregisterMod,
+  getModFailureCount,
+  // zai patch (2026-10-06):per-session mod 门禁(mainAgent 第四槽)。
+  // zai-server 侧若要自己管门禁(如测试或多实例),用这四个。
+  setSessionModGate,
+  clearSessionModGate,
+  resetSessionModGatesForTesting,
+  isModVisibleForSession,
+  hasSessionModGate,
+} from './opencc-src/mods/registry.js'
+export type {
+  LoadedMod,
+  ModCommandSpec,
+  ModToolSpec,
+  ModHandler,
+} from './opencc-src/mods/registry.js'
+export type {
+  ModContext,
+  ModFsApi,
+  ModNotice,
+  // zai patch (2026-10-06):ModPaneSpec 已随 TUI 能力面删除(见
+  // opencc-src/mods/engine.ts 文件头)。Web UI 要做 mod 面板时,应在
+  // zai-web 侧新建组件 + 订阅 subscribeModNotices 那类通道。
+} from './opencc-src/mods/engine.js'
+export {
+  subscribeModNotices,
+  // zai patch (2026-10-06):ui.status 是 mod → 宿主单向数据推送,不绑定
+  // 渲染技术,故保留(给未来的 Web 状态栏/侧栏用)。pane 相关的
+  // getModPanesSnapshot / subscribeModPanes 已随 TUI 能力面删除。
+  subscribeModStatus,
+  getModStatusSnapshot,
+  emitModsSystemNotice,
+} from './opencc-src/mods/engine.js'
+export { registerBuiltinMod, loadBuiltinMods } from './opencc-src/mods/builtin.js'
+export type { BuiltinModSpec } from './opencc-src/mods/builtin.js'
+export { MOD_MANIFEST_FILE, ModManifestSchema } from './opencc-src/mods/manifest.js'
+export type { ModManifest } from './opencc-src/mods/manifest.js'
 // zai patch (2026-09-06): pre-API-call reminder provider registry — zai-server
 // registers a provider that drains its per-session SessionInbox on every
 // vendor query-loop iteration (mirrors vendor bg-daemon inbox pattern).

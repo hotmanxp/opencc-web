@@ -197,6 +197,16 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   // vendor module is excluded from main tsc, mirror to ./index.js — runtime
   // value is inlined into the esbuild bundle; type mirror uses index.d.ts).
   './opencc-src/utils/task/diskOutput.js': './index.js',
+  // zai patch (2026-10-06, mods 同步): 用户 JS 扩展系统(src/mods/)的四个
+  // 公共模块。vendor opencc-src 整体被 tsc 排除,没有独立 d.ts,镜像到
+  // ./index.js(src/index.ts 提供 declare-only 契约);运行时值由 esbuild
+  // 打进 opencc-core.mjs。加载本身由 createHeadlessContext 内部触发,
+  // 这里导出的是 zai-server 的管理面(reload/unload/命令与工具池信号)。
+  './opencc-src/mods/hooks.js': './index.js',
+  './opencc-src/mods/engine.js': './index.js',
+  './opencc-src/mods/registry.js': './index.js',
+  './opencc-src/mods/builtin.js': './index.js',
+  './opencc-src/mods/manifest.js': './index.js',
 }
 
 /** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。

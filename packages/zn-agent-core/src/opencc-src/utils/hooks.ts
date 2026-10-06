@@ -58,6 +58,9 @@ import {
 } from 'src/services/analytics/index.js'
 import { logOTelEvent } from './telemetry/events.js'
 import { ALLOWED_OFFICIAL_MARKETPLACE_NAMES } from './plugins/schemas.js'
+// zai patch (2026-10-06, mods 同步):两档 tier 的 mod 链执行器。放在这里
+// 是为了跟 opencc mods-p1 保持逐行一致,便于后续 per-file 同步。
+import { runModChain } from '../mods/dispatch.js'
 import {
   startHookSpan,
   endHookSpan,
@@ -2337,8 +2340,10 @@ async function* executeHooks({
     }
   }
 
-  // Run all hooks in parallel with individual timeouts
-  const hookPromises = matchingHooks.map(async function* (
+  // Run all hooks in parallel with individual timeouts. 工厂形式,便于下面
+  // 的 mods tier-wrap 只对核心子集重建 generator(不改扁平并行语义)。
+  const buildHookGenerators = (hooks: typeof matchingHooks) =>
+    hooks.map(async function* (
     { hook, pluginRoot, pluginId, skillRoot },
     hookIndex,
   ): AsyncGenerator<HookResult> {
@@ -2929,6 +2934,82 @@ async function* executeHooks({
     }
   })
 
+  const hookPromises = buildHookGenerators(matchingHooks)
+
+  // --- zai patch (2026-10-06, mods 同步):两档 tier 包裹(mod < core) -------
+  // 带 modChain 标记的 composite 从扁平并行批次里提出:mod 链作为**外层**
+  // tier 顺序执行,它的 terminal next() 执行核心子集(并行,语义不变),
+  // handler 因此对核心管线有真正的 before/after 可见性。无 mod 时这段
+  // 完全不进入,扁平路径零改动。
+  // 同步自 opencc mods-p1(src/utils/hooks.ts)。
+  const modChainEntries = matchingHooks.flatMap(m =>
+    m.hook.type === 'callback' && m.hook.modChain ? m.hook.modChain : [],
+  )
+
+  function aggregateCoreOutput(
+    results: HookResult[],
+  ): Record<string, unknown> {
+    const blocked = results.some(
+      r =>
+        r.outcome === 'blocking' ||
+        r.blockingError !== undefined ||
+        r.preventContinuation,
+    )
+    const blockingReason = results.find(r => r.blockingError)?.blockingError
+      ?.blockingError
+    const systemMessage = results.map(r => r.systemMessage).find(Boolean)
+    return {
+      continue: !blocked,
+      ...(blocked
+        ? { decision: 'block' as const, reason: blockingReason }
+        : {}),
+      ...(systemMessage ? { systemMessage } : {}),
+    }
+  }
+
+  async function* modWrappedResults(): AsyncGenerator<HookResult> {
+    const coreHooks = matchingHooks.filter(
+      m => !(m.hook.type === 'callback' && m.hook.modChain),
+    )
+    const coreResults: HookResult[] = []
+    const coreRunner = async (
+      e: Record<string, unknown>,
+    ): Promise<Record<string, unknown>> => {
+      for await (const r of all(buildHookGenerators(coreHooks))) {
+        coreResults.push(r)
+      }
+      return aggregateCoreOutput(coreResults)
+    }
+    const compositeOutput = await runModChain(
+      modChainEntries,
+      hookInput,
+      coreRunner,
+      signal,
+      undefined,
+      // zai patch (2026-10-06):会话 id 供 mainAgent `mods` 槽做 per-session
+      // 门禁 —— 不可见 mod 的 handler 跳过,核心 tier 语义不变。
+      // 用 bootstrap 的 getSessionId(STATE.sessionId),与 AgentRegistry
+      // 绑定的 sid 同一取值来源(见 createOpenccRuntime-impl 的 sid)。
+      getSessionId(),
+    )
+    const compositeHook: HookCallback = {
+      type: 'callback',
+      timeout: timeoutMs / 1000,
+      callback: async () =>
+        compositeOutput as Awaited<ReturnType<HookCallback['callback']>>,
+    }
+    const compositeResult = await executeHookCallback({
+      toolUseID,
+      hook: compositeHook,
+      hookEvent,
+      hookInput,
+      signal,
+      toolUseContext,
+    })
+    yield compositeResult
+    yield* coreResults
+  }
+
   // Track outcomes for logging
   const outcomes = {
     success: 0,
@@ -2939,8 +3020,11 @@ async function* executeHooks({
 
   let permissionBehavior: PermissionResult['behavior'] | undefined
 
-  // Run all hooks in parallel and wait for all to complete
-  for await (const result of all(hookPromises)) {
+  // Run all hooks (flat parallel path, or mods-wrapped when mod composites
+  // are present) and wait for all to complete
+  const resultSource: AsyncIterable<HookResult> =
+    modChainEntries.length > 0 ? modWrappedResults() : all(hookPromises)
+  for await (const result of resultSource) {
     outcomes[result.outcome]++
 
     // Check for preventContinuation early

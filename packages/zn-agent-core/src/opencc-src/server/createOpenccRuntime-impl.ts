@@ -53,6 +53,12 @@ import { getUserConfigJson } from '../utils/userConfigJson.js'
 // 运行时报 "getAgentRegistry is not defined"。barrel re-export 触发
 // esbuild 同步生成 local binding,避开 TDZ。
 import { getAgentRegistry } from './index.js'
+// zai patch (2026-10-06, mods 同步):mod 门禁(mainAgent 第四槽 `mods`)。
+// getLoadedMods 取全部已加载 mod 名作为该槽的 origin;setSessionModGate
+// 写入 per-session 白名单,assembleToolPool / buildModCommands /
+// runModChain 三处消费。
+import { getLoadedMods, setSessionModGate } from '../mods/registry.js'
+import { buildModCommands } from '../mods/engine.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult, OpenccMcpApi, OpenccMcpStatus, OpenccMcpConnectFailure } from './serverTypes.js'
 // zai patch (2026-09-12, plan cron-fire-to-prompt, fix断链1): v2 runtime
@@ -156,10 +162,17 @@ export async function createOpenccRuntimeImpl(options) {
   // zai patch (2026-08-20): 主 Agent tools 槽不再在此全局应用 —— 改为
   // per-engine 应用(createEngine 按会话恢复的 agent 包一个闭包),否则
   // 不同会话各自恢复的 agent 会互相污染工具池。
-  const computeTools = () => {
+  //
+  // zai patch (2026-10-06, mods 同步):同理,mod 门禁也是 per-session 的 ——
+  // `sessionId` 缺省时 assembleToolPool 行为与 opencc 一致(全部 mod 可见)。
+  const computeTools = (sessionId?: string) => {
     const state = ctx.appState.getState()
     const permissionContext = state.toolPermissionContext
-    const assembled = assembleToolPool(permissionContext, state.mcp?.tools ?? [])
+    const assembled = assembleToolPool(
+      permissionContext,
+      state.mcp?.tools ?? [],
+      sessionId,
+    )
     return mergeAndFilterTools(ctx.tools, assembled, permissionContext.mode)
   }
 
@@ -435,8 +448,39 @@ export async function createOpenccRuntimeImpl(options) {
       const fn = agent?.slots?.[slotId] as ((o: T, s: string) => T) | undefined
       return fn ? fn(origin, sid) : origin
     }
+
+    // zai patch (2026-10-06, mods 同步):第四槽 —— 应用 mod 门禁。
+    //
+    // 时序很关键:必须**先**建门禁,再算工具池 —— assembleToolPool 读门禁
+    // 决定哪些 mod 工具可见。门禁每 engine 建一次(agent 绑定是 per-session
+    // 的,engine 与 session 一对一,所以这不是 per-turn 开销)。
+    //
+    // origin 传已加载的全部 mod 名;agent 的 mods 槽返回本会话启用的子集。
+    // 不设槽 → 传 null → 全部可见(= opencc 行为,零回归)。
+    const applyModGate = (): void => {
+      const agent = resolveBoundAgent()
+      const fn = agent?.slots?.['mods'] as
+        | ((o: string[], s: string) => string[] | Promise<string[]>)
+        | undefined
+      if (!fn) {
+        setSessionModGate(sid, null)
+        return
+      }
+      const all = getLoadedMods().map(m => m.manifest.name)
+      // mods 槽按契约是同步的(与 tools 槽同约束:QueryEngine.tools 要 sync
+      // 数组)。若将来允许 async,这里需要改 async 并把 engineComputeTools
+      // 改成 Promise —— 那会破坏当前 sync 契约,故此处显式 fail-fast。
+      const next = fn(all, sid)
+      if (next && typeof (next as Promise<string[]>).then === 'function') {
+        setSessionModGate(sid, null)
+        return
+      }
+      setSessionModGate(sid, next as string[])
+    }
+    applyModGate()
+
     const engineComputeTools = () =>
-      resolveBoundSlot('tools', computeTools())
+      resolveBoundSlot('tools', computeTools(sid))
     // zai patch (2026-09-22, MCP live view): commands / mcpClients 过去取
     // `ctx.mcp.*` —— 那是 createHeadlessContextImpl 的 boot 期快照,而
     // `connectMcp: false` 时它恒为空数组(后台连接只写 appState.mcp)。
@@ -456,7 +500,10 @@ export async function createOpenccRuntimeImpl(options) {
       cwd,
       tools: engineComputeTools(),
       get commands() {
-        return liveMcp()?.commands ?? []
+        // zai patch (2026-10-06, mods 同步):并入本会话可见的 mod 命令。
+        // 传 sid 让 mod 门禁生效(与工具池同一份白名单)。无 mod 注册时
+        // buildModCommands 返回空数组,行为与之前完全一致。
+        return [...(liveMcp()?.commands ?? []), ...buildModCommands(sid)]
       },
       get mcpClients() {
         return (liveMcp()?.clients ?? []).filter(c => c.type === 'connected')

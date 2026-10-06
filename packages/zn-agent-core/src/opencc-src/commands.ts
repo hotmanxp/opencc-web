@@ -1,4 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
+import { buildModCommands } from './mods/engine.js'
 import addDir from './commands/add-dir/index.js'
 import autofixPr from './commands/autofix-pr/index.js'
 import backfillSessions from './commands/backfill-sessions/index.js'
@@ -564,7 +565,7 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   })
 
   if (dynamicSkills.length === 0) {
-    return baseCommands
+    return appendModCommands(baseCommands)
   }
 
   // Dedupe dynamic skills - only add if not already present
@@ -577,7 +578,7 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   )
 
   if (uniqueDynamicSkills.length === 0) {
-    return baseCommands
+    return appendModCommands(baseCommands)
   }
 
   // Insert dynamic skills after plugin skills but before built-in commands
@@ -585,14 +586,28 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   const insertIndex = baseCommands.findIndex(c => builtInNames.has(c.name))
 
   if (insertIndex === -1) {
-    return [...baseCommands, ...uniqueDynamicSkills]
+    return appendModCommands([...baseCommands, ...uniqueDynamicSkills])
   }
 
-  return [
+  return appendModCommands([
     ...baseCommands.slice(0, insertIndex),
     ...uniqueDynamicSkills,
     ...baseCommands.slice(insertIndex),
-  ]
+  ])
+}
+
+/**
+ * zai patch (2026-10-06, mods 同步):把 mod 贡献的命令追加到列表末尾。
+ *
+ * 磁盘 mod 的命令带 `<modName>:` 前缀,遮蔽不了内置命令;内置 mod(第一方)
+ * 用裸名,靠这里的 dedupe 保证也盖不掉宿主命令。
+ */
+function appendModCommands(commands: Command[]): Command[] {
+  const modCommands = buildModCommands()
+  if (modCommands.length === 0) return commands
+  const names = new Set(commands.map(c => c.name))
+  const unique = modCommands.filter(c => !names.has(c.name))
+  return unique.length > 0 ? [...commands, ...unique] : commands
 }
 
 /**

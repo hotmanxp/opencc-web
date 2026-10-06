@@ -78,6 +78,26 @@ export interface MainAgentConfig {
   tools?: (origin: Tool[]) => Tool[]
   /** MCP server 插槽:origin 为解析后的 server 配置表(name → config) */
   mcp?: MainAgentSlot<Record<string, ScopedMcpServerConfig>>
+  /**
+   * zai patch (2026-10-06, mods 同步):**内置 mod 白名单** —— 本会话启用
+   * 哪些 mod(origin 为已加载的全部 mod 名,返回值是过滤后的子集)。
+   *
+   * 这是 mainAgent 第四个插槽,与前三个同为 per-session(createEngine 按 sid
+   * 解析绑定 agent 后派发),解决「mod 注册是进程级、无法按身份收窄」的问题。
+   *
+   * 语义:
+   *   - 不设此槽 → 全部 mod 可见(= opencc 原始行为,零回归)
+   *   - `[]`       → 本会话禁用所有 mod
+   *   - `['diff']` → 只有 diff 可见
+   *
+   * 与 `tools` 槽的区别:tools 槽过滤的是**宿主工具池**,mods 槽过滤的是
+   * **mod 贡献的**工具/命令/事件 handler 三者。两槽叠加,顺序是
+   * "assembleToolPool(含 mod 工具) → mods 门禁 → tools 槽"。
+   *
+   * 注意:这是**可见性**控制,不是安全边界 —— 被禁用的 mod 代码仍与宿主
+   * 同进程(与 opencc 的同进程模型一致,见 docs §5 M1)。
+   */
+  mods?: MainAgentSlot<string[]>
 }
 
 /** 内置 agents。default 不改 systemPrompt / mcp,仅通过 tools 槽挂入

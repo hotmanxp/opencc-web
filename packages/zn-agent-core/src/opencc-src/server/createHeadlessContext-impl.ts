@@ -42,6 +42,7 @@ import { getAgentDefinitionsWithOverrides } from '../tools/AgentTool/loadAgentsD
 import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
 import { getAllMcpConfigs } from '../services/mcp/config.js'
 import { captureHooksConfigSnapshot } from '../utils/hooks/hooksConfigSnapshot.js'
+import { loadMods } from '../mods/hooks.js'
 import { SandboxManager } from '../utils/sandbox/sandbox-adapter.js'
 import {
   createAppStateStore,
@@ -94,6 +95,9 @@ import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
  *   8. getTools(permissionContext)     — built-in tool registry
  *   9. getMcpToolsCommandsAndResources — MCP clients (best-effort)
  *  10. captureHooksConfigSnapshot      — hooks snapshot
+ *  10b. loadMods                       — 用户 JS 扩展 mod(zai patch: CLI 走
+ *                                       processSessionStartHooks,headless
+ *                                       不经过,必须显式调)
  *  11. getCanUseToolFn(undefined, ...) — permission rules (no prompt)
  *  12. SandboxManager exposed but NOT initialized (deferred)
  *
@@ -354,6 +358,22 @@ export async function createHeadlessContextImpl(
     snapshotCaptured = true
   } catch {
     // Same best-effort posture as MCP.
+  }
+
+  // Step 10b: zai patch (2026-10-06, mods 同步)—— 加载用户 JS 扩展 mod。
+  //
+  // 为什么必须在这里显式调,而不是跟 CLI 一样只挂在 processSessionStartHooks:
+  // zai 的 headless 启动序列**不经过** processSessionStartHooks(那是 main.tsx
+  // 的路径),所以 mod 永远不会被加载。放在 snapshot 之后、权限规则之前,与
+  // CLI 侧 `loadMods` 早于 SessionStart hooks 的语义一致 —— mod 注册的
+  // handler 对随后所有事件(含 SessionStart)可见。
+  //
+  // 同步是 memoized 的(utils/hooks.ts loadMods),重复调无副作用;
+  // 单个 mod 失败在内部归因并跳过,永不抛出。
+  try {
+    await loadMods()
+  } catch {
+    // Mods 是可选增强,加载不了不影响 headless context 建立。
   }
 
   // Step 11: permission rules. Pass `permissionPromptToolName:
