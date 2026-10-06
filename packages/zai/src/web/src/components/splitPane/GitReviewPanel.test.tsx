@@ -142,4 +142,72 @@ describe('GitReviewPanel', () => {
       expect(screen.getByRole('radio', { name: 'Worktree' })).toBeInTheDocument(),
     );
   });
+
+  it('requests the worktree side and labels a whole-file addition for an untracked file', async () => {
+    mocks.fetchStatusRich.mockResolvedValue({
+      entries: [{ path: 'new.ts', xy: '??', staged: false }],
+      truncated: false,
+      branch: 'main',
+      repositories: ['/tmp/repo'],
+    });
+    mocks.diff.mockResolvedValue({
+      ok: true,
+      isUntracked: true,
+      isBinary: false,
+      diff: 'diff --git a/new.ts b/new.ts\nnew file mode 100644\n@@ -0,0 +1 @@\n+hello',
+    });
+    render(<GitReviewPanel cwd="/tmp/repo" />);
+    fireEvent.click(await screen.findByTestId('git-row-new.ts'));
+    await waitFor(() =>
+      expect(mocks.diff).toHaveBeenCalledWith('/tmp/repo', 'new.ts', { staged: false }),
+    );
+    expect(await screen.findByTestId('git-diff-hint')).toHaveTextContent('未跟踪文件');
+    expect(screen.getByTestId('diff-view-by-file')).toBeInTheDocument();
+  });
+
+  it('requests the index side for a file whose only change is staged', async () => {
+    mocks.fetchStatusRich.mockResolvedValue({
+      entries: [{ path: 'staged.ts', xy: 'A ', staged: true }],
+      truncated: false,
+      branch: 'main',
+      repositories: ['/tmp/repo'],
+    });
+    render(<GitReviewPanel cwd="/tmp/repo" />);
+    fireEvent.click(await screen.findByTestId('git-row-staged.ts'));
+    await waitFor(() =>
+      expect(mocks.diff).toHaveBeenCalledWith('/tmp/repo', 'staged.ts', { staged: true }),
+    );
+  });
+
+  it('keeps the worktree side for a file that is both staged and modified', async () => {
+    mocks.fetchStatusRich.mockResolvedValue({
+      entries: [{ path: 'both.ts', xy: 'MM', staged: true }],
+      truncated: false,
+      branch: 'main',
+      repositories: ['/tmp/repo'],
+    });
+    render(<GitReviewPanel cwd="/tmp/repo" />);
+    fireEvent.click(await screen.findByTestId('git-row-both.ts'));
+    await waitFor(() =>
+      expect(mocks.diff).toHaveBeenCalledWith('/tmp/repo', 'both.ts', { staged: false }),
+    );
+  });
+
+  it('explains why a binary file has no line-level diff', async () => {
+    mocks.fetchStatusRich.mockResolvedValue({
+      entries: [{ path: 'logo.png', xy: '??', staged: false }],
+      truncated: false,
+      branch: 'main',
+      repositories: ['/tmp/repo'],
+    });
+    mocks.diff.mockResolvedValue({
+      ok: true,
+      isUntracked: true,
+      isBinary: true,
+      diff: 'diff --git a/logo.png b/logo.png\nBinary file',
+    });
+    render(<GitReviewPanel cwd="/tmp/repo" />);
+    fireEvent.click(await screen.findByTestId('git-row-logo.png'));
+    expect(await screen.findByTestId('git-diff-hint')).toHaveTextContent('二进制文件');
+  });
 });

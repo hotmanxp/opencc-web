@@ -234,7 +234,19 @@ export function GitReviewPanel({ cwd }: { cwd: string | null }) {
           ) : review.diff.error ? (
             <Empty description={review.diff.error} />
           ) : review.diff.text ? (
-            <DiffViewByFile diff={review.diff.text} />
+            <>
+              {(review.diff.isUntracked || review.diff.isBinary) && (
+                <div
+                  data-testid="git-diff-hint"
+                  className="mb-2 shrink-0 text-[11px] text-[var(--text-dim-55)]"
+                >
+                  {review.diff.isBinary
+                    ? '二进制文件 — 无文本内容,不显示行级差异'
+                    : '未跟踪文件 — 下方为整份新增内容(暂存后仍是全量新增)'}
+                </div>
+              )}
+              <DiffViewByFile diff={review.diff.text} />
+            </>
           ) : (
             <Empty
               description={

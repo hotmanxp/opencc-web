@@ -16,10 +16,12 @@
  * upstream reference implementation), adapted for zai's `resolveSafePath`
  * guard and instanceContext cwd injection.
  */
-import { readdir } from 'node:fs/promises';
+import { readdir, open } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { spawn } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
+import { resolveSafePath } from '../utils/safePath.js';
 import type {
   GitBranchEntry,
   GitLogEntry,
@@ -170,8 +172,15 @@ export function parseBranchEntries(
  *  Spawn (not execFile) is used so we can attach timeout-kill without race
  *  conditions on the wrapped child and we own the stdout/stderr streams.
  *  Exported (with `__test` prefix) so the test suite can hit timeout and
- *  non-zero-exit paths without contorting the public service surface. */
-export function runGit(cwd: string, args: string[], timeoutMs = 30_000): Promise<string> {
+ *  non-zero-exit paths without contorting the public service surface.
+ *  `acceptExitCodes` exists for `diff --no-index`, which uses exit 1 to mean
+ *  "the two inputs differ" — that is a successful read, not a failure. */
+export function runGit(
+  cwd: string,
+  args: string[],
+  timeoutMs = 30_000,
+  acceptExitCodes: number[] = [0],
+): Promise<string> {
   const full = ['-C', cwd, '--no-pager', '-c', 'color.ui=false', ...args];
   return new Promise<string>((resolvePromise, reject) => {
     const child = spawn('git', full, {
@@ -209,7 +218,7 @@ export function runGit(cwd: string, args: string[], timeoutMs = 30_000): Promise
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0) {
+      if (code !== null && acceptExitCodes.includes(code)) {
         resolvePromise(stdout);
       } else {
         reject(
@@ -408,19 +417,88 @@ export async function status(cwd: string, selected?: string): Promise<GitStatusR
 // Diff
 // ────────────────────────────────────────────────────────────────────────────
 
+/** Bytes sampled from the head of a file to decide binary vs text. Git's own
+ *  heuristic looks at the first 8000 bytes, so match that. */
+const BINARY_SNIFF_BYTES = 8_000;
+
+/** Whether `rel` is unknown to the index (i.e. a `??` porcelain entry). A path
+ *  that was `git rm`'d is also unknown to the index, so callers must pair this
+ *  with an existence check before treating a path as untracked. */
+async function isUntrackedPath(root: string, rel: string): Promise<boolean> {
+  try {
+    await runGit(root, ['ls-files', '--error-unmatch', '--', rel], DISCOVERY_TIMEOUT_MS);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** NUL byte in the first 8 KB is git's binary heuristic; matching it keeps
+ *  synthetic untracked diffs consistent with what tracked binaries render as. */
+async function looksBinary(abs: string): Promise<boolean> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(abs, 'r');
+    const buf = Buffer.alloc(BINARY_SNIFF_BYTES);
+    const { bytesRead } = await handle.read(buf, 0, BINARY_SNIFF_BYTES, 0);
+    return buf.subarray(0, bytesRead).includes(0);
+  } catch {
+    return false;
+  } finally {
+    await handle?.close();
+  }
+}
+
+/** Unified diff for an untracked file. `git diff` has no HEAD side to compare
+ *  an untracked path against, so the panel used to render an empty pane; diff
+ *  the file against `/dev/null` instead, which produces the exact same
+ *  "new file" patch `git add` would. Exit 1 means "inputs differ" — accepted. */
+async function untrackedDiff(
+  root: string,
+  rel: string,
+  abs: string,
+): Promise<{ diff: string; isBinary: boolean }> {
+  if (await looksBinary(abs)) {
+    return {
+      diff: `diff --git a/${rel} b/${rel}\nnew file mode 100644\nBinary file — 未跟踪的二进制文件,无法显示内容差异`,
+      isBinary: true,
+    };
+  }
+  const text = await runGit(
+    root,
+    ['diff', '--no-index', '--no-ext-diff', '--no-color', '-U3', '--', '/dev/null', rel],
+    30_000,
+    [0, 1],
+  );
+  return { diff: text, isBinary: false };
+}
+
 /** Diff text of the worktree (unstaged) or the index (staged). `-U3` keeps
- *  context compact; `--no-color` guarantees no ANSI codes reach the UI. */
+ *  context compact; `--no-color` guarantees no ANSI codes reach the UI.
+ *
+ *  Untracked paths have no index/HEAD side, so they are synthesized as
+ *  whole-file additions (see `untrackedDiff`) — without that the panel shows
+ *  an empty pane for every new file. */
 export async function diff(
   cwd: string,
   path?: string,
   staged = false,
   selected?: string,
-): Promise<string> {
+): Promise<{ diff: string; isUntracked: boolean; isBinary: boolean }> {
   const root = await repoRoot(cwd, selected);
+  if (path !== undefined && (await isUntrackedPath(root, path))) {
+    const safe = resolveSafePath(root, path);
+    // A `git rm`'d path is also missing from the index but no longer exists in
+    // the worktree — fall through so the staged deletion still renders.
+    if (safe.ok && existsSync(safe.abs)) {
+      const { diff: text, isBinary } = await untrackedDiff(root, path, safe.abs);
+      return { diff: text, isUntracked: true, isBinary };
+    }
+  }
   const args = ['diff', '--no-ext-diff', '--no-color', '-U3'];
   if (staged) args.push('--cached');
   if (path !== undefined) args.push('--', path);
-  return runGit(root, args);
+  return { diff: await runGit(root, args), isUntracked: false, isBinary: false };
 }
 
 /** Diff text of a single commit (`git show` with the commit header suppressed).
