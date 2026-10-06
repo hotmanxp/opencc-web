@@ -48,7 +48,7 @@ describe('deriveTranscriptNodes', () => {
     ]
     const out = deriveTranscriptNodes(msgs)
     expect(out.map(n => n.kind)).toEqual(['text', 'toolGroup', 'text'])
-    expect(out[1].kind === 'toolGroup' && out[1].toolCalls).toHaveLength(2)
+    expect(out[1].kind === 'toolGroup' && out[1].items.filter(i => i.kind === 'tool')).toHaveLength(2)
   })
 
   it('case 4: user + 3 consecutive tools + user → [text, toolGroup(len=6 entries), text]', () => {
@@ -62,20 +62,55 @@ describe('deriveTranscriptNodes', () => {
     const out = deriveTranscriptNodes(msgs)
     expect(out.map(n => n.kind)).toEqual(['text', 'toolGroup', 'text'])
     if (out[1].kind === 'toolGroup') {
-      expect(out[1].toolCalls).toHaveLength(6)
+      expect(out[1].items.filter(i => i.kind === 'tool')).toHaveLength(6)
     }
   })
 
-  it('case 5: thinking pass-through separates tool groups', () => {
+  it('case 5: thinking 不再切断工具组, 并入组内按序保留', () => {
     const msgs = [
       userMsg('q', 0),
       toolStart('Bash', 1, 't1'), toolDone('Bash', 2, 't1'),
       thinkingMsg('hmm', 3),
+      toolStart('Bash', 4, 't2'), toolDone('Bash', 5, 't2'),
+      userMsg('q2', 6),
+    ]
+    const out = deriveTranscriptNodes(msgs)
+    // 一段工具调用, 中间的思考不把它切成两段
+    expect(out.map(n => n.kind)).toEqual(['text', 'toolGroup', 'text'])
+    const grp = out[1]
+    if (grp && grp.kind === 'toolGroup') {
+      expect(grp.items.map(i => i.kind)).toEqual([
+        'tool', 'tool', 'thinking', 'tool', 'tool',
+      ])
+      expect(grp.items[2]?.index).toBe(3)
+    }
+  })
+
+  it('case 5b: 没有工具夹着的 thinking 仍独立成节点', () => {
+    const msgs = [
+      userMsg('q', 0),
+      thinkingMsg('先想想', 1),
+      userMsg('q2', 2),
+    ]
+    const out = deriveTranscriptNodes(msgs)
+    expect(out.map(n => n.kind)).toEqual(['text', 'thinking', 'text'])
+  })
+
+  it('case 5c: assistant.thinking 与 legacy thinking 载荷都并入组内', () => {
+    const msgs = [
+      userMsg('q', 0),
+      toolStart('Bash', 1, 't1'),
+      { type: 'assistant.thinking', thinking: 'a', eventId: 'th-a' } as unknown as AgentMessage,
+      thinkingMsg('b', 3),
       userMsg('q2', 4),
     ]
     const out = deriveTranscriptNodes(msgs)
-    // thinking bumps startIndex — must NOT be inside the tool group
-    expect(out.map(n => n.kind)).toEqual(['text', 'toolGroup', 'thinking', 'text'])
+    const grp = out.find(n => n.kind === 'toolGroup')
+    if (grp && grp.kind === 'toolGroup') {
+      expect(grp.items.map(i => i.kind)).toEqual(['tool', 'thinking', 'thinking'])
+    } else {
+      throw new Error('expected a toolGroup node')
+    }
   })
 
   it('case 6: tool_use:start without :done → group with status:pending', () => {
@@ -87,7 +122,8 @@ describe('deriveTranscriptNodes', () => {
     const out = deriveTranscriptNodes(msgs)
     expect(out.map(n => n.kind)).toEqual(['text', 'toolGroup', 'text'])
     if (out[1].kind === 'toolGroup') {
-      expect(out[1].toolCalls[0].status).toBe('pending')
+      const first = out[1].items[0]
+      expect(first?.kind === 'tool' && first.status).toBe('pending')
     }
   })
 
@@ -102,7 +138,7 @@ describe('deriveTranscriptNodes', () => {
     const out = deriveTranscriptNodes(msgs)
     const grp = out.find(n => n.kind === 'toolGroup')
     if (grp && grp.kind === 'toolGroup') {
-      const errs = grp.toolCalls.filter(e => e.status === 'error')
+      const errs = grp.items.filter(i => i.kind === 'tool' && i.status === 'error')
       expect(errs).toHaveLength(1)
     }
   })
@@ -125,7 +161,7 @@ describe('deriveTranscriptNodes', () => {
     expect(out.some(n => n.kind === 'ask')).toBe(true)
     const grp = out.find(n => n.kind === 'toolGroup')
     if (grp && grp.kind === 'toolGroup') {
-      expect(grp.toolCalls).toHaveLength(1) // only :start — :done is on the other side of ask
+      expect(grp.items.filter(i => i.kind === 'tool')).toHaveLength(1) // only :start — :done is on the other side of ask
     }
   })
 })

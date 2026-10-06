@@ -2,10 +2,20 @@ import { Fragment, useMemo, type ReactElement } from 'react'
 import { useAgentStoreOrCtx, type AgentMessage } from '../../store/useAgentStore.js'
 import { MessageBubble } from './MessageBubble.js'
 import { ToolRunGroup } from './ToolRunGroup.js'
-import { deriveTranscriptNodes, type ToolGroupEntry, type ToolGroupStatus } from './deriveTranscriptNodes.js'
+import { deriveTranscriptNodes, type GroupItem, type ToolGroupStatus } from './deriveTranscriptNodes.js'
 import { getRenderer } from '../toolRenderers/registry.js'
 import { deriveTurnArtifacts, type TurnArtifacts } from './deriveTurnArtifacts.js'
 import { TurnArtifactsBlock } from './TurnArtifactsBlock.js'
+
+/** 组内一项的 React key: eventId 优先, 退回「类型-下标」。 */
+function itemKey(it: GroupItem): string {
+  return ((it.message as { eventId?: unknown }).eventId as string) ?? `${it.kind}-${it.index}`
+}
+
+function firstItemId(items: GroupItem[]): string | undefined {
+  const first = items[0]
+  return first === undefined ? undefined : itemKey(first)
+}
 
 // toolGroup 内的 status 是否需要保留「工具运行段」外壳。
 // pending/error/invalid/denied 都保留外壳。
@@ -18,8 +28,8 @@ const STATUS_KEEPS_SHELL: ReadonlySet<ToolGroupStatus> = new Set([
 
 /** 同一 toolGroup 拆出来的渲染段:inline 直接内联,run 进 ToolRunGroup。 */
 type GroupSegment =
-  | { kind: 'inline'; entries: ToolGroupEntry[] }
-  | { kind: 'run'; entries: ToolGroupEntry[] }
+  | { kind: 'inline'; items: GroupItem[] }
+  | { kind: 'run'; items: GroupItem[] }
 
 /**
  * 把 toolGroup 的条目按「是否自包含展示工具」切成保序段。
@@ -30,20 +40,28 @@ type GroupSegment =
  *
  * 这样「模型一轮里先 Read 再 PresentFile」不会因为组内有别的工具而把
  * 文件卡整组吞进运行段(2026-09-24 PresentFile 设计 §7)。
+ *
+ * 思考项不参与切段: 它归入当前打开的那一段, 没有打开的段才自己起一段。
+ * 段内首项是思考(理论上不会发生, 组由工具开启)时走 inline, 仍按原序渲染。
  */
-function splitToolGroupEntries(entries: ToolGroupEntry[]): GroupSegment[] {
+function splitToolGroupItems(items: GroupItem[]): GroupSegment[] {
   const segs: GroupSegment[] = []
-  for (const e of entries) {
-    const name = (e.message as { name?: unknown }).name
+  for (const item of items) {
+    const last = segs[segs.length - 1]
+    if (item.kind === 'thinking') {
+      if (last) last.items.push(item)
+      else segs.push({ kind: 'inline', items: [item] })
+      continue
+    }
+    const name = (item.message as { name?: unknown }).name
     const selfContained =
       typeof name === 'string' &&
       name.length > 0 &&
       getRenderer(name).skipOuterGroup === true &&
-      !STATUS_KEEPS_SHELL.has(e.status)
-    const kind: GroupSegment['kind'] = selfContained ? 'inline' : 'run'
-    const last = segs[segs.length - 1]
-    if (last && last.kind === kind) last.entries.push(e)
-    else segs.push({ kind, entries: [e] })
+      !STATUS_KEEPS_SHELL.has(item.status)
+    const kind: 'inline' | 'run' = selfContained ? 'inline' : 'run'
+    if (last && last.kind === kind) last.items.push(item)
+    else segs.push({ kind, items: [item] })
   }
   return segs
 }
@@ -107,7 +125,7 @@ export function MessageListView({ messages, streaming }: Props) {
       const nodeEnd = node.kind === 'text'
         ? node.startIndex + node.messages.length - 1
         : node.kind === 'toolGroup'
-          ? node.startIndex + node.toolCalls.length - 1
+          ? node.startIndex + node.items.length - 1
           : node.index
       const bucket: TurnArtifacts[] = []
       while (ti < turns.length && turns[ti]!.endIndex <= nodeEnd) {
@@ -127,47 +145,55 @@ export function MessageListView({ messages, streaming }: Props) {
           // ([el] 或 [el, ...产物块]),无 key 会触发 React 的列表 key 警告。
           el = (
             <Fragment
-              key={`grp-${node.toolCalls[0]?.message.eventId ?? node.startIndex}`}
+              key={`grp-${firstItemId(node.items) ?? node.startIndex}`}
             >
-              {splitToolGroupEntries(node.toolCalls).map((seg) => {
-                // key 用段内首条 entry 的 eventId(而非下标区间):新消息 append
+              {splitToolGroupItems(node.items).map((seg) => {
+                // key 用段内首项的 eventId(而非下标区间):新消息 append
                 // 不改变已有段的 key → 不重挂载,运行段的展开态不丢。
-                const firstId =
-                  ((seg.entries[0]?.message as any).eventId as string) ??
-                  `seg-${seg.entries[0]?.index ?? 0}`
+                const segKey = firstItemId(seg.items) ?? `seg-${seg.items[0]?.index ?? 0}`
                 if (seg.kind === 'inline') {
                   return (
-                    <span key={`seg-inline-${firstId}`}>
-                      {seg.entries.map((e) => {
-                        const evtId = ((e.message as any).eventId as string) ?? `tool-${e.index}`
-                        return (
-                          <MessageBubble
-                            key={evtId}
-                            msg={e.message}
-                            streaming={e.status === 'pending'}
-                          />
-                        )
-                      })}
+                    <span key={`seg-inline-${segKey}`}>
+                      {seg.items.map((it) => (
+                        <MessageBubble
+                          key={itemKey(it)}
+                          msg={it.message}
+                          streaming={
+                            it.kind === 'tool'
+                              ? it.status === 'pending'
+                              : it.index === visibleMessages.length - 1
+                          }
+                        />
+                      ))}
                     </span>
                   )
                 }
+                // 段末的思考是最后一条消息时视为正在流式输出 —— 该段要跟着
+                // 自动展开, 否则「模型还在想」被折叠起来看不见。
+                const lastItem = seg.items[seg.items.length - 1]
+                const streamingThinking =
+                  lastItem !== undefined &&
+                  lastItem.kind === 'thinking' &&
+                  lastItem.index === visibleMessages.length - 1
                 return (
                   <ToolRunGroup
-                    key={`seg-run-${firstId}`}
-                    entries={seg.entries}
+                    key={`seg-run-${segKey}`}
+                    items={seg.items}
                     autoExpandRunning={!transcriptCollapsed}
+                    streamingThinking={streamingThinking}
                   />
                 )
               })}
             </Fragment>
           )
         } else if (node.kind === 'thinking') {
-          // 历史回放里的 legacy thinking 节点, 始终静态 (不闪烁)。
+          // 没被工具段包住的思考(轮首思考 / 纯问答轮)。思考是边流边追加的,
+          // 所以「是不是最后一条」就是它的 live 信号, 不看 streaming prop。
           el = (
             <MessageBubble
               key={`think-${node.index}-${i}`}
               msg={node.message}
-              streaming={false}
+              streaming={node.index === visibleMessages.length - 1}
             />
           )
         } else if (node.kind === 'ask') {
@@ -188,12 +214,9 @@ export function MessageListView({ messages, streaming }: Props) {
               {node.messages.map((m, mi) => {
                 const evtId = ((m as any).eventId as string) ?? `txt-${node.startIndex}-${mi}`
                 const msgIdx = node.startIndex + mi
-                const mt = (m as { type?: string }).type
-                const isThinkingMsg = mt === 'assistant.thinking'
-                const lastOverallIdx = visibleMessages.length - 1
-                const itemStreaming = isThinkingMsg
-                  ? msgIdx === lastOverallIdx
-                  : streaming && msgIdx === lastOverallIdx
+                // 思考消息不再进 text 桶(derive 已把它摘走并入工具段), 这里
+                // 只有正文/用户气泡 —— 末尾那条才是流式中的那条。
+                const itemStreaming = streaming && msgIdx === visibleMessages.length - 1
                 return (
                   <MessageBubble key={evtId} msg={m} streaming={itemStreaming} />
                 )
