@@ -4,9 +4,13 @@
 // /Applications/Trae CN.app → @byted-icube/ai-modules-chat 的 i18n 表,
 // key 形如 trae-chat-core.exploreGroup.runCommand.completed = "执行 {count} 条命令"):
 // 一段连续工具调用折叠成一行摘要时, 不按工具名罗列, 而是按「干了一类什么事」
-// 聚合计数, 逗号连接 —— "已执行 2 条命令，已更新待办"。
+// 聚合计数, 逗号连接 —— "执行 2 条命令，更新待办"。
 //
 // 这里只做纯函数: 工具名 → 分类 → 文案。不含任何 React, 便于单测。
+// 摘要文案对齐 Trae 的 `exploreGroup.<bucket>.completed`, 该 i18n 表本身
+// **不带「已」**(「读取 {count} 个文件」/「搜索 {count} 次文件」);
+// running 变体是「正在…」, 也不带。展开态单行 `verb` 则是另一种语气
+// (Trae `run-command-inline.executed` = 「命令已执行」), 保留「已」。
 import { getRenderer } from '../toolRenderers/registry.js'
 import type { ToolGroupEntry } from './deriveTranscriptNodes.js'
 
@@ -62,62 +66,62 @@ type BucketMeta = {
 
 const BUCKET_META: Readonly<Record<ToolBucket, BucketMeta>> = {
   runCommand: {
-    done: (n) => `已执行 ${n} 条命令`,
+    done: (n) => `执行 ${n} 条命令`,
     running: '正在执行命令',
     verb: '命令已执行',
     tint: 'var(--tool-tint-command, #f97316)',
   },
   fileView: {
-    done: (n) => `已读取 ${n} 个文件`,
+    done: (n) => `读取 ${n} 个文件`,
     running: '正在读取文件',
     verb: '已读取文件',
     tint: 'var(--tool-tint-view, #38bdf8)',
   },
   fileSearch: {
-    done: (n) => `已搜索 ${n} 次文件`,
+    done: (n) => `搜索 ${n} 次文件`,
     running: '正在搜索文件',
     verb: '已搜索文件',
     tint: 'var(--tool-tint-search, #a78bfa)',
   },
   fileEdit: {
-    done: (n) => `已编辑 ${n} 个文件`,
+    done: (n) => `编辑 ${n} 个文件`,
     running: '正在编辑文件',
     verb: '已编辑文件',
     tint: 'var(--tool-tint-edit, #4ade80)',
   },
   fileCreate: {
-    done: (n) => `已创建 ${n} 个文件`,
+    done: (n) => `创建 ${n} 个文件`,
     running: '正在创建文件',
     verb: '已创建文件',
     tint: 'var(--tool-tint-edit, #4ade80)',
   },
   folderView: {
-    done: (n) => `已浏览 ${n} 个目录`,
+    done: (n) => `浏览 ${n} 个目录`,
     running: '正在浏览目录',
     verb: '已浏览目录',
     tint: 'var(--tool-tint-view, #38bdf8)',
   },
   taskManagement: {
     // 待办更新没有"次数"语义, 固定文案不带计数 (对齐 Trae 的 taskManagement)
-    done: () => '已更新待办',
+    done: () => '更新待办',
     running: '正在更新待办',
     verb: '已更新待办',
     tint: 'var(--tool-tint-todo, #fbbf24)',
   },
   skill: {
-    done: (n) => `已调用 ${n} 次技能`,
+    done: (n) => `调用 ${n} 次技能`,
     running: '正在调用技能',
     verb: '已调用技能',
     tint: 'var(--tool-tint-skill, #f472b6)',
   },
   mcpCall: {
-    done: (n) => `已调用 ${n} 次 MCP`,
+    done: (n) => `调用 ${n} 次 MCP`,
     running: '正在调用 MCP',
     verb: '已调用 MCP',
     tint: 'var(--tool-tint-mcp, #22d3ee)',
   },
   other: {
-    done: (n) => `已调用 ${n} 次工具`,
+    done: (n) => `调用 ${n} 次工具`,
     running: '正在调用工具',
     verb: '已调用工具',
     tint: 'var(--tool-tint-other, #94a3b8)',
@@ -137,7 +141,7 @@ function isFailed(entry: ToolGroupEntry): boolean {
 }
 
 export type RunSummary = {
-  /** 逗号连接的摘要文案, 例: "已执行 2 条命令，已更新待办" */
+  /** 逗号连接的摘要文案, 例: "执行 2 条命令，更新待办" */
   text: string
   /** 该段是否还有工具在跑 */
   active: boolean

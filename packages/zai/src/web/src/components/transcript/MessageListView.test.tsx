@@ -68,8 +68,8 @@ describe("MessageListView — Agent 工具卡过滤", () => {
     )
     expect(screen.queryByText(/general-purpose \(agent\)/)).not.toBeInTheDocument()
     expect(screen.queryByText(/list files/)).not.toBeInTheDocument()
-    // Agent 已被摘掉, 运行段里只剩 Bash 一条 → 「已执行 1 条命令」
-    expect(screen.getByText("已执行 1 条命令")).toBeInTheDocument()
+    // Agent 已被摘掉, 运行段里只剩 Bash 一条 → 「执行 1 条命令」
+    expect(screen.getByText("执行 1 条命令")).toBeInTheDocument()
   })
 
   test("纯文本对话不受影响", () => {
@@ -115,7 +115,7 @@ describe("MessageListView — 工具运行段摘要", () => {
     )
     // 一个运行段, 一行摘要, 按段内首次出现顺序拼接
     expect(screen.getAllByTestId("tool-run-group")).toHaveLength(1)
-    expect(screen.getByText("已执行 2 条命令，已读取 1 个文件，已更新待办")).toBeInTheDocument()
+    expect(screen.getByText("执行 2 条命令，读取 1 个文件，更新待办")).toBeInTheDocument()
   })
 
   test("中间夹了正文就断成两段", () => {
@@ -176,7 +176,7 @@ describe("MessageListView — skipOuterGroup 路由", () => {
   test("Bash 仍渲染工具运行段", () => {
     render(<MessageListView messages={[toolMsg("tool_use:done", "tu-bash-1", "Bash", { command: "ls" })]} />)
     expect(screen.getByTestId("tool-run-group")).toBeInTheDocument()
-    expect(screen.getByText("已执行 1 条命令")).toBeInTheDocument()
+    expect(screen.getByText("执行 1 条命令")).toBeInTheDocument()
   })
 
   test("PresentFile + Bash 混合被拆成「运行段 + 文件卡」", () => {
@@ -189,7 +189,7 @@ describe("MessageListView — skipOuterGroup 路由", () => {
       />,
     )
     // 运行段只数 Bash 一条 → 证明 PresentFile 已被摘出
-    expect(screen.getByText("已执行 1 条命令")).toBeInTheDocument()
+    expect(screen.getByText("执行 1 条命令")).toBeInTheDocument()
     expect(screen.getByTestId("present-file-card")).toBeInTheDocument()
   })
 

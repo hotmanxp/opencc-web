@@ -66,17 +66,17 @@ describe("ToolRunGroup — 折叠摘要", () => {
         ]}
       />,
     )
-    expect(screen.getByText("已执行 2 条命令，已读取 1 个文件，已更新待办")).toBeInTheDocument()
+    expect(screen.getByText("执行 2 条命令，读取 1 个文件，更新待办")).toBeInTheDocument()
   })
 
   test("未知工具落 other 桶", () => {
     render(<ToolRunGroup items={[entry("t1", "SomeVendorTool", "done", { a: 1 })]} />)
-    expect(screen.getByText("已调用 1 次工具")).toBeInTheDocument()
+    expect(screen.getByText("调用 1 次工具")).toBeInTheDocument()
   })
 
   test("MCP 工具按前缀归 mcpCall 桶", () => {
     render(<ToolRunGroup items={[entry("t1", "mcp_github_create_issue", "done", { a: 1 })]} />)
-    expect(screen.getByText("已调用 1 次 MCP")).toBeInTheDocument()
+    expect(screen.getByText("调用 1 次 MCP")).toBeInTheDocument()
   })
 
   test("失败条目在摘要行显示失败计数", () => {
@@ -89,7 +89,7 @@ describe("ToolRunGroup — 折叠摘要", () => {
         ]}
       />,
     )
-    expect(screen.getByText("已执行 3 条命令")).toBeInTheDocument()
+    expect(screen.getByText("执行 3 条命令")).toBeInTheDocument()
     expect(screen.getByText("2 个失败")).toBeInTheDocument()
   })
 
@@ -102,7 +102,7 @@ describe("ToolRunGroup — 折叠摘要", () => {
         ]}
       />,
     )
-    expect(screen.getByText("已执行 1 条命令，正在读取文件")).toBeInTheDocument()
+    expect(screen.getByText("执行 1 条命令，正在读取文件")).toBeInTheDocument()
   })
 })
 
@@ -189,7 +189,7 @@ describe("ToolRunGroup — 段内思考", () => {
     )
     expect(screen.getByTestId("tool-run-thinking-mark")).toBeInTheDocument()
     // 摘要文案只讲工具, 不因思考多出一段文字
-    expect(screen.getByText("已执行 1 条命令")).toBeInTheDocument()
+    expect(screen.getByText("执行 1 条命令")).toBeInTheDocument()
   })
 
   test("没有思考的段不挂灯泡", () => {
@@ -230,7 +230,7 @@ describe("ToolRunGroup — 段内思考", () => {
         ]}
       />,
     )
-    expect(screen.getByText("已执行 2 条命令")).toBeInTheDocument()
+    expect(screen.getByText("执行 2 条命令")).toBeInTheDocument()
   })
 
   test("段末思考正在流式时该段自动展开, 不被折叠藏起来", () => {
