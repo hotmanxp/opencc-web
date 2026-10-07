@@ -151,6 +151,9 @@ export default function AgentConversation({
               icon={<ChevronUpIcon />}
               onClick={() => setShowAllMessages(true)}
               data-testid="show-all-messages-pill"
+              // AntD 默认按钮带一圈描边, 这个吸顶提示只要圆角底色。cssinjs 的
+              // :hover / :focus 规则优先级高于普通工具类, 三态都得用 ! 压。
+              className="!border-transparent hover:!border-transparent focus:!border-transparent"
             >
               显示全部 ({hiddenCount} 条隐藏)
             </Button>
