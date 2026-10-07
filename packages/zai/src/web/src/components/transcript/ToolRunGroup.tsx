@@ -65,7 +65,7 @@ export function ToolRunGroup({
             {summary.errors} 个失败
           </span>
         )}
-        <span className="inline-flex items-center flex-shrink-0 text-[var(--text-tertiary)] ml-auto">
+        <span className="inline-flex items-center flex-shrink-0 text-[var(--text-tertiary)]">
           {expanded ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         </span>
       </button>
