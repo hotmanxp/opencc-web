@@ -1,6 +1,6 @@
 # opencc-web
 
-知鸟 AI 统一工具平台 — 本地 Web 管理界面 + 可嵌入的 Agent Runtime Core。
+知鸟 AI 智研平台 — 本地 Web 管理界面 + 可嵌入的 Agent Runtime Core。
 
 本仓库聚焦两件事:
 
