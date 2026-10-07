@@ -93,14 +93,14 @@ export function ToolRunRow({
         )}
         {row.detail && (
           <span
-            className="text-xs text-[var(--text-secondary)] truncate min-w-0 flex-1"
+            className="text-xs text-[var(--text-secondary)] truncate min-w-0"
             style={{ fontFamily: CODE_FONT_FAMILY }}
             title={row.detail}
           >
             {row.detail}
           </span>
         )}
-        <span className="inline-flex items-center flex-shrink-0 text-[var(--text-tertiary)] ml-auto">
+        <span className="inline-flex items-center flex-shrink-0 text-[var(--text-tertiary)]">
           {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         </span>
       </button>
