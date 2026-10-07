@@ -11,6 +11,7 @@ import {
   message,
 } from 'antd';
 import {
+  FolderGit2Icon,
   GitCommitIcon,
   GitForkIcon,
   LayersIcon,
@@ -106,7 +107,13 @@ export function GitReviewPanel({ cwd }: { cwd: string | null }) {
             { label: '提交', value: 'commits', icon: <GitCommitIcon size={12} /> },
             { label: '分支', value: 'branches', icon: <GitForkIcon size={12} /> },
             ...(showWorktreeSelector
-              ? [{ label: 'Worktree', value: 'worktrees' as GitMode }]
+              ? [
+                  {
+                    label: 'Worktree',
+                    value: 'worktrees' as GitMode,
+                    icon: <FolderGit2Icon size={12} />,
+                  },
+                ]
               : []),
           ]}
         />
