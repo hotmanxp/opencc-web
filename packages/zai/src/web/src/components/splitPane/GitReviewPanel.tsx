@@ -82,6 +82,7 @@ export function GitReviewPanel({ cwd }: { cwd: string | null }) {
         {showWorktreeSelector && (
           <Select
             size="small"
+            variant="borderless"
             style={{ minWidth: 180 }}
             value={selectedWorktree ?? review.worktrees.find((w) => w.current)?.path}
             onChange={(value) => {
@@ -126,6 +127,7 @@ export function GitReviewPanel({ cwd }: { cwd: string | null }) {
         </span>
         <Button
           size="small"
+          type="text"
           icon={<RotateCwIcon />}
           loading={review.loading}
           onClick={review.refetch}
