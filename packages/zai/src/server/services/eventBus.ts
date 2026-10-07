@@ -195,26 +195,35 @@ export class ServerEventBus {
   // 容量同样按 CAPACITY 裁, 避免单 sid 长期占满内存.
   private historyBySid = new Map<string, ServerEvent[]>()
 
-  emit(event: ServerEventInput) {
+  /**
+   * 发布一个事件。
+   *
+   * `opts.recordHistory === false` 表示「实时下发,但不进重放缓冲」——
+   * 给周期性 / 无状态变化的事件用,见下方 instanceSupervisor 心跳的用法。
+   * 默认 true,行为与此前完全一致。
+   */
+  emit(event: ServerEventInput, opts?: { recordHistory?: boolean }) {
     const full: ServerEvent = {
       ...event,
       eventId: event.eventId ?? nextId(),
       ts: event.ts ?? Date.now(),
       seq: event.seq ?? ++this.seqCounter,
     } as ServerEvent
-    this.history.push(full)
-    if (this.history.length > CAPACITY) {
-      this.history.shift()
-    }
-    // 写 per-sid 切片 (仅当 event 带明确的 string sessionId)
-    const sid = eventSessionId(full)
-    if (typeof sid === 'string') {
-      const arr = this.historyBySid.get(sid) ?? []
-      arr.push(full)
-      if (arr.length > CAPACITY) {
-        arr.shift()
+    if (opts?.recordHistory !== false) {
+      this.history.push(full)
+      if (this.history.length > CAPACITY) {
+        this.history.shift()
       }
-      this.historyBySid.set(sid, arr)
+      // 写 per-sid 切片 (仅当 event 带明确的 string sessionId)
+      const sid = eventSessionId(full)
+      if (typeof sid === 'string') {
+        const arr = this.historyBySid.get(sid) ?? []
+        arr.push(full)
+        if (arr.length > CAPACITY) {
+          arr.shift()
+        }
+        this.historyBySid.set(sid, arr)
+      }
     }
     // 用索引式 for 而非 for-of 是为了支持在 catch 中按当前索引 splice 移除
     // 出错的 subscriber:抛错的订阅者会一直留在 subs 里,后续每次 emit 都白跑

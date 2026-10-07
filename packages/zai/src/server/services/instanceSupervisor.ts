@@ -96,7 +96,7 @@ export type InstanceSupervisorDeps = {
   assertPortAvailable: (port: number) => Promise<void>
   readFile: () => Promise<InstancesFile>
   writeFile: (file: InstancesFile) => Promise<void>
-  emit: (event: ServerEventInput) => void
+  emit: (event: ServerEventInput, opts?: { recordHistory?: boolean }) => void
   now: () => number
   sleep: (ms: number) => Promise<void>
 }
@@ -223,6 +223,24 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     const entries = new Map<string, Entry>()
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null
     const emit = (instanceId: string, status: InstanceStatus) => deps.emit({ type: 'instance.changed', instanceId, state: status.state, port: status.port, pid: status.pid, lastHeartbeatAt: status.lastHeartbeatAt })
+    // 心跳 tick 专用:只推给**当前在线**的订阅者,不进 eventBus 的重放缓冲。
+    //
+    // Why (2026-10-07):心跳每 HEARTBEAT_POLL_MS(5s) 一次、每实例一条,
+    // N 个运行实例 ≈ N/5 条每秒。而 history 上限只有 CAPACITY=256
+    // (eventBus.ts),于是全局 history 每约 256/(N/5) 秒被心跳事件彻底刷满
+    // —— 实测 5 实例时 history 时间跨度只有 268s,前 256 条里 254 条是
+    // instance.changed,把 server.connected / session.* / job.* 全挤掉,
+    // 导致重连补发(replay)失效。
+    //
+    // 心跳**本就不该进重放缓冲**:它是「进程还活着」的周期性信号,不带状态
+    // 跃迁,重放给新客户端没有增量信息 —— 新连接本来就会收到一条
+    // server.connected 触发 hydrate,以及 /instances 页自己的
+    // `loadInstances()` 冷拉。真正需要进 history 的是状态跃迁
+    // (starting→running→down 等),那些走上面的 `emit`,不受影响。
+    const emitHeartbeat = (instanceId: string, status: InstanceStatus) => deps.emit(
+      { type: 'instance.changed', instanceId, state: status.state, port: status.port, pid: status.pid, lastHeartbeatAt: status.lastHeartbeatAt },
+      { recordHistory: false },
+    )
     const snapshotOf = (entry: Entry): InstanceSnapshot => ({ ...entry.def, ...entry.status, isCurrent: false })
     const currentSnapshot = (): InstanceSnapshot => ({ id: CURRENT_INSTANCE_ID, name: basename(opts.cwd) || opts.cwd, cwd: opts.cwd, createdAt: '', state: 'running', port: Number(process.env.ZAI_PORT ?? 0) || null, pid: process.pid, startedAt: new Date(deps.now()).toISOString(), lastHeartbeatAt: null, lastError: null, isCurrent: true })
     const ensureNotCurrent = (id: string) => { if (id === CURRENT_INSTANCE_ID) throw new InstanceSupervisorError('CURRENT_INSTANCE', 'cannot operate on current instance') }
@@ -319,7 +337,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
           persistSafe()
         } else if (isChildHeartbeatMessage(msg)) {
           setStatus(entry, { lastHeartbeatAt: new Date(deps.now()).toISOString() })
-          emit(entry.def.id, entry.status)
+          emitHeartbeat(entry.def.id, entry.status)
         } else if (isChildRestartMessage(msg)) {
           // instance child 请求重启(设置面板「重启服务」→ /api/system/restart →
           // sendRestart → IPC 'restart')。复用 restartInstance(stop+start)重新

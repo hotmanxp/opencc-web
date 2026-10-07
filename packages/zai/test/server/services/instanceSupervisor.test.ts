@@ -21,7 +21,7 @@ class FakeChild extends EventEmitter {
 interface Deps {
   now: () => number
   sleep: (ms: number) => Promise<void>
-  emit: (e: ServerEventInput) => void
+  emit: (e: ServerEventInput, opts?: { recordHistory?: boolean }) => void
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => FakeChild
   probePort: (start: number, max?: number) => Promise<number>
   assertPortAvailable?: (port: number) => Promise<void>
@@ -31,6 +31,11 @@ interface Deps {
 
 function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['emit']; readFile?: Deps['readFile']; assertPortAvailable?: Deps['assertPortAvailable']; probePort?: Deps['probePort'] }) {
   const events: ServerEventInput[] = []
+  // 记录被显式标记为「不进重放缓冲」的事件。心跳每 5s 一条、N 实例 ≈ N/5
+  // 条每秒,而 history 上限只有 256 —— 若心跳也进缓冲,全局 history 会被
+  // 彻底刷满(server.connected / session.* / job.* 全被挤掉),重连补发失效。
+  // 这里让测试能直接断言「心跳被排除、状态跃迁没被排除」。
+  const historyExcluded: ServerEventInput[] = []
   const writes: { def: unknown; statuses: Record<string, unknown> }[] = []
   let time = 1_000000
   let probeStart = 9201
@@ -40,7 +45,10 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
   const deps: Deps = {
     now: () => time,
     sleep: () => Promise.resolve(),
-    emit: extra?.emit ?? ((e) => { events.push(e) }),
+    emit: extra?.emit ?? ((e, opts) => {
+      events.push(e)
+      if (opts?.recordHistory === false) historyExcluded.push(e)
+    }),
     spawn: (_cmd, args, opts) => {
       spawnOptions.push(opts)
       spawnArgs.push(args)
@@ -56,7 +64,7 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
     writeFile: extra?.onWriteFile ?? (async (w) => { writes.push(w) }),
     readFile: extra?.readFile,
   }
-  return { events, writes, deps, fakeChildren, spawnOptions, spawnArgs, advance: (t: number) => { time = t }, setProbe: (n: number) => { probeStart = n } }
+  return { events, historyExcluded, writes, deps, fakeChildren, spawnOptions, spawnArgs, advance: (t: number) => { time = t }, setProbe: (n: number) => { probeStart = n } }
 }
 
 async function initSup(deps: Deps, cwd = '/tmp/current', dataDir = '/tmp/x') {
@@ -721,6 +729,72 @@ describe('instanceSupervisor (4b — heartbeat + shutdown)', () => {
     vi.resetModules()
   })
   afterEach(() => { vi.restoreAllMocks() })
+
+  // ========== 心跳不进重放缓冲 (2026-10-07) ==========
+  // 线上症状:eventBus 全局 history(上限 256)被 instance.changed 心跳刷满,
+  // history 时间跨度被压到 ~4.5 分钟,server.connected / session.* / job.*
+  // 全被挤掉,重连补发失效。实测 5 实例时前 256 条里 254 条是心跳。
+  it('心跳事件被标记为不进 history;状态跃迁仍然进', async () => {
+    const { deps, fakeChildren, events, historyExcluded } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    const child = fakeChildren[0]!
+    // ready = 状态跃迁(starting → running),必须留在 history 里
+    child.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const readyEvents = events.length
+    const readyExcluded = historyExcluded.length
+
+    // 连续心跳 —— 每一条都实时推给订阅者,但都不得进 history
+    child.emit('message', { type: 'heartbeat', instanceId: snap.id, port: 9205, ts: Date.now(), pid: 222 })
+    child.emit('message', { type: 'heartbeat', instanceId: snap.id, port: 9205, ts: Date.now(), pid: 222 })
+    child.emit('message', { type: 'heartbeat', instanceId: snap.id, port: 9205, ts: Date.now(), pid: 222 })
+
+    // 1) 心跳仍然实时下发(UI 的「最后心跳」要继续动)
+    const heartbeatEvents = events.slice(readyEvents)
+    expect(heartbeatEvents).toHaveLength(3)
+    expect(heartbeatEvents.every((e) => e.type === 'instance.changed')).toBe(true)
+    // 2) 但三条全部被标记为不进重放缓冲
+    expect(historyExcluded.length - readyExcluded).toBe(3)
+    expect(historyExcluded.every((e) => e.type === 'instance.changed')).toBe(true)
+    // 3) ready 那个状态跃迁**没有**被排除 —— 不能把心跳优化做过头
+    expect(readyExcluded).toBe(0)
+    expect(events[readyEvents - 1]?.type).toBe('instance.changed')
+  })
+
+  // 守门:心跳的 lastHeartbeatAt 状态更新本身不能被优化掉 —— 它是
+  // 20s 超时判定(tickHeartbeat)的唯一依据,丢了就会误杀健康实例。
+  //
+  // 判据设计成**可区分**的:时间轴取 ready@t0、心跳@t0+15s、tick@t0+30s。
+  //   - 心跳正确更新 lastHeartbeatAt → 距上次心跳 15s ≤ 20s → 保持 running;
+  //   - 心跳更新被优化掉(lastHeartbeatAt 停在 t0) → 距上次 30s > 20s →
+  //     误判超时,SIGKILL 掉一个其实健康的实例。
+  it('心跳仍然更新 lastHeartbeatAt(超时判定依赖它,丢了会误杀健康实例)', async () => {
+    const t0 = 1_000000
+    let time = t0
+    const { deps, fakeChildren } = makeSupervisor()
+    deps.now = () => time
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    const child = fakeChildren[0]!
+    child.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const atReady = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!.lastHeartbeatAt
+    expect(atReady).toBe(new Date(t0).toISOString())
+
+    time = t0 + 15_000
+    child.emit('message', { type: 'heartbeat', instanceId: snap.id, port: 9205, ts: time, pid: 222 })
+    // 心跳确实把 lastHeartbeatAt 推进了(而不是原地不动)
+    expect(
+      getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!.lastHeartbeatAt,
+    ).toBe(new Date(t0 + 15_000).toISOString())
+
+    // tick 在 t0+30s:距最后一次心跳 15s,在 20s 阈值内 → 不应被杀
+    time = t0 + 30_000
+    ;(getInstanceSupervisor() as unknown as { __tickHeartbeat?: () => void }).__tickHeartbeat?.()
+    expect(getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!.state).toBe('running')
+    expect(child.kill).not.toHaveBeenCalled()
+  })
 
   it('heartbeat tick: stale running instance → down + SIGKILL + lastError', async () => {
     let time = 1_000000
