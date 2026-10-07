@@ -21,6 +21,8 @@ interface CaptureOptions {
   lastEventId?: string
   /** Passed as ?sid=xxx (also via X-Session-Id header). */
   sid?: string
+  /** Passed as ?topics=a,b — the whitelist the server filters by. */
+  topics?: string[]
   /** Called once headers arrive; use to schedule emits before destroy. */
   onReady?: (helpers: { wait: () => Promise<void> }) => void
   /** Predicate that decides when to destroy the stream and resolve. */
@@ -46,7 +48,10 @@ function captureSse(app: express.Express, options: CaptureOptions = {}): Promise
 
     const req = request(app).get('/api/event').buffer(false)
     if (options.lastEventId) req.set('Last-Event-ID', options.lastEventId)
-    if (options.sid) req.query({ sid: options.sid })
+    const query: Record<string, string> = {}
+    if (options.sid) query.sid = options.sid
+    if (options.topics) query.topics = options.topics.join(',')
+    if (Object.keys(query).length > 0) req.query(query)
 
     req.on('response', (res) => {
       headers = res.headers as Record<string, string>
@@ -402,6 +407,115 @@ describe('GET /api/event', () => {
         .filter((chunk) => chunk.split('\n').some((line) => line.startsWith('data: ')))
       expect(dataLines.length).toBe(1) // 仅作为一次实时 push 出现
     })
+
+    // ========== topic 闸门 (regression: 2026-10-07 /instances 首屏 9MB 泄露) ==========
+  // 线上症状:无 sid + topics 白名单的连接(/instances 等不建会话的页面,
+  // 白名单见 useEventStream.ts 的 GLOBAL_ONLY_TOPICS,刻意**不含** agent_task)
+  // 照样收到 §2.5 的全机合成 bg 快照 —— §2.5 不过滤 topics,绕过了白名单。
+  // 实测首屏 2071 帧 / 9MB / 352 个 session,每条带完整 prompt + resultText。
+  describe('synth push 的 topic 过滤', () => {
+    afterEach(() => {
+      __resetBackgroundRuntimeForTests()
+    })
+
+    // 与 useEventStream.ts 的 GLOBAL_ONLY_TOPICS 保持一致 —— 这里刻意
+    // 手抄而不是 import,让测试在白名单漂移时先红(前端常量不是本模块依赖)。
+    const GLOBAL_ONLY_TOPICS_WITHOUT_AGENT_TASK = [
+      'system',
+      'instance',
+      'task_factory',
+      'skills',
+      'app_update',
+      'command',
+      'session',
+      'job',
+    ]
+
+    function makeFakeBgWithPrompts(ids: Array<{ id: string; parentSessionId: string | null }>) {
+      return wrapWithJobStarted({
+        async dispatch() { throw new Error('not used') },
+        async get(id: string) {
+          const t = ids.find((x) => x.id === id)
+          return t ? ({ id: t.id, status: 'completed', input: { prompt: `SECRET-PROMPT-${t.id}` }, createdAt: 0, eventCount: 0, parentSessionId: t.parentSessionId } as any) : null
+        },
+        async list() {
+          return ids.map((t) => ({
+            id: t.id,
+            status: 'completed',
+            input: { prompt: `SECRET-PROMPT-${t.id}` },
+            createdAt: 0,
+            eventCount: 0,
+            parentSessionId: t.parentSessionId,
+          } as any))
+        },
+        async cancel() { return { ok: true } },
+        async cancelByParentSession() { return { cancelled: 0 } },
+        events: (() => (async function* () {})()) as any,
+        async shutdown() {},
+        attach: (async () => null) as any,
+        appendTaskEvent: (async () => undefined) as any,
+        finalizeTask: (async () => undefined) as any,
+        sendMessageToTask: (async () => ({ ok: true })) as any,
+      } as any)
+    }
+
+    test('无 sid + GLOBAL_ONLY_TOPICS 白名单 → 收不到任何合成 bg task (内容泄露回归)', async () => {
+      __setBackgroundRuntime(makeFakeBgWithPrompts([
+        { id: 'leak-a', parentSessionId: 'session-from-another-cwd' },
+        { id: 'leak-b', parentSessionId: 'session-from-another-cwd' },
+      ]))
+
+      const app = makeApp()
+      const { body } = await captureSse(app, {
+        topics: GLOBAL_ONLY_TOPICS_WITHOUT_AGENT_TASK,
+        until: (b) => b.includes('event: server.connected'),
+        timeoutMs: 200,
+      })
+
+      // 白名单里没有 agent_task → §2.5 整段跳过,别的 session 的 task 正文
+      // 一条都不能出现。断言的是「副作用没发生」而不是状态码。
+      expect(body).toMatch(/event: server\.connected/)
+      expect(body).not.toMatch(/synth-bgstate-/)
+      expect(body).not.toMatch(/SECRET-PROMPT-/)
+      expect(body).not.toMatch(/leak-a/)
+      expect(body).not.toMatch(/leak-b/)
+    })
+
+    test('白名单显式含 agent_task → 仍然收得到合成事件 (闸门不是一刀切)', async () => {
+      __setBackgroundRuntime(makeFakeBgWithPrompts([
+        { id: 'wanted', parentSessionId: 's1' },
+      ]))
+
+      const app = makeApp()
+      const { body } = await captureSse(app, {
+        topics: ['agent_task'],
+        until: (b) => b.includes('event: server.connected'),
+        timeoutMs: 200,
+      })
+
+      expect(body).toMatch(/synth-bgstate-wanted/)
+      expect(body).toMatch(/SECRET-PROMPT-wanted/)
+    })
+
+    test('带 sid + topics 含 agent_task → 按 sid 过滤后仍收得到 (Agent 页原修复不回退)', async () => {
+      const sid = `bg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      __setBackgroundRuntime(makeFakeBgWithPrompts([
+        { id: 'mine', parentSessionId: sid },
+        { id: 'theirs', parentSessionId: 'other-sid' },
+      ]))
+
+      const app = makeApp()
+      const { body } = await captureSse(app, {
+        sid,
+        topics: ['agent_task'],
+        until: (b) => b.includes('event: server.connected'),
+        timeoutMs: 200,
+      })
+
+      expect(body).toMatch(/synth-bgstate-mine/)
+      expect(body).not.toMatch(/synth-bgstate-theirs/)
+    })
+  })
 
     test('bg runtime 未初始化时, 跳过 synth push 不报错 (兼容 dsh 模式)', async () => {
       // __resetBackgroundRuntimeForTests() 让 getBackgroundRuntime() 抛 'not initialized'

@@ -127,11 +127,30 @@ router.get('/event', async (req: Request, res: Response) => {
     //    bg runtime 当前 task 列表,把每条 task 当作「合成的
     //    agent_task.changed」事件通过本连接的 writeEvent 单独 push 给
     //    新客户端 (不走 eventBus,不被淘汰)。wantedSid 有值时按
-    //    task.parentSessionId 过滤;wantedSid 为 null 时推全部 task
-    //    (旧 fallback 行为,非 agent 页面也用得到)。
+    //    task.parentSessionId 过滤。
     //    seq 字段取自 eventBus 的下一个 seqCounter (走完 getHistoryAfter
     //    之后此值最大),保证客户端 reorder 时合成的 state 排在 replay 之后。
-    const bg = safeGetBackgroundRuntime()
+    //
+    //    **topic 闸门 (2026-10-07)**:本段此前完全不过滤 topics,与上面 replay
+    //    分支的 `topicMatches` 判定不一致。后果是无 sid + topics 白名单的连接
+    //    (即 useEventStream 在 sessionId===null 时发的 GLOBAL_ONLY_TOPICS,
+    //    覆盖 /instances 等不建会话的页面)照样收下**全机** bg task:该白名单
+    //    刻意不含 `agent_task`(useEventStream 注释明说不要让无会话页面持有
+    //    别的会话状态),但 §2.5 绕过了它。线上实测该页面首屏收到 2071 条
+    //    合成帧 / 9MB,覆盖 352 个 session,每条带完整 `input.prompt` 与
+    //    `resultText` —— 既是几十秒的加载卡顿,也是实打实的跨会话内容泄露。
+    //
+    //    修法:与 replay 用同一条判据(`topicMatches`),无 topics 参数 = 全量
+    //    订阅 = 维持旧行为(推全部 task)。这样:
+    //      - `?sid=A`(Agent 页,不带 topics)→ 不过滤,仍按 sid 推,原
+    //        CliAgent 刷新丢 task 的修复完全不受影响;
+    //      - 无 sid + topics=/instances 那套白名单 → `agent_task` 不在其中,
+    //        整段跳过;
+    //      - 无 sid + 无 topics(老式全量连接)→ 维持推全部,既有语义不变。
+    const wantsAgentTasks =
+      wantedTopics.length === 0 ||
+      ServerEventBus.topicMatches('agent_task.changed', wantedTopics)
+    const bg = wantsAgentTasks ? safeGetBackgroundRuntime() : null
     if (bg) {
       let synthSeq = eventBus.getNextSeq()
       for (const task of await bg.list()) {
