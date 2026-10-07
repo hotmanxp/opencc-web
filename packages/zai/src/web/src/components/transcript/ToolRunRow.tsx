@@ -34,14 +34,14 @@ const BUCKET_ICON: Record<ToolBucket, ReactNode> = {
   other: <WrenchIcon size={11} />,
 };
 
-/** 分类图标徽章: 12px 圆角方块 + 该分类的主题色。 */
+/** 分类图标: 只留该分类的主题色, 不加底色方块 —— 底色在密集的工具流里过于抢眼。 */
 export function BucketBadge({ bucket }: { bucket: ToolBucket }) {
   const tint = bucketMeta(bucket).tint;
   return (
     <span
       aria-hidden="true"
-      className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-[5px] flex-shrink-0"
-      style={{ background: `color-mix(in srgb, ${tint} 18%, transparent)`, color: tint }}
+      className="inline-flex items-center justify-center flex-shrink-0"
+      style={{ color: tint }}
     >
       {BUCKET_ICON[bucket]}
     </span>
