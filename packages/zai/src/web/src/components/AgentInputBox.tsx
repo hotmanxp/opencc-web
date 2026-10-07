@@ -2133,12 +2133,7 @@ export default React.memo(function AgentInputBox({
                     input.trim().length === 0
                       ? "var(--bg-faint-08)"
                       : "#ff6600",
-                  border:
-                    creatingSession ||
-                    pendingAsk?.status === "pending" ||
-                    input.trim().length === 0
-                      ? "1px solid var(--border-subtle)"
-                      : "1px solid #ff6600",
+                  border: "none",
                   borderRadius: 6,
                   color:
                     creatingSession ||
