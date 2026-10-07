@@ -8,6 +8,7 @@ import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js';
 import type { AppState } from 'src/state/AppState.js';
 import { z } from 'zod/v4';
 import { TOOL_SUMMARY_MAX_LENGTH } from '../../constants/toolLimits.js';
+import { logForDebugging } from '../../utils/debug.js';
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../../services/analytics/index.js';
 import { notifyVscodeFileUpdated } from '../../services/mcp/vscodeSdkMcp.js';
@@ -1364,7 +1365,27 @@ async function* runShellCommand({
 
     // No foreground task registered — spawn a new background task
     // Note: spawn is essentially synchronous despite being async
-    void spawnBackgroundTask().then(shellId => {
+    void spawnBackgroundTask()
+      .catch(error => {
+        // Backgrounding is best-effort, but a rejection here used to become an
+        // unhandled rejection AND left the generator waiting forever: the
+        // resolve below only runs on the success path, so the command silently
+        // vanished instead of reporting that it could not be backgrounded
+        // (oc-008).
+        logForDebugging(
+          `[BashTool] failed to background command: ${error instanceof Error ? error.message : String(error)}`,
+          { level: 'error' },
+        );
+        // Release the generator even on failure — see the resolve() below for
+        // why it has to happen either way.
+        const resolveOnFailure = resolveProgress;
+        if (resolveOnFailure) {
+          resolveProgress = null;
+          resolveOnFailure();
+        }
+        return undefined;
+      })
+      .then(shellId => {
       backgroundShellId = shellId;
 
       // Wake the generator's Promise.race so it sees backgroundShellId.
@@ -1380,7 +1401,7 @@ async function* runShellCommand({
       logEvent(eventName, {
         command_type: getCommandTypeForLogging(command)
       });
-      if (backgroundFn) {
+      if (backgroundFn && shellId) {
         backgroundFn(shellId);
       }
     });

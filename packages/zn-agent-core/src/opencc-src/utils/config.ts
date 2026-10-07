@@ -1041,7 +1041,7 @@ function migrateConfigFields(config: GlobalConfig): GlobalConfig {
 
   // Already migrated
   if (config.installMethod !== undefined) {
-    return config
+    return normalizedConfig
   }
 
   // autoUpdaterStatus is removed from the type but may exist in old configs
@@ -1082,7 +1082,7 @@ function migrateConfigFields(config: GlobalConfig): GlobalConfig {
   }
 
   return {
-    ...config,
+    ...normalizedConfig,
     installMethod,
     autoUpdates,
   }

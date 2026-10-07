@@ -95,6 +95,11 @@ export function unregisterMod(name: string): LoadedMod | undefined {
   const index = loadedMods.findIndex(m => m.manifest.name === name)
   if (index === -1) return undefined
   const [removed] = loadedMods.splice(index, 1)
+  // Drop the circuit-breaker count with the mod (tc-006). Keeping it let a
+  // reloaded instance start at N failures and trip the breaker after fewer
+  // than MOD_BREAKER_THRESHOLD fresh ones — the count was for code that is no
+  // longer loaded.
+  failureCounts.delete(name)
   notifyModToolsChanged()
   return removed
 }

@@ -87,6 +87,7 @@ import { getBranch } from './git.js'
 import { gracefulShutdownSync, isShuttingDown } from './gracefulShutdown.js'
 import { parseJSONL } from './json.js'
 import { logError } from './log.js'
+import { emitModsSystemNotice } from '../mods/engine.js'
 import { extractTag, isCompactBoundaryMessage } from './messages.js'
 import { sanitizePath } from './path.js'
 import {
@@ -1910,7 +1911,7 @@ class Project {
         const isNewUuid = !messageSet.has(entry.uuid)
         if (isAgentSidechain || isNewUuid) {
           // Enqueue write — appendToFile handles ENOENT by creating directories
-          void this.enqueueWrite(targetFile, entry)
+          const written = this.enqueueWrite(targetFile, entry)
 
           if (!isAgentSidechain) {
             // messageSet is main-file-authoritative. Sidechain entries go to a
@@ -1921,7 +1922,19 @@ class Project {
             // and --resume's buildConversationChain terminates at the dangling ref.
             // Same constraint for remote (inc-4718 above): sidechain persisting a
             // UUID the main thread hasn't written yet → 409 when main writes it.
+            //
+            // Add synchronously (a second record for the same uuid arriving before
+            // the flush lands must dedup, not double-write) but ROLL BACK on
+            // failure. Without the rollback the uuid stays in the set forever, so
+            // every later retry is skipped as a duplicate and the message is lost
+            // for good — a single failed append silently deleted a chunk of the
+            // conversation, and logError writes only to a log the user never reads.
             messageSet.add(entry.uuid)
+            void written.catch(error => {
+              if (messageSet.delete(entry.uuid)) {
+                this.reportTranscriptWriteFailure(entry, error)
+              }
+            })
 
             if (isTranscriptMessage(entry)) {
               await this.persistToRemote(sessionId, entry)
@@ -1937,6 +1950,25 @@ class Project {
         throw new Error(`Unhandled session storage entry type: ${entryType}`)
       }
     }
+  }
+
+  /**
+   * A transcript append failed and its uuid was rolled back, so the message
+   * can be re-recorded later. Tell the user instead of losing it quietly —
+   * logError alone writes only to a log nobody reads.
+   *
+   * Deliberately does NOT re-enqueue a retry: a failed append has already
+   * settled its queue slot and released the rewrite barrier, and re-queueing
+   * behind it would stall every later write. Rolling the uuid back is what
+   * makes a real retry possible.
+   */
+  private reportTranscriptWriteFailure(entry: Entry, error: unknown): void {
+    logError(error)
+    const message = error instanceof Error ? error.message : String(error)
+    emitModsSystemNotice(
+      `Failed to save this message to the session transcript: ${message}. ` +
+        `It is still in this conversation but may be missing if you exit now.`,
+    )
   }
 
   /**

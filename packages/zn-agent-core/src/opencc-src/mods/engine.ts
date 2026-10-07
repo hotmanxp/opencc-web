@@ -256,6 +256,22 @@ async function buildFsApi(
     }
     return real
   }
+  /**
+   * Fence `path` when it already exists. Returns null when it is absent, so a
+   * file that is about to be created only needs its parent fenced.
+   */
+  const assertFencedIfExists = async (path: string): Promise<string | null> => {
+    try {
+      return await assertFenced(path)
+    } catch (error) {
+      if (
+        (error as { cause?: NodeJS.ErrnoException }).cause?.code === 'ENOENT'
+      ) {
+        return null
+      }
+      throw error
+    }
+  }
   return {
     async read(path) {
       return readFile(await assertFenced(path), 'utf8')
@@ -265,7 +281,14 @@ async function buildFsApi(
       // The file itself may not exist yet — fence on its parent directory.
       const parentReal = await assertFenced(resolve(abs, '..'))
       const fileName = abs.slice(abs.lastIndexOf('/') + 1)
-      await writeFile(resolve(parentReal, fileName), data, 'utf8')
+      const target = resolve(parentReal, fileName)
+      // Fence the final path too when it exists. writeFile follows a symlink
+      // sitting at the last segment, so parent-only fencing let a mod write
+      // through `link.txt -> /outside/secret.txt` and land outside the roots.
+      // read/list/exists already fence the final path; write was the odd one
+      // out, breaking the "containment check on every call" promise above.
+      await assertFencedIfExists(target)
+      await writeFile(target, data, 'utf8')
     },
     async list(path) {
       return readdir(await assertFenced(path))

@@ -179,7 +179,22 @@ export async function runModChain(
     if (!isModVisibleForSession(modName, sessionId)) {
       return runFrom(current)
     }
-    const next = async (e?: Record<string, unknown>) => runFrom(e ?? current)
+    // `index` is shared by every nested next(), so a handler that calls next()
+    // more than once would otherwise advance the cursor twice and re-run the
+    // remaining handlers plus the core terminal tier for the same event. Once a
+    // branch has consumed a position, further calls on that handler's next()
+    // become no-ops returning the branch's own result.
+    const branchResults = new Map<
+      () => Promise<Record<string, unknown>>,
+      Promise<Record<string, unknown>>
+    >()
+    const next = (e?: Record<string, unknown>) => {
+      const prior = branchResults.get(next)
+      if (prior) return prior
+      const branch = runFrom(e ?? current)
+      branchResults.set(next, branch)
+      return branch
+    }
     try {
       const result = await invokeModHandler(modName, handler, current, next)
       recordModHandlerSuccess(modName)

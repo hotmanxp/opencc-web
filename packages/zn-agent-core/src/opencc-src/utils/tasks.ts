@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { z } from 'zod/v4'
 import { getIsNonInteractiveSession, getSessionId } from '../bootstrap/state.js'
+import { replaceFileAtomic } from './atomicReplace.js'
 import { uniq } from './array.js'
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir, getTeamsDir, isEnvTruthy } from './envUtils.js'
@@ -316,7 +317,7 @@ export async function createTask(
     const id = String(highestId + 1)
     const task: Task = { id, ...taskData }
     const path = getTaskPath(taskListId, id)
-    await writeFile(path, jsonStringify(task, null, 2))
+    await replaceFileAtomic(path, jsonStringify(task, null, 2))
     notifyTasksUpdated()
     taskChanged.emit({ taskListId, task: { ...task, blocks: task.blocks ?? [], blockedBy: task.blockedBy ?? [] }, action: 'upsert' })
     return id
@@ -382,7 +383,7 @@ async function updateTaskUnsafe(
   }
   const updated: Task = { ...existing, ...updates, id: taskId }
   const path = getTaskPath(taskListId, taskId)
-  await writeFile(path, jsonStringify(updated, null, 2))
+  await replaceFileAtomic(path, jsonStringify(updated, null, 2))
   notifyTasksUpdated()
   taskChanged.emit({ taskListId, task: updated, action: 'upsert' })
   return updated

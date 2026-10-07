@@ -1,5 +1,5 @@
 import { access, constants as fsConstants } from 'node:fs/promises'
-import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { extname, join, relative, resolve } from 'node:path'
 
 /**
@@ -100,22 +100,27 @@ async function listModFiles(
         await walk(abs, depth + 1)
         continue
       }
-      if (!entry.isFile()) continue
-      // Reject symlinks whose target escapes the mod root
-      const st = await lstat(abs)
-      if (st.isSymbolicLink()) {
-        let target: string | undefined
+      // A symlink has to be classified BEFORE the isFile() filter. Dirent
+      // .isFile() is false for ANY symlink, even one pointing at a regular
+      // file, so the old `if (!entry.isFile()) continue` skipped every link
+      // before the escape check below could run — leaving it unreachable and
+      // letting a mod smuggle in a symlinked file that validateModSize and
+      // validateModImports then never see (cc-003).
+      if (entry.isSymbolicLink()) {
+        let target: string
         try {
           target = await realpath(abs)
         } catch {
           continue // dangling symlink — ignore
         }
-        if (target && relative(rootReal, target).startsWith('..')) {
+        if (relative(rootReal, target).startsWith('..')) {
           throw new ModValidationError(
             `symlink escapes the mod folder: ${relative(rootReal, abs)}`,
             modName,
           )
         }
+      } else if (!entry.isFile()) {
+        continue
       }
       count++
       if (SCANNABLE_EXTENSIONS.has(extname(entry.name))) {

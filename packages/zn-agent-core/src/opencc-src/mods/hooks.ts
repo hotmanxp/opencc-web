@@ -83,6 +83,22 @@ async function discoverModRoots(dir: string): Promise<string[]> {
   return roots.sort()
 }
 
+/**
+ * Cache-buster appended to a mod entry's import specifier.
+ *
+ * ESM caches a module by resolved URL forever, so `/mods reload` after editing
+ * a mod's source kept running the OLD code — the reload appeared to succeed
+ * and nothing changed (oc-002). A query string makes each pass a distinct URL.
+ *
+ * It has to bump on every reload, not just once: the counter is what makes the
+ * *next* reload different from the previous one's cached copy.
+ */
+let modReloadGeneration = 0
+
+function reloadQuerySuffix(): string {
+  return `?openccReload=${modReloadGeneration}`
+}
+
 async function loadSingleMod(root: string): Promise<LoadedMod> {
   const manifestRaw = JSON.parse(
     await readFile(join(root, MOD_MANIFEST_FILE), 'utf8'),
@@ -93,7 +109,7 @@ async function loadSingleMod(root: string): Promise<LoadedMod> {
   await validateModSize(manifest.name, root)
   await validateModImports(manifest.name, root)
 
-  const module = (await import(pathToFileURL(entryReal).href)) as {
+  const module = (await import(pathToFileURL(entryReal).href + reloadQuerySuffix())) as {
     register?: unknown
   }
   if (typeof module.register !== 'function') {
@@ -110,7 +126,18 @@ async function loadSingleMod(root: string): Promise<LoadedMod> {
     commands: [],
     tools: [],
   }
-  await module.register(createModContext(mod))
+  const name = manifest.name
+  try {
+    await module.register(createModContext(mod))
+  } catch (error) {
+    // A mod can claim ui.status (and ui.pane upstream) before it throws. Those
+    // live in registries keyed by mod name, and this mod never gets registered,
+    // so no unload or reload path would ever clear them — leaving a broken
+    // mod's UI behind permanently (oc-001). Release what it claimed.
+    // zai patch: pane 在本 vendor 已随 TUI 能力面删除,只剩 status。
+    clearModStatus(name)
+    throw error
+  }
   return mod
 }
 
@@ -127,12 +154,14 @@ function swapRegisteredHooks(): void {
 }
 
 export const loadMods = memoize(async (): Promise<ModLoadResult[]> => {
+  // Fresh import specifiers for this pass so edited mod code actually runs.
+  modReloadGeneration++
   ensureBreakerWired()
   const dir = getModsDirectory()
   // Drop previous instances first — /mods reload must not duplicate
   // handlers (disk and built-in mods alike).
   for (const mod of [...getLoadedMods()]) {
-    unregisterMod(mod.manifest.name)
+    purgeModState(mod.manifest.name)
   }
   let roots: string[]
   try {
@@ -221,13 +250,28 @@ function ensureBreakerWired(): void {
 }
 
 /** Minimal unload (P1, docs R9): remove a mod and rebuild the hook swap. */
-export async function unloadMod(name: string): Promise<boolean> {
-  const removed = unregisterMod(name)
-  if (!removed) return false
-  // Clear the persistent ui.status segment the mod left behind.
-  // zai patch (2026-10-06):原 opencc 还在这里调 clearModPanes(name) ——
-  // pane 是 TUI render site,已随 Web UI 体系删除,无残留可清。
+/**
+ * Drop every trace of a mod from the runtime.
+ *
+ * The single cleanup point for mod-owned state. Registration writes into
+ * several independent registries (statuses, panes, the render cache, the
+ * circuit-breaker count), so anything that removes a mod must call this —
+ * unloading and reloading are both removals, and having only one of them do
+ * the cleanup is what let a reload leave a stale status segment behind
+ * (tc-004).
+ */
+function purgeModState(name: string): void {
+  // zai patch (2026-10-06): pane 是 TUI render site,已随 Web UI 体系删除,
+  // 本 vendor 无 pane 注册表,故只清 status。
   clearModStatus(name)
+  // The render cache and breaker count are keyed by mod registration, so they
+  // clear when the mod leaves the registry — see registry.unregisterMod.
+  unregisterMod(name)
+}
+
+export async function unloadMod(name: string): Promise<boolean> {
+  if (!getLoadedMods().some(m => m.manifest.name === name)) return false
+  purgeModState(name)
   swapRegisteredHooks()
   logForDebugging(`[mods] unloaded mod "${name}"`)
   return true

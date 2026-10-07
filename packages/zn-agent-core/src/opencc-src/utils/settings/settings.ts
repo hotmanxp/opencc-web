@@ -46,6 +46,7 @@ import {
 import { type SettingsJson, SettingsSchema } from './types.js'
 import {
   filterInvalidPermissionRules,
+  filterInvalidTopLevelFields,
   formatZodError,
   type SettingsWithErrors,
   type ValidationError,
@@ -215,14 +216,31 @@ function parseSettingsFileUncached(path: string): {
     // rule doesn't cause the entire settings file to be rejected.
     const ruleWarnings = filterInvalidPermissionRules(data, path)
 
-    const result = SettingsSchema().safeParse(data)
+    // Same reasoning one level up: a single bad-typed field must not take
+    // `model`, `permissions` and `hooks` down with it (wb-003). Unknown
+    // fields are already tolerated by the schema; this handles fields that
+    // are present but the wrong shape.
+    const { data: repaired, warnings: fieldWarnings } =
+      filterInvalidTopLevelFields(data, path, candidate =>
+        SettingsSchema().safeParse(candidate),
+      )
+
+    const result = SettingsSchema().safeParse(repaired)
 
     if (!result.success) {
       const errors = formatZodError(result.error, path)
-      return { settings: null, errors: [...ruleWarnings, ...errors] }
+      return {
+        settings: null,
+        errors: [...ruleWarnings, ...fieldWarnings, ...errors],
+      }
     }
 
-    return { settings: result.data, errors: ruleWarnings }
+    // Carry the field warnings through so a silently dropped setting still
+    // reaches the settings-issues surface.
+    return {
+      settings: result.data,
+      errors: [...ruleWarnings, ...fieldWarnings],
+    }
   } catch (error) {
     handleFileSystemError(error, path)
     return { settings: null, errors: [] }

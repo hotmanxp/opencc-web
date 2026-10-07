@@ -263,3 +263,53 @@ export function filterInvalidPermissionRules(
   }
   return warnings
 }
+
+/**
+ * Drop top-level fields that fail schema validation so one bad entry doesn't
+ * invalidate the whole settings file.
+ *
+ * The same reasoning as filterInvalidPermissionRules, applied one level up: a
+ * typo in one field should cost the user that field, not silently reset
+ * `model`, `permissions` and `hooks` together. Callers surface the returned
+ * warnings through the existing settings-issues path.
+ *
+ * Returns the surviving fields plus a warning per dropped field. If dropping
+ * the offending fields still doesn't validate (e.g. the object itself is
+ * malformed), the original data is returned untouched so the caller reports
+ * the real error rather than a partially-repaired file.
+ */
+export function filterInvalidTopLevelFields(
+  data: unknown,
+  filePath: string,
+  validate: (candidate: unknown) => { success: boolean },
+): { data: unknown; warnings: ValidationError[] } {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return { data, warnings: [] }
+  }
+  const obj = data as Record<string, unknown>
+  if (validate(data).success) {
+    return { data, warnings: [] }
+  }
+
+  const warnings: ValidationError[] = []
+  const kept: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    const candidate = { ...kept, [key]: value }
+    if (validate(candidate).success) {
+      kept[key] = value
+    } else {
+      warnings.push({
+        file: filePath,
+        path: key,
+        message: `Invalid value for "${key}" was ignored`,
+        invalidValue: value,
+      })
+    }
+  }
+
+  // Repair failed — return the original so the caller reports the real error.
+  if (!validate(kept).success) {
+    return { data, warnings: [] }
+  }
+  return { data: kept, warnings }
+}

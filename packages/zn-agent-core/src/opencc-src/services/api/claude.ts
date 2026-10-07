@@ -2907,13 +2907,23 @@ async function* queryModel(
       try {
         // Fall back to non-streaming mode
         const result = yield* executeNonStreamingRequest(
-          { model: options.model, source: options.querySource, effortValue: effort },
+          {
+            model: options.model,
+            source: options.querySource,
+            // Must match the streaming path (and the watchdog fallback above).
+            // Dropping it here sent a routed sub-agent's ENTIRE conversation to
+            // the global default provider instead of its agentModels endpoint —
+            // a privacy leak, not just a wrong model (cc-013).
+            providerOverride: options.providerOverride,
+            effortValue: effort,
+          },
           {
             model: options.model,
             fallbackModel: options.fallbackModel,
             thinkingConfig,
             ...(isFastModeEnabled() && { fastMode: isFastMode }),
             signal,
+            querySource: options.querySource,
           },
           paramsFromContext,
           (attempt, _startTime, tokens) => {
@@ -3275,7 +3285,12 @@ export function accumulateUsage(
   messageUsage: Readonly<NonNullableUsage>,
 ): NonNullableUsage {
   return {
-    input_tokens: totalUsage?.input_tokens ?? 0 + messageUsage?.input_tokens ?? 0,
+    // Parenthesised like every sibling field below: `+` binds tighter than
+    // `??`, so the unparenthesised form parsed as
+    // `total ?? (0 + message) ?? 0` and never actually added the two totals —
+    // cumulative input_tokens just echoed the first turn's value (cc-012).
+    input_tokens:
+      (totalUsage?.input_tokens ?? 0) + (messageUsage?.input_tokens ?? 0),
     cache_creation_input_tokens:
       (totalUsage?.cache_creation_input_tokens ?? 0) +
       (messageUsage?.cache_creation_input_tokens ?? 0),

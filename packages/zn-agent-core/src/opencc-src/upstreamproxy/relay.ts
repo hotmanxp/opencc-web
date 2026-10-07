@@ -54,6 +54,31 @@ const MAX_CHUNK_BYTES = 512 * 1024
 const PING_INTERVAL_MS = 30_000
 
 /**
+ * Ceiling on bytes buffered while the WS handshake is in flight.
+ *
+ * The buffer only has to cover a handshake that is briefly slow — the CONNECT
+ * packet plus the start of a TLS ClientHello. Anything beyond that is a client
+ * streaming data at a connection that is not up yet, and holding it all costs
+ * unbounded memory for as long as the handshake stays pending (cc-007).
+ */
+const MAX_PENDING_BYTES = 8 * 1024 * 1024
+
+/**
+ * How long the WebSocket handshake may stay pending before the relay gives up.
+ *
+ * The keepalive pinger only starts in onopen, so before the upgrade completes
+ * nothing bounds the connection: a gateway that accepts TCP and then stalls
+ * holds the client socket open indefinitely (cc-008). Paired with the pending
+ * buffer ceiling, this bounds a stuck handshake in both memory and time.
+ */
+let HANDSHAKE_TIMEOUT_MS = 30_000
+
+/** @internal Shortens the handshake timeout so tests don't wait 30s. */
+export function _setHandshakeTimeoutForTesting(ms: number): void {
+  HANDSHAKE_TIMEOUT_MS = ms
+}
+
+/**
  * Encode an UpstreamProxyChunk protobuf message by hand.
  *
  * For `message UpstreamProxyChunk { bytes data = 1; }` the wire format is:
@@ -111,6 +136,10 @@ type ConnState = {
   ws?: WebSocketLike
   connectBuf: Buffer
   pinger?: ReturnType<typeof setInterval>
+  /** Cleared once the WS opens, so a slow-but-fine upgrade is never cut off. */
+  handshakeTimer?: ReturnType<typeof setTimeout>
+  // Total bytes currently held in `pending`, for the ceiling above.
+  pendingBytes: number
   // Bytes that arrived after the CONNECT header but before ws.onopen fired.
   // TCP can coalesce CONNECT + ClientHello into one packet, and the socket's
   // data callback can fire again while the WS handshake is still in flight.
@@ -137,10 +166,34 @@ type ClientSocket = {
   end: () => void
 }
 
+/**
+ * Buffer bytes received before the WS is open.
+ *
+ * Returns false when the ceiling was crossed, in which case the connection is
+ * torn down: silently dropping bytes would corrupt the client's stream, and
+ * buffering them is exactly what the cap exists to prevent.
+ */
+function enqueuePending(
+  sock: ClientSocket,
+  st: ConnState,
+  data: Uint8Array,
+): boolean {
+  if (st.pendingBytes + data.byteLength > MAX_PENDING_BYTES) {
+    st.closed = true
+    sock.end()
+    return false
+  }
+  const buf = Buffer.from(data)
+  st.pending.push(buf)
+  st.pendingBytes += buf.byteLength
+  return true
+}
+
 function newConnState(): ConnState {
   return {
     connectBuf: Buffer.alloc(0),
     pending: [],
+    pendingBytes: 0,
     wsOpen: false,
     established: false,
     closed: false,
@@ -327,9 +380,7 @@ function handleData(
     // Stash any bytes that arrived after the CONNECT header so
     // openTunnel can flush them once the WS is open.
     const trailing = st.connectBuf.subarray(headerEnd + 4)
-    if (trailing.length > 0) {
-      st.pending.push(Buffer.from(trailing))
-    }
+    if (trailing.length > 0 && !enqueuePending(sock, st, trailing)) return
     st.connectBuf = Buffer.alloc(0)
     openTunnel(sock, st, firstLine, wsUrl, authHeader, wsAuthHeader)
     return
@@ -337,7 +388,7 @@ function handleData(
   // Phase 2: WS exists. If it isn't OPEN yet, buffer; ws.onopen will
   // flush. Once open, pump client bytes to WS in chunks.
   if (!st.wsOpen) {
-    st.pending.push(Buffer.from(data))
+    enqueuePending(sock, st, data)
     return
   }
   forwardToWs(st.ws, data)
@@ -377,7 +428,24 @@ function openTunnel(
   ws.binaryType = 'arraybuffer'
   st.ws = ws
 
+  // Bound the handshake itself — cleared the moment it succeeds.
+  st.handshakeTimer = setTimeout(() => {
+    if (st.wsOpen || st.closed) return
+    st.closed = true
+    sock.end()
+    try {
+      ws.close()
+    } catch {
+      // Already closing; sock.end() above is what matters.
+    }
+  }, HANDSHAKE_TIMEOUT_MS)
+  st.handshakeTimer.unref?.()
+
   ws.onopen = () => {
+    if (st.handshakeTimer) {
+      clearTimeout(st.handshakeTimer)
+      st.handshakeTimer = undefined
+    }
     // First chunk carries the CONNECT line plus Proxy-Authorization so the
     // server can auth the tunnel and know the target host:port. Server
     // responds with its own "HTTP/1.1 200" over the tunnel; we just pipe it.
@@ -392,6 +460,7 @@ function openTunnel(
       forwardToWs(ws, buf)
     }
     st.pending = []
+    st.pendingBytes = 0
     // Not all WS implementations expose ping(); empty chunk works as an
     // application-level keepalive the server can ignore.
     st.pinger = setInterval(sendKeepalive, PING_INTERVAL_MS, ws)
@@ -446,6 +515,7 @@ function forwardToWs(ws: WebSocketLike, data: Buffer): void {
 function cleanupConn(st: ConnState | undefined): void {
   if (!st) return
   if (st.pinger) clearInterval(st.pinger)
+  if (st.handshakeTimer) clearTimeout(st.handshakeTimer)
   if (st.ws && st.ws.readyState <= WebSocket.OPEN) {
     try {
       st.ws.close()
