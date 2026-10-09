@@ -30,6 +30,22 @@
  * ${sessionId}.jsonl` but roots the home dir at the caller's dataDir
  * instead of vendor's `getClaudeConfigHomeDir()`.
  *
+ * ─────────────────────────────────────────────────────────────────────
+ * ⚠️ NOT WIRED INTO zai (verified 2026-10-08) — read before using.
+ *
+ * `createSessionFacade` has ZERO call sites under `packages/zai/src`.
+ * It appears only in prose (comments in weixinMemory.ts,
+ * WeixinSessionMap.ts, agentRuntime.ts). zai's live transcript path is
+ * `compat/runtime/legacyTranscriptStore.ts` (see the write/read map in
+ * `src/index.ts`), which is fully implemented with ~30 live call sites —
+ * despite its "legacy" name it is the CURRENT accessor, not a dead one.
+ *
+ * In particular: `SessionFacade.compact(sessionId)` does NOT compact
+ * anything. It only reads `boundaryStartOffset` / `hasPreservedSegment`
+ * off the file (see the method body below). Reaching for it expecting an
+ * executed compaction is exactly the mistake its name invites.
+ * ─────────────────────────────────────────────────────────────────────
+ *
  * The split into thin + impl mirrors `createHeadlessContext` /
  * `createHeadlessContext-impl.ts`. The public d.ts surface is
  * captured by the sibling file; this implementation file is excluded
@@ -294,6 +310,11 @@ export async function createSessionFacadeImpl(
     },
 
     async compact(sessionId: string): Promise<SessionCompactResult | null> {
+      // Despite the name, this READS existing compact state — it does not
+      // perform or schedule a compaction. No LLM call, no write. To actually
+      // compact a conversation that is `services/compact/compact.ts`
+      // `compactConversation` (which itself never persists — its two
+      // `writeSessionTranscriptSegment` calls are `if (false)`-gated).
       const filePath = resolvePath(sessionId)
       let fileSize: number
       try {

@@ -10,3 +10,11 @@ dist/
 # 任何 src 改动都会让它变化；同时也是构建产物（可由 `npm run build` 重生）。
 # 不应跟踪。
 tsconfig.tsbuildinfo
+# VCR 录制产物。vendor 的 `withVCR`（opencc-src/services/vcr.ts）在
+# NODE_ENV==='test' 时必然开启（`shouldUseVCR()` 第一行就判 test），首次
+# 跑到某条未录制的请求时会把响应写到 `fixtures/<sha1>.json` —— 文件名是
+# `normalizeMessagesForAPI` 输出内容的哈希。
+# zai 的 /compact 走 vendor 压缩链路后，单测会真的触发录制。
+# （zn-agent-core/fixtures/ 下那 10 个是历史上已提交且用户决定保留的，
+#   不在此列。）
+fixtures/

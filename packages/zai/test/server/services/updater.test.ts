@@ -8,7 +8,7 @@ import type { ServerEvent } from '../../../src/shared/events.js'
 //   1. dev 模式 (ZAI_FROM_GLOBAL_INSTALL !== '1') 直接 return,不调 npm view
 //   2. SKIP_ENV=1 直接 return
 //   3. settings.autoUpdate=false 跳过 npm view
-//   4. 已最新 (current >= latest) 跳过 install
+//   4. 已最新 (current >= latest) → emit idle,不 install
 //   5. 有新版 → emit installing → (mock spawn) → emit complete
 //   6. spawn 失败 → emit failed
 //
@@ -29,6 +29,7 @@ const eventListener = (e: ServerEvent) => recordedEvents.push(e)
 // 模拟 getCliStatuses — 每个 case 单独覆盖返回值
 const mockGetCliStatuses = vi.fn()
 const mockSpawn = vi.fn()
+const mockProbeWritable = vi.fn()
 
 vi.mock('../../../src/server/services/detect.js', () => ({
   // 只导出测试需要的 getter,其它函数不模拟 — vi.fn() 默认返回 undefined
@@ -38,6 +39,12 @@ vi.mock('../../../src/server/services/detect.js', () => ({
 vi.mock('../../../src/server/services/spawner.js', () => ({
   spawn: (...args: unknown[]) => mockSpawn(...args),
   resolveSpawnCommand: vi.fn((cmd: string, args: string[]) => ({ command: cmd, args })),
+}))
+
+// 权限预检默认「可写」,让既有用例走原路径;单独的用例覆盖不可写分支。
+// 不 mock 的话会真跑 `npm config get prefix`,慢且随环境漂。
+vi.mock('../../../src/server/services/npmPermissions.js', () => ({
+  probeGlobalPrefixWritable: (...args: unknown[]) => mockProbeWritable(...args),
 }))
 
 beforeEach(async () => {
@@ -50,6 +57,9 @@ beforeEach(async () => {
   recordedEvents.length = 0
   mockGetCliStatuses.mockReset()
   mockSpawn.mockReset()
+  mockProbeWritable.mockReset()
+  // 默认前缀可写 — 大多数用例只关心版本比较/安装本身。
+  mockProbeWritable.mockResolvedValue({ writable: true, prefix: '/writable/prefix' })
   const { eventBus } = await import('../../../src/server/services/eventBus.js')
   eventBus.subscribe(eventListener)
 })
@@ -95,7 +105,7 @@ describe('maybeAutoUpdate', () => {
     expect(mockSpawn).not.toHaveBeenCalled()
   })
 
-  it('skips install when current >= latest (no events emitted besides checking)', async () => {
+  it('emits idle when current >= latest (no install, and checking is closed)', async () => {
     mockGetCliStatuses.mockResolvedValue([
       { name: 'zai', pkg: '@zn-ai/zai', bin: 'zai', installed: true,
         path: '/x', currentVersion: '0.3.11', latestVersion: '0.3.11' },
@@ -105,8 +115,48 @@ describe('maybeAutoUpdate', () => {
     await maybeAutoUpdate()
     expect(mockGetCliStatuses).toHaveBeenCalledWith(true, 'zai')
     expect(mockSpawn).not.toHaveBeenCalled()
-    // 只发了 checking,没有 installing / complete / failed
-    expect(recordedEvents.map((e) => e.type)).toEqual(['app.update.checking'])
+    // checking 必须有 idle 收尾:前端「正在检查」通知 duration:0,不发
+    // 终态事件它就永久悬挂(HRMSV3-ZN-WEBSITE#668)。
+    expect(recordedEvents.map((e) => e.type)).toEqual([
+      'app.update.checking',
+      'app.update.idle',
+    ])
+    const idle = recordedEvents.find((e) => e.type === 'app.update.idle') as Extract<ServerEvent, { type: 'app.update.idle' }>
+    expect(idle.reason).toBe('up-to-date')
+  })
+
+  it('emits idle when getCliStatuses throws', async () => {
+    mockGetCliStatuses.mockRejectedValue(new Error('npm registry unreachable'))
+
+    const { maybeAutoUpdate } = await import('../../../src/server/services/updater.js')
+    await maybeAutoUpdate()
+    expect(recordedEvents.map((e) => e.type)).toEqual([
+      'app.update.checking',
+      'app.update.idle',
+    ])
+    const idle = recordedEvents.find((e) => e.type === 'app.update.idle') as Extract<ServerEvent, { type: 'app.update.idle' }>
+    expect(idle.reason).toBe('check-failed')
+  })
+
+  it('emits idle when no cli status is returned', async () => {
+    mockGetCliStatuses.mockResolvedValue([])
+
+    const { maybeAutoUpdate } = await import('../../../src/server/services/updater.js')
+    await maybeAutoUpdate()
+    const idle = recordedEvents.find((e) => e.type === 'app.update.idle') as Extract<ServerEvent, { type: 'app.update.idle' }>
+    expect(idle.reason).toBe('no-status')
+  })
+
+  it('emits idle when latest version is unknown (npm view failed)', async () => {
+    mockGetCliStatuses.mockResolvedValue([
+      { name: 'zai', pkg: '@zn-ai/zai', bin: 'zai', installed: true,
+        path: '/x', currentVersion: '0.3.11', latestVersion: null },
+    ])
+
+    const { maybeAutoUpdate } = await import('../../../src/server/services/updater.js')
+    await maybeAutoUpdate()
+    const idle = recordedEvents.find((e) => e.type === 'app.update.idle') as Extract<ServerEvent, { type: 'app.update.idle' }>
+    expect(idle.reason).toBe('no-version')
   })
 
   it('emits installing + complete when newer version found and spawn succeeds', async () => {
@@ -139,6 +189,50 @@ describe('maybeAutoUpdate', () => {
     const complete = recordedEvents.find((e) => e.type === 'app.update.complete') as Extract<ServerEvent, { type: 'app.update.complete' }>
     expect(complete.from).toBe('0.3.8')
     expect(complete.to).toBe('0.3.11')
+  })
+
+  it('emits failed (without spawning npm) when global prefix is not writable', async () => {
+    mockGetCliStatuses.mockResolvedValue([
+      { name: 'zai', pkg: '@zn-ai/zai', bin: 'zai', installed: true,
+        path: '/x', currentVersion: '0.3.8', latestVersion: '0.3.11' },
+    ])
+    mockProbeWritable.mockResolvedValue({ writable: false, prefix: '/usr/local' })
+
+    const { maybeAutoUpdate } = await import('../../../src/server/services/updater.js')
+    await maybeAutoUpdate()
+
+    // 关键:npm 完全没有被 spawn — 否则 npm 会自己往 root 目录写并喷堆栈。
+    expect(mockSpawn).not.toHaveBeenCalled()
+    expect(recordedEvents.map((e) => e.type)).toEqual([
+      'app.update.checking',
+      'app.update.failed',
+    ])
+    const failed = recordedEvents.find((e) => e.type === 'app.update.failed') as Extract<ServerEvent, { type: 'app.update.failed' }>
+    expect(failed.from).toBe('0.3.8')
+    expect(failed.to).toBe('0.3.11')
+    // 消息要说人话:含出错的目录 + 手动补救命令,而不是 npm 原始堆栈。
+    expect(failed.error).toContain('/usr/local')
+    expect(failed.error).toContain('npm install -g @zn-ai/zai@0.3.11')
+  })
+
+  it('proceeds when prefix probe is inconclusive (writable=null)', async () => {
+    mockGetCliStatuses.mockResolvedValue([
+      { name: 'zai', pkg: '@zn-ai/zai', bin: 'zai', installed: true,
+        path: '/x', currentVersion: '0.3.8', latestVersion: '0.3.11' },
+    ])
+    mockProbeWritable.mockResolvedValue({ writable: null, prefix: null })
+    mockSpawn.mockResolvedValue({ code: 0, signal: null })
+
+    const { maybeAutoUpdate } = await import('../../../src/server/services/updater.js')
+    await maybeAutoUpdate()
+
+    // 探测失败不能阻断升级 — 交给 npm 自己报错。
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
+    expect(recordedEvents.map((e) => e.type)).toEqual([
+      'app.update.checking',
+      'app.update.installing',
+      'app.update.complete',
+    ])
   })
 
   it('emits failed when spawn exits non-zero', async () => {

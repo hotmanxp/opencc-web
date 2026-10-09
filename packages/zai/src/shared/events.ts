@@ -196,7 +196,13 @@ const SystemEvent = z.discriminatedUnion('type', [
   // 比较 → 必要时 `npm install -g`,全程异步,通过这些事件把阶段
   // 同步给前端。payload 故意不带 sessionId(纯 system 级事件),
   // eventBus.isGlobalEvent() 必须显式登记才能跨 sid 广播。
+  //
+  // checking 与 idle 互为收尾:前端「正在检查」通知 duration:0(不自动
+  // 消失),只能靠终态事件销毁。没有 idle 就没有终态,「已是最新」时
+  // 通知会永久悬挂。
   z.object({ ...Base.shape, type: z.literal('app.update.checking') }),
+  z.object({ ...Base.shape, type: z.literal('app.update.idle'),
+             reason: z.enum(['up-to-date','no-version','no-status','check-failed']) }),
   z.object({ ...Base.shape, type: z.literal('app.update.installing'),
              from: z.string(), to: z.string() }),
   z.object({ ...Base.shape, type: z.literal('app.update.complete'),

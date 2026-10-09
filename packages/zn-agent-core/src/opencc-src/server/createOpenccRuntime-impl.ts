@@ -41,11 +41,12 @@ import { getPluginCommands, getPluginSkills } from '../utils/plugins/loadPluginC
 import { getAgentDefinitionsWithOverrides } from '../tools/AgentTool/loadAgentsDir.js'
 import { refreshActivePlugins } from '../utils/plugins/refresh.js'
 import { loadInstalledPluginsV2, hasPendingUpdates, getPendingUpdatesDetails } from '../utils/plugins/installedPluginsManager.js'
-import { getMarketplace, getDeclaredMarketplaces, loadKnownMarketplacesConfig, addMarketplaceSource, saveMarketplaceToSettings, clearMarketplacesCache } from '../utils/plugins/marketplaceManager.js'
+import { getMarketplace, getDeclaredMarketplaces, loadKnownMarketplacesConfig, addMarketplaceSource, saveMarketplaceToSettings, clearMarketplacesCache, refreshMarketplace } from '../utils/plugins/marketplaceManager.js'
 import { getMarketplaceSourceDisplay } from '../utils/plugins/marketplaceHelpers.js'
 import { parseMarketplaceInput } from '../utils/plugins/parseMarketplaceInput.js'
 import { parsePluginIdentifier } from '../utils/plugins/pluginIdentifier.js'
 import { clearAllCaches } from '../utils/plugins/cacheUtils.js'
+import { getGitCommitSha } from '../utils/plugins/pluginVersioning.js'
 import { getUserConfigJson } from '../utils/userConfigJson.js'
 // zai patch (2026-08-29): 走 server/index.js barrel 拿 getAgentRegistry。
 // 直接 import './agentRegistry.js' 在 esbuild bundle 时把内部 call site
@@ -609,6 +610,79 @@ export async function createOpenccRuntimeImpl(options) {
     return counts
   }
 
+  /**
+   * Installed plugins whose marketplace now offers something newer.
+   *
+   * Two comparisons, in order of confidence:
+   *   1. explicit `entry.version` — a semver the maintainer bumped. Installed
+   *      version differing from it is a definitive "behind".
+   *   2. git HEAD — covers git-subdir plugins that carry no `version` field at
+   *      all (their installed "version" is a `<sha>-<pathhash>` token, not
+   *      something comparable as semver). Comparing the marketplace clone's
+   *      HEAD against the recorded `gitCommitSha` catches those.
+   *
+   * Anything we cannot compare (unreadable marketplace, local directory
+   * source with no git, no recorded sha) is simply not reported — the UI
+   * keeps the plugin updatable regardless, `updatePluginOp` no-ops on
+   * already-current installs.
+   */
+  async function findOutdatedInstalledPluginIds(
+    v2: Awaited<ReturnType<typeof loadInstalledPluginsV2>>,
+  ): Promise<string[]> {
+    const pluginIds = Object.keys(v2.plugins)
+    if (pluginIds.length === 0) return []
+
+    const declared = getDeclaredMarketplaces()
+    if (Object.keys(declared).length === 0) return []
+
+    const marketplaceConfig = await loadKnownMarketplacesConfig()
+    // One git HEAD read per marketplace, not per plugin.
+    const headByMarketplace = new Map<string, string | null>()
+    const entriesByMarketplace = new Map<string, Awaited<ReturnType<typeof getMarketplace>> | null>()
+
+    const outdated: string[] = []
+    for (const pluginId of pluginIds) {
+      const { name, marketplace } = parsePluginIdentifier(pluginId)
+      if (!name || !marketplace || !declared[marketplace]) continue
+
+      if (!entriesByMarketplace.has(marketplace)) {
+        entriesByMarketplace.set(
+          marketplace,
+          await getMarketplace(marketplace).catch(() => null),
+        )
+      }
+      const entry = entriesByMarketplace
+        .get(marketplace)
+        ?.plugins?.find((p) => p.name === name)
+      if (!entry) continue
+
+      for (const inst of v2.plugins[pluginId] ?? []) {
+        if (entry.version && inst.version && entry.version !== inst.version) {
+          outdated.push(pluginId)
+          break
+        }
+        if (entry.version && inst.version) continue // both known and equal
+
+        // No usable version field — fall back to git HEAD comparison.
+        if (!inst.gitCommitSha) continue
+        const installLocation = marketplaceConfig[marketplace]?.installLocation
+        if (!installLocation) continue
+        if (!headByMarketplace.has(marketplace)) {
+          headByMarketplace.set(
+            marketplace,
+            await getGitCommitSha(installLocation).catch(() => null),
+          )
+        }
+        const head = headByMarketplace.get(marketplace)
+        if (head && head !== inst.gitCommitSha) {
+          outdated.push(pluginId)
+          break
+        }
+      }
+    }
+    return outdated
+  }
+
   async function buildList(): Promise<OpenccPluginListResult> {
     const [loadResult, v2, counts] = await Promise.all([
       loadAllPlugins(),
@@ -622,12 +696,22 @@ export async function createOpenccRuntimeImpl(options) {
       e.mcpServers = Object.keys(p.mcpServers ?? {}).length
       counts.set(p.name, e)
     }
-    // 4) hasUpdate via pending updates registry
+    // 4) hasUpdate — two independent signals, union'd.
+    //    4a) the background autoupdater already downloaded a newer version to
+    //        disk while this session still runs the old installPath.
+    //    4b) the marketplace itself moved on (see findOutdatedInstalledPluginIds).
+    //    4a alone left the flag permanently false in zai: the headless runtime
+    //    never runs the autoupdater, so nothing ever wrote a differing path.
     const pendingMap = new Map<string, boolean>()
     if (hasPendingUpdates()) {
       for (const u of getPendingUpdatesDetails()) {
-        pendingMap.set(u.id, true)
+        // The detail row's key is `pluginId`, not `id` — reading `u.id` yielded
+        // undefined, so even a completed autoupdate never lit the flag.
+        pendingMap.set(u.pluginId, true)
       }
+    }
+    for (const id of await findOutdatedInstalledPluginIds(v2)) {
+      pendingMap.set(id, true)
     }
     // Plugin enable/disable state is stored in the unified user config JSON
     // (~/.zai.json, fallback ~/.zai.json) — not the vendor settings
@@ -830,6 +914,54 @@ export async function createOpenccRuntimeImpl(options) {
           message: alreadyMaterialized
             ? `市场 '${name}' 已存在于本地，已重新登记`
             : `已添加市场: ${name}`,
+          marketplaces: await buildMarketplaces(),
+          available: await buildAvailable(),
+        }
+      } catch (e) {
+        return { success: false, message: e instanceof Error ? e.message : String(e) }
+      }
+    },
+
+    /**
+     * Mirrors the CLI's `marketplaceUpdateHandler`: refresh the upstream
+     * manifest in place, then drop every cache that could still serve the
+     * pre-refresh state. Refreshing only the source is deliberate — the
+     * installed plugins keep running until the user updates them
+     * individually from the 已安装 tab.
+     */
+    async updateMarketplace(name: string): Promise<OpenccMarketplaceActionResult> {
+      const trimmed = (name ?? '').trim()
+      if (!trimmed) return { success: false, message: '市场名称为空' }
+
+      // refreshMarketplace() returns silently (no signal) for settings-sourced
+      // marketplaces — they have no upstream. Rejecting them here is what lets
+      // the UI explain why the click produced no change instead of reporting
+      // a bogus success.
+      let config
+      try {
+        config = await loadKnownMarketplacesConfig()
+      } catch (e) {
+        return { success: false, message: e instanceof Error ? e.message : String(e) }
+      }
+      const entry = config[trimmed]
+      if (!entry) return { success: false, message: `市场 '${trimmed}' 不存在` }
+      if (entry.source?.source === 'settings') {
+        return {
+          success: false,
+          message: `市场 '${trimmed}' 来自 settings 内联配置，没有上游可拉取，已跳过`,
+        }
+      }
+
+      try {
+        await refreshMarketplace(trimmed)
+        // getMarketplace is memoized and clearAllCaches() does not touch that
+        // memo — without this the refreshed marketplace still reads as stale.
+        clearMarketplacesCache()
+        clearAllCaches()
+        return {
+          success: true,
+          name: trimmed,
+          message: `已更新市场: ${trimmed}`,
           marketplaces: await buildMarketplaces(),
           available: await buildAvailable(),
         }

@@ -197,6 +197,12 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   // vendor module is excluded from main tsc, mirror to ./index.js — runtime
   // value is inlined into the esbuild bundle; type mirror uses index.d.ts).
   './opencc-src/utils/task/diskOutput.js': './index.js',
+  // zai patch (2026-10-08, 手动 /compact 接线 P0): 压缩后缓存清理与
+  // compact-warning 抑制。zai 手动 /compact 绕开 vendor 链路,必须显式补
+  // 这两个(自动压缩由 autoCompact.ts 内部完成)。vendor 模块被 tsc 排除,
+  // 镜像到 ./index.js;运行时值由 esbuild 打进 opencc-core.mjs。
+  './opencc-src/services/compact/postCompactCleanup.js': './index.js',
+  './opencc-src/services/compact/compactWarningState.js': './index.js',
   // zai patch (2026-10-06, mods 同步): 用户 JS 扩展系统(src/mods/)的四个
   // 公共模块。vendor opencc-src 整体被 tsc 排除,没有独立 d.ts,镜像到
   // ./index.js(src/index.ts 提供 declare-only 契约);运行时值由 esbuild
@@ -236,6 +242,31 @@ function rewriteDtsSourcePath(line: string): string {
  *  .length === 0` 判断 — bundle-opencc 自己会写 Tool.d.ts 到 dist/opencc-
  *  src/Tool.d.ts(zai patch 2026-08-20),让 dist 永远非空,误判 warm。 */
 const TSC_PROBE = join(ROOT, 'dist', 'compat', 'cwdStore.d.ts')
+
+/** Trees whose d.ts are emitted by tsc somewhere in this same build, so a
+ *  warm dist that predates a brand-new module there must not hard-fail:
+ *  `compat/*` is in the main project's root file set and its d.ts lands in
+ *  the `tsc -b` step that runs right after this script; `opencc-src/server/*`
+ *  is emitted by the `tsc -p tsconfig.server.json` step later in this script.
+ *  Everything else under `opencc-src/` is excluded from tsc and must be
+ *  mirrored via DTS_PATH_REWRITE. */
+const TSC_EMITTED_PREFIXES = ['compat/', 'opencc-src/server/'] as const
+
+function isTscEmittedTarget(target: string): boolean {
+  const rel = target.replace(/^\.\//, '')
+  if (!TSC_EMITTED_PREFIXES.some((prefix) => rel.startsWith(prefix))) return false
+  // Only defer when the source module actually exists — tsc will emit its
+  // d.ts. A re-export with no source at all is a genuine dangling export and
+  // still fails the assertion below.
+  const base = join(ROOT, 'src', rel.replace(/\.js$/, ''))
+  return (
+    existsSync(`${base}.ts`) ||
+    existsSync(`${base}.tsx`) ||
+    existsSync(`${base}.d.ts`) ||
+    existsSync(join(base, 'index.ts'))
+  )
+}
+
 function assertDtsTargetsResolve(bundleEntryDts: string): void {
   if (!existsSync(TSC_PROBE)) {
     console.log(
@@ -247,13 +278,12 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
   for (const m of bundleEntryDts.matchAll(fromRe)) {
     const target = m[1]
     if (target === './package.json' || !target.startsWith('.')) continue
-    // opencc-src/server/* targets are mechanically emitted later in THIS
-    // script by the `tsc -p tsconfig.server.json` step (their files are in
-    // tsconfig.server.json include), so a warm dist that predates a new
-    // server module must not hard-fail here before that step runs. Dangling
-    // refs are still caught by typecheck:consumer + verify-server-types-
-    // self-contained (the same net the cold-build guard relies on).
-    if (target.startsWith('./opencc-src/server/')) continue
+    // Targets in a tree tsc emits d.ts for (see TSC_EMITTED_PREFIXES) resolve
+    // once those steps run, so a warm dist that predates a new module there
+    // must not hard-fail here. Dangling refs are still caught downstream:
+    // typecheck:consumer + verify-server-types-self-contained (the same net
+    // the cold-build guard relies on).
+    if (isTscEmittedTarget(target)) continue
     const expected = join(OUT_DIR, target.replace(/\.js$/, '.d.ts'))
     if (!existsSync(expected)) {
       console.error(

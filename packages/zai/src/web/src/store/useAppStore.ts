@@ -233,6 +233,7 @@ interface AppState {
    *   - 'checking' / 'installing' → 顶部 antd notification(轻量提示)
    *   - 'complete' → Modal.info「升级到 vX.Y.Z 完成,请重启 zai 以生效」
    *   - 'failed'   → Modal.error「升级失败:<err>」
+   *   - 'idle'     → 无需升级的终态,UpdateNotifier 销毁顶部通知
    *
    * dismissedKey 是 `${from}->${to}` 或纯 `error`;dismiss 后同 key
    * 不再触发弹窗(用户已经知道了),但新一轮 installing 会重置 dismissedKey。
@@ -460,6 +461,10 @@ export const useAppStore = create<AppState>((set) => ({
     switch (event.type) {
       case 'app.update.checking':
         return { ...state, appUpdate: { status: 'checking' } }
+      // 无需升级 — 流程终态。UpdateNotifier 靠它销毁 duration:0 的
+      // 「正在检查」通知,不清 dismissedKey(本轮没有弹窗发生过)。
+      case 'app.update.idle':
+        return { ...state, appUpdate: { status: 'idle' } }
       case 'app.update.installing':
         return {
           ...state,

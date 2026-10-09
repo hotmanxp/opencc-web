@@ -589,8 +589,8 @@ function mapSubagentBgEventType(type: string): string {
 }
 
 /**
- * Build the opencc ctx → zai ToolCallCtx transform. Mirrors SkillTool.ts
- * (SkillBridgeContext): inject sessionId + abortSignal. setAppState /
+ * Build the opencc ctx → zai ToolCallCtx transform. Mirrors AskUserQuestionTool.ts
+ * (AskUserQuestionBridgeContext): inject sessionId + abortSignal. setAppState /
  * setAppStateForTasks are passed through via `...o` (we need
  * setAppStateForTasks specifically for task registration to reach the root
  * store, not the no-op'd async-agent setAppState — see

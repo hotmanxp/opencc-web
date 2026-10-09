@@ -25,6 +25,7 @@ const shownFinalModals = new Set<string>()
  *   - 'installing' → 同上 notification 更新文案 + from/to 版本号
  *   - 'complete'   → Modal.info「升级到 vX.Y.Z 完成,请重启 zai 以生效」
  *   - 'failed'     → Modal.error「升级失败:<err>」
+ *   - 'idle'       → 销毁顶部 notification,不弹窗(无需升级的终态)
  *
  * 去重:complete/failed 由 store.dismissedKey 记录用户已 dismiss 的
  * from+to 组合,同 key 不再弹(用户已按掉);shownFinalModals Set 防
@@ -49,8 +50,16 @@ export function UpdateNotifier() {
           ? `err:${error}`
           : status
 
+    // idle — 无需升级(已是最新 / 查不到版本 / 状态查询失败),流程到此
+    // 结束。checking 的通知 duration:0 不自动消失,只能在这里销毁。
+    // 静默收场,不弹任何东西。
+    if (status === 'idle') {
+      notification.destroy('app-update-progress')
+      return
+    }
+
     // 检查中 / 安装中 → 顶部轻量通知。duration: 0 表示不自动关闭,
-    // 下一阶段(complete/failed)会主动 destroy。同 key 调用幂等更新。
+    // 下一阶段(idle/complete/failed)会主动 destroy。同 key 调用幂等更新。
     if (status === 'checking' || status === 'installing') {
       // 新一轮升级流程的开始 — 清空最终弹窗去重,允许 fresh 流程的
       // complete/failed 弹出(上一轮相同 key 的弹窗记录不再适用)。

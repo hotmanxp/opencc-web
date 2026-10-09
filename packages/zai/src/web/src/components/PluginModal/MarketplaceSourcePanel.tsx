@@ -7,7 +7,9 @@ type Props = {
   marketplaces: MarketplaceDto[]
   status: FetchStatus
   adding: boolean
+  updating?: string
   onAdd: (source: string) => void
+  onUpdate: (name: string) => void
 }
 
 /** `2026-08-07T...` → `2026-08-07`,拿不到就不显示. */
@@ -18,12 +20,21 @@ function formatDate(iso?: string): string | null {
 }
 
 /**
- * "市场来源" Tab — 列出已配置的插件市场,并提供添加入口.
+ * "市场来源" Tab — 列出已配置的插件市场,并提供添加/更新入口.
  *
- * 添加是唯一的写操作:删除/更新市场目前仍走 CLI(`claude marketplace remove|update`),
- * 因为删除会连带卸载该市场下已安装的插件,需要更重的确认流程.
+ * 「更新」只把该来源的上游清单拉到最新(git pull / 重新下载),不动已安装的插件;
+ * 装不装新版仍由「已安装」Tab 决定 —— 那边只有拿到新的清单才会把「待更新」标记点亮.
+ * 删除市场仍走 CLI(`claude marketplace remove`),因为删除会连带卸载该市场下
+ * 已安装的插件,需要更重的确认流程.
  */
-export function MarketplaceSourcePanel({ marketplaces, status, adding, onAdd }: Props) {
+export function MarketplaceSourcePanel({
+  marketplaces,
+  status,
+  adding,
+  updating,
+  onAdd,
+  onUpdate,
+}: Props) {
   const [source, setSource] = useState('')
 
   if (status === 'loading' || status === 'idle') {
@@ -76,25 +87,37 @@ export function MarketplaceSourcePanel({ marketplaces, status, adding, onAdd }: 
             <div
               key={m.name}
               data-testid="marketplace-source-row"
-              className="py-2.5 px-3"
+              className="flex items-start gap-3 py-2.5 px-3"
               style={{ borderBottom: '1px solid var(--border-subtle)' }}
             >
-              <div className="flex items-center gap-2 flex-wrap">
-                <Typography.Text strong>{m.name}</Typography.Text>
-                <Tag style={{ margin: 0 }}>{m.sourceType}</Tag>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Typography.Text strong>{m.name}</Typography.Text>
+                  <Tag style={{ margin: 0 }}>{m.sourceType}</Tag>
+                </div>
+                <Typography.Text
+                  type="secondary"
+                  className="text-xs block mt-0.5 break-all"
+                >
+                  {m.source}
+                </Typography.Text>
+                <Typography.Text type="secondary" className="text-xs block mt-0.5">
+                  {/* pluginCount 为 undefined 表示该市场缓存读不出来,不能当成 0 个插件 */}
+                  {m.pluginCount === undefined ? '插件清单读取失败' : `${m.pluginCount} 个插件`}
+                  {` · 已安装 ${m.installedCount}`}
+                  {updated ? ` · 更新于 ${updated}` : ''}
+                </Typography.Text>
               </div>
-              <Typography.Text
-                type="secondary"
-                className="text-xs block mt-0.5 break-all"
+              <Button
+                size="small"
+                className="shrink-0 mt-0.5"
+                data-testid="marketplace-source-update"
+                loading={updating === m.name}
+                disabled={!!updating && updating !== m.name}
+                onClick={() => onUpdate(m.name)}
               >
-                {m.source}
-              </Typography.Text>
-              <Typography.Text type="secondary" className="text-xs block mt-0.5">
-                {/* pluginCount 为 undefined 表示该市场缓存读不出来,不能当成 0 个插件 */}
-                {m.pluginCount === undefined ? '插件清单读取失败' : `${m.pluginCount} 个插件`}
-                {` · 已安装 ${m.installedCount}`}
-                {updated ? ` · 更新于 ${updated}` : ''}
-              </Typography.Text>
+                更新
+              </Button>
             </div>
           )
         })

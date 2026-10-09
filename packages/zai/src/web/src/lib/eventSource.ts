@@ -89,6 +89,7 @@ const NAMED_EVENT_TYPES = [
   // 弹窗「升级完成 / 失败」。对齐 shared/events.ts SystemEvent union,
   // 新增事件必须同步加到 NAMED_EVENT_TYPES,否则 EventSource 静默丢事件。
   'app.update.checking',
+  'app.update.idle',
   'app.update.installing',
   'app.update.complete',
   'app.update.failed',

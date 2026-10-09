@@ -49,6 +49,11 @@ export interface SessionTranscriptEntry {
   [key: string]: unknown
 }
 
+/**
+ * Read-only view of existing compact state. Produced by
+ * `SessionFacade.compact()` — which, despite the name, does NOT run a
+ * compaction (no LLM call, no write). See sessionFacade-impl.ts.
+ */
 export interface SessionCompactResult {
   /** Byte offset in the JSONL file where the post-boundary content starts (0 if no boundary). */
   boundaryStartOffset: number

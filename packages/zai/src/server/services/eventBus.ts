@@ -72,6 +72,7 @@ export function isGlobalEvent(event: ServerEvent): boolean {
     // 否则只有最初连 SSE 的那个 tab 会看到「升级完成」弹窗,后开的
     // tab 永远不会被通知。
     case 'app.update.checking':
+    case 'app.update.idle':
     case 'app.update.installing':
     case 'app.update.complete':
     case 'app.update.failed':
@@ -139,6 +140,7 @@ const GLOBAL_TOPIC_COMMAND = new Set<string>(['command.run', 'command.done'])
 // 最先连上的那个 tab 能看到「升级完成」。
 const GLOBAL_TOPIC_APP_UPDATE = new Set<string>([
   'app.update.checking',
+  'app.update.idle',
   'app.update.installing',
   'app.update.complete',
   'app.update.failed',

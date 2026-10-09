@@ -147,11 +147,14 @@ export * from './index.js'
 // 导出的是 opencc-src/query.ts 的真实 query)
 //
 // zai patch (2026-08-09): 暴露 vendor 的 queryModelWithStreaming 给 zai 直接复用。
-// zai 之前的 compat/runtime/compactService 通过显式注入 ModelCaller 调用 LLM,
-// 但 commit da5956c3 已经移除了 zai 自建 modelCaller 路径——模型调用全部走
-// vendor 的 query/deps.ts productionDeps().callModel = queryModelWithStreaming
-// (读 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL)。让 compat/compactSession 也
-// 内部直接走这条路径,统一调用语义,消除"modelCaller 未配置" 错误。
+// 模型调用统一走 vendor 的 query/deps.ts productionDeps().callModel =
+// queryModelWithStreaming(读 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL)。
+//
+// 2026-10-08 更新:曾提到「让 compat/compactSession 也内部走这条路径」——
+// 那条 shim 已随 P3-1 删除(恒依赖已被移除的 modelCaller,零生产调用方)。
+// 手动 /compact 现在走 vendor compactViaVendor(见下方 compactBridge 导出),
+// queryModelWithStreaming 的剩余消费者是 /compact 的自建回退路径
+// (ZAI_COMPACT_VENDOR=0 时)。
 export { queryModelWithStreaming } from './opencc-src/services/api/claude.js'
 export { asSystemPrompt } from './opencc-src/utils/systemPromptType.js'
 // zai patch (2026-08-20): buildTool + z 供外置主 agent JS(~/.zai/main-agents/*.js)
@@ -292,6 +295,39 @@ export { hasExternalIncludes } from './compat/memory/loader.js'
 
 // ./opencc-src/services/api/sessionApiCounter(zai routes/agent.ts 用量统计)
 export * from './opencc-src/services/api/sessionApiCounter.js'
+
+// 压缩后缓存清理(zai 手动 /compact 调用)。
+//
+// 自动压缩走 vendor `autoCompact.ts`,内部已经调 runPostCompactCleanup +
+// markPostCompaction;但 zai 手动 /compact 是自建实现
+// (packages/zai/src/server/services/commands/builtin/compact.ts),绕开了整条
+// vendor 链路,于是 manual compact 后残留:microcompact 追踪状态、
+// getUserContext / getMemoryFiles memo、systemPromptSections、分类器审批、
+// Bash 权限推测、beta tracing、sessionMessages cache。`suppressCompactWarning`
+// 同理 —— vendor 参考实现(commands/compact/compact.ts:128)在成功压缩后调用,
+// 缺它会让「距下次 auto-compact 还剩多少」的提示继续按压缩前的 token 数显示。
+//
+// 这两个是 vendor 命令**层**的职责,`compactConversation` 自己不做,故必须由
+// 调用方显式补 —— 漏了就是上面那串残留。
+export { runPostCompactCleanup } from './opencc-src/services/compact/postCompactCleanup.js'
+export { suppressCompactWarning } from './opencc-src/services/compact/compactWarningState.js'
+
+// 手动 /compact 接 vendor 压缩链路的桥(P1/P2)。
+//
+// 导出 wrapper 而非 `compactConversation` 本体:后者有 6 个位置参数,其中
+// cacheSafeParams 依赖 getSystemPrompt / getUserContext / getSystemContext
+// 三个异步源,裸导出等于把易错细节推给每个调用方。bridge 内部照搬 vendor
+// 参考实现(opencc-src/commands/compact/compact.ts)的调用序列。
+// 落盘不在 bridge 职责内 —— compactConversation 自己不写盘,zai 侧仍用
+// store.replace()。详见 compat/compact/compactBridge.ts 模块注释。
+export { compactViaVendor } from './compat/compact/compactBridge.js'
+export type {
+  CompactViaVendorOptions,
+  CompactViaVendorResult,
+} from './compat/compact/compactBridge.js'
+// buildReplToolUseContext 供 zai 侧构造 vendor compactConversation 需要的
+// ToolUseContext;与 createReplSession 共用同一份形状(P1-1 抽出)。
+export { buildReplToolUseContext } from './compat/repl/buildReplToolUseContext.js'
 
 // ./opencc-src/utils/model/genericModelCapabilities(zai profileProjection)
 export * from './opencc-src/utils/model/genericModelCapabilities.js'

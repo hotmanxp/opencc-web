@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 
 // 把 queryModelWithStreaming 整体替换成可控 stream — 当前 compactCommand
 // 直接走 vendor 内置 query 路径 (注释见 compact.ts:106-113),不再依赖
@@ -54,8 +54,22 @@ const runtimeMock = vi.hoisted(() => ({
   sessionId: null as string | null,
 }))
 
+// zai patch (2026-10-08, P2): 本文件锁定**自建**摘要路径(它 mock 的是
+// queryModelWithStreaming)。默认实现已切到 vendor compactViaVendor,
+// 这里显式退回自建,否则 mock 不命中、测试会打真实 vendor 链路。
+// vendor 路径由 builtin.compact.vendor.test.ts 单独覆盖。
+const VENDOR_ENV_KEY = 'ZAI_COMPACT_VENDOR'
+let priorVendorFlag: string | undefined
+
+afterEach(() => {
+  if (priorVendorFlag === undefined) delete process.env[VENDOR_ENV_KEY]
+  else process.env[VENDOR_ENV_KEY] = priorVendorFlag
+})
+
 beforeEach(() => {
   vi.resetModules()
+  priorVendorFlag = process.env[VENDOR_ENV_KEY]
+  process.env[VENDOR_ENV_KEY] = '0'
   queryMock.events = [
     {
       type: 'stream_event',
@@ -144,13 +158,23 @@ describe('compactCommand — transcript rewriting', () => {
     expect(Array.isArray(calledMessages)).toBe(true)
     expect(calledMessages).toHaveLength(4)
 
-    const types = (calledMessages as TranscriptMessage[]).map((m) => m.type)
+    // zai patch (2026-10-08, P1.5): boundary 改用 vendor 形状
+    // type:'system' + subtype:'compact_boundary'。
+    const msgs = calledMessages as TranscriptMessage[]
+    const types = msgs.map((m) => m.type)
     expect(types).toEqual([
-      'compact_boundary',
+      'system',    // boundary — vendor 形状
       'assistant', // summary
       'assistant', // 倒数第二条 user/assistant (a2 "second assistant reply")
       'user',      // 最后一条 user/assistant (u3 "third user msg (most recent)")
     ])
+    expect(msgs[0]!.subtype).toBe('compact_boundary')
+    // preservedSegment 锚点: head=保留段首, tail=保留段末, anchor=summary
+    const seg = msgs[0]!.compactMetadata?.preservedSegment
+    expect(seg).toBeDefined()
+    expect(seg!.headUuid).toBe(msgs[2]!.uuid)
+    expect(seg!.tailUuid).toBe(msgs[3]!.uuid)
+    expect(seg!.anchorUuid).toBe(msgs[1]!.uuid)
 
     // summary 必须含原始 'mocked summary' 文本
     const summary = (calledMessages as TranscriptMessage[])[1]!
@@ -183,11 +207,17 @@ describe('compactCommand — transcript rewriting', () => {
 
     const [, calledMessages] = storeMock.replace.mock.calls[0] as [string, unknown[]]
     expect(calledMessages).toHaveLength(3) // boundary + summary + 1 原始
-    expect((calledMessages as TranscriptMessage[]).map((m) => m.type)).toEqual([
-      'compact_boundary',
+    const msgs3 = calledMessages as TranscriptMessage[]
+    expect(msgs3.map((m) => m.type)).toEqual([
+      'system',    // boundary — vendor 形状
       'assistant',
       'assistant',
     ])
+    expect(msgs3[0]!.subtype).toBe('compact_boundary')
+    // 保留段只有 1 条时 headUuid === tailUuid,锚点仍要写(vendor 靠它 relink)
+    const seg3 = msgs3[0]!.compactMetadata?.preservedSegment
+    expect(seg3?.headUuid).toBe(msgs3[2]!.uuid)
+    expect(seg3?.tailUuid).toBe(msgs3[2]!.uuid)
   })
 
   it('returns kind:error without calling store.replace when transcript has < 2 messages', async () => {

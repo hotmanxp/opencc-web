@@ -25,6 +25,13 @@ import {
 } from './compact.js'
 import { runPostCompactCleanup } from './postCompactCleanup.js'
 import { trySessionMemoryCompaction } from './sessionMemoryCompact.js'
+import {
+  AUTOCOMPACT_BUFFER_TOKENS,
+  computeAutoCompactThreshold,
+} from './autoCompactThreshold.js'
+
+// Re-exported: several callers import the buffer from this module.
+export { AUTOCOMPACT_BUFFER_TOKENS }
 
 // Reserve this many tokens for output during compaction
 // Based on p99.99 of compact summary output being 17,387 tokens.
@@ -49,7 +56,7 @@ export function getEffectiveContextWindowSize(model: string): number {
   // Floor: effective context must be at least the summary reservation plus a
   // usable buffer. If it goes lower, the auto-compact threshold becomes
   // negative and fires on every message (issue #635).
-  const autocompactBuffer = 13_000 // must match AUTOCOMPACT_BUFFER_TOKENS
+  const autocompactBuffer = AUTOCOMPACT_BUFFER_TOKENS
   const effectiveContext = contextWindow - reservedTokensForSummary
   return Math.max(effectiveContext, reservedTokensForSummary + autocompactBuffer)
 }
@@ -73,7 +80,6 @@ export type AutoCompactTrackingState = {
   forceReason?: 'memory-pressure' | 'message-count'
 }
 
-export const AUTOCOMPACT_BUFFER_TOKENS = 13_000
 export const WARNING_THRESHOLD_BUFFER_TOKENS = 20_000
 export const ERROR_THRESHOLD_BUFFER_TOKENS = 20_000
 export const MANUAL_COMPACT_BUFFER_TOKENS = 3_000
@@ -166,25 +172,21 @@ export function resolveAutoCompactCircuitBreakerState(args: {
   }
 }
 
+// zai patch (2026-10-08): 阈值策略抽到 autoCompactThreshold.ts 这个叶子模块。
+// 上游对所有模型统一用「窗口 - 13k buffer」，隐含假设是窗口小到「塞满前就该压」。
+// 但 zai 常用 1M 窗口的三方模型（MiniMax-M3 / M3.1-Flash-Preview、zhiniao-glm-5.1 等），
+// 阈值因此高达 987k，实践中永远够不到 —— 而 microcompact 的两条路径在 external build
+// 里被上游用 `if (false)` / 硬 stub 关掉了（cachedMicrocompact.ts 的
+// isCachedMicrocompactEnabled、isModelSupportedForCacheEditing 均 return false），
+// legacy 路径已删除。也就是说 60%→98% 这段完全裸奔，没有任何机制在管。
+//
+// 复现：sess-1791423013771-u8o0uxod 涨到 534k 未压缩即终止，其中 54.7% 是 Write
+// 工具入参（每个文件在 tool_use.input 与 tool_result 里各存一遍）。
 export function getAutoCompactThreshold(model: string): number {
-  const effectiveContextWindow = getEffectiveContextWindowSize(model)
-
-  const autocompactThreshold =
-    effectiveContextWindow - AUTOCOMPACT_BUFFER_TOKENS
-
-  // Override for easier testing of autocompact
-  const envPercent = process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
-  if (envPercent) {
-    const parsed = parseFloat(envPercent)
-    if (!isNaN(parsed) && parsed > 0 && parsed <= 100) {
-      const percentageThreshold = Math.floor(
-        effectiveContextWindow * (parsed / 100),
-      )
-      return Math.min(percentageThreshold, autocompactThreshold)
-    }
-  }
-
-  return autocompactThreshold
+  return computeAutoCompactThreshold(
+    getEffectiveContextWindowSize(model),
+    process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE,
+  )
 }
 
 export function calculateTokenWarningState(

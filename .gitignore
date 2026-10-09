@@ -66,6 +66,7 @@ Thumbs.db
 # Local runtime artifacts (ego browser task outputs etc.)
 var/
 docs/superpowers/plans/screenshots
+docs/superpowers/plans/**/screenshots/
 docs/superpowers/verification
 CONTEXT.md
 

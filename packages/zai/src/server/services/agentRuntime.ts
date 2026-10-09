@@ -11,19 +11,29 @@ import {
   TranscriptStore,
 } from '@zn-ai/zn-agent-core'
 
-// `TranscriptStore` is now imported from `@zn-ai/zn-agent-core` (the
-// compat shim at compat/runtime/legacyTranscriptStore.ts) — Task 6
-// deleted the synthetic compat store. The shim is a no-op facade:
-// the real session/transcript data is owned by the new
-// `OpenccRuntime` (see opencc-src/server/sessionFacade.ts). Route
-// handlers in `routes/agent.ts` / `routes/transcript.ts` /
-// builtin commands `clear` / `compact` continue to call
-// `getTranscriptStore().read/patch/remove/replace` against this
-// instance; the shim satisfies the call shape and the runtime
-// materializes real transcripts on first `query()`. Pre-existing
-// zai test files (transcript-repair-2013.test.ts,
-// builtin.compact.test.ts) were already broken in this worktree
-// per the 5/189 pre-existing baseline.
+// `TranscriptStore` comes from `@zn-ai/zn-agent-core`
+// (compat/runtime/legacyTranscriptStore.ts). Despite the filename it is
+// NOT dead code and NOT a stub — it is the authoritative transcript
+// accessor for zai, with ~30 live call sites across routes/agent.ts,
+// routes/transcript.ts, routes/internal/pushAction.ts, and the builtin
+// `clear` / `compact` commands.
+//
+// The JSONL file is written by two parties, verified empirically against
+// on-disk transcripts (2026-10-08):
+//   - vendor 环: user / assistant / tool_use / tool_result rows, including
+//     auto-compact's postCompactMessages (~96% of rows)
+//   - zai 侧: session-meta / custom-title / last-prompt, visible slash
+//     command rows (appendMessageEntry), and the whole-file rewrite that
+//     /compact + /clear perform (replace)
+// This class is the ONLY read path back (read/list), and owns the zai-side
+// writes. `append()` alone is a no-op by design — message rows belong to
+// the vendor loop. See index.ts for the same map in export context.
+//
+// `opencc-src/server/sessionFacade.ts` implements an alternative session
+// API but has zero call sites on the zai side; do not assume `sessionFacade`
+// owns transcript data. (An earlier revision of this comment claimed it
+// did — that was wrong.)
+//
 // The server module exports two `OpenccRuntime` shapes (one from
 // `serverTypes.ts` describing the brief's 8-method contract, one from
 // `createOpenccRuntime.ts` describing the impl). The factory's runtime

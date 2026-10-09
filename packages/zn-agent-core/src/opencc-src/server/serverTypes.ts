@@ -507,6 +507,8 @@ export type OpenccPluginApi = {
   listMarketplaces(): Promise<OpenccMarketplaceDto[]>
   /** `source` is raw user input — `owner/repo`, an https/git URL, or a local path. */
   addMarketplace(source: string): Promise<OpenccMarketplaceActionResult>
+  /** Re-pull a marketplace's upstream manifest. `name` is the marketplace name. */
+  updateMarketplace(name: string): Promise<OpenccMarketplaceActionResult>
 }
 
 // zai patch (2026-08-30, plan P0): export ReplSession types from server barrel.

@@ -241,6 +241,7 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     // appUpdate 状态显示 Modal / notification。统一走 useAppStore,
     // 不进 useAgentStore(这是 system 级,不是会话级)。
     case 'app.update.checking':
+    case 'app.update.idle':
     case 'app.update.installing':
     case 'app.update.complete':
     case 'app.update.failed':

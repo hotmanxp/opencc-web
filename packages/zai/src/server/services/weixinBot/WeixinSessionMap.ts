@@ -4,7 +4,7 @@
  * 为什么不直接把 `weixin:<acct>:<chatType>:<chatId>` 当 sessionId:
  *   zai 全仓库对 sessionId 的隐含契约是 `sess-<uuid>` / 字符集
  *   `[a-z0-9-]`,并且有代码显式依赖 —— transcript 文件名直接拼 sessionId
- *   (`compat/transcript/legacyTranscriptStore.ts` → `${sessionId}.jsonl`)、
+ *   (`compat/runtime/legacyTranscriptStore.ts` → `${sessionId}.jsonl`)、
  *   `compat/taskListStore.ts` 的 sanitize 注释明写假设该字符集、前端
  *   session 列表 / URL 全链路。带 `:` 的 ID 会一路漏到文件名与 URL。
  *

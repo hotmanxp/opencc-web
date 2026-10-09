@@ -64,6 +64,9 @@ import {
 import { restoreSession } from './sessionRestore.js'
 // zai patch (2026-08-30, plan P0): vendor query() integration (Task 8).
 import { query } from '../../opencc-src/query.js'
+// zai patch (2026-10-08, P1-1): ToolUseContext 构造与手动 /compact 共用,
+// 见 buildReplToolUseContext.ts 的模块注释。
+import { buildReplToolUseContext } from './buildReplToolUseContext.js'
 // zai patch (2026-08-30, plan P0): SDK message → runtime event adapter (Task 8).
 import { translateSdkToRuntime } from '../../compat/runtime/sdkEventAdapter.js'
 // zai patch (2026-08-30, plan P0): use vendor's user message factory so
@@ -454,94 +457,28 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
             const vendorCtx = useVendorFallbacks
               ? await _loadVendorToolContext()
               : null
-            // Vendor getTools needs a ToolPermissionContext; we don't
-            // have a real one in server-repl mode, so use the empty
-            // default. assembleToolPool expects (permissionContext,
-            // mcpTools); passing getEmptyToolPermissionContext means
-            // permission-mode rules won't filter any tools (which is
-            // the right default — host-supplied tools already passed
-            // host-side filtering).
-            const fallbackTools = hostTools
-              ?? (vendorCtx
-                ? vendorCtx.getTools({
-                  mode: 'acceptEdits',
-                  additionalWorkingDirectories: new Map(),
-                  alwaysAllowRules: {},
-                  alwaysDenyRules: {},
-                  alwaysAskRules: {},
-                  isBypassPermissionsModeAvailable: false,
-                })
-                : {})
+            // getCommands 是 async,先取;tools / readFileState 的 fallback
+            // 在 buildReplToolUseContext 内部做(见该文件同名注释)。
             const fallbackCommands = hostCommands
               ?? (vendorCtx ? await vendorCtx.getCommands(opts.cwd) : [])
-            const fallbackMcpClients = hostMcpClients ?? []
-            const fallbackReadFileState = hostReadFileState
-              ?? (vendorCtx
-                ? vendorCtx.createFileStateCacheWithSizeLimit(100)
-                : { get: () => undefined, set: () => undefined, has: () => false, delete: () => false })
-            const fallbackAgents = hostAgents ?? []
-            const fallbackAbortController = vendorCtx
-              ? vendorCtx.createAbortController()
-              : new AbortController()
-            const toolUseContext = {
-              options: {
-                commands: fallbackCommands,
-                debug: false,
-                mainLoopModel: (opts as any).model ?? 'claude-sonnet-4-5',
-                tools: fallbackTools,
-                verbose: false,
-                thinkingConfig: { type: 'adaptive' as const },
-                mcpClients: fallbackMcpClients,
-                mcpResources: {},
-                isNonInteractiveSession: true,
-                agentDefinitions: {
-                  activeAgents: fallbackAgents,
-                  allAgents: [] as unknown[],
-                },
-                customSystemPrompt: undefined,
-                appendSystemPrompt: undefined,
-                querySource: 'server-repl' as const,
-              },
-              // zai patch (2026-09-07, plan P0-1.5, worktree-dsh): 独立
-              // sessionId 字段, 不复用 agentId, 配合 query.ts:2672-2673
-              // mid-turn drain filter 走独立 sessionId 路由, 规避 vendor
-              // 内部 30+ 处 toolUseContext.agentId 副作用(BashTool
-              // preventCwdChanges / attachments plan 路径 /
-              // PermissionContext / SDK 输出)。
+            // zai patch (2026-10-08, P1-1): context 构造抽到共用模块
+            // buildReplToolUseContext —— 手动 /compact(P2)接 vendor
+            // compactConversation 时要同一份形状。复制一份必然漂移,而这里
+            // 的防御默认值是踩坑换来的(见该文件 getAppState 注释)。
+            const toolUseContext = buildReplToolUseContext({
+              tools: hostTools,
+              commands: fallbackCommands,
+              mcpClients: hostMcpClients,
+              readFileState: hostReadFileState,
+              agents: hostAgents,
+              resolvedCommands: fallbackCommands,
+              cwd: opts.cwd,
+              model: (opts as any).model,
               sessionId: sessionId as any,
-              agentId: undefined,
-              abortController: fallbackAbortController,
-              readFileState: fallbackReadFileState,
-              // zai patch (2026-08-30, plan P3-T0 fix): vendor getTools() and
-              // most tool implementations dereference
-              // `appState.toolPermissionContext.{mode, additionalWorkingDirectories,
-              // prePlanMode}` synchronously during query(). The zai web
-              // host typically passes a minimal getAppState (just enough
-              // for the message store), so without defensive defaults the
-              // very first plain-text prompt crashes with "Cannot read
-              // properties of undefined (reading 'mode')". Mirror the
-              // shape queryContext.ts:107-160 builds, with safe sentinels.
-              getAppState: () => {
-                const host = (opts.getAppState?.() ?? {}) as Record<string, unknown>
-                if (host.toolPermissionContext) return host as any
-                return {
-                  ...host,
-                  toolPermissionContext: {
-                    mode: 'default',
-                    additionalWorkingDirectories: new Map<string, string>(),
-                    prePlanMode: 'default',
-                  },
-                } as any
-              },
-              setAppState: (fn: (prev: unknown) => unknown) => {
-                opts.setAppState?.(fn)
-              },
-              setInProgressToolUseIDs: () => {},
-              setResponseLength: () => {},
-              updateFileHistoryState: () => {},
-              updateAttributionState: () => {},
-              messages: [] as any[],
-            }
+              vendorCtx,
+              getAppState: opts.getAppState,
+              setAppState: opts.setAppState,
+            })
             for await (const sdkMsg of query({
               messages: messages as any,
               systemPrompt: [] as any,

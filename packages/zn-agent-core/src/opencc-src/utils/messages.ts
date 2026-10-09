@@ -1391,7 +1391,13 @@ export function normalizeMessagesForAPI(
   // hashes, breaking VCR fixture lookup. Computed once here so the pre-merge
   // injection (in the user case) and the post-merge sweep below share it.
   let injectSnipTags = false
-  if (false && process.env.NODE_ENV !== 'test') {
+  // zai patch (2026-10-08): 上游用 `if (false)` 做 external build 的 DCE，把整段
+  // 掐断成死代码 —— 结果 snip 工具虽已注册（tools.ts:271），prompt 也告诉模型去用
+  // system-generated `snip_id=...`，但上下文里从来没有这些标记，markForSnip 的短 ID
+  // 永远匹配不上 UUID，snipCompactIfNeeded 恒返回 tokensFreed=0（空转）。
+  // 此处恢复运行时判定：NODE_ENV==='test' 仍跳过（marker 会改 message 内容 hash，
+  // 破坏 VCR fixture 查找），其余一律以 isSnipRuntimeEnabled() 为准。
+  if (process.env.NODE_ENV !== 'test') {
     const { isSnipRuntimeEnabled } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../services/compact/snipCompact.js') as typeof import('../services/compact/snipCompact.js')
@@ -1896,7 +1902,14 @@ export function mergeUserMessages(a: UserMessage, b: UserMessage): UserMessage {
     content: string | ContentBlockParam[],
   ): string | ContentBlockParam[] =>
     isCollapseSummary ? stripSnipTagsFromContent(content) : content
-  if (false) {
+  // zai patch (2026-10-08): 与 normalizeMessagesForAPI 的注入门控同源 —— 上游
+  // `if (false)` 让下面的 isMeta 归正分支成为死代码，fallback 直接 `...a` 透传
+  // a.isMeta。于是「meta 消息 + 真实用户消息」合并后仍带 isMeta:true，而
+  // appendMessageTagToUserMessage 对 isMeta 消息跳过打标（apiTransform.ts:29），
+  // 真实用户内容因此永远拿不到 snip_id。query.ts 会把连续的 user 消息合并，
+  // 这条路径很常见，必须一起放开。NODE_ENV==='test' 保持关闭以免影响
+  // VCR fixture hashing（与注入门控的测试豁免保持一致）。
+  if (process.env.NODE_ENV !== 'test') {
     // A merged message is only meta if ALL merged messages are meta. If any
     // operand is real user content, the result must not be flagged isMeta
     // (so internal snip ids get injected and it's treated as user-visible content).

@@ -12,6 +12,7 @@ const mockPlugins = {
   reload: vi.fn(),
   listMarketplaces: vi.fn(),
   addMarketplace: vi.fn(),
+  updateMarketplace: vi.fn(),
 }
 const mockGetRuntime = vi.fn()
 
@@ -151,5 +152,51 @@ describe('routes/plugins', () => {
     expect(r.status).toBe(200)
     expect(r.body.success).toBe(false)
     expect(r.body.message).toContain('无法识别')
+  })
+
+  it('POST /marketplaces/update forwards name and returns fresh lists', async () => {
+    mockPlugins.updateMarketplace.mockResolvedValue({
+      success: true,
+      name: 'zn-plugins-market',
+      message: '已更新市场: zn-plugins-market',
+      marketplaces: [{ name: 'zn-plugins-market', lastUpdated: '2026-10-08T00:00:00.000Z' }],
+      available: [{ id: 'p@zn-plugins-market', name: 'p' }],
+    })
+    const { app } = await bootstrap({ plugins: mockPlugins })
+    const r = await request(app).post('/api/plugins/marketplaces/update').send({ name: 'zn-plugins-market' })
+    expect(r.status).toBe(200)
+    expect(mockPlugins.updateMarketplace).toHaveBeenCalledWith('zn-plugins-market')
+    expect(r.body.success).toBe(true)
+    expect(r.body.marketplaces[0].lastUpdated).toBe('2026-10-08T00:00:00.000Z')
+    expect(r.body.available[0].id).toBe('p@zn-plugins-market')
+  })
+
+  // git pull / re-download failures are domain errors, not transport errors —
+  // the vendor error text (seed-managed, corrupted installLocation, …) must
+  // reach the UI untouched.
+  it('POST /marketplaces/update surfaces failure as 200 + success:false', async () => {
+    mockPlugins.updateMarketplace.mockResolvedValue({
+      success: false,
+      message: "Failed to refresh marketplace 'm': 市场 'm' is seed-managed",
+    })
+    const { app } = await bootstrap({ plugins: mockPlugins })
+    const r = await request(app).post('/api/plugins/marketplaces/update').send({ name: 'm' })
+    expect(r.status).toBe(200)
+    expect(r.body.success).toBe(false)
+    expect(r.body.message).toContain('seed-managed')
+  })
+
+  it('POST /marketplaces/update without name returns 400', async () => {
+    const { app } = await bootstrap({ plugins: mockPlugins })
+    const r = await request(app).post('/api/plugins/marketplaces/update').send({})
+    expect(r.status).toBe(400)
+    expect(mockPlugins.updateMarketplace).not.toHaveBeenCalled()
+  })
+
+  it('POST /marketplaces/update returns 503 when runtime is null', async () => {
+    const { app } = await bootstrap(null)
+    const r = await request(app).post('/api/plugins/marketplaces/update').send({ name: 'm' })
+    expect(r.status).toBe(503)
+    expect(r.body.error).toBe('agent runtime not ready')
   })
 })

@@ -2,6 +2,7 @@ import { eventBus } from './eventBus.js';
 import { initZaiSettingsCache, readZaiSettings, resolveAutoUpdate } from './zaiSettingsStore.js';
 import { getCliStatuses } from './detect.js';
 import { spawn } from './spawner.js';
+import { probeGlobalPrefixWritable } from './npmPermissions.js';
 
 // 只检测 +安装 zai 自身,沿用 detect.ts:109 的 `@zn-ai/zai` 注册。
 // 不需要包管理器检测(对比 opencc 的 installGlobalPackage 那一坨
@@ -32,10 +33,11 @@ let bootPromise: Promise<void> | null = null;
  *   3. settings.autoUpdate === false → return
  *   4. emit 'app.update.checking'
  *   5. getCliStatuses(true, 'zai')   ← forceRefresh=true,跳过 24h TTL
- *   6. 没有 latestVersion / 没新版本 → return
- *   7. emit 'app.update.installing'
- *   8. spawn 'npm install -g @zn-ai/zai@<v> --prefer-online'
- *   9. emit 'app.update.complete' | 'app.update.failed'
+ *   6. 没有 latestVersion / 没新版本 → emit 'app.update.idle' + return
+ *   7. 预检 npm 全局 prefix 可写性;不可写 → emit 'app.update.failed' + return
+ *   8. emit 'app.update.installing'
+ *   9. spawn 'npm install -g @zn-ai/zai@<v> --prefer-online'
+ *  10. emit 'app.update.complete' | 'app.update.failed'
  */
 export async function maybeAutoUpdate(): Promise<void> {
   if (bootPromise) return bootPromise;
@@ -58,16 +60,59 @@ async function run(): Promise<void> {
 
   eventBus.emit({ type: 'app.update.checking' });
 
-  const statuses = await getCliStatuses(true, 'zai');
+  // 「无需升级」是流程终态,必须显式发 idle 收尾:前端 checking 阶段的
+  // notification 是 duration:0(不自动消失),只有终态事件能销毁它。
+  // 历史上这里是静默 return,于是「已是最新」这个最常见路径下提示永久
+  // 悬挂 —— 每次启动都会复现。
+  const noUpdate = (reason: 'no-status' | 'no-version' | 'up-to-date' | 'check-failed') => {
+    eventBus.emit({ type: 'app.update.idle', reason });
+  };
+
+  let statuses;
+  try {
+    statuses = await getCliStatuses(true, 'zai');
+  } catch (err) {
+    console.warn('[updater] getCliStatuses failed:', err);
+    noUpdate('check-failed');
+    return;
+  }
+
   const zai = statuses[0];
-  if (!zai) return;
+  if (!zai) {
+    noUpdate('no-status');
+    return;
+  }
 
   const { currentVersion, latestVersion } = zai;
-  if (!currentVersion || !latestVersion) return; // npm view 失败 / 未发布
-  if (!isNewer(latestVersion, currentVersion)) return; // 已是最新
+  if (!currentVersion || !latestVersion) {
+    noUpdate('no-version');
+    return;
+  }
+  if (!isNewer(latestVersion, currentVersion)) {
+    noUpdate('up-to-date'); // 已是最新
+    return;
+  }
 
   const from = currentVersion;
   const to = latestVersion;
+
+  // 权限预检:不可写就不 spawn npm。否则 npm 会尝试往 root 拥有的
+  // 目录(典型是缺 `prefix=` 时回退的 /usr/local)写,失败时把几十行
+  // 原始 EACCES 堆栈喷到终端 —— 既没用又难懂。这里提前拦下,给一条
+  // 说明白哪里错了、怎么修的消息。探测失败(writable === null)不拦,
+  // 交给 npm 自己报错。
+  const { writable, prefix } = await probeGlobalPrefixWritable();
+  if (writable === false) {
+    const target = prefix ?? 'npm 全局 prefix';
+    const errorMsg =
+      `npm 全局目录不可写:${target}。zai 无法自动升级(需要写权限)。` +
+      `可手动执行 npm install -g ${PACKAGE_NAME}@${to},或修复该目录权限后重试;` +
+      `也可在设置中关闭自动升级。`;
+    console.warn(`[updater] skip install: ${errorMsg}`);
+    eventBus.emit({ type: 'app.update.failed', from, to, error: errorMsg });
+    return;
+  }
+
   eventBus.emit({ type: 'app.update.installing', from, to });
 
   let ok = false;
