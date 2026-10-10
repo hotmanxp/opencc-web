@@ -762,9 +762,16 @@ export async function createOpenccRuntimeImpl(options) {
   async function buildAvailable(): Promise<OpenccMarketplacePluginDto[]> {
     const installed = await buildList()
     const installedIds = new Set(installed.plugins.map((p) => p.id))
-    const declared = getDeclaredMarketplaces()
+    // zai patch (2026-10-11, 市场 tab 空列表):枚举源从 getDeclaredMarketplaces()
+    // (settings 意图层)换成 loadKnownMarketplacesConfig()(磁盘状态层),与相邻的
+    // buildMarketplaces() 同源。官方市场只有在 enabledPlugins 里存在
+    // `@claude-plugins-official` 插件时才算 implicit 声明 —— 一个官方插件都没装的
+    // 用户意图层是空的,于是「市场来源」显示 315 个插件、「市场」tab 却空着。
+    // removeMarketplaceSource() 两层同时清,所以状态层里的条目就是真在盘上的,
+    // 不会让已删的市场复活。
+    const state = await loadKnownMarketplacesConfig()
     const out: OpenccMarketplacePluginDto[] = []
-    for (const [marketplaceName, decl] of Object.entries(declared)) {
+    for (const marketplaceName of Object.keys(state)) {
       const mp = await getMarketplace(marketplaceName).catch(() => null)
       if (!mp) continue
       for (const entry of mp.plugins ?? []) {
