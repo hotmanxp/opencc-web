@@ -60,6 +60,7 @@ import {
   setCwdState,
   setIsInteractive,
   setOriginalCwd,
+  setSessionTrustAccepted,
 } from '../bootstrap/state.js'
 import { enableConfigs } from '../utils/config.js'
 import { getCanUseToolFn } from '../cli/print.js'
@@ -359,6 +360,29 @@ export async function createHeadlessContextImpl(
   } catch {
     // Same best-effort posture as MCP.
   }
+
+  // Step 10a: zai patch (2026-10-11, hook 信任门)—— headless 路径显式置信任。
+  //
+  // **为什么必须在这里**:所有 hook 事件的统一入口 `executeHooks`
+  // (utils/hooks.ts)开头有三道门,第三道是 `shouldSkipHookDueToTrust()` ——
+  // 交互模式(非 SDK)下工作区未受信就 `return`,**静默跳过全部 hook**,不报错
+  // 不打日志。而信任的唯一设置点是 `interactiveHelpers.tsx` 里 TUI 信任弹窗
+  // 确认后的 `setSessionTrustAccepted(true)` —— headless/web 根本没有那个弹窗,
+  // 于是 `checkHasTrustDialogAccepted()` 恒为 false。
+  //
+  // 后果:zai 里 mod 注册完全正常(swapRegisteredHooks 拿到 7 个事件)、工具
+  // 照常执行,但**每个 handler 一次都没被调用** —— 实测 7 个事件计数全 0,
+  // 而 `/modctl` 面板正是靠这个计数自证的。同一道门也让用户配置的命令 hook
+  // 在 zai 里静默失效。
+  //
+  // **为什么 zai 可以无条件信任**:zai 只监听 localhost,无外部鉴权(见
+  // AGENTS.md「zai 仅监听 localhost,不依赖外部鉴权」),能连上来的用户就是
+  // 本机用户本身 —— 信任弹窗要确认的正是这件事。非交互(SDK)模式走
+  // `getIsNonInteractiveSession()` 的另一条分支,不受影响。
+  //
+  // 位置在 loadMods() 之前:mod 注册的 handler 要对随后所有事件可见,信任必须
+  // 先于第一次 hook 派发建立。
+  setSessionTrustAccepted(true)
 
   // Step 10b: zai patch (2026-10-06, mods 同步)—— 加载用户 JS 扩展 mod。
   //
