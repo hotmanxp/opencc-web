@@ -51,6 +51,7 @@ import {
   BUILTIN_MARKETPLACE_NAME,
   getBuiltinPlugins,
 } from '../../plugins/builtinPlugins.js'
+import { filterMarketplacePluginEntries } from './marketplaceEntryFilter.js'
 import type {
   LoadedPlugin,
   PluginComponent,
@@ -2084,16 +2085,7 @@ async function loadPluginsFromMarketplaces({
   const errors: PluginError[] = []
 
   // Filter to plugin@marketplace format and validate
-  const marketplacePluginEntries = Object.entries(enabledPlugins).filter(
-    ([key, value]) => {
-      // Check if it's in plugin@marketplace format (includes both enabled and disabled)
-      const isValidFormat = PluginIdSchema().safeParse(key).success
-      if (!isValidFormat || value === undefined) return false
-      // Skip built-in plugins — handled separately by getBuiltinPlugins()
-      const { marketplace } = parsePluginIdentifier(key)
-      return marketplace !== BUILTIN_MARKETPLACE_NAME
-    },
-  )
+  const marketplacePluginEntries = filterMarketplacePluginEntries(enabledPlugins)
 
   // Load known marketplaces config to look up sources for policy checking.
   // Use the Safe variant so a corrupted config file doesn't crash all plugin

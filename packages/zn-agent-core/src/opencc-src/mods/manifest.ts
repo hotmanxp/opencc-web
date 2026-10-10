@@ -1,5 +1,6 @@
 import { z } from 'zod/v4'
 import { lazySchema } from '../utils/lazySchema.js'
+import { PluginManifestUserConfigSchema } from '../utils/plugins/schemas.js'
 
 /**
  * Mod manifest (`opencc-mod.json`) schema.
@@ -34,6 +35,15 @@ export const ModManifestSchema = lazySchema(() =>
     entry: z
       .string()
       .regex(/^\.{1,2}\//, 'entry must be a relative path starting with ./'),
+    /**
+     * 用户可配置项。由插件列表的「Configure options」渲染,mod 通过
+     * `ctx.options` 读取。
+     *
+     * zai patch (2026-10-10, mods 同步):与插件 manifest 的 `userConfig`
+     * 同键名同 schema —— 这是刻意的,不是命名巧合:让 mod 原样复用插件的
+     * 配置存储、校验与对话框,并且 mod 的 manifest 对写过插件的人可读。
+     */
+    userConfig: PluginManifestUserConfigSchema().shape.userConfig,
   }),
 )
 

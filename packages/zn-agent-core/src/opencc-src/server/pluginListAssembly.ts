@@ -101,7 +101,15 @@ function toDto(
     ? plugin.repository
     : (resolveMarketplace(plugin.repository) ?? plugin.repository)
   const id = isBuiltin ? plugin.repository : buildPluginId(plugin.name, marketplace)
-  const scope = isBuiltin ? 'builtin' : deriveScope(plugin.name, installedV2)
+  // zai patch (2026-10-10, mods 同步):mod 投影也带 isBuiltin —— 目的是让
+  // 它绕开 install/uninstall/update 流水线(两个来源都不是市场装的)。但
+  // 磁盘 mod 在用户眼里就是「用户自己放的」,标成「内置」会误导,所以作用域
+  // 按 mod 的真实来源给;内置 mod 才显示「内置」。
+  const scope: OpenccPluginScope = plugin.mod
+    ? (plugin.mod.builtin ? 'builtin' : 'user')
+    : isBuiltin
+      ? 'builtin'
+      : deriveScope(plugin.name, installedV2)
   // enabled: built-in always reads enabledPlugins; otherwise read from settings.
   const enabled = isBuiltin
     ? (enabledSettings?.[id] ?? true)
@@ -125,6 +133,9 @@ function toDto(
       commands: 0, agents: 0, skills: 0, hooks: 0, mcpServers: 0,
     },
     errors: errorsForPlugin(plugin.name, errors),
+    // zai patch (2026-10-10, mods 同步):透传 mod 元信息,让 UI 能标出这是
+    // 一个 mod 并展示它注册了什么。真插件此处为 undefined。
+    ...(plugin.mod ? { mod: plugin.mod } : {}),
   }
 }
 
@@ -134,9 +145,15 @@ export function assemblePluginList(
   enabledSettings: Record<string, boolean> | undefined,
   componentCounts: Map<string, OpenccPluginComponentCounts>,
   hasUpdateFor: (id: string) => boolean = () => false,
+  /**
+   * zai patch (2026-10-10, mods 同步):mod 的插件投影(`getModsAsPlugins()`),
+   * 与真插件并入同一张列表。默认空数组 —— 调用方不传时本函数行为与
+   * 引入 mod 之前完全一致,便于既有单测不受影响。
+   */
+  modPlugins: readonly LoadedPlugin[] = [],
 ): OpenccPluginListResult {
   const all = [...loadResult.enabled, ...loadResult.disabled]
-  const plugins = all.map((p) =>
+  const plugins = [...all, ...modPlugins].map((p) =>
     toDto(p, installedV2, enabledSettings, componentCounts, loadResult.errors, hasUpdateFor),
   )
   return { plugins, errors: topLevelErrors(loadResult.errors) }

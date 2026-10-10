@@ -1,6 +1,7 @@
 // @ts-ignore
 import type { LspServerConfig } from '../services/lsp/types.js'
 import type { McpServerConfig } from '../services/mcp/types.js'
+import type { ModPluginInfo } from '../mods/pluginView.js'
 import type { BundledSkillDefinition } from '../skills/bundledSkills.js'
 import type {
   CommandMetadata,
@@ -68,6 +69,11 @@ export type LoadedPlugin = {
   mcpServers?: Record<string, McpServerConfig>
   lspServers?: Record<string, LspServerConfig>
   settings?: Record<string, unknown>
+  /**
+   * zai patch (2026-10-10, mods 同步):当这条记录其实是 mod 的投影时
+   * 携带的 mod 元信息(见 mods/pluginView.ts)。真插件不带此字段。
+   */
+  mod?: ModPluginInfo
 }
 
 export type PluginComponent =

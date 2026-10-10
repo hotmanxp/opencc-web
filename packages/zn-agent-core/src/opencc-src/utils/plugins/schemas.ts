@@ -665,7 +665,7 @@ const PluginUserConfigOptionSchema = lazySchema(() =>
  * Values are available as ${user_config.KEY} in MCP/LSP server config, hook
  * commands, and (non-sensitive only) skill/agent content.
  */
-const PluginManifestUserConfigSchema = lazySchema(() =>
+export const PluginManifestUserConfigSchema = lazySchema(() =>
   z.object({
     userConfig: z
       .record(

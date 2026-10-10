@@ -59,6 +59,8 @@ import { getAgentRegistry } from './index.js'
 // 写入 per-session 白名单,assembleToolPool / buildModCommands /
 // runModChain 三处消费。
 import { getLoadedMods, setSessionModGate } from '../mods/registry.js'
+import { getModsAsPlugins, modNameForPluginId } from '../mods/pluginView.js'
+import { setModEnabled, reloadMods } from '../mods/hooks.js'
 import { buildModCommands } from '../mods/engine.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult, OpenccMcpApi, OpenccMcpStatus, OpenccMcpConnectFailure } from './serverTypes.js'
@@ -696,6 +698,16 @@ export async function createOpenccRuntimeImpl(options) {
       e.mcpServers = Object.keys(p.mcpServers ?? {}).length
       counts.set(p.name, e)
     }
+    // zai patch (2026-10-10, mods 同步):mod 注册的命令/工具也计入组件数,
+    // 否则 UI 上一个注册了 3 个命令的 mod 会显示成 0,读起来像没生效。
+    // 注意这里遍历的是「已加载」集合:被禁用的 mod 代码根本没跑,没有
+    // 可数的注册 —— 它的空计数正是「已停用」的可视信号。
+    for (const mod of getLoadedMods()) {
+      const e = counts.get(mod.manifest.name) ?? { commands: 0, agents: 0, skills: 0, hooks: 0, mcpServers: 0 }
+      e.commands += mod.commands.length
+      e.hooks += mod.handlers.length
+      counts.set(mod.manifest.name, e)
+    }
     // 4) hasUpdate — two independent signals, union'd.
     //    4a) the background autoupdater already downloaded a newer version to
     //        disk while this session still runs the old installPath.
@@ -718,7 +730,17 @@ export async function createOpenccRuntimeImpl(options) {
     // cascade. See utils/userConfigJson.ts for the read/write contract.
     const userConfig = getUserConfigJson()
     const enabled = userConfig.enabledPlugins as Record<string, boolean> | undefined
-    return assemblePluginList(loadResult, v2, enabled, counts, (id) => pendingMap.get(id) === true)
+    // zai patch (2026-10-10, mods 同步):把 mod 投影并入同一张列表。
+    // mod 的 id(`<name>@mods`)与开关状态读的是同一个 `enabledPlugins`,
+    // 所以 UI 里那一个 Switch 同时管住插件和 mod,没有任何 mod 专属分支。
+    return assemblePluginList(
+      loadResult,
+      v2,
+      enabled,
+      counts,
+      (id) => pendingMap.get(id) === true,
+      getModsAsPlugins(),
+    )
   }
 
   async function reloadActive(): Promise<OpenccPluginActionResult['reload']> {
@@ -812,6 +834,18 @@ export async function createOpenccRuntimeImpl(options) {
     },
 
     async setEnabled(id, enabled) {
+      // zai patch (2026-10-10, mods 同步):mod 开关在进插件流水线之前分流。
+      // mod 的 id 来自同一张 `enabledPlugins`,但它没有 installed_plugins 记录,
+      // 走 setPluginEnabledOp 会因为「找不到这个插件」而失败。mod 的开关是
+      // 立即生效的(关 → unloadMod,开 → reloadMods),所以这里也不需要
+      // reloadActive() 重载插件流水线 —— 直接回最新列表即可。
+      const modName = modNameForPluginId(id)
+      if (modName !== undefined) {
+        const result = await setModEnabled(modName, enabled)
+        if (!result.success) return { success: false, message: result.message }
+        return { success: true, message: result.message, state: await buildList() }
+      }
+
       // Auto-detect the scope where the plugin lives rather than forcing
       // 'user'. The UI displays the merged state across scopes, but a
       // hardcoded user-scope write produced false "already disabled"
@@ -864,8 +898,28 @@ export async function createOpenccRuntimeImpl(options) {
 
     async reload() {
       const reload = await reloadActive()
-      if (reload === undefined) return { success: false, message: 'Hot reload failed' }
-      return { success: true, message: 'Reloaded', reload, state: await buildList() }
+      // zai patch (2026-10-10, mods 同步):插件热重载不会碰 mods —— 两条
+      // 加载器彼此独立。用户改完 mod 源码点同一个「重载插件」按钮时,
+      // 如果不带上 mods, mod 的改动不会生效(看上去重载成功了但什么都没变)。
+      // reloadMods 失败不回滚插件重载:两者无依赖,部分成功好过整体失败。
+      let modsReloaded = true
+      try {
+        await reloadMods()
+      } catch (error) {
+        modsReloaded = false
+        logForDebugging(
+          `[mods] reload during plugin reload failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+      if (reload === undefined) {
+        return { success: false, message: 'Hot reload failed', state: await buildList() }
+      }
+      return {
+        success: modsReloaded,
+        message: modsReloaded ? 'Reloaded' : 'Plugins reloaded, but mods failed to reload',
+        reload,
+        state: await buildList(),
+      }
     },
 
     async listMarketplaces(): Promise<OpenccMarketplaceDto[]> {

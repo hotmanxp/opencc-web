@@ -431,6 +431,19 @@ export type OpenccPluginDto = {
   hasUpdate: boolean
   components: OpenccPluginComponentCounts
   errors: string[]
+  /**
+   * zai patch (2026-10-10, mods 同步):当这一行其实是 mod 的投影时携带的
+   * mod 元信息(见 mods/pluginView.ts)。真插件不带此字段,前端据此决定
+   * 显示哪些 mod 专属的信息(订阅事件 / 工具 / 命令)。
+   */
+  mod?: {
+    modName: string
+    root: string
+    builtin: boolean
+    handlerEvents: string[]
+    toolNames: string[]
+    commandNames: string[]
+  }
 }
 
 export type OpenccMarketplacePluginDto = {

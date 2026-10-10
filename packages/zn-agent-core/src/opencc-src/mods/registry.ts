@@ -79,6 +79,64 @@ export type LoadedMod = {
 
 let loadedMods: LoadedMod[] = []
 
+/**
+ * zai patch (2026-10-10, mods 同步):KnownMod 发现层。
+ *
+ * opencc 把「发现」和「加载」分成两张表:`loadedMods` 装真正在跑的代码,
+ * `knownMods` 装被发现过的 mod(含被禁用、因而没有代码在跑的)。
+ * 分开的原因是 pluginView 投影 —— 一个被 /plugins 关掉的 mod 故意不进
+ * `loadedMods`(代码不该跑),但它仍然需要占一行,否则用户关掉之后就没有
+ * 任何控件能再打开它。
+ *
+ * 注意:本 vendor 的 builtin mods 故意留空(见 builtin.ts),所以实际只会
+ * 记录磁盘 mod;`builtin` 字段仍保留以对齐上游形状。
+ */
+export type KnownMod = {
+  builtin: boolean
+  userConfig?: Record<string, unknown> | undefined
+  /**
+   * zai patch (2026-10-10, mods 同步):manifest 里的展示元信息。
+   *
+   * 为什么必须存在:`getModsAsPlugins()` 优先从**已加载的** mod 取
+   * description / version。被禁用的 mod 没有已加载对象(代码不跑),若发现
+   * 层不存这两项,用户在 UI 上关掉一个 mod,那一行会当场丢掉版本号和描述
+   * —— 看起来像 mod 被抹掉了,而不是被关掉了。这里存的是 manifest 已解析
+   * 出来的原值,不需要加载代码。
+   */
+  description?: string | undefined
+  version?: string | undefined
+  /**
+   * zai patch (2026-10-10, mods 同步):mod 根目录绝对路径。
+   *
+   * 与 description / version 同理,存它是因为**被禁用的 mod 没有已加载
+   * 对象**,而 UI 要用它告诉用户「这个 mod 的文件在哪」—— 用户要停用或删除
+   * 一个 mod,得先找得到它。内置 mod 存 `BUILTIN_ORIGIN` 哨兵(没有真实路径)。
+   */
+  root?: string | undefined
+}
+
+let knownMods = new Map<string, KnownMod>()
+
+export function noteDiscoveredMod(
+  name: string,
+  builtin: boolean,
+  userConfig?: Record<string, unknown>,
+  meta?: { description?: string; version?: string; root?: string },
+): void {
+  if (knownMods.has(name)) return
+  knownMods.set(name, { builtin, userConfig, ...meta })
+}
+
+export function getKnownMods(): ReadonlyMap<string, KnownMod> {
+  return knownMods
+}
+
+/** Forget discovery results. Called per `loadMods()` pass so a deleted mod
+ *  folder stops lingering in the plugin list. */
+export function clearKnownMods(): void {
+  knownMods = new Map()
+}
+
 /** Marker for in-memory built-in mods (src/mods/builtin.ts). */
 export const BUILTIN_ORIGIN = '(builtin)'
 
@@ -107,6 +165,7 @@ export function unregisterMod(name: string): LoadedMod | undefined {
 /** Reset registry state. For tests only. */
 export function resetModsRegistryForTesting(): void {
   loadedMods = []
+  clearKnownMods()
   modToolsVersion++
   notifyModToolsChanged()
   failureCounts.clear()
