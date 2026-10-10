@@ -122,6 +122,12 @@ export {
   registerExtraReminderProvider,
   clearExtraReminderProviders,
 } from './opencc-src/utils/daemon/preApiCallReminders.js'
+// zai patch (2026-10-11, SessionStart 接线):headless 侧 SessionStart hook
+// 产出的附加上下文存储。createHeadlessContextImpl 写入,agentRuntime 注册
+// reminder provider 读出注入。见 server/sessionStartBridge.ts 的说明。
+export {
+  getSessionStartContexts,
+} from './opencc-src/server/sessionStartBridge.js'
 // zai patch (2026-09-23): skill 目录热更新 —— vendor 的 chokidar watcher。
 //
 // vendor 只在交互式入口 `opencc-src/main.tsx:463` 初始化它(`!isBareMode()`),

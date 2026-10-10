@@ -43,6 +43,12 @@ import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
 import { getAllMcpConfigs } from '../services/mcp/config.js'
 import { captureHooksConfigSnapshot } from '../utils/hooks/hooksConfigSnapshot.js'
 import { loadMods } from '../mods/hooks.js'
+import { processSessionStartHooks } from '../utils/sessionStart.js'
+import {
+  extractAdditionalContexts,
+  setSessionStartContexts,
+} from './sessionStartBridge.js'
+import { logForDebugging } from '../utils/debug.js'
 import { SandboxManager } from '../utils/sandbox/sandbox-adapter.js'
 import {
   createAppStateStore,
@@ -398,6 +404,33 @@ export async function createHeadlessContextImpl(
     await loadMods()
   } catch {
     // Mods 是可选增强,加载不了不影响 headless context 建立。
+  }
+
+  // Step 10c: zai patch (2026-10-11)—— 派发 SessionStart hooks。
+  //
+  // 与 Step 10b 同一形状的缺口:`processSessionStartHooks` 的唯一调用方是
+  // `main.tsx`(交互式 REPL 的入口),headless 路径从不经过它。结果是 mod
+  // 注册了 SessionStart handler 却一次都收不到事件 —— 信任门修好之后实测
+  // 面板里 SessionStart 恒为 ×0,而 PreToolUse / PostToolUse /
+  // UserPromptSubmit 都正常非 0。
+  //
+  // 位置在 loadMods() 之后:handler 必须先注册,SessionStart 才看得见它们。
+  //
+  // 产出不能直接丢弃 —— processSessionStartHooks 返回的 HookResultMessage[]
+  // 在 REPL 里是塞进本会话消息流的,headless 侧没有那个位置。所以只取其中的
+  // `hook_additional_context`,存进 sessionStartBridge,由 pre-API-call
+  // reminder provider 每次 LLM 调用前作为 <system-reminder> 注入
+  // (与 zai 的 inbox reminder 同一机制,见 sessionStartBridge.ts 的说明)。
+  try {
+    const startMessages = (await processSessionStartHooks('startup', {
+      sessionId: sessionIdForSlot,
+    })) as unknown as Array<Record<string, unknown>>
+    setSessionStartContexts(extractAdditionalContexts(startMessages))
+  } catch (error) {
+    // SessionStart hook 是可选增强;失败不影响 headless context 建立。
+    logForDebugging(
+      `[mods] SessionStart hooks failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
 
   // Step 11: permission rules. Pass `permissionPromptToolName:

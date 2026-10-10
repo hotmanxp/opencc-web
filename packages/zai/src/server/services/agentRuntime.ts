@@ -165,6 +165,7 @@ const permissionRegistry = new PermissionRegistry()
 import {
   enqueue as _vendorEnqueue,
   enqueuePendingNotification as _vendorEnqueuePendingNotification,
+  getSessionStartContexts,
   installMessageQueueAdapterBridges,
   registerExtraReminderProvider,
 } from '@zn-ai/zn-agent-core'
@@ -172,6 +173,25 @@ import { drainInboxReminder } from './inboxReminder.js'
 let inboxReminderProviderRegistered = false
 registerExtraReminderProvider((sid: string) => drainInboxReminder(sid))
 inboxReminderProviderRegistered = true
+
+// zai patch (2026-10-11, SessionStart 接线):把 SessionStart hook 产出的附加
+// 上下文作为 pre-API-call reminder 注入。
+//
+// 背景:headless 路径原先从不派发 SessionStart(`processSessionStartHooks` 的
+// 唯一调用方是 vendor 的 main.tsx,即交互式 REPL 入口),于是 mod 注册了
+// SessionStart handler 却一次都收不到事件。现在由 createHeadlessContextImpl
+// 在启动时派发一次,产出存进 vendor 的 sessionStartBridge;这里把它接上注入
+// 通道 —— 与上面的 inbox reminder 同一个机制(`registerExtraReminderProvider`),
+// query loop 每次 LLM API call 前调用,结果作为 <system-reminder> prepend。
+//
+// SessionStart 的产出按定义就是「会话启动时给模型看的上下文」,每次调用前注入
+// 正是它该去的位置;hook 自己产出的 message 属于 REPL 的消息流,headless 侧没有
+// 对应位置,故只取 hook_additional_context 一类(见 sessionStartBridge.ts)。
+registerExtraReminderProvider(() => {
+  const contexts = getSessionStartContexts()
+  if (contexts.length === 0) return null
+  return contexts.join('\n')
+})
 
 // zai patch (2026-09-07, plan P0-1.1, worktree-dsh, fix-area: vendor-enqueue-imports):
 // 入口层 install 一次 vendor enqueue 桥, 让 compat 层 zaiEnqueue*
