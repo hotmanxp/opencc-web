@@ -1832,7 +1832,7 @@ export default React.memo(function AgentInputBox({
                 onClick={() => {
                   void storeApi.getState().stop();
                 }}
-                className="!h-auto flex items-center justify-center gap-1 py-1.5 px-3.5 !bg-[rgba(255,102,0,0.15)] !border !border-solid !border-[#ff6600] !rounded-md !text-[#ff6600] !font-semibold !text-[13px] cursor-pointer"
+                className="!h-auto flex items-center justify-center gap-1 py-1.5 px-3.5 !bg-[color-mix(in_srgb,var(--cmd-token-color)_15%,transparent)] !border !border-solid !border-[var(--cmd-token-color)] !rounded-md !text-[var(--cmd-token-color)] !font-semibold !text-[13px] cursor-pointer"
               >
                 <SquareIcon />
                 <span>停止</span>
@@ -1863,15 +1863,17 @@ export default React.memo(function AgentInputBox({
                     pendingAsk?.status === "pending" ||
                     input.trim().length === 0
                       ? "var(--bg-faint-08)"
-                      : "#ff6600",
+                      : "var(--cmd-token-color)",
                   border: "none",
                   borderRadius: 6,
+                  // 文字不是白:启用态底色是浅橙(#f97316)/浅紫(#a78bfa),
+                  // 白字对浅色底的对比度只有 ~2.7~2.9:1,深色字能到 5.4:1 以上。
                   color:
                     creatingSession ||
                     pendingAsk?.status === "pending" ||
                     input.trim().length === 0
                       ? "var(--text-tertiary)"
-                      : "#fff",
+                      : "#1e1b4b",
                   fontWeight: 600,
                   fontSize: 13,
                   cursor:
