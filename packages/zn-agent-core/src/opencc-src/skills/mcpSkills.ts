@@ -13,10 +13,23 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 
 const SKILL_URI_PREFIX = 'skill://'
+const SKILL_ENTRY_FILENAME = '/skill.md'
 const MCP_SKILL_CACHE_SIZE = 20
 
+/**
+ * Whether a `skill://` resource is a skill entry point, as opposed to one of
+ * the reference documents shipped alongside it.
+ *
+ * A pack exposes its entry as `skill://<server>/SKILL.md` — the same
+ * `<name>/SKILL.md` layout every other skill source here uses (local skills,
+ * bundled skills, plugin skills). Its siblings are supporting docs the entry
+ * tells the model to "load on demand"; only the entry carries frontmatter
+ * `name`, so only the entry may become a slash command / Skill-tool entry.
+ * References stay reachable through ReadMcpResourceTool.
+ */
 export function isSkillResource(resource: { uri: string; name?: string }): boolean {
-  return resource.uri.toLowerCase().startsWith(SKILL_URI_PREFIX)
+  const uri = resource.uri.toLowerCase()
+  return uri.startsWith(SKILL_URI_PREFIX) && uri.endsWith(SKILL_ENTRY_FILENAME)
 }
 
 export function deriveMcpSkillName(serverName: string, uri: string): string {
