@@ -481,6 +481,25 @@ interface AgentState {
   rejectAsk: (reason?: string) => Promise<void>
 }
 
+// 展示型工具 (PresentFile / displayFiles) 的 mapToolResultToToolResultBlockParam
+// 把回灌给 LLM 的 content 压成占位串 'done' 省上下文,真正的展示数据另存在
+// 同一 message 的 toolUseResult.output 里。实时 SSE 走的是旁路
+// (routes/agent.ts 的 takePresentFileOutput,取出即删),刷新后的历史回放拿不到
+// 旁路,只能从 toolUseResult 取 —— 不取则 output 只剩 'done',
+// presentFileRenderer.parsePresented 解析失败,文件卡片整块不渲染。
+//
+// 仅在 content 恰为占位串时回退,其余一律原样透传 —— 判据是值而不是工具名,
+// 这样 displayFiles 等同构工具无需各自登记。若某工具的真实输出恰好是 'done',
+// 回退取回的仍是它自己的 toolUseResult.output,属修正而非误伤。
+function pickToolResultOutput(content: unknown, msg: any): unknown {
+  if (content !== 'done') return content
+  const tur = msg?.toolUseResult
+  if (tur && typeof tur === 'object' && typeof tur.output === 'string') {
+    return tur.output
+  }
+  return content
+}
+
 // 把 transcript.messages 还原成 AgentMessage[] (供 React 渲染).
 // 设计: 必须与 SSE 流水线 (applyRuntimeEvent) 产出的 AgentMessage 形态等价,
 // 使 UI 渲染层 (ToolCallBlock / MessageList 等) 不需要区分"实时流"还是"历史回放".
@@ -545,7 +564,7 @@ export function loadTranscriptMessages(
           out[idx] = {
             ...out[idx],
             type: tr.is_error ? 'tool_use:error' : 'tool_use:done',
-            output: tr.content,
+            output: pickToolResultOutput(tr.content, msg),
             error: tr.is_error ? tr.content : undefined,
           }
         }
