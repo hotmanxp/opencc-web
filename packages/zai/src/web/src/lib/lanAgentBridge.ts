@@ -8,6 +8,12 @@
 //
 // Imported (side-effect) from main.tsx so the registration runs before
 // any component mounts.
+//
+// ⚠️ 2026-10-11:这个 side-effect import 之前**实际上不存在** —— main.tsx 只
+// import 了 App 与 index.css,全仓没有任何地方引用本模块,所以
+// window.lanAgentAttachImages 运行时从未注册,lan-agent 的图片注入一直静默
+// 走 WebView 的降级路径(onShowFileChooser → File 转换,在部分 ROM 上不可靠)。
+// 本次补上入口导入后该桥才真正生效。
 
 import { useAgentStore } from "../store/useAgentStore";
 import { readImageAsBase64 } from "./imageReader";
@@ -26,6 +32,21 @@ declare global {
       mime: string,
     ) => Promise<void>;
     lanAgentAttachImages?: (items: AttachItem[]) => Promise<void>;
+    /**
+     * 回到 lan-agent 原生的 Agent 对话(底栏「任务」栏)。
+     *
+     * 页面自己不认识原生导航,只能通过这里转发到 lan-agent 的
+     * `@JavascriptInterface` 桥(JS 名 `AndroidWebview`,见
+     * lan-agent 的 ui/WebViewScreen.kt)。调用方据此判断要不要渲染按钮:
+     * 探不到桥 = 当前不是 lan-agent(或 App 版本还没带这个桥),返回
+     * false 而不是抛错,让 UI 自行降级。
+     */
+    lanAgentGoToAgent?: () => boolean;
+    /**
+     * lan-agent 通过 addJavascriptInterface 注入的对象。本文件只在
+     * lanAgentGoToAgent 内部探测它,组件层不该直接摸。
+     */
+    AndroidWebview?: { goToAgent?: () => boolean };
   }
 }
 
@@ -71,6 +92,15 @@ if (typeof window !== "undefined") {
         console.error("[lanAgent] attachOne failed", item.filename, e);
       }
     }
+  };
+
+  // 页面 → 原生的向下转发。lan-agent 的原生 Agent 对话在底栏「任务」栏,
+  // 页内无从切换 tab,只能让它那边接。探不到桥返回 false 让调用方降级
+  // (非 lan-agent 环境 / App 版本早于该桥),不抛错。
+  window.lanAgentGoToAgent = () => {
+    const bridge = window.AndroidWebview;
+    if (!bridge || typeof bridge.goToAgent !== "function") return false;
+    return bridge.goToAgent();
   };
 
   // Marker so lan-agent can probe "is this page lan-agent-aware" without

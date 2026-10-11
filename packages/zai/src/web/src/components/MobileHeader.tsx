@@ -1,6 +1,6 @@
 import { Button } from 'antd'
 import IconButton from "./IconButton.js";
-import { MenuIcon, PlusIcon } from 'lucide-react';
+import { BotIcon, MenuIcon, PlusIcon } from 'lucide-react';
 import { useAgentStore } from '../store/useAgentStore'
 import { useProjection } from '../store/useProjection'
 import { useIsLanAgentHost } from '../hooks/useIsLanAgentHost'
@@ -17,11 +17,15 @@ export interface MobileHeaderProps {
  *   右: [+] 新建会话按钮
  * 不渲染设置/分享按钮 — 这两个由 AgentInputBox 内部工具栏提供。
  *
- * lan-agent App 内(Android WebView 宿主)额外在 [+] 左侧插一个模型切换按钮:
- * 该宿主下 MobileAgent 不渲染底部 ConfigStatusBar, 模型切换入口不能跟着
- * 一起消失, 否则用户在 App 里没有任何换模型的地方。复用 ConfigStatusBar 里
- * 同一个 ModelStatusButton(弹层 / 面板 / patchSessionModel 全一致), 只是换了
- * 宿主位置;Popover placement 由组件内部读 isMobile 自动取 'bottom'。
+ * lan-agent App 内(Android WebView 宿主)顶栏多两个按钮:
+ *   - [Bot] 回到原生 APP 对话 —— 切回 lan-agent 底栏「任务」栏。页面内无从
+ *     切原生 tab,走 lib/lanAgentBridge 转给原生。只有原生真的注入了桥
+ *     (window.AndroidWebview)时才渲染,否则不给一个点了没反应的按钮。
+ *   - [模型名] 模型切换 —— 该宿主下 MobileAgent 不渲染底部 ConfigStatusBar,
+ *     模型切换入口不能跟着一起消失, 否则用户在 App 里没有任何换模型的地方。
+ *     复用 ConfigStatusBar 里同一个 ModelStatusButton(弹层 / 面板 /
+ *     patchSessionModel 全一致), 只是换了宿主位置;Popover placement 由
+ *     组件内部读 isMobile 自动取 'bottom'。
  */
 export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps) {
   const sessionId = useAgentStore((s) => s.sessionId)
@@ -32,6 +36,15 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
   const isBusy = status === "streaming"
   const current = sessions.find((s) => s.sessionId === sessionId)
   const isLanAgentHost = useIsLanAgentHost()
+  // 「回到原生对话」只在 lan-agent 真的把桥注进来时才有意义。非 App 环境
+  // (手机浏览器直接开 /m)或 App 版本早于该桥时 window.AndroidWebview 为
+  // undefined,lanAgentGoToAgent() 返回 false —— 此时不渲染,而不是给一个
+  // 点了没反应的按钮。
+  const canGoToNativeAgent =
+    isLanAgentHost &&
+    typeof window !== 'undefined' &&
+    typeof window.lanAgentGoToAgent === 'function' &&
+    typeof window.AndroidWebview?.goToAgent === 'function'
   // dsh 投影试点 (2026-08-15): 标题优先走 host 推送的 session/projection 帧
   // (重连后 host 重算整体重发), fallback 到 sessions 列表的 title。
   const projectedTitle = useProjection<string>(sessionId, 'title')
@@ -72,13 +85,27 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
       >
         {title}
       </div>
+      {/* 「回到原生 APP 对话」: lan-agent 的原生 Agent 对话在底栏「任务」栏,
+          页内无从切 tab,只能通过 lib/lanAgentBridge 转给原生。图标用 Bot
+          —— 与 lan-agent 底栏「任务」栏同款(Lucide.Bot),点了去哪一眼可辨。 */}
+      {canGoToNativeAgent && (
+        <IconButton
+          icon={<BotIcon />}
+          onClick={() => void window.lanAgentGoToAgent?.()}
+          title="回到 APP 内的 Agent 对话"
+          aria-label="回到原生 APP 对话"
+          data-testid="mobile-header-go-native"
+          style={{ width: 36, height: 36, padding: 0 }}
+        />
+      )}
       {/* lan-agent 宿主专属: 模型切换入口从被隐藏的底部状态栏搬到这里。
           max-w 防止长模型名(如 MiniMax-M3.1-Flash-Preview)把居中标题挤没;
           truncate 走 ModelStatusButton 的 className 入口, 命中断言按钮内层
-          span 而不是靠外层 overflow 硬裁。 */}
+          span 而不是靠外层 overflow 硬裁。顶栏左侧已有「回到原生」按钮时
+          再收窄一档,给标题让出空间。 */}
       {isLanAgentHost && (
         <span
-          className="min-w-0 max-w-[38vw] flex items-center text-[var(--accent-start)]"
+          className={`min-w-0 flex items-center text-[var(--accent-start)] ${canGoToNativeAgent ? 'max-w-[28vw]' : 'max-w-[38vw]'}`}
           data-testid="mobile-header-model"
         >
           <ModelStatusButton compact className="max-w-full [&>span]:truncate" />

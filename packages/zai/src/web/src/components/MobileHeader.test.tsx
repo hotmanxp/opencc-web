@@ -70,3 +70,65 @@ describe('MobileHeader — lan-agent 宿主的模型切换入口', () => {
     expect(screen.queryByTestId('mobile-header-model')).toBeNull()
   })
 })
+
+describe('MobileHeader — 「回到原生 APP 对话」入口(JS bridge)', () => {
+  /**
+   * 装上 lan-agent 的原生桥。页面侧的转发函数 window.lanAgentGoToAgent
+   * 由 lib/lanAgentBridge.ts 在模块加载时注册 —— 本测试不 import 那个模块
+   * (它是入口副作用),所以这里两个都手动装,复刻运行时形态。
+   */
+  function stubBridge(goToAgent: () => boolean = () => true) {
+    const native = { goToAgent }
+    vi.stubGlobal('AndroidWebview', native)
+    vi.stubGlobal('lanAgentGoToAgent', () => window.AndroidWebview?.goToAgent?.() ?? false)
+    return native
+  }
+
+  it('宿主 + 桥都在时渲染按钮', () => {
+    stubUA(ANDROID_WEBVIEW_UA)
+    stubBridge()
+    render(<MobileHeader onOpenSessionDrawer={() => {}} />)
+    expect(screen.getByTestId('mobile-header-go-native')).toBeInTheDocument()
+  })
+
+  it('点击按钮转发到原生桥', () => {
+    stubUA(ANDROID_WEBVIEW_UA)
+    const spy = vi.fn(() => true)
+    stubBridge(spy)
+    render(<MobileHeader onOpenSessionDrawer={() => {}} />)
+    screen.getByTestId('mobile-header-go-native').click()
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  // 非 App 环境(手机浏览器直接开 /m)不该给一个点了没反应的按钮。
+  it('宿主但无原生桥时不渲染(非 lan-agent 环境 / App 版本早于该桥)', () => {
+    stubUA(ANDROID_WEBVIEW_UA)
+    render(<MobileHeader onOpenSessionDrawer={() => {}} />)
+    expect(screen.queryByTestId('mobile-header-go-native')).toBeNull()
+  })
+
+  it('桥对象在但没有 goToAgent 方法时不渲染', () => {
+    stubUA(ANDROID_WEBVIEW_UA)
+    vi.stubGlobal('AndroidWebview', {})
+    vi.stubGlobal('lanAgentGoToAgent', () => false)
+    render(<MobileHeader onOpenSessionDrawer={() => {}} />)
+    expect(screen.queryByTestId('mobile-header-go-native')).toBeNull()
+  })
+
+  // 桥是 lan-agent 独有:非宿主环境即便有桥也不该出现(UA 与桥两个信号都得满足)。
+  it('非 WebView UA + 有桥仍不渲染', () => {
+    stubUA(CHROME_MOBILE_UA)
+    stubBridge()
+    render(<MobileHeader onOpenSessionDrawer={() => {}} />)
+    expect(screen.queryByTestId('mobile-header-go-native')).toBeNull()
+  })
+
+  // 两个按钮共存是 lan-agent 宿主的常态 —— 模型入口不能被新按钮挤掉。
+  it('与模型切换按钮共存', () => {
+    stubUA(ANDROID_WEBVIEW_UA)
+    stubBridge()
+    render(<MobileHeader onOpenSessionDrawer={() => {}} />)
+    expect(screen.getByTestId('mobile-header-go-native')).toBeInTheDocument()
+    expect(screen.getByTestId('mobile-header-model')).toBeInTheDocument()
+  })
+})
