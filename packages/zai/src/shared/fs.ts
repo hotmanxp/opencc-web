@@ -23,6 +23,18 @@ export interface FsAck {
   error?: string;
 }
 
+/** POST /fs/create 的目标类型:'file' 建空文件,'dir' 建目录。 */
+export type FsCreateKind = 'dir' | 'file';
+
+export interface FsCreateResult {
+  ok: boolean;
+  error?: string;
+  /** 创建成功的相对路径(相对 cwd,POSIX 分隔符),失败时缺席。 */
+  path?: string;
+  name?: string;
+  type?: FsCreateKind;
+}
+
 export interface FsFile {
   ok: boolean;
   error?: string;

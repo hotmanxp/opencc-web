@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Empty, Input, Segmented, Spin, Switch, Tag, Tree, message } from 'antd';
-import { XIcon, FolderOpenIcon, RotateCwIcon } from 'lucide-react';
+import { Button, Dropdown, Empty, Input, Segmented, Spin, Switch, Tag, Tree, message } from 'antd';
+import { XIcon, FolderOpenIcon, RotateCwIcon, FilePlusIcon } from 'lucide-react';
 import { FileIcon, DirIcon } from './fileIcon.js';
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
@@ -16,7 +16,7 @@ import { DocumentPreview } from '../documentPreview/index.js';
 import { useAgentStore } from '../../store/useAgentStore.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
-import { FsContextMenu } from './FsContextMenu.js';
+import { FsContextMenu, FsCreateDialog } from './FsContextMenu.js';
 import { useFsWrite } from './useFsWrite.js';
 import { useCodeThemeMode } from '../../hooks/useCodeThemeMode.js';
 import { LazyMonacoCodeView, type MonacoCodeViewApi } from './MonacoCodeView.js';
@@ -537,6 +537,9 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const selected = activeKey === FILES_TAB ? null : activeKey;
   const file = useFsFile(cwd, selected);
   const [contextMenu, setContextMenu] = useState<{ path: string; absPath: string; x: number; y: number; kind?: 'file' | 'dir' } | null>(null);
+  // 新建弹窗的目标。**必须活在 FsTab**,不能放在 FsContextMenu 里 ——
+  // 菜单关闭时那个组件被整体卸载,state 跟着消失,弹窗永不渲染。
+  const [createTarget, setCreateTarget] = useState<{ type: 'file' | 'dir'; dir: string } | null>(null);
   // Search-mode toggle. When non-empty after trim, the left pane renders
   // <FsSearchList> instead of the directory tree. Right-side preview
   // (selected/file) is unchanged — search results reuse setSelected().
@@ -934,6 +937,24 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     </Button>
   );
 
+  // 「新建」入口。树里没有任何节点代表「根」,右键菜单没法在根目录触发,
+  // 所以根目录的新建走工具栏按钮。
+  const createBtn = (
+    <Dropdown
+      trigger={['click']}
+      menu={{
+        items: [
+          { key: 'file', label: '新建文件', 'data-testid': 'fs-create-menu-file', onClick: () => setCreateTarget({ type: 'file', dir: '' }) },
+          { key: 'dir', label: '新建文件夹', 'data-testid': 'fs-create-menu-dir', onClick: () => setCreateTarget({ type: 'dir', dir: '' }) },
+        ],
+      }}
+    >
+      <Button size="small" icon={<FilePlusIcon />} title="在项目根目录新建" data-testid="fs-create-btn">
+        新建
+      </Button>
+    </Dropdown>
+  );
+
   const treeData = root.data?.ok && root.data.entries ? renderTree(root.data.entries) : [];
 
   const isFilesTab = activeKey === FILES_TAB;
@@ -1118,6 +1139,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             </Button>
           </>
         )}
+        {isFilesTab && createBtn}
         {isFilesTab && refreshBtn}
       </div>
       {/* 面板区: 高度链路走 flex (SplitPane 的 Tabs 被 .zai-pane-fill 拉满),
@@ -1271,8 +1293,22 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             closeTab(contextMenu.path);
             refreshAll();
           }}
+          onRequestCreate={setCreateTarget}
         />
       )}
+      {/* 新建弹窗挂在 FsTab 而非 FsContextMenu:菜单被 antd Dropdown 关闭
+          时 FsContextMenu 会被整体卸载(createTarget 若存在它内部就跟着
+          消失,弹窗一帧都渲染不出来)。这里与菜单生命周期解耦。 */}
+      <FsCreateDialog
+        target={createTarget}
+        onClose={() => setCreateTarget(null)}
+        onCreated={(created) => {
+          refreshAll();
+          // 新建文件直接打开:「新建 → 看内容 → 敲字 → 保存」是一条链,
+          // 中间还要手动去树里点一次才能开始写。
+          if (created.type === 'file') openFile(created.path);
+        }}
+      />
     </div>
   );
 }

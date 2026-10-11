@@ -27,6 +27,12 @@ vi.mock('./FsContextMenu.js', () => ({
       <button onClick={onClose}>close</button>
     </div>
   )),
+  // FsCreateDialog 是 2026-10-11 从 FsContextMenu 里拆出来的独立弹窗
+  // (挂 FsTab 层级,不能随右键菜单卸载)。这里给个 stub,免得 FsTab 的
+  // 单测去拉真实 antd Modal。
+  FsCreateDialog: vi.fn(({ target }) => (
+    <div data-testid="create-dialog-stub" data-open={String(target !== null)} />
+  )),
 }));
 // 文档预览渲染层(2026-09-21):FsTab 只负责「按 kind 分发」,真正的解析由
 // components/documentPreview 里的渲染器做。这里只 stub 掉 DocumentPreview

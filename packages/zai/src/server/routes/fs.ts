@@ -13,7 +13,7 @@ import { resolveRgPath, runRipgrep } from '../services/ripgrep.js';
 import type {
   FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult,
   FsContentSearchEntry, FsContentSearchResult, FsUploadResult,
-  FilePreviewPayload, FilePreviewError, FsResolveResult,
+  FilePreviewPayload, FilePreviewError, FsResolveResult, FsCreateResult,
 } from '../../shared/fs.js';
 import {
   classifyKind, DOCUMENT_MAX_BYTES, IMAGE_MAX_BYTES, isDocumentKind, isPreviewableKind, mimeFromExt,
@@ -1540,6 +1540,100 @@ fsRouter.post('/fs/delete', async (req, res) => {
     res.json({ ok: true } satisfies FsAck);
   } catch (err) {
     res.status(500).json({ ok: false, error: `删除失败：${err instanceof Error ? err.message : String(err)}` } satisfies FsAck);
+  }
+});
+
+// --- Create file / directory (POST /fs/create) ---------------------------
+//
+// PUT /fs/file 刻意只做 "save",不创建新文件(fs.ts:568 的 404 "文件不存在"),
+// 所以「新建」必须走独立端点。
+//
+// `name` 只允许**单个 basename**:含路径分隔符的一律拒绝,目标目录由前端
+// 通过 `dir` 传入。落点由 dir + name 拼出,再过一遍 resolveSafePath。
+
+/**
+ * 校验用户输入的新建条目名:必须是单个 basename(不含分隔符)、非隐藏控制
+ * 名、长度有界。返回清洗后的名字,非法返回 null。
+ */
+function sanitizeEntryName(name: unknown): string | null {
+  if (typeof name !== 'string') return null;
+  const cleaned = name.trim();
+  if (!cleaned || cleaned === '.' || cleaned === '..') return null;
+  // 只收 basename:`/` 或 `\` 出现即拒。不像 sanitizeUploadName 那样
+  // split(...).pop() 静默丢弃目录成分 —— 这里是显式的用户意图,静默改写
+  // 会让人在 A 目录里建出 B 目录的文件而毫无察觉。
+  if (/[\\/]/.test(cleaned)) return null;
+  if (/[\x00-\x1f\x7f]/.test(cleaned)) return null;
+  if (cleaned.length > 200) return null;
+  return cleaned;
+}
+
+fsRouter.post('/fs/create', async (req, res) => {
+  const { cwd } = ctx(req);
+  const dir = typeof req.body?.dir === 'string' ? req.body.dir : '';
+  const kind = req.body?.type === 'dir' ? 'dir' : 'file';
+  const name = sanitizeEntryName(req.body?.name);
+  if (!name) {
+    res.status(400).json({ ok: false, error: '名称不合法(不能为空、不能含路径分隔符)' } satisfies FsCreateResult);
+    return;
+  }
+  // 父目录必须存在且是目录 —— 不做 recursive 创建:「新建」只在树里已经
+  // 看得到的目录里建条目,凭空造中间层属于另一回事。
+  const parent = resolveSafePath(cwd, dir);
+  if (!parent.ok) {
+    const status = parent.error.includes('NUL') ? 400 : 403;
+    res.status(status).json({ ok: false, error: parent.error } satisfies FsCreateResult);
+    return;
+  }
+  let parentInfo;
+  try {
+    parentInfo = await stat(parent.abs);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    res.status(code === 'ENOENT' ? 404 : 500).json({
+      ok: false,
+      error: code === 'ENOENT' ? '目标目录不存在' : `stat 失败：${err instanceof Error ? err.message : String(err)}`,
+    } satisfies FsCreateResult);
+    return;
+  }
+  if (!parentInfo.isDirectory()) {
+    res.status(400).json({ ok: false, error: '目标不是目录' } satisfies FsCreateResult);
+    return;
+  }
+  // 最终落点由 dir + name 拼出,并再过一遍 resolveSafePath 兜底(name 已
+  // 拒分隔符,这里是双保险)。
+  const safe = resolveSafePath(cwd, dir ? `${dir}/${name}` : name);
+  if (!safe.ok) {
+    const status = safe.error.includes('NUL') ? 400 : 403;
+    res.status(status).json({ ok: false, error: safe.error } satisfies FsCreateResult);
+    return;
+  }
+  const createdPath = (dir ? `${dir}/${name}` : name);
+  try {
+    if (kind === 'dir') {
+      // mkdir 本身就是原子的:已存在抛 EEXIST。
+      await mkdir(safe.abs);
+    } else {
+      // flag 'wx' = 独占创建,已存在抛 EEXIST。比先 stat 再写更安全
+      // (TOCTOU:两个并发请求都 stat 通过,然后互相覆盖)。
+      await writeFile(safe.abs, '', { flag: 'wx' });
+    }
+    res.json({ ok: true, path: createdPath, name, type: kind } satisfies FsCreateResult);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') {
+      res.status(409).json({ ok: false, error: '已存在同名文件或目录' } satisfies FsCreateResult);
+      return;
+    }
+    if (code === 'ENOENT') {
+      res.status(404).json({ ok: false, error: '目标目录不存在' } satisfies FsCreateResult);
+      return;
+    }
+    const status = code === 'EACCES' || code === 'EPERM' ? 403 : 500;
+    res.status(status).json({
+      ok: false,
+      error: `创建失败：${err instanceof Error ? err.message : String(err)}`,
+    } satisfies FsCreateResult);
   }
 });
 
