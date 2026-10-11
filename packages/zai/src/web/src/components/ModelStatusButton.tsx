@@ -31,9 +31,15 @@ type Props = {
    * 给窄屏幕 / 分屏态腾出横向空间. 默认 false (保持向后兼容, 即完整渲染).
    */
   compact?: boolean
+  /**
+   * 追加到 trigger 的 Tailwind class. 供宿主在窄容器里限制宽度并让模型名
+   * ellipsis 截断 (如移动端顶栏) —— `[&>span]:truncate` 命中 antd Button
+   * 包 children 的内层 <span>, 单靠 overflow-hidden 只会硬裁掉半个字符。
+   */
+  className?: string
 }
 
-export default function ModelStatusButton({ compact = false }: Props = {}) {
+export default function ModelStatusButton({ compact = false, className }: Props = {}) {
   // 移动端直接从 useAppStore.isMobile 读, 与 ModeStatusButton 同模式.
   const isMobile = useAppStore((s) => s.isMobile)
   const { text: badgeText, tooltipText } = useModelBadgeText({ compact, isMobile })
@@ -51,7 +57,7 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
         size="small"
         aria-label={`切换模型,当前 ${badgeText ?? '未知'}`}
         title={`当前模型: ${tooltipText ?? '未知'}\n点击切换`}
-        className="opacity-90 text-xs font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace]"
+        className={`opacity-90 text-xs font-[ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace] ${className ?? ''}`}
         style={{
           color: 'inherit',
           opacity: currentModel ? 0.9 : 0.6,
