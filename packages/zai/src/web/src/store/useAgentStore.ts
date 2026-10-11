@@ -1144,10 +1144,9 @@ export function createAgentStore() {
       }
       set({ sessions, availableModels })
       // 特殊标记: URL 带 ?sid=newID 表示 "新 tab 想开全新会话".
-      // ConfigStatusBar 上的 N 按钮会在新 tab 里打开 /agent?sid=newID,
-      // 我们在这里拦截 → 立即调 createNewSession() 建一条空 transcript,
-      // 然后让 createNewSession 内部通过 writeUrlSid 把 URL 改成真实 sid,
-      // 避免列表回退把 URL 又改成 first.
+      // 打开 /agent?sid=newID 时在这里拦截 → 立即调 createNewSession() 建一条
+      // 空 transcript, 然后让 createNewSession 内部通过 writeUrlSid 把 URL
+      // 改成真实 sid, 避免列表回退把 URL 又改成 first.
       const requested = readUrlSid()
       if (requested === 'newID') {
         await get().createNewSession()
