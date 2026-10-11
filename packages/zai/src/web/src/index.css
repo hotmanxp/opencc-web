@@ -818,6 +818,28 @@ body.zai-split-resizing * {
   height: 14px;
 }
 
+/* ─── slash 下拉的搜索框 focus/hover 态 ─────────────────────────
+ * 列表项里的 `/命令` 文字已经走 --cmd-token-color(浅橙 / 深紫),但搜索框
+ * 聚焦时还是 antd 的 colorPrimary 橙(App.tsx DARK_TOKENS)—— 同一个浮层
+ * 里两种高亮色。收敛到同一套语义色。
+ *
+ * 这里用 CSS 规则而非 Tailwind/Tailwind ! 覆盖:antd 5 的 focus 边框与
+ * box-shadow 由 cssinjs 注入,优先级压 Tailwind;而 `styles` prop 只覆盖
+ * 语义槽位,碰不到 focus 态。
+ *
+ * 用 id 而非 className 挂钩:antd 的 Input 没把 className 透传到 <input>
+ * (实测 DOM 上只有 `ant-input ant-input-sm css-dev-only-do-not-override-*`,
+ * data-* 透传了、className 没有),class 选择器匹配不上。id 选择器特异性
+ * (1,x,0) 也天然压得过 cssinjs 运行时注入的
+ * `.css-dev-only-do-not-override-<hash>.ant-input:focus`。
+ */
+#quick-command-search-input.ant-input:hover,
+#quick-command-search-input.ant-input:focus,
+#quick-command-search-input.ant-input-focused {
+  border-color: var(--cmd-token-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cmd-token-color) 18%, transparent);
+}
+
 .agent-input-ref-chip-label {
   min-width: 0;
   overflow: hidden;
