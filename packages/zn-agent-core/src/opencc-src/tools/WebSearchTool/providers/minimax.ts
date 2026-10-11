@@ -66,7 +66,7 @@ export const minimaxProvider: SearchProvider = {
         },
         body: JSON.stringify({
           model,
-          max_tokens: 8192,
+          max_tokens: 32_768,
           messages: [{ role: 'user', content: input.query }],
           tools: [tool],
         }),

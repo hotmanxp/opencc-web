@@ -690,19 +690,16 @@ body.zai-split-resizing * {
   border-color: #ff6600 !important;
 }
 
-/* ─── Agent 输入框命令/Skill 高亮 (mirror-backdrop) ─────────────
- * 模式: 一个绝对定位的 backdrop 浮在 antd TextArea 之下,渲染带 mark
- * 的可见文本;textarea 自身 color/text-fill-color 变透明,只保留 caret
- * 与 selection。两个图层共享 antd 默认 metrics (padding 4px/11px,
- * fontSize 14, lineHeight 22) → 文本逐字对齐,mark 不会漂移。
+/* ─── Agent 输入框编辑面(Lexical composer) ──────────────────────
+ * 输入面是一个 contenteditable(Lexical):文件引用 chip、`/命令` 高亮、
+ * 普通文本都是编辑器里的真实内容。旧的「绝对定位 backdrop + 透明 antd
+ * TextArea + 隐藏镜像层」三层结构整层删除 —— 它存在的唯一理由是在
+ * textarea 里伪造可视文本,而 textarea 的 U+FFFC 占位单元把 chip 宽度
+ * 锁死在 56px(实测),长文件名必然被截断。
  *
- * 触发条件: 仅当输入以 `/<已知命令名>` 起首时挂载 (见
- * AgentInputBox.tsx `deriveCommandToken`),普通文本路径不渲染 backdrop,
- * 性能开销为零。
- *
- * 与 deepseek-harness InputBar 的 hlToken / backdrop 思路一致,但只取
- * "claim-token highlight" 这一支 (chips / textRefs / hint 不移植 —
- * ZAI 当前没有 reference/codec/hint 这些概念)。
+ * 手法移植自 deepseek-harness InputBar 的 composer,实现见
+ * `components/input/editor/`。度量沿用原 antd TextArea
+ * (padding 4px/11px,fontSize 14,lineHeight 22),视觉不变。
  */
 .agent-input-decorator-wrap {
   position: relative;
@@ -712,42 +709,7 @@ body.zai-split-resizing * {
   flex-direction: column;
 }
 
-/* 透明 placeholder: backdrop 接管后,TextArea 文本变透明,但
-   placeholder 仍需可见 — 用 ::placeholder 显式恢复 fill-color。 */
-.agent-input-decorator-wrap textarea::placeholder {
-  color: var(--text-tertiary);
-  -webkit-text-fill-color: var(--text-tertiary);
-  opacity: 1;
-}
-
-/* antd TextArea 默认 `background: var(--bg-input)` 实色 + border,不透明化
-   会盖住 backdrop 的 mark + 普通文本。让 textarea 自身背景透明,
-   border 保留(否则输入框失去卡面轮廓):
-   装饰层 wrap 内,backdrop(z=0)画底色 + 高亮文本,
-   textarea(z=1)画透明 + caret — caret / selection 始终在最顶层
-   (不被 backdrop 盖住),选中态看得到浏览器 selection 蓝底框 + 高亮文本。*/
-.agent-input-textarea-field {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-  resize: none;
-  overflow: hidden;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  caret-color: var(--text-primary);
-}
-
-/* ---- 三层输入区布局(追齐 deepseek-harness InputBar) ----
-   .scroll(唯一滚动容器,封顶滚动)> .grow(相对)> [backdrop / textarea /
-   mirror]。backdrop 渲染全部可见文本 + chip + token-mark;textarea 透明
-   只留 caret / selection;mirror 隐藏、决定 .grow 的高度 → auto-grow。
-   三层共享 metrics 与 DshChipCell 打头的 font-stack,占位符 U+FFFC 的
-   advance 三层一致 → chip 与文本零漂移。 */
+/* 唯一滚动容器:封顶 240px 后滚动 */
 .agent-input-scroll {
   max-height: 240px;
   overflow-y: auto;
@@ -757,117 +719,111 @@ body.zai-split-resizing * {
   position: relative;
 }
 
-.agent-input-backdrop,
-.agent-input-textarea-field,
-.agent-input-mirror {
+/* 可编辑面:高度随内容自然增长,旧的 auto-grow 隐藏镜像层随之删除 */
+.agent-input-editor {
   box-sizing: border-box;
   padding: 4px 11px;
+  /* 三行下限(≈ 旧隐藏镜像层的 min-height):删除 auto-grow 镜像层后由编辑
+     面自己兜底,否则空输入框会塌成一行,输入时整块布局往上跳。 */
+  min-height: 74px;
   font-size: 14px;
   line-height: 22px;
-  font-family: 'DshChipCell', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-}
-
-/* Backdrop 浮层: inset:0 填满 .grow,pointer-events 让开鼠标(点击落到
-   底层 textarea)。普通文本、chip、token-mark 全在这里画。 */
-.agent-input-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  overflow: hidden;
+  outline: none;
   color: var(--text-primary);
+  caret-color: var(--accent-start);
 }
 
-/* 隐藏镜像:高度权威,撑起 .grow(auto-grow);保留 3 行最小高度(≈ 原
-   rows=3 的视觉高度)。 */
-.agent-input-mirror {
-  visibility: hidden;
+/* Lexical 的段落是 <p> 块:抹掉 UA 默认 margin,保持与旧 textarea 相同的行节奏 */
+.agent-input-editor p {
+  margin: 0;
+}
+
+/* 空草稿占位提示(兄弟节点,绝不进 contenteditable)。组合输入期间隐藏:
+   原生 composition 与 Lexical 的最终文本对账完成之前,提示会盖在正在
+   组合的字上。 */
+.agent-input-placeholder {
+  position: absolute;
+  top: 4px;
+  left: 11px;
+  right: 11px;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-tertiary);
   pointer-events: none;
-  min-height: 74px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* 命令 token mark: 与下方 slash dropdown 的 `/name` 文字色一致
-   (走 var(--cmd-token-color),深色主题 #a78bfa 紫,浅色主题
-   var(--accent-start) 橙)。不加背景色 (用户要求:文字色标记,
-   不要 block-style 的色块)。从 dropdown 选完 Tab/Enter 后输入框
-   里立刻出现同色文字,反馈链路视觉统一。
-   注意:不要在这里加 padding。backdrop 接管可见文本、textarea 自身
-   透明只保留 caret,两者宽度若不一致 (mark 多 4px 水平 padding 会让
-   mark 整体加宽) → 光标位置停留在 backdrop 文本"内部"而非末尾,
-   wrap 点也可能错位。视觉区分靠 color 已足够,如需 padding 视觉间距
-   仿 MentionChip 用 hidden placeholder + absolute stretch 占位。*/
-.agent-input-cmd-token {
-  color: var(--cmd-token-color);
+.agent-input-editor[data-composer-composing] + .agent-input-placeholder {
+  display: none;
+}
+
+/* 命令 argument-hint 幽灵提示:参数模板挂在末段之后,由 JS 侧以
+   `--agent-input-hint`(一个带引号的字符串)喂给 CSS 生成内容。它不在
+   文档树里,既不会被选中也不会被发送;用户开始敲参数后随 rest 非空消失。 */
+.agent-input-editor p:last-child::after {
+  content: var(--agent-input-hint);
+  color: var(--text-dim-45);
+}
+
+.agent-input-editor[data-composer-composing] p:last-child::after {
+  content: none;
+}
+
+/* ─── 文件引用 chip ─────────────────────────────────────────────
+ * chip 现在是 Lexical 装饰节点里的真实行内元素(见
+ * `components/input/editor/chip-node.tsx`),宽度随 label 自然撑开,
+ * 不再需要任何宽度对位 hack —— 旧的 DshChipCell @font-face(把 U+FFFC
+ * 映射成 4em 空单元)与 `scale(0.72)` 覆盖层整段删除。
+ *
+ * 视觉对齐 deepseek-harness `ReferenceChip.module.css`:透明底 + 强调色
+ * 文字 + 图标 + 超出省略,hover 才出底色,失效态置灰加删除线;配色跟命令
+ * token 共用 `--cmd-token-color`(浅色橙 / 暗色紫)。
+ */
+.agent-input-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 240px;
+  padding: 0 4px;
   border-radius: 4px;
+  background: transparent;
+  /* 与命令 token 同一套语义色:浅色主题橙、深色主题紫(--cmd-token-color)。
+     早期版本写死 var(--accent-start),结果暗色下 chip 变橙而 slash 命令
+     仍是紫,两种「正在补全的高亮」对不上。 */
+  color: var(--cmd-token-color);
+  line-height: inherit;
+  vertical-align: baseline;
+  user-select: none;
+  cursor: default;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 
-/* 命令 argument-hint 幽灵提示: 选中/敲完 `/name` 且未输入参数时,在
-   backdrop 行尾以暗色展示参数模板 (如 `<patch|minor|major>`)。纯视觉,
-   不在 textarea 内容里;用户敲参数后随 rest 非空自动消失。 */
-.agent-input-cmd-hint {
-  color: var(--text-dim-45);
-}
-
-/* ---- 文件引用 chip 的单元字体 ----
-   一个 glyph 的字体:只把 U+FFFC 映射为 4em 空白单元(其余 codepoint 落
-   到后续 font-family)。textarea 里的占位符与 backdrop chip 的 ::before
-   都渲染同一个 U+FFFC、走同一个 stack → 两层宽度严格一致,chip 定位
-   零漂移。 */
-@font-face {
-  font-family: 'DshChipCell';
-  src: url('data:font/ttf;base64,AAEAAAAKAIAAAwAgT1MvMkT8SmIAAAEoAAAAYGNtYXAADQBPAAABkAAAADRnbHlmAAAAAAAAAcwAAAABaGVhZCwtPGoAAACsAAAANmhoZWEDIg7bAAAA5AAAACRobXR4EZQAAAAAAYgAAAAIbG9jYQAAAAAAAAHEAAAABm1heHAAAwACAAABCAAAACBuYW1lvljk2gAAAdAAAABscG9zdNNweNQAAAI8AAAALQABAAAAAQAAdia1tV8PPPUAAwPoAAAAAOaLfcUAAAAA5ot9xQAAAAAAAAAAAAAAAwACAAAAAAAAAAEAAAMg/zgAAA+gAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAACAAEAAAACAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAwjKAZAABQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAPz8/PwAA//z//AMg/zgAAAMgAMgAAAAAAAAAAAAAAAAAAAAgAAAB9AAAD6AAAAAAAAIAAAADAAAAFAADAAEAAAAUAAQAIAAAAAQABAABAAD//P//AAD//P//AAUAAQAAAAAAAAAAAAAAAAAAAAAAAAAEADYAAQAAAAAAAQALAAAAAQAAAAAAAgAHAAsAAwABBAkAAQAWABIAAwABBAkAAgAOAChEc2hDaGlwQ2VsbFJlZ3VsYXIARABzAGgAQwBoAGkAcABDAGUAbABsAFIAZQBnAHUAbABhAHIAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAABAgZvYmpyZXAAAAA=') format('truetype');
-}
-
-/* ---- 文件引用 chip ----
-   硬对齐约束:chip 的总宽度必须严格等于 textarea 里那个 U+FFFC 的
-   advance,否则其后每个字符漂移。::before 渲染同一 U+FFFC、走同一 font
-   stack(DshChipCell 4em 单元),两层天然一致;chip 本身不带 padding。
-   label 用 absolute + compensated-scale(先按 1/0.72 布局再缩回,裁边落到
-   视觉单元边沿),title 携带完整路径。 */
-.agent-input-ref-chip {
-  position: relative;
-  display: inline-block;
-  border-radius: 6px;
-  background: rgba(255, 102, 0, 0.18);
-  cursor: default;
-  vertical-align: baseline;
-}
-
-.agent-input-ref-chip::before {
-  content: '\FFFC';
-  color: transparent;
-}
-
-.agent-input-ref-chip-label {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: calc(100% / 0.72 - 10px);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  overflow: hidden;
-  color: var(--text-primary);
-  white-space: nowrap;
-  transform: translate(-50%, -50%) scale(0.72);
-  font-size: 12px;
-  line-height: 16px;
+.agent-input-ref-chip:hover {
+  background: color-mix(in srgb, var(--cmd-token-color) 14%, transparent);
 }
 
 .agent-input-ref-chip-icon {
-  font-size: 12px;
-  flex-shrink: 0;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.agent-input-ref-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-input-ref-chip[data-invalid] {
-  background: rgba(216, 97, 97, 0.2);
+  color: var(--danger, #d86161);
   text-decoration: line-through;
   opacity: 0.7;
 }
