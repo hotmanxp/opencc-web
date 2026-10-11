@@ -734,7 +734,10 @@ body.zai-split-resizing * {
   overflow-wrap: anywhere;
   outline: none;
   color: var(--text-primary);
-  caret-color: var(--accent-start);
+  /* 与命令 token / 文件引用 chip 同一套语义色:浅色主题橙、深色主题紫
+     (--cmd-token-color)。早先写 var(--accent-start),两个主题都是品牌橙,
+     暗色下 chip 与 slash 高亮是紫的、光标却是橙的,对不上。 */
+  caret-color: var(--cmd-token-color);
 }
 
 /* Lexical 的段落是 <p> 块:抹掉 UA 默认 margin,保持与旧 textarea 相同的行节奏 */
