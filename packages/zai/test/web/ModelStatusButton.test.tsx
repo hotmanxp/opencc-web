@@ -171,6 +171,52 @@ describe('ModelStatusButton TUI picker (extended)', () => {
     expect(m3Rows.length).toBe(2) // 1 in Recent + 1 in provider group
   })
 
+  it('dedupes Recent when a legacy session and a provider-scoped session resolve to the same entry', async () => {
+    // Regression (2026-10-11): Recent used to key its dedup set on the
+    // SESSION's (providerId, model). A legacy session with no providerId
+    // resolves to the first availableModels entry matching the name, and an
+    // older session holding that same providerId resolves to the very same
+    // entry — the two keys differ, so one row rendered twice in Recent.
+    const scoped: ModelEntry[] = [{
+      alias: 'flash-p1',
+      model: 'Flash-Preview',
+      label: 'Flash-Preview',
+      description: 'P1',
+      providerId: 'p1',
+    }]
+    useAgentStore.setState({
+      availableModels: scoped,
+      sessions: [
+        // Newer: legacy session, no providerId recorded.
+        { sessionId: 's-1', title: 'a', updatedAt: 3, model: 'Flash-Preview' },
+        // Older: same model, carrying the providerId the legacy session's
+        // name fallback resolves to.
+        {
+          sessionId: 's-2',
+          title: 'b',
+          updatedAt: 2,
+          model: 'Flash-Preview',
+          providerId: 'p1',
+        },
+      ],
+    })
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        defaultModel: 'Flash-Preview',
+        baseURL: null,
+        models: scoped,
+      }),
+    } as Response)
+
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('Flash-Preview (P1)'))
+    // 1 in Recent + 1 in the provider group = 2. Pre-fix this was 3, because
+    // both sessions landed on the same entry.
+    expect(screen.getAllByTestId('model-row-flash-p1')).toHaveLength(2)
+  })
+
   it('formats provider title from entry.description (falls back to host)', async () => {
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))

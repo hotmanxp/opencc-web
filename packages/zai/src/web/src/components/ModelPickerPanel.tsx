@@ -163,19 +163,25 @@ export default function ModelPickerPanel() {
     const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
     for (const s of sorted) {
       if (!s.model || s.model === 'unknown') continue
-      const key = `${s.providerId ?? ''}::${s.model}`
-      if (seen.has(key)) continue
       const entry = availableModels.find(
         (m) => m.model === s.model && m.providerId === s.providerId,
       )
       // Fallback: legacy sessions without providerId — match by model name
       // only when no providerId is recorded on the session.
-      const fallback = entry ?? (s.providerId
+      const resolved = entry ?? (s.providerId
         ? undefined
         : availableModels.find((m) => m.model === s.model))
-      if (!fallback) continue
+      if (!resolved) continue
+      // zai patch (2026-10-11): dedupe on the RESOLVED entry's tuple key, not
+      // on the session's. A legacy session carrying no providerId resolves to
+      // whichever provider's entry matched the name first, and an older
+      // session holding that same providerId resolves to the very same entry —
+      // keying on the session let both through and rendered one row twice in
+      // Recent (seen in the wild: MiniMax-M3.1-Flash-Preview listed twice).
+      const key = entryTupleKey(resolved)
+      if (seen.has(key)) continue
       seen.add(key)
-      out.push(fallback)
+      out.push(resolved)
       if (out.length >= 5) break
     }
     return out
