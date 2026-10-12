@@ -49,6 +49,11 @@ const NAMED_EVENT_TYPES = [
   'runtime.aborted',
   'runtime.error',
   'runtime.compacted',
+  // runtime.compacting — 压缩过程态「正在压缩…」(zi patch 2026-10-12)。
+  // 与上一行的 runtime.compacted 语义相反,别合并:那个是压缩**结束后**弹的
+  // 5s toast,这个是压缩**过程中**常驻的状态条。漏登记的表现是"压缩了几十秒
+  // 界面毫无反应",且不会有任何报错。
+  'runtime.compacting',
   // compact_boundary — 压缩分界线(zi patch 2026-10-12)。**不带 runtime.
   // 前缀**(它是 transcript 常驻内容,不是流式运行时事件),但同样必须登记,
   // 否则 EventSource 不为它注册 listener、帧直接消失 —— 表现是"toast 会弹、

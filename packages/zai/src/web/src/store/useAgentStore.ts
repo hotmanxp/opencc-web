@@ -389,6 +389,14 @@ interface AgentState {
   applyCompactionEvent: (event: Extract<ServerEvent, { type: 'runtime.compacted' }>) => void
   dismissCompactionToast: (id: string) => void
 
+  // zai patch (2026-10-12): 压缩**过程中**的状态位,UI 渲染「正在压缩…」。
+  // 与上面的 toasts 是两件独立的事,不要合并 —— toasts 是压缩**结束后**的
+  // 5s 一次性提示(带 expiresAt 自动回收),而压缩本身常耗时数十秒,塞进
+  // toast 池会被 expiresAt 误删。所以过程态是独立 boolean, 由独立的
+  // CompactingIndicator 组件渲染。
+  compacting: boolean
+  applyCompactingEvent: (event: Extract<ServerEvent, { type: 'runtime.compacting' }>) => void
+
   addMessage: (msg: AgentMessage) => void
   upsertToolCall: (msg: AgentMessage) => void
   upsertStreamBlock: (
@@ -815,6 +823,8 @@ export function createAgentStore() {
   // 与 useAppStore 的 ToastInfo (server.system toast / server.error) 完全独立,
   // 不混用同一个池.
   toasts: [],
+  // zai patch (2026-10-12): 压缩过程态,初始 false(没在压缩)。
+  compacting: false,
   // 待清空定时器: 每 sessionId 一份, "全部任务完成" 后 5s 自动从 store 移除
   // (避免"全部完成还一直挂着"的 UI 噪音). 重新写入含未完成任务时取消.
   _taskClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
@@ -898,6 +908,44 @@ export function createAgentStore() {
         toasts: [...(state.toasts ?? []), newToast],
       }
     })
+  },
+  // zai patch (2026-10-12): 压缩过程态翻转。
+  //
+  // 幂等语义照搬 vendor 的 `isCompactingRef`(opencc-src/hooks/
+  // useRemoteSession.ts:228-232):
+  //   compacting:true  且已经 true  → 早退, 不重复写状态;
+  //   compacting:false            → 无条件置 false。
+  //
+  // 为什么幂等这么重要:core 侧把 vendor 的 setSDKStatus('compacting') 与
+  // onCompactProgress({compact_start}) 都映射成了同一个 true(见
+  // buildReplToolUseContext),所以一次压缩本来就会收到 start×2 / end×2;
+  // 此外 keep-alive 定时器(opencc-src/services/compact/compact.ts:1237-1246)
+  // 每 30s 还会重发一次 'compacting'。不早退的话 UI 会被反复唤醒重渲染。
+  //
+  // 「end 即置 false」覆盖了**孤立 end**:vendor 的 compact_end 在 finally
+  // 里, 而 compact_start 在 PreCompact hook 之后 —— hook 抛错时会先来 end
+  // 再(可能永远不来)start。只在配对时才关的话, 压缩态就永久卡住了。
+  //
+  // **不按 sessionId 过滤**:过程态是会话级提示, 收到就应用。
+  //
+  // ⚠️ 投递侧有个缺口(2026-10-12 已由 setCurrentSession/clearMessages 兜住):
+  // runtime.compacting 是 **sid-scoped**(不在 isGlobalEvent 白名单), 所以
+  // "切到 B 后收到 A 的结束帧"在现实中**根本到不了这里** —— SSE 已按
+  // ?sid=B 重连并把 A 的帧过滤掉了。原注释写的那个意图与服务端投递是矛盾的,
+  // 别再依赖"另一会话的结束帧会来关状态"。
+  applyCompactingEvent: (event) => {
+    const next = event.compacting !== false
+    // zai fix (2026-10-12): 必须用闭包里的 `get()`, 不能写
+    // `useAgentStore.getState()` —— 后者是**模块级单例**, 而本 reducer
+    // 是 create() 产出的闭包, Context store(NewSuperTaskModal 等走
+    // applyBatchTo(store, ...) 的路径)会拿到另一个实例。
+    //
+    // 写单例的后果: 单例 compacting=false、modal store=true, 来一个
+    // false 事件时 `false === false` 成立 → 早退 → **modal store 永远
+    // 不更新**, 压缩指示在弹窗里卡死。get() 与同段的 set() 配对, 读的
+    // 一定是当前实例。
+    if (get().compacting === next) return
+    set({ compacting: next })
   },
   // UI 端可主动 dismiss (例如用户点 ×); reducer 不强制依赖 expiresAt 清理
   // 路径, 两条路并存, 兼容未来需要的"立即清除"交互.
@@ -1204,6 +1252,9 @@ export function createAgentStore() {
   clearMessages: () =>
     set((s) => {
       const sid = s.sessionId
+      // zai fix (2026-10-12): 与 setCurrentSession 同因同解 —— 压缩过程态
+      // 是 sid-scoped, 清屏/切视图后原会话的结束帧到不了(见该处注释),
+      // 在这里就地复位。见 CompactingIndicator 的注释。
       // 切会话/清屏只清理当前 sid 的 v2 task.
       const { [sid as string]: _dropV2, ...restV2 } = (s.v2TasksBySession ?? {}) as Record<string, V2TaskItem[]>
       void _dropV2
@@ -1220,6 +1271,7 @@ export function createAgentStore() {
         // 回到的可能是同一个 sid 的低 seq 事件,带着旧高水位会把它们全丢。
         lastSeqBySession: {},
         v2TasksBySession: sid ? restV2 : s.v2TasksBySession,
+        compacting: false,
       }
     }),
 
@@ -1265,7 +1317,21 @@ export function createAgentStore() {
   },
 
   setCurrentSession: (sessionId: string) => {
-    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0, lastRuntimeTurnIndex: null, lastSeqBySession: {} })
+    // zai fix (2026-10-12): 复位 compacting。
+    //
+    // 手动 /compact 期间切会话会让指示永久卡死: runtime.compacting 是
+    // **sid-scoped**(不在 isGlobalEvent 白名单), 切到 B 后 SSE 重连带
+    // ?sid=B, A 的 `compacting:false` 被服务端静默丢弃 —— 那个帧根本
+    // 到不了这里(applyCompactingEvent 注释里"切到 B 后 A 的结束帧照样
+    // 要关掉"的意图与服务端投递是矛盾的)。而切会话门禁只看
+    // status==='streaming', /compact 期间 status 始终 idle, 故这条路径
+    // 完全可达(实测压缩窗口约 20 秒)。
+    //
+    // 为什么不在这里用 (b) 把 runtime.compacting 加进 isGlobalEvent:
+    // 那样所有 tab 都会收到任意会话的压缩态 —— 后台会话压缩时, 正在看
+    // 别的会话的 tab 也会弹出"正在压缩…", 是新的串扰。(a) 在视图切换
+    // 这一侧就地复位, 语义更准: 换了会话就不该显示上一个会话的压缩态。
+    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0, lastRuntimeTurnIndex: null, lastSeqBySession: {}, compacting: false })
     // 同步 URL ?sid=..., 让刷新/分享链接落到同一会话.
     writeUrlSid(sessionId)
     // ★ Cold-start 快照补全: 切会话时 fire-and-forget 拉一次 4 字段快照,
@@ -1744,6 +1810,15 @@ export function createAgentStore() {
     // sessionId), 不能借用系统 toast 池.
     if (event.type === 'runtime.compacted') {
       get().applyCompactionEvent(event)
+      return
+    }
+    // zai patch (2026-10-12): 压缩过程态。与上面的 compacted 同样放在
+    // sid 过滤之前 —— 收到就应用。
+    // ⚠️ 但**别指望**靠"另一会话的结束帧"来复位: runtime.compacting 是
+    // sid-scoped, SSE 已按 ?sid=<当前会话> 过滤, 别的会话的帧收不到。
+    // 跨会话的兜底在 setCurrentSession / clearMessages 里就地复位。
+    if (event.type === 'runtime.compacting') {
+      get().applyCompactingEvent(event)
       return
     }
     // Defense-in-depth: 后端已经按 sid 过滤 (subscribeScoped), 但切换会话

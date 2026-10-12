@@ -66,17 +66,30 @@ export function initStateBridge(): () => void {
   const onAgentTaskChanged = (e: { sessionId: string | null; task: unknown }) => {
     eventBus.emit({ type: 'agent_task.changed', ...e })
   }
+  // zai patch (2026-10-12): 压缩过程态。手动 /compact 与自动压缩**同源**
+  // —— 两边都从 vendor compactConversation 的 compact_start/compact_end
+  // 出发(core 侧 createCompactProgressEmitter 统一转换), 故一个订阅覆盖
+  // 两条路径。
+  //
+  // 与 runtime.compacted / compact_boundary 的分工:那两个是压缩**结束后**
+  // 才有的一次性 toast 与 transcript 分界线; 本事件管压缩**过程中**的
+  // 「正在压缩…」状态条。压缩实测耗时 ~20s, 缺这段 UI 就是全白屏。
+  const onCompactChanged = (e: { sessionId: string; compacting: boolean }) => {
+    eventBus.emit({ type: 'runtime.compacting', ...e })
+  }
 
   stateChangeBus.on('cwd.changed', onCwdChanged)
   stateChangeBus.on('bash_task.changed', onBashTaskChanged)
   stateChangeBus.on('v2_task.changed', onV2TaskChanged)
   stateChangeBus.on('agent_task.changed', onAgentTaskChanged)
+  stateChangeBus.on('compact.changed', onCompactChanged)
 
   _stateBridgeDispose = () => {
     stateChangeBus.off('cwd.changed', onCwdChanged)
     stateChangeBus.off('bash_task.changed', onBashTaskChanged)
     stateChangeBus.off('v2_task.changed', onV2TaskChanged)
     stateChangeBus.off('agent_task.changed', onAgentTaskChanged)
+    stateChangeBus.off('compact.changed', onCompactChanged)
   }
   return _stateBridgeDispose
 }

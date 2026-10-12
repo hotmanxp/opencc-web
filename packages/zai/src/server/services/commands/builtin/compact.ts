@@ -6,6 +6,8 @@ import {
   suppressCompactWarning,
   compactViaVendor,
   buildReplToolUseContext,
+  // zai patch (2026-10-12): 与自动压缩共用的 vendor 过程信号转换器 → stateChangeBus。
+  createCompactProgressEmitter,
   type LocalCommand,
   type LocalCommandResult,
   type Message,
@@ -138,38 +140,57 @@ async function summarizeViaVendor(
   context: { cwd: string; model?: string; sessionId?: string },
 ): Promise<VendorSummary> {
   try {
-    const toolUseContext = buildReplToolUseContext({
-      cwd: context.cwd,
-      model:
-        context.model ??
-        process.env.ANTHROPIC_DEFAULT_SONNET_MODEL ??
-        process.env.ANTHROPIC_SMALL_FAST_MODEL ??
-        'default',
-      sessionId: context.sessionId ?? '',
-      vendorCtx: null,
-    })
+    // zai patch (2026-10-12): 手动压缩接上 vendor 的过程信号, 与自动压缩
+    // 同源。压缩常耗时数十秒(实测 19.9s), 没有过程态用户会以为没响应而
+    // 重复点击。
+    //
+    // 与自动路径共用 createCompactProgressEmitter —— 去重(keep-alive 每 30s
+    // 重发 'compacting' 必须早退)、孤立 end 容忍等语义只有一份实现, 两边
+    // 不会漂移。信号走 core 的 stateChangeBus → zai stateBridge → SSE。
+    //
+    // **不 import 任何 zai 的东西**:本文件只 import @zn-ai/zn-agent-core,
+    // 跨层耦合由 stateBridge 那层翻译。详见 compat/compact/compactProgress.ts。
+    const compactEmitter = createCompactProgressEmitter(context.sessionId ?? '')
+    try {
+      const toolUseContext = buildReplToolUseContext({
+        cwd: context.cwd,
+        model:
+          context.model ??
+          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL ??
+          process.env.ANTHROPIC_SMALL_FAST_MODEL ??
+          'default',
+        sessionId: context.sessionId ?? '',
+        vendorCtx: null,
+        onCompactProgress: compactEmitter.onCompactProgress,
+      })
 
-    const result = await compactViaVendor({
-      messages: messages as never,
-      toolUseContext,
-      model:
-        context.model ??
-        process.env.ANTHROPIC_DEFAULT_SONNET_MODEL ??
-        process.env.ANTHROPIC_SMALL_FAST_MODEL ??
-        'default',
-      cwd: context.cwd,
-      // vendor 的 `getCompactPrompt` 把 customInstructions 拼到
-      // `Additional Instructions:` 段(prompt.ts:302),但 BASE_COMPACT_PROMPT
-      // 里有英文模板开头("This session is being continued from a previous
-      // conversation...")—— 真机验证发现模板句会带偏模型,摘要整体变英文。
-      // 故措辞要显式覆盖模板:要求**包括开头句在内全部用中文**。
-      customInstructions:
-        '摘要必须全程使用**简体中文**输出,包括开头的接续说明句在内,不要出现英文句子。' +
-        '用紧凑的项目符号列表组织。' +
-        '必须保留:具体的文件名与路径、版本号、错误信息原文、已执行的命令、' +
-        '以及尚未完成的任务。不要捏造对话中没出现的内容。',
-    })
-    return { kind: 'ok', summary: result.summary }
+      const result = await compactViaVendor({
+        messages: messages as never,
+        toolUseContext,
+        model:
+          context.model ??
+          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL ??
+          process.env.ANTHROPIC_SMALL_FAST_MODEL ??
+          'default',
+        cwd: context.cwd,
+        // vendor 的 `getCompactPrompt` 把 customInstructions 拼到
+        // `Additional Instructions:` 段(prompt.ts:302),但 BASE_COMPACT_PROMPT
+        // 里有英文模板开头("This session is being continued from a previous
+        // conversation...")—— 真机验证发现模板句会带偏模型,摘要整体变英文。
+        // 故措辞要显式覆盖模板:要求**包括开头句在内全部用中文**。
+        customInstructions:
+          '摘要必须全程使用**简体中文**输出,包括开头的接续说明句在内,不要出现英文句子。' +
+          '用紧凑的项目符号列表组织。' +
+          '必须保留:具体的文件名与路径、版本号、错误信息原文、已执行的命令、' +
+          '以及尚未完成的任务。不要捏造对话中没出现的内容。',
+      })
+      return { kind: 'ok', summary: result.summary }
+    } finally {
+      // 复位闭包状态。vendor 的 compact_end 在 finally 里, 正常路径已发过
+      // 翻转; 这里兜的是**异常发生在 vendor 调用之外**的情况(如
+      // buildReplToolUseContext 抛错), 此时不该留下"正在压缩"的脏状态。
+      compactEmitter.dispose()
+    }
   } catch (err) {
     // 临时诊断(2026-10-08 真机验证):定位 vendor 压缩链的形状错误来源
     if (process.env.ZAI_COMPACT_DEBUG === '1') {

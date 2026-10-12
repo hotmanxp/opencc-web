@@ -15,10 +15,21 @@
  * plan P1-1(2026-10-08)。
  *
  * 与 vendor REPL 的差异:zai 是 Web 无 TTY,所以
- * `setStreamMode` / `setSDKStatus` / `setResponseLength` / `setToolJSX` 这类
- * 终端 Ink UI 状态控制全部是 no-op 或不提供。vendor compact.ts 用到其中
- * 三个,均为 optional 调用(`context.setResponseLength?.(...)`),不提供即
- * no-op —— 实测见 plan §2.2 的成员用量表。
+ * `setStreamMode` / `setResponseLength` / `setToolJSX` 这类终端 Ink UI 状态
+ * 控制全部是 no-op 或不提供。vendor compact.ts 用到其中几个,均为 optional
+ * 调用(`context.setResponseLength?.(...)`),不提供即 no-op —— 实测见
+ * plan §2.2 的成员用量表。
+ *
+ * **例外:`setSDKStatus` 与 `onCompactProgress` 现在透出了**(2026-10-12)。
+ * 之前它们和 TTY UI 控件一起被归为「不需要」,但 vendor 用它们表达的是
+ * **压缩过程的语义信号**,不是终端渲染:compactConversation 开始时发
+ * `setSDKStatus('compacting')`(compact.ts:435)+ `compact_start`(452),结束时
+ * 发 `compact_end`(800, 在 finally 里)+ `setSDKStatus(null)`。Web UI 需要据此
+ * 渲染「正在压缩…」—— 压缩常耗时数十秒,没有过程态用户会重复点击。
+ *
+ * 不提供时的后果是**静默**:vendor 全部用 optional call,键缺失即 no-op,
+ * 既不报错也无日志。透出后由调用方(createReplSession 转 REPL 事件流)决定
+ * 怎么用,未传 `onCompactProgress` 的调用方(手动 /compact)行为不变。
  */
 
 /** 懒加载的 vendor 工具/命令/文件态上下文。测试下为 null 以跳过重型 import 链。 */
@@ -44,6 +55,29 @@ export type BuildReplToolUseContextOptions = {
   resolvedCommands?: unknown
   getAppState?: () => unknown
   setAppState?: (fn: (prev: unknown) => unknown) => void
+  /**
+   * zai patch (2026-10-12): vendor 压缩过程信号,原样透传给调用方。
+   *
+   * vendor 在 `compactConversation` 里发的事件只有 4 种 type
+   * (Tool.ts:182-183 声明的 `CompactProgressEvent`):
+   *   {type:'compact_start'} / {type:'compact_end'}
+   *   {type:'hooks_start', hookType}   — pre_compact / session_start / post_compact
+   *   {type:'compact_progress', ratio} — 摘要生成的 0..1 进度
+   *
+   * 只关心开始/结束时,**不要**对 compact_progress 做任何事 —— 它在流式摘要
+   * 期间高频触发(每个 chunk 一次),转成 SSE 帧会把事件流刷爆。
+   *
+   * 时序保证(决定了前端能不能靠它关状态):`compact_end` 在 compactConversation
+   * 的 `finally` 块里(compact.ts:797-802),异常路径(413 重试耗尽、PreCompact
+   * hook 抛错)也一定发。但反过来 `compact_start` 在 PreCompact hook **之后**
+   * (452 vs 436),hook 抛错会产生**孤立的 compact_end** —— 处理方必须容忍
+   * 「没有 start 就来 end」。
+   */
+  onCompactProgress?: (event: {
+    type: 'compact_start' | 'compact_end' | 'hooks_start' | 'compact_progress'
+    hookType?: string
+    ratio?: number
+  }) => void
 }
 
 /**
@@ -185,5 +219,37 @@ export function buildReplToolUseContext(
     updateFileHistoryState: () => {},
     updateAttributionState: () => {},
     messages: [] as any[],
+    // zai patch (2026-10-12): 压缩过程信号透出。见文件头「例外」段与
+    // BuildReplToolUseContextOptions.onCompactProgress。
+    //
+    // 两个键都**有值时**才挂 —— vendor 侧是 optional call
+    // (`context.onCompactProgress?.(...)`),键缺失与传 undefined 等价,
+    // 所以「调用方没传就不挂」既省一个 no-op 包装,也让
+    // `'onCompactProgress' in ctx` 能区分「接了信号」与「没接」。
+    ...(opts.onCompactProgress ? { onCompactProgress: opts.onCompactProgress } : {}),
+    // setSDKStatus 是 vendor 的同义信号:'compacting' 表示开始, null 表示结束
+    // (compact.ts:435/801)。它比 compact_start **更早**置位 —— 在 PreCompact
+    // hook 执行之前,后者在 hook 之后(452)。透出它是为了让「压缩中」覆盖
+    // hook 阶段;调用方通常只用 onCompactProgress 就够,这里是给需要严格
+    // 贴合 vendor 状态机的场景留的口子。
+    //
+    // ⚠️ 映射后一次压缩会收到 **start×2 / end×2**(两条 vendor 信号都映射
+    // 到同一语义)。这是有意的:keep-alive 定时器(compact.ts:1237-1246)每 30s
+    // 重发一次 `setSDKStatus('compacting')`,消费端若不早退就会被反复唤醒。
+    // vendor 自己用 `isCompactingRef` 挡这一下(hooks/useRemoteSession.ts:228-232),
+    // 所以**消费端必须复刻那个 ref 语义** —— 两次 start/end 在按 ref 去重后
+    // 都是幂等的,不构成问题。
+    setSDKStatus: opts.onCompactProgress
+      ? (status: unknown) => {
+          if (status === 'compacting') {
+            opts.onCompactProgress?.({ type: 'compact_start' })
+          } else if (status === null) {
+            opts.onCompactProgress?.({ type: 'compact_end' })
+          }
+          // 其他 status 值 vendor 当前不会传(Tool.ts 的 SDKStatus 只有
+          // 'compacting' | null),忽略而不是透传 —— 让回调只看到
+          // 开始/结束两种语义,不必在每个调用方里重复判别。
+        }
+      : undefined,
   }
 }

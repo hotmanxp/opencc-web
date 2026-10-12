@@ -67,6 +67,9 @@ import { query } from '../../opencc-src/query.js'
 // zai patch (2026-10-08, P1-1): ToolUseContext 构造与手动 /compact 共用,
 // 见 buildReplToolUseContext.ts 的模块注释。
 import { buildReplToolUseContext } from './buildReplToolUseContext.js'
+// zai patch (2026-10-12): 压缩过程信号 → stateChangeBus, 与手动 /compact
+// 路径同源。详见 compat/compact/compactProgress.ts。
+import { createCompactProgressEmitter } from '../compact/compactProgress.js'
 // zai patch (2026-08-30, plan P0): SDK message → runtime event adapter (Task 8).
 import { translateSdkToRuntime } from '../../compat/runtime/sdkEventAdapter.js'
 // zai patch (2026-08-30, plan P0): use vendor's user message factory so
@@ -112,6 +115,13 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
   let turnIndex = 0
   let isRunning = false
   let isDisposed = false
+  // zai patch (2026-10-12): 压缩过程信号转换器。声明在 session 级而非
+  // turn 级 —— 压缩可能跨 turn 边界(compact_end 落在 turnEnd 之后的清理
+  // 阶段),放 turn 局部会让下一次 start 看不到"已在压缩中",提前重发一次
+  // 翻转事件。对应 vendor 的 isCompactingRef
+  // (opencc-src/hooks/useRemoteSession.ts:120,同为会话级)。
+  // 与手动 /compact 路径共用同一个工厂, 保证去重语义不会漂移。
+  const compactEmitter = createCompactProgressEmitter(sessionId)
   const lifecycleSubs = new Map<
     ReplSessionLifecycleEvent,
     Set<(p?: unknown) => void>
@@ -357,6 +367,9 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     () => tasksV2Handle.teardown(),
     () => notificationsHandle.teardown(),
     () => guard.teardown(),
+    // zai patch (2026-10-12): 复位压缩过程态的闭包状态。会话销毁后不应再
+    // 有翻转事件流出; 放最后构造 = 最先 teardown。
+    () => compactEmitter.dispose(),
   ]
 
   async function runTurn(content: ContentBlock[]): Promise<void> {
@@ -478,6 +491,14 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
               vendorCtx,
               getAppState: opts.getAppState,
               setAppState: opts.setAppState,
+              // zai patch (2026-10-12): 把 vendor 压缩过程信号接出去。自动压缩
+              // 发生在 vendor `query()` 循环内部 (autoCompactIfNeeded →
+              // compactConversation), HTTP 层拿不到中间状态。
+              //
+              // 信号出口用共用的 createCompactProgressEmitter (→ stateChangeBus),
+              // 与手动 /compact 路径**同源** —— 去重逻辑只有一份, 不会漂移。
+              // 详见 compat/compact/compactProgress.ts 的模块注释。
+              onCompactProgress: compactEmitter.onCompactProgress,
             })
             for await (const sdkMsg of query({
               messages: messages as any,

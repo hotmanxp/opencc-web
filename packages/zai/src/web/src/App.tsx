@@ -6,6 +6,7 @@ import AppRouter from './router';
 import { useEventStream } from './store/useEventStream';
 import { useEffectiveTheme } from './hooks/useEffectiveTheme.js';
 import CompactionToastDock from './components/CompactionToastDock';
+import CompactingIndicator from './components/CompactingIndicator';
 
 /* DARK: 主题色用 Tailwind orange-500 (#f97316) — 比 #ff6600 更柔和; 次要
    文字提到 slate-300/600 让 antd 默认组件在深背景上清晰可读.
@@ -60,6 +61,10 @@ export default function App() {
             useAgentStore 单例, 而 AgentConversation 被多个弹窗以各自的
             AgentStoreContext 复用。详见组件头注释。 */}
         <CompactionToastDock />
+        {/* 压缩过程态「正在压缩…」—— 与 CompactionToastDock 并列而非合并:
+            toast 靠 5s expiresAt 回收, 压缩跑几十秒会被误删。挂 App 层
+            (而非 AgentConversation) 是因为 SSE 只 dispatch 到根 store。*/}
+        <CompactingIndicator />
       </BrowserRouter>
     </ConfigProvider>
   );

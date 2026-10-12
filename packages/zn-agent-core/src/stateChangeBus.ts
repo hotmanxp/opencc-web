@@ -68,6 +68,22 @@ export interface StateChangeEventMap {
     error?: string
     action: 'start' | 'finish'
   }
+  /**
+   * zai patch (2026-10-12): 压缩**过程态**。payload.compacting 是一次翻转
+   * 后的目标状态, 不是"发生了什么"的事件 —— 重复到达幂等。
+   *
+   * 为什么单独一个通道而不是复用 command.run/done:后者是 command 层的
+   * 通用埋点, 不反映 vendor 的压缩语义(自动压缩根本不经过 command 层,
+   * 它的埋点根本不发), 拿它近似"正在压缩"是把两套语义硬凑。手动与自动
+   * 必须同源 —— 都从 vendor compactConversation 的过程信号出发。
+   *
+   * 两侧调用方(compact/repl 的 buildReplToolUseContext 透出的
+   * onCompactProgress)共用这一条, 详见 compat/repl/buildReplToolUseContext.ts。
+   */
+  'compact.changed': {
+    sessionId: string
+    compacting: boolean
+  }
 }
 
 type Listener<E, K extends keyof E> = (payload: E[K]) => void

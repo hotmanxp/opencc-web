@@ -120,6 +120,25 @@ const RuntimeEvent = z.discriminatedUnion('type', [
              trigger: z.enum(['auto', 'manual']),
              preTokens: z.number(),
              messagesSummarized: z.number().optional() }),
+  // zai patch (2026-10-12): runtime.compacting —— 压缩**过程中**的状态翻转,
+  // 前端据此渲染「正在压缩…」。与同组的两个事件分工:
+  //   runtime.compacting  → 过程态,开始时 true、结束时 false(不落 messages)
+  //   runtime.compacted   → 事后 toast(5s 自动消失)
+  //   compact_boundary    → transcript 里常驻的分界线(刷新后仍在)
+  //
+  // 为什么需要独立事件:压缩常耗时数十秒,此前这段时间 UI 完全无反馈,用户
+  // 不知道发生了什么,容易重复点击。vendor 的 `compact_start`/`compact_end`
+  // 信号原先无人接 —— compat/repl/buildReplToolUseContext 刻意不提供
+  // onCompactProgress / setSDKStatus(见该文件模块注释),vendor 全部用
+  // optional call,键缺失即静默 no-op。现已在 core 侧透出并接到 REPL 事件流
+  // (compat/repl/createReplSession.ts 的 onCompactProgress 回调)。
+  //
+  // 单个布尔而非 start/end 两个 type:重复事件在消费端幂等(见
+  // useAgentStore.applyCompactingEvent 的 ref 语义),合并成一个可翻转状态后
+  // 乱序/重放都不会产生「关不掉」的中间态。
+  z.object({ ...Base.shape, type: z.literal('runtime.compacting'),
+             sessionId: z.string(),
+             compacting: z.boolean() }),
   // zai patch 2026-10-12: 删掉 runtime.retrying。
   // 它此前有 schema + useAgentStore 的 case + 单测, 但**全仓没有任何生产者**
   // —— 后台重试循环(DefaultBackgroundRuntime.runOne 的 catch 分支)只

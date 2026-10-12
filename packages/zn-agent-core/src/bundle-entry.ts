@@ -334,6 +334,14 @@ export type {
 // buildReplToolUseContext 供 zai 侧构造 vendor compactConversation 需要的
 // ToolUseContext;与 createReplSession 共用同一份形状(P1-1 抽出)。
 export { buildReplToolUseContext } from './compat/repl/buildReplToolUseContext.js'
+// zai patch (2026-10-12): 手动 /compact 与自动压缩共用的 vendor 压缩过程
+// 信号转换器(→ stateChangeBus)。两边同源: 都从 compactConversation 的
+// compact_start/compact_end 出发, 去重语义只有一份实现。
+export { createCompactProgressEmitter } from './compat/compact/compactProgress.js'
+export type {
+  CompactProgressEmitter,
+  VendorCompactProgressEvent,
+} from './compat/compact/compactProgress.js'
 
 // ./opencc-src/utils/model/genericModelCapabilities(zai profileProjection)
 export * from './opencc-src/utils/model/genericModelCapabilities.js'

@@ -38,6 +38,9 @@ describe('useEventStream batch dispatch', () => {
       segmentedToolUseIds: {},
       queuedPrompts: [],
       lastSeqBySession: {},
+      // 压缩过程态也要重置 —— 它是跨用例持存的 boolean, 不重置会让前一个用例
+      // 的 compacting=true 泄漏到下一个, 断言互相干扰。
+      compacting: false,
     })
     useAppStore.setState({ connected: false, streamState: 'connecting', streamAttempt: 0 })
   })
@@ -213,5 +216,50 @@ describe('useEventStream batch dispatch', () => {
     expect(useAppStore.getState().serviceState).toEqual({
       phase: 'restarting', reason: 'user_action', deadlineMs: 5000,
     })
+  })
+
+  // 压缩过程态 (2026-10-12) 走真实链路 (applyBatchTo)。
+  //
+  // 数据来源是 stateBridge 推的 ServerEvent —— core 侧
+  // createCompactProgressEmitter 把 vendor 的 compact_start/compact_end
+  // 转成 compact.changed 走 stateChangeBus, zai stateBridge 翻译成
+  // runtime.compacting。**手动与自动同源**, 都经这一个事件 type。
+  it('runtime.compacting 路由到过程态 (手动/自动共用)', () => {
+    applyBatch([
+      {
+        type: 'runtime.compacting', eventId: 'cp1', ts: 1, seq: 1,
+        sessionId: 's1', compacting: true,
+      },
+    ] as never)
+    expect(useAgentStore.getState().compacting).toBe(true)
+    applyBatch([
+      {
+        type: 'runtime.compacting', eventId: 'cp2', ts: 2, seq: 2,
+        sessionId: 's1', compacting: false,
+      },
+    ] as never)
+    expect(useAgentStore.getState().compacting).toBe(false)
+  })
+
+  it('command.run/done **不再**驱动压缩过程态 (同源要求)', () => {
+    // command.* 是 command 层通用埋点, 不反映 vendor 压缩语义 —— 此前
+    // 曾用 `name === 'compact'` 近似"正在压缩", 属错误接线, 已撤除。
+    // 自动压缩根本不经过 command 层, 拿它近似会让两条路径来路不同。
+    applyBatch([
+      {
+        type: 'command.run', eventId: 'cr1', ts: 1, seq: 1,
+        sessionId: 's1', commandId: 'cid1', name: 'compact',
+        args: '', trigger: 'user',
+      },
+    ] as never)
+    expect(useAgentStore.getState().compacting).toBe(false)
+    applyBatch([
+      {
+        type: 'command.done', eventId: 'cd1', ts: 2, seq: 2,
+        sessionId: 's1', commandId: 'cid1', name: 'compact',
+        result: 'compacted', durationMs: 19932,
+      },
+    ] as never)
+    expect(useAgentStore.getState().compacting).toBe(false)
   })
 })

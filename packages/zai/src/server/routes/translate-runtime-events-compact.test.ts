@@ -116,3 +116,26 @@ describe('translateRuntimeEvents — compact_boundary', () => {
     })
   })
 })
+
+// 压缩**过程态** (2026-10-12 返工) —— 断言 translator **不再**产出它。
+//
+// 过程态曾一度由 translator 从 core 的 RuntimeEvent 转发, 后来改成
+// core 侧 createCompactProgressEmitter 直接 emit 到 stateChangeBus,
+// zai 的 stateBridge 翻译成 ServerEvent 推 SSE。translator 这条 case 已
+// 随之删除 (唯一生产者是 stateBridge.ts 的 onCompactChanged)。
+//
+// 这条断言是**反向守卫**:若有人再把 case 加回 translator, 它会变红。
+// 理由是那会造成同一状态两条生产路径 —— 前端拿到重复帧虽因 reducer 幂等
+// 而无害, 但两条来路意味着"手动/自动同源"的约定被破坏, 去重语义也会
+// 分裂到两处实现。
+describe('translateRuntimeEvents — 不再产出 runtime.compacting', () => {
+  test('translator 不转发 compacting 状态 (生产者是 stateBridge)', async () => {
+    const out = await collect([
+      { type: 'runtime.compacting', compacting: true },
+      { type: 'runtime.compacting', compacting: false },
+      { type: 'message_stop' },
+    ])
+    // 落到 default 分支被丢弃, 不产出任何帧。
+    expect(out.filter((e) => e.type === 'runtime.compacting')).toHaveLength(0)
+  })
+})

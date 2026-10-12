@@ -168,6 +168,11 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     case 'runtime.aborted':
     case 'runtime.error':
     case 'runtime.compacted':
+    // runtime.compacting — 压缩过程态「正在压缩…」(zai patch 2026-10-12)。
+    // 与 runtime.compacted 走同一条路(applyRuntimeEvent 内部按 type 分流到
+    // applyCompactionEvent / applyCompactingEvent), 但两者语义相反:前者是
+    // 压缩**结束**后的 5s toast, 本者是压缩**过程中**常驻的状态条。
+    case 'runtime.compacting':
       store.getState().applyRuntimeEvent(event)
       break
     // compact_boundary — 压缩分界线(zai patch 2026-10-12)。落进 messages
@@ -176,6 +181,17 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     case 'compact_boundary':
       store.getState().applyRuntimeEvent(event)
       break
+    // command.* 刻意**不**在这里驱动压缩过程态 (2026-10-12 返工)。
+    //
+    // 此前曾用 `name === 'compact'` 过滤 command.run/done 来近似"正在压缩",
+    // 现在撤掉了 —— 那是错的: command.* 是 command 层的通用生命周期埋点,
+    // 不反映 vendor 的压缩语义。两条后果:
+    //   1. 自动压缩根本不经过 command 层, 它的埋点不发 → 同一种 UI 状态
+    //      两条路径来路不同, 手动/自动不同源;
+    //   2. 过程态的起止由 vendor compactConversation 的 compact_start /
+    //      compact_end 决定 (core 侧 createCompactProgressEmitter 统一转换,
+    //      经 stateChangeBus → stateBridge → SSE), 语义归属清晰。
+    // 现在手动与自动同源, 都收敛到上面的 `case 'runtime.compacting'`。
     case 'session.created':
     case 'session.deleted':
     case 'session.renamed':

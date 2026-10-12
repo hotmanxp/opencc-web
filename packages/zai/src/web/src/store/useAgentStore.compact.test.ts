@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, test } from 'vitest'
-import { useAgentStore, loadTranscriptMessages } from './useAgentStore.js'
+import { useAgentStore, loadTranscriptMessages, createAgentStore } from './useAgentStore.js'
 
 // 压缩事件接线 (2026-10-12) 的 store 侧回归。
 //
@@ -169,5 +169,136 @@ describe('loadTranscriptMessages — 历史回放', () => {
       { uuid: 'u1', type: 'user', timestamp: 1, message: { role: 'user', content: '你好' } },
     ])
     expect(out.map((m) => m.type)).toEqual(['user.text'])
+  })
+})
+
+// 压缩**过程中**的状态 (2026-10-12)。与上面 compact_boundary / compacted
+// 是三件独立的事: 那个是结束后的常驻分界线与 5s toast, 这个是压缩期间的
+// 临时过程态。回归重点是复刻 vendor `isCompactingRef` 的幂等语义
+// (opencc-src/hooks/useRemoteSession.ts:228-232)。
+describe('runtime.compacting 过程态', () => {
+  test('开始 → true, 结束 → false', () => {
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.compacting',
+      eventId: 'e-c1', ts: 1, sessionId: 's1', seq: 1, compacting: true,
+    })
+    expect(useAgentStore.getState().compacting).toBe(true)
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.compacting',
+      eventId: 'e-c2', ts: 2, sessionId: 's1', seq: 2, compacting: false,
+    })
+    expect(useAgentStore.getState().compacting).toBe(false)
+  })
+
+  test('重复的 compacting=true 幂等 (keep-alive 每 30s 重发)', () => {
+    // core 侧把 setSDKStatus 与 onCompactProgress 都映射成 start, 一次压缩
+    // 本来就收到 start×2; 再叠加 vendor 的 keep-alive 定时器重复重发。
+    // 早退保证不会每次都唤醒订阅者重渲染。
+    useAgentStore.getState().applyCompactingEvent({
+      type: 'runtime.compacting',
+      eventId: 'e1', ts: 1, seq: 1, sessionId: 's1', compacting: true,
+    })
+    const first = useAgentStore.getState()
+    useAgentStore.getState().applyCompactingEvent({
+      type: 'runtime.compacting',
+      eventId: 'e2', ts: 2, seq: 2, sessionId: 's1', compacting: true,
+    })
+    // 状态没变, 且 store 引用未替换 (未触发订阅者)
+    expect(useAgentStore.getState()).toBe(first)
+    expect(useAgentStore.getState().compacting).toBe(true)
+  })
+
+  test('孤立 end (PreCompact hook 抛错) 也能关掉状态 —— 不卡死', () => {
+    // vendor: compact_end 在 finally 里, 而 compact_start 在 PreCompact hook
+    // 之后 (compact.ts:452 vs 436), hook 抛错会先来 end。
+    useAgentStore.getState().applyCompactingEvent({
+      type: 'runtime.compacting',
+      eventId: 'e-end', ts: 1, seq: 1, sessionId: 's1', compacting: true,
+    })
+    useAgentStore.getState().applyCompactingEvent({
+      type: 'runtime.compacting',
+      eventId: 'e-end2', ts: 2, seq: 2, sessionId: 's1', compacting: false,
+    })
+    expect(useAgentStore.getState().compacting).toBe(false)
+    // 从未 start 就收到 end 也不应抛错 (幂等地保持 false)
+    useAgentStore.getState().applyCompactingEvent({
+      type: 'runtime.compacting',
+      eventId: 'e-end3', ts: 3, seq: 3, sessionId: 's1', compacting: false,
+    })
+    expect(useAgentStore.getState().compacting).toBe(false)
+  })
+
+  test('别的会话发来的 compacting 也能关掉本会话的指示 (不按 sid 过滤)', () => {
+    // 与 applyCompactionEvent 一致: 过程态是会话级提示而非流级内容。
+    // 切到 B 后收到 A 的"压缩结束", 指示照样要关, 否则 B 永远显示压缩中。
+    useAgentStore.setState({ sessionId: 'B' })
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.compacting',
+      eventId: 'e-x', ts: 1, sessionId: 'A', seq: 1, compacting: true,
+    })
+    expect(useAgentStore.getState().compacting).toBe(true)
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.compacting',
+      eventId: 'e-y', ts: 2, sessionId: 'A', seq: 2, compacting: false,
+    })
+    expect(useAgentStore.getState().compacting).toBe(false)
+  })
+
+  test('过程态不写 messages 也不写 toasts', () => {
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.compacting',
+      eventId: 'e-z', ts: 1, sessionId: 's1', seq: 1, compacting: true,
+    })
+    expect(useAgentStore.getState().messages).toHaveLength(0)
+    expect(useAgentStore.getState().toasts).toHaveLength(0)
+  })
+})
+
+// 三个 2026-10-12 的回归修复。
+describe('压缩过程态的三处修复', () => {
+  test('修1: 切会话 / clearMessages 复位 compacting (否则永久卡死)', () => {
+    // runtime.compacting 是 sid-scoped(不在 isGlobalEvent 白名单), 切到 B
+    // 后 A 的 compacting:false 被服务端静默丢弃 → 前端收不到任何关闭信号。
+    useAgentStore.setState({ compacting: true })
+
+    useAgentStore.getState().setCurrentSession('sess-B')
+    expect(useAgentStore.getState().compacting).toBe(false)
+
+    useAgentStore.setState({ compacting: true })
+    useAgentStore.getState().clearMessages()
+    expect(useAgentStore.getState().compacting).toBe(false)
+  })
+
+  test('修2: reducer 读的是当前 store 实例, 不是模块级单例', () => {
+    // 原实现写 `useAgentStore.getState()`, 那是**单例**。Context store
+    // (NewSuperTaskModal 等走 applyBatchTo(store, ...)) 会拿到另一个实例,
+    // 于是: 单例 false + modal store true + 来一个 false 事件
+    //       → 单例侧 false === false 早退 → **modal store 永不更新**。
+    const modalStore = createAgentStore()
+    // 单例与 modal store 处于不同状态, 正是触发误判的组合。
+    useAgentStore.setState({ compacting: false })
+    modalStore.setState({ compacting: true })
+
+    modalStore.getState().applyCompactingEvent({
+      type: 'runtime.compacting',
+      eventId: 'e1', ts: 1, seq: 1, sessionId: 's1', compacting: false,
+    })
+
+    // 修复后: 读的是 modal store 自己的状态(true ≠ false) → 不早退 → 更新。
+    expect(modalStore.getState().compacting).toBe(false)
+  })
+
+  test('修2 补充: 单例状态不影响 Context store 的幂等判断', () => {
+    const modalStore = createAgentStore()
+    modalStore.setState({ compacting: true })
+    useAgentStore.setState({ compacting: true })
+
+    // 两边都是 true, 事件也是 true → modal store 应幂等早退(引用不变)。
+    const before = modalStore.getState()
+    modalStore.getState().applyCompactingEvent({
+      type: 'runtime.compacting',
+      eventId: 'e2', ts: 1, seq: 1, sessionId: 's1', compacting: true,
+    })
+    expect(modalStore.getState()).toBe(before)
   })
 })
