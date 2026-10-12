@@ -123,6 +123,25 @@ export function getRouteMetadata() { return null }
 // `index.ts` barrel, but transitive imports still reference it.
 // These names are imported across the codebase:
 export function logEvent(_event: string, _props?: unknown): void { /* noop */ }
+
+// ── commands cache invalidation ───────────────────────────────────────
+//
+// `utils/skills/skillChangeDetector.ts` imports both of these from
+// `../../commands.js`. The `commands` **directory** is stripped, and the
+// stripped-dir regexes match on the leaf segment too — so that specifier
+// lands here rather than on the real `commands.ts` barrel (which does export
+// both). The result is `clearCommandMemoizationCaches is not a function` at
+// `notifyCommandsChanged()`.
+//
+// Reached by: loading a mod from disk — `mods/hooks.ts` →
+// `swapRegisteredHooks` → `notifyCommandsChanged()`. So a cold registry that
+// loads its first mod hits it.
+//
+// No-ops are the honest stub: there is no command cache to clear when the
+// command surface is the Web UI's own, assembled in
+// `services/commands/slashList.ts`.
+export function clearCommandsCache(): void { /* noop — the command surface is the Web UI's */ }
+export function clearCommandMemoizationCaches(): void { /* noop — same */ }
 export type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS = unknown
 export function getDynamicConfig_BLOCKS_ON_INIT() { return {} }
 export function getFeatureValue_CACHED_MAY_BE_STALE(_flag: string, _defaultValue?: unknown) {

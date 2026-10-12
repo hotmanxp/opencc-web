@@ -179,6 +179,7 @@ pnpm release:major
 | 会话归档 | `docs/superpowers/specs/2026-09-23-zai-session-archive-design.md` |
 | Turn artifacts | `docs/superpowers/specs/2026-09-24-zai-turn-artifacts-design.md` |
 | vendor 终端 UI 清理 | AGENTS.md「vendor 终端 UI 已被就地 stub(2026-10-04)」条 + `packages/zn-agent-core/scripts/{stub-ui-sources,prune-unused-imports,drop-dead-types,scan-dead-code}.ts` |
+| mods 插件系统 | **`docs/mods-vendor-divergences.md` 是入口** —— 先读它,再读 `docs/mods-upstream-contract.md`(上游 2.1.296 契约)/ `mods-upstream-gaps.md`(上游未完成项)。前四份是上游原文、描述的是 **opencc 而非 vendor**;偏差清单记录 zai 侧的有意分叉(TUI 删除、session 门禁、`ctx.fs` 授权门、`ui.render` 按名拒斥)与测试环境的两处必要修正。改动 `packages/zn-agent-core/src/opencc-src/mods/` 前必读。 |
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。**新特性开工前先在此目录搜既有 spec**,避免重复设计。
 

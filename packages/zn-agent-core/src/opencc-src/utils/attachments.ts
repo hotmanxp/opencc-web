@@ -102,9 +102,6 @@ const skillSearchModules = false
         require('../services/skillSearch/prefetch.js') as typeof import('../services/skillSearch/prefetch.js'),
     }
   : null
-const autoModeStateModule = true
-  ? (require('./permissions/autoModeState.js') as typeof import('./permissions/autoModeState.js'))
-  : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import {
   MAX_LINES_TO_READ,
@@ -261,6 +258,7 @@ import { removeTeammateFromTeamFile } from './swarm/teamHelpers.js'
 import { unassignTeammateTasks } from './tasks.js'
 import { getCompanionIntroAttachment } from '../buddy/prompt.js'
 import { isBuddyEnabled } from '../buddy/feature.js'
+import * as autoModeStateModule from './permissions/autoModeState.js'
 
 export const TODO_REMINDER_CONFIG = {
   TURNS_SINCE_WRITE: 10,

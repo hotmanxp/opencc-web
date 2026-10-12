@@ -18,6 +18,10 @@ import { GlobTool } from './tools/GlobTool/GlobTool.js'
 // import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js' // zai web 场景无需 Jupyter notebook 编辑,保留 vendor 文件仅作类型兼容
 import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
+import { CronCreateTool } from './tools/ScheduleCronTool/CronCreateTool.js'
+import { CronDeleteTool } from './tools/ScheduleCronTool/CronDeleteTool.js'
+import { CronListTool } from './tools/ScheduleCronTool/CronListTool.js'
+import { MonitorTool as MonitorToolImpl } from './tools/MonitorTool/MonitorTool.js'
 import { BriefTool } from './tools/BriefTool/BriefTool.js'
 import { SnipTool } from './tools/SnipTool/SnipTool.js'
 // zai patch (2026-08-31, plan cliagent-register): CliAgent — external
@@ -39,16 +43,34 @@ const SleepTool =
   false || false
     ? require('./tools/SleepTool/SleepTool.js').SleepTool
     : null
+// zai patch (2026-10-12, mods 同步):下面 4 处 require 是本文件里**模块加载期
+// 真正执行**的(其余带 `false ?` 的死代码分支、以及 `getTeamCreateTool` 这类
+// 函数内的 lazy require 都不会在 import 时跑)。
+//
+// opencc 跑在 Bun 上,Bun 的 require 能把 `./X.js` 解析到磁盘上的 `X.ts`;
+// vitest 下同一个 require 落到 Node 原生 CJS resolver —— 既不做 `.js`→`.ts`
+// 替换,也看不见 Vite 的 alias —— 于是任何 import 图走到 tools.ts 的测试都会以
+// `Cannot find module './tools/ScheduleCronTool/CronCreateTool.js'` 整文件挂掉。
+//
+// 这 4 处本来就没有任何 gate,改成静态 import **不改变求值时机**,只是换了谁
+// 来解析它(以及由 esbuild 编译,而不是 Node 逐字读)。文件里其余 30 余个工具
+// 本来就是静态 import,这个形状是一致的。
+//
+// **不要**顺手动下面这些:
+//   - `getTeamCreateTool` / `getTeamDeleteTool` / `getSendMessageTool` ——
+//     注释写明是「Lazy require to break circular dependency」,改成静态 import
+//     会引入真实的循环依赖(见 mods/builtin.ts 里同一形状的告警);
+//   - `getPowerShellTool` —— 同为 lazy 且带 feature gate;
+//   - 各 `false ?` 分支 —— 永不执行,留着即可。
 const cronTools = [
-  require('./tools/ScheduleCronTool/CronCreateTool.js').CronCreateTool,
-  require('./tools/ScheduleCronTool/CronDeleteTool.js').CronDeleteTool,
-  require('./tools/ScheduleCronTool/CronListTool.js').CronListTool,
+  CronCreateTool,
+  CronDeleteTool,
+  CronListTool,
 ]
 const RemoteTriggerTool = false
   ? require('./tools/RemoteTriggerTool/RemoteTriggerTool.js').RemoteTriggerTool
   : null
-const MonitorTool =
-  require('./tools/MonitorTool/MonitorTool.js').MonitorTool
+const MonitorTool = MonitorToolImpl
 const SendUserFileTool = false
   ? require('./tools/SendUserFileTool/SendUserFileTool.js').SendUserFileTool
   : null

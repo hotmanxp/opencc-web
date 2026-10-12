@@ -12,6 +12,23 @@
  * registerBuiltinMod 里的 `.push` 抛 "Cannot read properties of undefined"。
  * **tsc 绿、build:core 绿、bundle 字节数不变,只有真 import bundle 才炸** ——
  * 所以下面第一件事就是加载并真的走一遍注册。
+ *
+ * ── 事件名迁移(2026-10-12, mods 同步)────────────────────────────────
+ * 上游 2.1.296 的对齐把 7 个 settings.json hook 名(`PreToolUse` /
+ * `PostToolUse` / `UserPromptSubmit` / `SessionStart` / `SessionEnd` / `Stop` /
+ * `Notification`)换成了点号事件表。本文件随之改写,映射是:
+ *
+ *   PreToolUse       → tool.call
+ *   UserPromptSubmit → prompt.submit
+ *   SessionStart     → session.start
+ *   SessionEnd       → session.end
+ *   Stop             → turn.complete
+ *   PostToolUse      → **无对应**,探针已删(上游的 tool.call 只走执行前侧,
+ *                      完成侧没有点号事件名;自造一个只会得到恒为 0 的计数)
+ *   Notification     → **无对应**(最接近的 ui.message 在 UNAVAILABLE_EVENTS
+ *                      里被按名拒掉)
+ *
+ * 载荷字段也随之变:prompt.submit 读 `text` 而不是 `prompt`。
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
@@ -25,11 +42,24 @@ import {
   resetModsRegistryForTesting,
 } from '../../src/opencc-src/mods/registry.js'
 import { buildModCommands } from '../../src/opencc-src/mods/engine.js'
-import { MOD_SUPPORTED_EVENTS } from '../../src/opencc-src/mods/dispatch.js'
 import {
   __resetModctlHitsForTesting,
   getModctlHits,
 } from '../../src/opencc-src/mods/builtin/modctl.js'
+
+/**
+ * modctl 订阅的事件全集。
+ *
+ * 刻意写成字面量而不是从 `protocol.js` 取全集:这份断言的价值在于「modctl
+ * 订阅了它认为该订阅的那几条」,从同一张表推导出来会让它变成恒真。
+ */
+const SUBSCRIBED_EVENTS = [
+  'tool.call',
+  'prompt.submit',
+  'session.start',
+  'session.end',
+  'turn.complete',
+] as const
 
 describe('内置 mod modctl', () => {
   beforeEach(() => {
@@ -92,12 +122,11 @@ describe('内置 mod modctl', () => {
 })
 
 /**
- * 事件链实测:把每个事件真的投进 `runModChain`,断言 handler 被调到、
- * 计数入账、上下文按预期注入。
+ * 事件链实测:把每个事件真的投进 handler,断言 handler 被调到、计数入账、
+ * 上下文按预期注入。
  *
- * 为什么必须真跑而不是只断言注册:`ctx.on('PostToolUse', h)` 写错字段名
- * 不会报错,只会静默什么都不发生 —— 只有把真实载荷喂进去,才能证明这条链
- * 在 zai 侧真的通。
+ * 为什么必须真跑而不是只断言注册:写错字段名不会报错,只会静默什么都不发生
+ * —— 只有把真实载荷喂进去,才能证明这条链在 zai 侧真的通。
  */
 describe('内置 mod modctl — 事件订阅', () => {
   /** 把 modctl 的 handler 找出来,包装成直接可调的形状。 */
@@ -126,60 +155,56 @@ describe('内置 mod modctl — 事件订阅', () => {
     resetModsRegistryForTesting()
   })
 
-  it('注册了全部 7 个非 ui 事件,一个不落', async () => {
+  it('订阅了全部 5 个点号事件,一个不落,也不多', async () => {
     const { mod } = await loadModctl()
     const registered = mod.handlers.map(h => h.event).sort()
-    const expected = [...MOD_SUPPORTED_EVENTS].sort()
-    expect(registered).toEqual(expected)
-    // 刻意不订阅 ui.render —— 它已随 TUI 能力面删除,订阅会被
-    // isModSupportedEvent 拒绝。
-    expect(registered).not.toContain('ui.render')
+    expect(registered).toEqual([...SUBSCRIBED_EVENTS].sort())
+    // 旧 hook 名一个都不该再出现 —— 它们已不在事件表里。
+    for (const legacy of [
+      'PreToolUse',
+      'PostToolUse',
+      'UserPromptSubmit',
+      'SessionStart',
+      'SessionEnd',
+      'Stop',
+      'Notification',
+    ]) {
+      expect(registered).not.toContain(legacy)
+    }
   })
 
   // 每个事件一条:真跑 + 断言计数 + 断言上下文语义。
   const CASES = [
     {
-      event: 'PreToolUse' as const,
-      input: { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } },
+      event: 'tool.call' as const,
+      input: { tool_name: 'Bash', tool_input: { command: 'ls' } },
       detail: 'Bash',
       context: 'Bash',
     },
     {
-      event: 'PostToolUse' as const,
-      input: { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_output: 'ok' },
-      detail: 'Read',
-      context: 'Read',
-    },
-    {
-      event: 'UserPromptSubmit' as const,
-      input: { hook_event_name: 'UserPromptSubmit', prompt: '你好世界' },
+      event: 'prompt.submit' as const,
+      input: { text: '你好世界' },
       detail: '你好世界',
       context: '4 字',
     },
     {
-      event: 'SessionStart' as const,
-      input: { hook_event_name: 'SessionStart', cwd: '/tmp/proj' },
+      event: 'session.start' as const,
+      input: { cwd: '/tmp/proj' },
       detail: '/tmp/proj',
       context: '/tmp/proj',
     },
     {
-      event: 'SessionEnd' as const,
-      input: { hook_event_name: 'SessionEnd', reason: 'clear' },
+      event: 'session.end' as const,
+      input: { reason: 'clear' },
       detail: 'reason=clear',
-      // SessionEnd 不注入上下文(会话已结束,注入了也没人消费)。
+      // session.end 不注入上下文(会话已结束,注入了也没人消费)。
       context: null,
     },
     {
-      event: 'Stop' as const,
-      input: { hook_event_name: 'Stop', stop_reason: 'end_turn' },
+      event: 'turn.complete' as const,
+      input: { stop_reason: 'end_turn' },
       detail: 'stop_reason=end_turn',
       context: null,
-    },
-    {
-      event: 'Notification' as const,
-      input: { hook_event_name: 'Notification', message: '磁盘空间不足' },
-      detail: '磁盘空间不足',
-      context: '磁盘空间不足',
     },
   ]
 
@@ -200,7 +225,7 @@ describe('内置 mod modctl — 事件订阅', () => {
       expect(calls).toHaveLength(1)
       expect(calls[0]).toEqual(c.input)
       // 4) 返回值保留了下游结果(透传而非中断)
-      expect(out).toMatchObject({ hook_event_name: c.input.hook_event_name })
+      expect(out).toMatchObject(c.input)
 
       // 5) 上下文注入语义
       const injected = (out.hookSpecificOutput as { additionalContext?: string } | undefined)
@@ -214,24 +239,23 @@ describe('内置 mod modctl — 事件订阅', () => {
   }
 
   it('注入时必带 hookEventName —— 缺了会 throw 并打断每一轮对话', async () => {
-    // 回归防线:processHookJSONOutput 先拿 hookEventName 与 expectedHookEvent
-    // 比对,不匹配直接 throw;随后整个 switch 也靠它分派。缺字段的真实症状
-    // 不是「注入没生效」,而是每轮对话都被
-    // "expected 'UserPromptSubmit' but got 'undefined'" 打断。
+    // 回归防线:下游的 hook 消费者先拿 hookEventName 与 expectedHookEvent
+    // 比对,不匹配直接 throw。缺字段的真实症状不是「注入没生效」,而是每轮
+    // 对话都被 "expected 'UserPromptSubmit' but got 'undefined'" 打断。
     const { byEvent } = await loadModctl()
-    const handler = byEvent.get('UserPromptSubmit')!
+    const handler = byEvent.get('prompt.submit')!
     const { terminal } = terminalSpy()
-    const out = await handler({ hook_event_name: 'UserPromptSubmit', prompt: 'hi' }, terminal)
+    const out = await handler({ text: 'hi' }, terminal)
     expect((out.hookSpecificOutput as { hookEventName?: string }).hookEventName).toBe(
-      'UserPromptSubmit',
+      'prompt.submit',
     )
   })
 
-  it('五个注入事件的 hookEventName 与各自事件一致', async () => {
+  it('注入型事件的 hookEventName 与各自事件一致', async () => {
     const { byEvent } = await loadModctl()
     const { terminal } = terminalSpy()
-    for (const ev of ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'Notification']) {
-      const out = await byEvent.get(ev)!({ hook_event_name: ev, tool_name: 'Bash' }, terminal)
+    for (const ev of ['tool.call', 'prompt.submit', 'session.start']) {
+      const out = await byEvent.get(ev)!({ tool_name: 'Bash', text: 'x', cwd: '/w' }, terminal)
       expect(
         (out.hookSpecificOutput as { hookEventName?: string }).hookEventName,
         `${ev} 的 hookEventName 不匹配`,
@@ -241,25 +265,25 @@ describe('内置 mod modctl — 事件订阅', () => {
 
   it('多次触发时计数累加,detail 保留最近一次', async () => {
     const { byEvent } = await loadModctl()
-    const handler = byEvent.get('PostToolUse')!
+    const handler = byEvent.get('tool.call')!
     const { terminal } = terminalSpy()
 
-    await handler({ hook_event_name: 'PostToolUse', tool_name: 'Bash' }, terminal)
-    await handler({ hook_event_name: 'PostToolUse', tool_name: 'Grep' }, terminal)
+    await handler({ tool_name: 'Bash' }, terminal)
+    await handler({ tool_name: 'Grep' }, terminal)
 
-    const hit = getModctlHits().get('PostToolUse')
+    const hit = getModctlHits().get('tool.call')
     expect(hit?.count).toBe(2)
     expect(hit?.detail).toContain('Grep')
   })
 
   it('注入不覆盖其他 mod 已写入的 additionalContext', async () => {
     const { byEvent } = await loadModctl()
-    const handler = byEvent.get('SessionStart')!
+    const handler = byEvent.get('session.start')!
     // 下游已经有人写了 additionalContext(模拟另一个 mod 或宿主)。
     const terminal = async () => ({
       hookSpecificOutput: { additionalContext: '来自下游的内容' },
     })
-    const out = await handler({ hook_event_name: 'SessionStart' }, terminal)
+    const out = await handler({ cwd: '/w' }, terminal)
     const ctx = (out.hookSpecificOutput as { additionalContext: string }).additionalContext
     expect(ctx).toContain('来自下游的内容')
     expect(ctx).toContain('[modctl]')
@@ -267,30 +291,30 @@ describe('内置 mod modctl — 事件订阅', () => {
 
   it('下游保留 hookSpecificOutput 里的其他字段', async () => {
     const { byEvent } = await loadModctl()
-    const handler = byEvent.get('PreToolUse')!
+    const handler = byEvent.get('tool.call')!
     const terminal = async () => ({
       hookSpecificOutput: { permissionDecision: 'allow' as const },
     })
-    const out = await handler({ hook_event_name: 'PreToolUse', tool_name: 'Bash' }, terminal)
+    const out = await handler({ tool_name: 'Bash' }, terminal)
     // 注入上下文时不能把 permissionDecision 之类的东西冲掉。
     expect(out.hookSpecificOutput).toMatchObject({ permissionDecision: 'allow' })
   })
 
   it('超长载荷被截断,不会把面板撑爆', async () => {
     const { byEvent } = await loadModctl()
-    const handler = byEvent.get('Notification')!
+    const handler = byEvent.get('prompt.submit')!
     const { terminal } = terminalSpy()
-    await handler({ hook_event_name: 'Notification', message: 'x'.repeat(5000) }, terminal)
-    const detail = getModctlHits().get('Notification')?.detail ?? ''
+    await handler({ text: 'x'.repeat(5000) }, terminal)
+    const detail = getModctlHits().get('prompt.submit')?.detail ?? ''
     expect(detail.length).toBeLessThan(200)
     expect(detail.endsWith('…')).toBe(true)
   })
 
-  it('/modctl 把「支持但从未收到」的事件标出来 —— 便于区分没发生 vs 没接线', async () => {
+  it('/modctl 把「订阅了但从未收到」的事件标出来 —— 便于区分没发生 vs 没接线', async () => {
     const { mod } = await loadModctl()
     // 一个事件都不投,面板应逐条报 ×0
     const out = await mod.commands[0].handler!() as string
-    for (const event of MOD_SUPPORTED_EVENTS) {
+    for (const event of SUBSCRIBED_EVENTS) {
       expect(out).toContain(event)
       expect(out).toContain('从未收到')
     }
@@ -300,11 +324,11 @@ describe('内置 mod modctl — 事件订阅', () => {
   it('/modctl 在收到部分事件后如实显示计数与最近载荷', async () => {
     const { byEvent, mod } = await loadModctl()
     const { terminal } = terminalSpy()
-    await byEvent.get('SessionStart')!({ hook_event_name: 'SessionStart', cwd: '/w' }, terminal)
-    await byEvent.get('SessionStart')!({ hook_event_name: 'SessionStart', cwd: '/w' }, terminal)
+    await byEvent.get('session.start')!({ cwd: '/w' }, terminal)
+    await byEvent.get('session.start')!({ cwd: '/w' }, terminal)
 
     const out = await mod.commands[0].handler!() as string
-    expect(out).toContain('SessionStart')
+    expect(out).toContain('session.start')
     expect(out).toContain('×  2')
     expect(out).toContain('/w')
     // 未触发的仍应标为 0

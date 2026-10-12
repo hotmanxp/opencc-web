@@ -30,9 +30,6 @@ import {
 import * as teamMemPaths from '../memdir/teamMemPaths.js'
 
 
-const teamMemWatcher = true
-  ? (require('../services/teamMemorySync/watcher.js') as typeof import('../services/teamMemorySync/watcher.js'))
-  : null
 const memoryShapeTelemetry = false
   // @ts-ignore - module not found
   ? (require('../memdir/memoryShapeTelemetry.js') as typeof import('../memdir/memoryShapeTelemetry.js'))
@@ -40,6 +37,7 @@ const memoryShapeTelemetry = false
 
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { getSubagentLogName } from './agentContext.js'
+import * as teamMemWatcher from '../services/teamMemorySync/watcher.js'
 
 /**
  * Extract the file path from a tool input for memdir detection.

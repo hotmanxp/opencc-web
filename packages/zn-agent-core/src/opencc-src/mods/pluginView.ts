@@ -1,6 +1,7 @@
 import { BUILTIN_MARKETPLACE_NAME, MODS_MARKETPLACE_NAME } from '../plugins/builtinPlugins.js'
 import type { LoadedPlugin } from '../types/plugin.js'
 import { getUserConfigJson } from '../utils/userConfigJson.js'
+import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
 import { BUILTIN_ORIGIN, getKnownMods, getLoadedMods } from './registry.js'
 
 /**
@@ -98,7 +99,20 @@ export function isModEnabled(modName: string, builtin: boolean): boolean {
 }
 
 /**
- * 把每个已知 mod 投影成插件形状。
+ * Whether the user has turned a mod ON, as opposed to never having touched it.
+ *
+ * `isModEnabled` reads an absent key as enabled — right for a feature mod,
+ * wrong for an `optIn` one, where absent has to mean off. Without this an
+ * opt-in mod ships dormant and can never be started, because writing `true` is
+ * the only state that differs from the default.
+ */
+export function isModExplicitlyEnabled(modName: string, builtin: boolean): boolean {
+  const id = modPluginId(modName, builtin)
+  return getSettings_DEPRECATED()?.enabledPlugins?.[id] === true
+}
+
+/**
+ * Project every known mod into the plugin shape.
  *
  * 「已知」≠「已加载」:被插件列表关掉的 mod 是**故意**不进注册表的
  * (它的代码不该跑),但它仍然需要一行 —— 否则关掉它就没有控件能再打开。

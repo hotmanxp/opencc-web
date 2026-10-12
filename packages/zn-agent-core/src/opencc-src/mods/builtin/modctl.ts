@@ -5,7 +5,16 @@ import {
   getKnownMods,
   getLoadedMods,
 } from '../registry.js'
-import { MOD_SUPPORTED_EVENTS } from '../dispatch.js'
+import { MOD_EVENTS, unavailabilityReason } from '../protocol.js'
+
+/**
+ * The events this panel probes.
+ *
+ * Every declared event except the ones `UNAVAILABLE_EVENTS` refuses by name —
+ * subscribing to those would throw at `register()` rather than record a zero,
+ * which would take the whole mod down instead of reporting the gap.
+ */
+const PROBE_EVENTS = MOD_EVENTS.filter(e => unavailabilityReason(e) === undefined)
 
 /**
  * Built-in mod `modctl` — mod 运行时的自检面板。
@@ -26,7 +35,7 @@ import { MOD_SUPPORTED_EVENTS } from '../dispatch.js'
  * 载荷长什么样,此前没有任何观测手段 —— 一条 handler 写错字段名只会静默地
  * 什么都不发生。
  *
- * 所以这里订阅 `MOD_SUPPORTED_EVENTS` 的**全部**事件,每个 handler 做两件
+ * 所以这里订阅 `PROBE_EVENTS` 的**全部**事件,每个 handler 做两件
  * 真实的事(不是空跑):
  *   1. 记录事件名 + 关键载荷字段,供 `/modctl` 汇总;
  *   2. 调 `next()` 把事件交还下游核心 tier(不打断宿主)。
@@ -88,7 +97,7 @@ function truncate(value: unknown): string {
 
 /** 把计数压成一行紧凑摘要,供 ui.status 通道使用。 */
 function summarizeHits(): string {
-  return MOD_SUPPORTED_EVENTS.map(e => `${e}=${hits.get(e)?.count ?? 0}`).join(' ')
+  return PROBE_EVENTS.map(e => `${e}=${hits.get(e)?.count ?? 0}`).join(' ')
 }
 
 function record(event: string, detail?: string): void {
@@ -167,53 +176,48 @@ registerBuiltinMod({
     ctxRef = ctx
 
     // --- 工具前:确认这次调用将被执行,并把工具名喂回上下文 ---
-    ctx.on('PreToolUse', (e, next) => {
+    ctx.on('tool.call', (e, next) => {
       const tool = String(e.tool_name ?? e.tool ?? '?')
-      record('PreToolUse', `tool=${tool}`)
-      return withContext(e, next, 'PreToolUse', `[modctl] 工具即将执行:${tool}`)
+      record('tool.call', `tool=${tool}`)
+      return withContext(e, next, 'tool.call', `[modctl] 工具即将执行:${tool}`)
     })
 
-    // --- 工具后:确认完成,并回注结果摘要 ---
-    ctx.on('PostToolUse', (e, next) => {
-      const tool = String(e.tool_name ?? e.tool ?? '?')
-      record('PostToolUse', `tool=${tool}`)
-      return withContext(e, next, 'PostToolUse', `[modctl] 工具已完成:${tool}`)
-    })
+    // zai patch (2026-10-12, mods 同步):原 `PostToolUse` 探针已删 ——
+    // 上游 2.1.296 的点号事件表里**没有**工具完成侧事件:`tool.call` 走的是
+    // 执行前(`d.ts:3245` "about to run a tool"),完成侧没有对应名字。照搬
+    // 一个自造名只会得到一个永远为 0 的计数,比没有这行更糟(面板会谎报「没接线」)。
 
     // --- 用户提交提示:把提示词首行回注,证明载荷被读到了 ---
-    ctx.on('UserPromptSubmit', (e, next) => {
-      const prompt = String(e.prompt ?? '')
-      record('UserPromptSubmit', truncate(prompt))
-      return withContext(e, next, 'UserPromptSubmit', `[modctl] 已收到提示(${prompt.length} 字)`)
+    ctx.on('prompt.submit', (e, next) => {
+      const prompt = String(e.text ?? '')
+      record('prompt.submit', truncate(prompt))
+      return withContext(e, next, 'prompt.submit', `[modctl] 已收到提示(${prompt.length} 字)`)
     })
 
     // --- 会话开始:所有事件里唯一能看到 cwd 的入口 ---
-    ctx.on('SessionStart', (e, next) => {
+    ctx.on('session.start', (e, next) => {
       const cwd = e.cwd ?? e.workingDirectory ?? '(未提供)'
-      record('SessionStart', `cwd=${String(cwd)}`)
-      return withContext(e, next, 'SessionStart', `[modctl] 会话已启动,cwd=${String(cwd)}`)
+      record('session.start', `cwd=${String(cwd)}`)
+      return withContext(e, next, 'session.start', `[modctl] 会话已启动,cwd=${String(cwd)}`)
     })
 
-    // --- 会话结束:reason 字段由 MATCHER_FIELDS 声明可匹配 ---
-    ctx.on('SessionEnd', (e, next) => {
+    // --- 会话结束:reason 是这条链唯一有意义的载荷 ---
+    ctx.on('session.end', (e, next) => {
       const reason = String(e.reason ?? '?')
-      record('SessionEnd', `reason=${reason}`)
+      record('session.end', `reason=${reason}`)
       return next(e)
     })
 
-    // --- 停止:stop_reason 是 Stop 唯一有意义的载荷 ---
-    ctx.on('Stop', (e, next) => {
+    // --- 一轮结束:stop_reason 是这条链唯一有意义的载荷 ---
+    ctx.on('turn.complete', (e, next) => {
       const reason = String(e.stop_reason ?? e.reason ?? '?')
-      record('Stop', `stop_reason=${reason}`)
+      record('turn.complete', `stop_reason=${reason}`)
       return next(e)
     })
 
-    // --- 通知 ---
-    ctx.on('Notification', (e, next) => {
-      const message = String(e.message ?? '')
-      record('Notification', truncate(message))
-      return withContext(e, next, 'Notification', `[modctl] 通知:${truncate(message)}`)
-    })
+    // zai patch (2026-10-12, mods 同步):原 `Notification` 探针已删 ——
+    // 上游表里最接近的是 `ui.message`,而它在 `UNAVAILABLE_EVENTS` 里被按名
+    // 拒掉(没有 surface 总线),订阅它会在 register 阶段直接抛错。
 
     ctx.registerCommand({
       name: 'modctl',
@@ -261,16 +265,16 @@ registerBuiltinMod({
         // 而不是 mod 写错了 —— 这正是这份面板要回答的问题。
         lines.push('')
         lines.push('【事件链实测】')
-        for (const event of MOD_SUPPORTED_EVENTS) {
+        for (const event of PROBE_EVENTS) {
           const hit = hits.get(event)
           lines.push(
             hit
-              ? `  ${event.padEnd(18)} ×${String(hit.count).padStart(3)}   ${hit.detail ?? ''}`
-              : `  ${event.padEnd(18)} ×  0   (从未收到)`,
+              ? `  ${event.padEnd(22)} ×${String(hit.count).padStart(3)}   ${hit.detail ?? ''}`
+              : `  ${event.padEnd(22)} ×  0   (从未收到)`,
           )
         }
 
-        const never = MOD_SUPPORTED_EVENTS.filter(e => !hits.has(e))
+        const never = PROBE_EVENTS.filter(e => !hits.has(e))
         if (never.length > 0) {
           lines.push('')
           lines.push(`提示:${never.join('、')} 从未收到。可能是该事件本会话未发生,`)

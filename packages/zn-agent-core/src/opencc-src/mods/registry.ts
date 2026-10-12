@@ -1,6 +1,11 @@
-import type { HookEvent } from '../types/hooks.js'
 import type { LocalJSXCommandCall } from '../types/command.js'
 import type { ModManifest } from './manifest.js'
+import type {
+  ModEventName,
+  ModMatcher,
+  ModNext,
+  ModTier,
+} from './protocol.js'
 
 /**
  * Mod registry — lifecycle state for loaded mods (docs/mods-plan.md §3.4).
@@ -11,14 +16,59 @@ import type { ModManifest } from './manifest.js'
  * tool pool (REPL re-renders mod tools via a version counter).
  */
 
-/** Signature of a mod event handler (docs/mods-plan.md §3.3). */
+/**
+ * Signature of a mod event handler (docs/mods-plan.md §3.3).
+ *
+ * The return type is `unknown` because a handler on a STREAMING event is an
+ * async generator, not a promise: `async function* ($, e, next)` yields the
+ * event's chunks and returns its result. `next` is declared to return a
+ * promise because that is what the one-shot paths hand it; on the streaming
+ * paths it returns the stream beneath instead, and `runModStreamChain` is
+ * what actually drives it.
+ */
 export type ModHandler = (
   e: Record<string, unknown>,
-  next: (e?: Record<string, unknown>) => Promise<Record<string, unknown>>,
+  next: ModNext,
 ) => unknown | Promise<unknown>
 
 /**
- * zai patch (2026-10-06):opencc 原本在此定义 `MOD_RENDER_EVENT`('ui.render')
+ * `next` — run the layers beneath — with `next.to` to hand control to a named
+ * tier instead of the adjacent one.
+ *
+ * Upstream `d.ts:5241-5243`: "A managed hook's: prepend may name append,
+ * builtin or core, append core; it never skips a tier with more authority",
+ * and `d.ts:9642` `TargetTier = Exclude<Tier, 'prepend' | 'user'>` — a hook may
+ * only ever descend, never climb. `canDescend` holds the same table.
+ */
+
+/**
+ * A streaming event's `next` is the STREAM beneath, not a promise.
+ *
+ * Upstream has exactly two streaming events (`turn.step`, `process.spawn`)
+ * and gives them their own `StreamHook` type for this reason: the same
+ * `next(e)` call means "await the rest of the chain" on one event and "open
+ * a second stream" on the other, and one handler type cannot say both.
+ */
+export type ModStreamNext = (
+  e?: Record<string, unknown>,
+) => AsyncGenerator<unknown, unknown>
+
+/**
+ * `async function* ($, e, next)`: yields the event's chunks and returns its
+ * result. Three shapes are distinguishable — `return yield* next(e)` passes,
+ * `for await (c of next(e)) yield f(c)` transforms, yielding without calling
+ * `next` answers alone and nothing beneath runs.
+ */
+export type ModStreamHandler = (
+  e: Record<string, unknown>,
+  next: ModStreamNext,
+) => AsyncGenerator<unknown, unknown>
+
+/** The two events whose handlers are generators rather than functions. */
+export type ModStreamEvent = 'turn.step' | 'process.spawn'
+
+/**
+ * zai patch (2026-10-06): opencc 原本在此定义 `MOD_RENDER_EVENT`('ui.render')
  * / `ModRenderEvent` / `ModRenderHandler` —— 一个跑在 React render 期间的
  * 同步文本变换事件(消费方是 opencc 的 PromptInput)。zai 的 UI 是 Web UI,
  * 不存在这条渲染路径,故整块删除。详见 engine.ts 文件头的能力面说明。
@@ -26,13 +76,25 @@ export type ModHandler = (
  * 后果:`ctx.on('ui.render', h)` 会走 `isModSupportedEvent` 的查表并被拒,
  * 报 "unsupported event"。这是有意的 fail-fast —— 依赖 TUI 渲染的 mod
  * 应当尽早暴露,而不是静默无效。
+ *
+ * 同源删除:`mods/renderTap.ts`(ui.render 的渲染点 tap + LRU 缓存)与
+ * `mods/builtin/{diffMod,mermaidMod,handoffMod}`(纯终端 UI 内置 mod)。
  */
-export type ModEventName = HookEvent
+
+/** `ModEventName` / `ModMatcher` / `ModTier` 现由 protocol.ts 定义并在此转出。 */
+export type { ModEventName, ModMatcher, ModTier }
 
 export type ModHandlerSpec = {
   event: ModEventName
-  /** Normalized string matcher (object matchers are converted by dispatch). */
-  matcher?: string
+  /**
+   * Structured matcher, evaluated against the frozen event argument by
+   * `matchesMatcher`. Upstream also spells the tier here as `to`; the loader
+   * lifts it onto `tier` so a matcher can never match on an event field by
+   * that name.
+   */
+  matcher?: ModMatcher
+  /** Where in the chain this handler sits. Defaults to `builtin`. */
+  tier?: ModTier
   handler: ModHandler
 }
 
@@ -137,11 +199,38 @@ export function clearKnownMods(): void {
   knownMods = new Map()
 }
 
+/**
+ * Fires whenever the set of loaded mods changes (register or unregister).
+ *
+ * Consumers that memoize per-mod output subscribe here — the dispatch chains
+ * are keyed on the mod set, so a subscriber that does not hear about a
+ * register/unregister keeps dispatching against mods that are gone.
+ */
+const modSetListeners = new Set<() => void>()
+
+export function subscribeModSetChanged(listener: () => void): () => void {
+  modSetListeners.add(listener)
+  return () => {
+    modSetListeners.delete(listener)
+  }
+}
+
+function notifyModSetChanged(): void {
+  for (const listener of modSetListeners) {
+    try {
+      listener()
+    } catch {
+      // A broken subscriber must not break registration.
+    }
+  }
+}
+
 /** Marker for in-memory built-in mods (src/mods/builtin.ts). */
 export const BUILTIN_ORIGIN = '(builtin)'
 
 export function registerLoadedMod(mod: LoadedMod): void {
   loadedMods.push(mod)
+  notifyModSetChanged()
   notifyModToolsChanged()
 }
 
@@ -158,6 +247,7 @@ export function unregisterMod(name: string): LoadedMod | undefined {
   // than MOD_BREAKER_THRESHOLD fresh ones — the count was for code that is no
   // longer loaded.
   failureCounts.delete(name)
+  notifyModSetChanged()
   notifyModToolsChanged()
   return removed
 }
@@ -166,6 +256,9 @@ export function unregisterMod(name: string): LoadedMod | undefined {
 export function resetModsRegistryForTesting(): void {
   loadedMods = []
   clearKnownMods()
+  // Subscribers hold derived state (the op-event chains), so clearing the set
+  // without notifying leaves them dispatching against mods that are gone.
+  notifyModSetChanged()
   modToolsVersion++
   notifyModToolsChanged()
   failureCounts.clear()

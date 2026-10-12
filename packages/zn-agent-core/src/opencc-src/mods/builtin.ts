@@ -7,8 +7,8 @@ import {
   registerLoadedMod,
   noteDiscoveredMod,
 } from './registry.js'
-import { isModEnabled } from './pluginView.js'
 import { createModContext, type ModContext } from './engine.js'
+import { isModEnabled, isModExplicitlyEnabled } from './pluginView.js'
 
 /**
  * Built-in mod channel (docs/mods-plan.md §4.3 / §九 — upstream parity of
@@ -26,8 +26,20 @@ export type BuiltinModSpec = {
   version?: string
   description?: string
   /**
-   * zai patch (2026-10-10, mods 同步):用户可配置项,与磁盘 mod 的
-   * `opencc-mod.json` → `userConfig` 同 schema 同存储,复用同一套配置对话框。
+   * Ship the mod without loading it unless the user turns it on in `/plugins`.
+   *
+   * For a diagnostic that is itself a listener: `mod-probe` subscribes to
+   * every event, so leaving it on by default made `hasModHandlersFor` true
+   * everywhere and turned the zero-subscription fast path off permanently —
+   * every dispatch then paid a payload clone, a frozen copy and a budgeted
+   * hook, in a session that asked for none of it. The mod is still listed, so
+   * `/plugins` is where it gets switched on.
+   */
+  optIn?: boolean
+  /**
+   * User-configurable values, surfaced by `/plugins` → Installed as
+   * "Configure options". Same schema and same storage as a disk mod's
+   * `opencc-mod.json` → `userConfig`; see ModManifestSchema.
    */
   userConfig?: UserConfigSchema
   register(ctx: ModContext): void | Promise<void>
@@ -97,7 +109,12 @@ export async function loadBuiltinMods(): Promise<{
     })
     // 门禁在 register() 之前:用户关掉的内置 mod 一次都不该跑 register,
     // 否则它的命令 / handler 会留在运行时里。
-    if (!isModEnabled(spec.name, true)) {
+    // `optIn` inverts the default: an absent key means OFF, so a diagnostic
+    // ships listed but dormant until someone turns it on.
+    const enabled = spec.optIn
+      ? isModExplicitlyEnabled(spec.name, true)
+      : isModEnabled(spec.name, true)
+    if (!enabled) {
       disabled.push(spec.name)
       continue
     }
@@ -133,30 +150,34 @@ export async function loadBuiltinMods(): Promise<{
 // The fixed built-in manifest (upstream parity of wCe()'s hardcoded list).
 // Import the mod file here to ship it; no other wiring needed.
 //
-// zai patch (2026-10-06, mods 同步):**故意留空**。
+// zai patch (2026-10-06, mods 同步):**只注册非 TUI 的内置 mod**。
 //
-// opencc 侧当前注册了两个内置 mod,两个都依赖终端 UI,搬到 zai 无意义(这两个仍未搬):
+// opencc 侧当前注册四个,三个依赖终端 UI,搬到 zai 无意义(这三个仍未搬):
 //   - `diff`    —— 注册一个实时 pane(`ctx.ui.pane`),ink 组件;zai 无 TUI,
 //                 终端 UI 已被 `stub-ui-sources.ts` 就地 stub 成 `return null`
 //   - `handoff` —— `local-jsx` 命令,交互式 JSX 文档选择器;zai 的 slash 命令
 //                 走自己的 registry(services/commands/slashList.ts),不消费
 //                 vendor `getCommands()` 的 local-jsx 分支
+//   - `mermaid` —— 同为 `ui.render` 渲染点变换,而 `ui.render` 事件链
+//                 (hasModRenderHandlers / runModRenderChainSync)已随 TUI 能力面
+//                 一并删除,这个 mod 没有可挂载的通道
 //
-// 通道本身(registerBuiltinMod / loadBuiltinMods)完整保留:第一方功能想用 mod
-// 形态实现时,在这里 import + registerBuiltinMod 即可,不需要再动加载器。
+// `mod-probe` 是唯一搬过来的:它只 import `engine.js` / `protocol.js`,不 import
+// 本文件,**因此不构成循环依赖**,可以顶层 import(与 modctl 的情况相反)。
+// 它是 optIn 的 —— 默认关着、只在 `/plugins` 显式打开才加载 —— 所以常驻噪音
+// 为零;打开后它订阅全部事件并报告哪些真的派发过。
 //
-// zai patch (2026-10-11):**再次留空** —— `mods/builtin/modctl.ts` 与它的单测
-// (`test/unit/mods-builtinModctl.test.ts`)**仍在树上,但不再注册**。
+// 注意:`/mod-probe` 本身**分不清「没接线」和「本次没调用」** —— op 事件要等对应
+// 的 `$` 方法被调用才触发,一次只有 4 个内建 mod 的 session 里 `fs.read` /
+// `store.get` / `clock.now` 都不会出现,而它们实现完好。静态分析才是准确判据,
+// 探针只适合发现「跑着跑着哑掉」的事件。
 //
-// 它曾经是第一个(也是唯一一个)内置 mod,订阅全部 7 个非 ui 事件并向每轮对话
-// 回注 `[modctl] …`。当时的用途是自检 + 给内置 mod 这条路径找真实数据验;hook
-// 管线的接线(工作区信任门修复,`server/createHeadlessContext-impl.ts`)
-// 收尾后使命结束,而常驻噪音对每个会话都是负担,故摘掉。
+// zai patch (2026-10-11):**`mods/builtin/modctl.ts` 刻意不注册** —— 它订阅全部
+// 事件并向每轮对话回注 `[modctl] …`,常驻噪音对每个会话都是负担。文件与单测
+// (`test/unit/mods-builtinModctl.test.ts`)仍在树上,其 import 自身会执行
+// `registerBuiltinMod`,所以单测不依赖加载器。
 //
-// 单测不依赖加载器:它顶层直接 `import modctl.js`,那条 import 自己就执行了
-// `registerBuiltinMod`,所以 `builtinSpecs` 仍有数据可测。
-//
-// 将来要重新挂上时,注意**必须动态 import,不能写顶层 import**:顶层
+// 将来要把 modctl 挂回来,注意**必须动态 import,不能写顶层 import**:顶层
 // `import './builtin/modctl.js'` 会与本文件形成循环依赖 —— modctl.ts 要 import
 // 本文件的 `registerBuiltinMod`,而本文件在求值末尾 import modctl。esbuild
 // 打成单 bundle 后模块初始化顺序变成「modctl 的顶层代码先跑」,此刻
@@ -164,5 +185,9 @@ export async function loadBuiltinMods(): Promise<{
 // "Cannot read properties of undefined (reading 'push')"。
 //
 // **tsc 绿、build:core 绿、bundle 字节数不变,只有真 import bundle 才炸**
-// —— 所以要走 `loadBuiltinMods` 里一次幂等的 `await import(...)`(原实现是
-// 这个形状,函数名 `ensureBuiltinManifest`),不要「简化」回顶层 import。
+// —— 所以要走 `loadBuiltinMods` 里一次幂等的 `await import(...)`,不要
+// 「简化」回顶层 import。
+// ---------------------------------------------------------------------------
+import { modProbeBuiltinMod } from './builtin/modProbe.js'
+
+registerBuiltinMod(modProbeBuiltinMod)

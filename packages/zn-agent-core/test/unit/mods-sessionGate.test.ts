@@ -142,7 +142,7 @@ describe('mods 槽 — per-session 门禁', () => {
     setSessionModGate('sess-6', ['allowed'])
     const result = await runModChain(
       chain,
-      { hook_event_name: 'Stop' },
+      { stop_reason: 'end_turn' },
       async () => {
         seen.push('core')
         return { continue: true }
@@ -253,20 +253,39 @@ describe('mods 槽 — TUI 能力面已移除', () => {
     )
     const mod = makeMod('rendertest')
     const ctx = createModContext(mod)
+    // `ui.render` 在事件表里(上游有),但本宿主没有可挂载的渲染点,所以走
+    // UNAVAILABLE_EVENTS 的按名拒斥,报的是具体原因而不是笼统的 unsupported。
     expect(() =>
       ctx.on('ui.render' as never, (() => 'x') as never),
-    ).toThrow(/unsupported event/i)
+    ).toThrow(/ctx\.on\("ui\.render"\)/)
+    expect(() =>
+      ctx.on('ui.render' as never, (() => 'x') as never),
+    ).toThrow(/no React\/Ink render pass/)
     // 且没有把 handler 记进 mod —— 失败要干净
     expect(mod.handlers).toHaveLength(0)
   })
 
-  it('保留的 7 个 hook 事件仍全部可用', async () => {
+  it('点号事件可订阅,而旧的 settings.json hook 名被明确拒绝', async () => {
     const { createModContext } = await import(
       '../../src/opencc-src/mods/engine.js'
     )
     const mod = makeMod('hooktest')
     const ctx = createModContext(mod)
+    // 上游 2.1.296 对齐后的事件表是点号名;抽 5 条跨分组的代表。
     for (const ev of [
+      'tool.call',
+      'prompt.submit',
+      'session.start',
+      'session.end',
+      'turn.complete',
+    ] as const) {
+      ctx.on(ev, async (_e, next) => next())
+    }
+    expect(mod.handlers).toHaveLength(5)
+
+    // 旧 hook 名不再是 mod 事件 —— 必须响亮地拒,而不是静默收下再永不触发。
+    // 它们是宿主 hook 词汇,在上游属于 classic 通道。
+    for (const legacy of [
       'PreToolUse',
       'PostToolUse',
       'UserPromptSubmit',
@@ -275,9 +294,16 @@ describe('mods 槽 — TUI 能力面已移除', () => {
       'Stop',
       'Notification',
     ] as const) {
-      ctx.on(ev, async (_e, next) => next())
+      expect(
+        () =>
+          ctx.on(
+            legacy as never,
+            (async (_e: unknown, next: () => unknown) => next()) as never,
+          ),
+        `${legacy} 应该被拒绝`,
+      ).toThrow(/unsupported event/i)
     }
-    expect(mod.handlers).toHaveLength(7)
+    expect(mod.handlers).toHaveLength(5)
   })
 
   it('ui.status 仍能写入快照(notice/status 是数据通道,不是渲染)', async () => {
