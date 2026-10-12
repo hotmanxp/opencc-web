@@ -1318,8 +1318,14 @@ async function* queryLoop(
         try {
           let streamingFallbackOccured = false
           queryCheckpoint('query_api_streaming_start')
+          // Awaited: `prompt.context` is dispatched inside, and a hook may add
+          // or drop a context block before the request goes out.
+          const messagesWithUserContext = await prependUserContext(
+            messagesForQuery,
+            userContext,
+          )
           for await (const message of deps.callModel({
-            messages: prependUserContext(messagesForQuery, userContext),
+            messages: messagesWithUserContext,
             systemPrompt: fullSystemPrompt,
             thinkingConfig: toolUseContext.options.thinkingConfig,
             tools: toolsForModel,
