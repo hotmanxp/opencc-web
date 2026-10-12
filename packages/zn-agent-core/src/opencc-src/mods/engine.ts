@@ -14,6 +14,7 @@ import type {
   LoadedMod,
   ModCommandSpec,
   ModHandler,
+  ModHandlerInput,
   ModToolSpec,
 } from './registry.js'
 import {
@@ -59,6 +60,7 @@ import {
   unavailabilityReason,
   type ModEventName,
   type ModMatcher,
+  type ModNext,
 } from './protocol.js'
 import { modPluginId } from './pluginView.js'
 
@@ -170,13 +172,13 @@ export type ModContext = {
    * hook.
    */
   on(event: ModStreamEvent, handler: ModStreamHandler): void
-  on(event: ModEventRef, handler: ModHandler): void
+  on(event: ModEventRef, handler: ModHandlerInput): void
   /**
    * Upstream's matcher shape: a plain object nested against the event, with
    * four leaf kinds (exact, RegExp, any-of, partial). `{ to: 'core' }` is
    * lifted out as the tier rather than matched as an event field.
    */
-  on(event: ModEventRef, matcher: ModMatcher, handler: ModHandler): void
+  on(event: ModEventRef, matcher: ModMatcher, handler: ModHandlerInput): void
   // zai patch (2026-10-06):上游在通用重载之前还有一条 `ui.render` 的同步
   // 重载 —— 它跑在 React render 期间,消费方是 PromptInput,Web UI 无此路径,
   // 故随 TUI 能力面删除。`ui.render` 也不在 `isModEventName` 的表里,传进来
@@ -254,6 +256,18 @@ export type ModContext = {
    * different states and only the mod knows whether the difference matters.
    */
   options: PluginOptionValues
+  /**
+   * Upstream `$.plugin` (d.ts:2325) — "This plugin, as loaded: its manifest
+   * name and its directory". The first noun every mod's own lifecycle reads:
+   * a framework opens its `startMod($)` with `$.plugin.name` and dies without
+   * it, and it is the only member of upstream's 21-noun `$` that costs nothing
+   * to answer — the loader already resolved both.
+   */
+  plugin: {
+    name: string
+    /** The mod's directory, absolute. */
+    root: string
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -593,6 +607,36 @@ function readModOptions(mod: LoadedMod): PluginOptionValues {
 // ctx construction
 // ---------------------------------------------------------------------------
 
+/**
+ * Put the engine back in front of a handler that expects to find it there.
+ *
+ * Upstream's hook is `($: EngineInterface, e, next)` — three parameters, `$`
+ * FIRST. `MatchedHook` at d.ts:5758 says so, and published mods are written to
+ * it: a framework's own lifecycle opens `startMod($, eventInput, passOn)` and
+ * builds its whole surface from `$.plugin`, `$.session`, `$.fs`. Called as
+ * `handler(e, next)` that `$` is the event, `$.plugin` is undefined, and the
+ * mod's lifecycle never starts — the handler throws, the dispatch layer
+ * attributes it and moves on, and the mod looks installed and inert.
+ *
+ * Arity, not a flag: a handler that declares three parameters is asking for
+ * the engine, and one that declares two is the older `(e, next)` shape that
+ * opencc's own built-ins and mods are written in. Both run; neither is rewritten
+ * at the call site.
+ */
+function withEngineInterface(
+  ctx: ModContext,
+  handler: ModHandlerInput,
+): ModHandler {
+  if (handler.length < 3) return handler as ModHandler
+  const wantsEngine = handler as unknown as (
+    $: ModContext,
+    e: Record<string, unknown>,
+    next: ModNext,
+  ) => unknown
+  return ((e: Record<string, unknown>, next: ModNext) =>
+    wantsEngine(ctx, e, next)) as ModHandler
+}
+
 export function createModContext(mod: LoadedMod): ModContext {
   const modName = mod.manifest.name
   const nouns = buildModNouns(modName)
@@ -603,8 +647,9 @@ export function createModContext(mod: LoadedMod): ModContext {
   const fsApi: ModFsApi | undefined = isModFsAuthorized(modName)
     ? buildFsApiLazy(modName, [process.cwd(), mod.root])
     : undefined
-  return {
+  const ctx: ModContext = {
     options: readModOptions(mod),
+    plugin: { name: modName, root: mod.root },
     // Every method below dispatches its own event, so a noun being present is
     // the same fact as its op events being live (docs/mods-upstream-contract.md
     // §1.2). Nothing here is a name without a call behind it.
@@ -648,14 +693,19 @@ export function createModContext(mod: LoadedMod): ModContext {
       }
       const handler = (
         hasExplicitMatcher ? maybeHandler : matcherOrHandler
-      ) as ModHandler | undefined
+      ) as ModHandlerInput | undefined
       if (typeof handler !== 'function') {
         throw new Error('ctx.on(): handler must be a function')
       }
       const { matcher, tier } = hasExplicitMatcher
         ? splitTier(matcherOrHandler as ModMatcher)
         : { matcher: undefined, tier: undefined }
-      mod.handlers.push({ event: canonical, matcher, tier, handler })
+      mod.handlers.push({
+        event: canonical,
+        matcher,
+        tier,
+        handler: withEngineInterface(ctx, handler),
+      })
     },
     registerCommand(spec) {
       return dispatchModOpSync('command.register', { spec }, () => {
@@ -757,6 +807,7 @@ export function createModContext(mod: LoadedMod): ModContext {
     },
     ...(fsApi ? { fs: fsApi } : {}),
   }
+  return ctx
 }
 
 // ---------------------------------------------------------------------------

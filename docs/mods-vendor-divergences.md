@@ -3,8 +3,8 @@
 > 这份文档回答一个问题:**`docs/mods-upstream-contract.md` 描述的是上游行为,
 > 那么 `packages/zn-agent-core/src/opencc-src/mods/` 里到底是什么?**
 >
-> 同步时间:2026-10-12。上游 `opencc@main-opencc` 截至 `bf8adab2`
-> (2026-10-11~12 的 14 个 mods commit)。
+> 同步时间:2026-10-13。上游 `opencc@main-opencc` 截至 `59b2b27d`
+> (前两批的 14 个 + 第三批 5 个)。
 >
 > **不要**把下面「有意分叉」里的任何一条当成 bug 顺手改回上游 —— 每条都写了
 > 为什么。改成上游形状之前先读理由。
@@ -22,11 +22,49 @@
 |---|---|
 | 新增文件 | `protocol.ts` `nouns.ts` `toolDescribe.ts` `sessionUsage.ts` `turnStep.ts` `turnStepStream.ts` `instructionFiles.ts` `builtin/modProbe.ts` |
 | 重写文件 | `dispatch.ts` `engine.ts` `registry.ts` `pluginView.ts` `builtin.ts` |
-| 非 mods 文件 | `types/hooks.ts`(`ModChainEntry` 加 `tier`/`matcher`)、`utils/toolSchemaCache.ts`(tool.describe 的 schema 失效) |
+| 非 mods 文件 | `types/hooks.ts`(`ModChainEntry` 加 `tier`/`matcher`/`event`)、`utils/toolSchemaCache.ts`(tool.describe 的 schema 失效) |
 
 同步方式:以 `c855981d`(= vendor 上次的同步点,已用 blob 逐文件核对确认)为
 base 做**三方合并**,24 处冲突逐个裁决。这样 vendor 的本地适配不会被上游
 的整片重写冲掉,也不会漏掉上游新增的能力。
+
+### 第三批(2026-10-13,上游 `e7d696d8` ~ `59b2b27d` 五个 commit)
+
+这五个不是新特性,是**上游拿一个真实发布的 mod 驱动出来的 bug 修复** ——
+那个 mod 装上了却什么都不做,而派发层把每次异常都归因后继续走,从外面看
+就是「已加载」。
+
+| 上游 commit | 改了什么 | vendor 落点 |
+|---|---|---|
+| `e7d696d8` | `clock.after`/`every` 交回 `Timer` 句柄;定时器按 mod 登记,卸载时清 | `nouns.ts` `hooks.ts` |
+| `5ba8abeb` | handler 支持上游形态 `($: EngineInterface, e, next)`;`next` 带 `event`/`origin` | `registry.ts` `engine.ts` `protocol.ts` `dispatch.ts` `types/hooks.ts` |
+| `59b2b27d` | `$.plugin` 名词;`session.measure` 从同步派发改成串行队列异步派发 | `engine.ts` `cost-tracker.ts` |
+| `e47bd606` | `optIn` 内置 mod 在插件列表那一行的启用态判定 | `builtin.ts` `pluginView.ts` `pluginListAssembly.ts`(见下) |
+| `44c657f1` | 一个拿真 mod 跑的验证脚本 | 未搬(vendor 不含 `scripts/`) |
+
+**为什么 `session.measure` 的同步→异步是必须的**:上游 `await` 这个事件,
+它的结果表写着 `"session.measure": void 0` —— 也就是 handler 返回什么都不
+影响宿主。同步派发买不到任何东西,却要付一个代价:`dispatchModEngineSync`
+不能 await,一个**正确的** async handler 返回的 promise 被丢在地上、记成一次
+失败,而 `addToTotalSessionCost` 每轮响应调一次、熔断阈值 5 连败 —— 一个
+工作得很好的 mod 被卸载,状态行一路正常直到那一刻。改成队列派发后,`changed`
+的差分仍在同步段算(不能自己跟自己赛跑),只有派发入队。
+
+**`e47bd606` 的 zai 对应物比上游更硬**。上游那个 bug 是两个谓词读**同一个**
+存储、只是对缺键的默认值相反(行按 `!== false` 算,加载器按 `=== true`)。
+zai 侧原本是**读写根本不在一个文件**:`setModEnabled` 写 `~/.zai.json` 的
+user config,`isModExplicitlyEnabled` 读的是 `getSettings_DEPRECATED()`
+(settings.json 级联),于是 `optIn` 内置 mod 的门禁永远读到 undefined ——
+用户在 UI 上打开它,它也加载不了。两处都已修:
+
+- `isModExplicitlyEnabled` 改读 `getUserConfigJson()`,与 `isModEnabled`
+  和写入端同源;
+- `KnownMod` 加 `optIn` 字段一路带到 `ModPluginInfo`,`toDto` 据此对
+  optIn 的读 `=== true`、其余照旧。
+
+> 这一条正是 §4 那句「改之前先确认插件 UI 实际写的是哪个键」的又一个实例:
+> **读写的存储必须先验过往返**。`~/.zai.json` 里 `demo-mod@mods` /
+> `modctl@builtin` 两个真实键就是证据 —— 它们只存在于 user config。
 
 ## 二、事件面
 
@@ -253,16 +291,21 @@ dependency」)、`getPowerShellTool`(lazy + gate)、各 `false ?` 死分支。
 
 ## 六、验证到什么程度
 
-- `pnpm --filter @zn-ai/zn-agent-core test` 全绿(1324 项,含本轮新增的
+- `pnpm --filter @zn-ai/zn-agent-core test` 全绿(1338 项 / 182 文件,含
   mods 端到端接线用例)。
 - `npm run typecheck`(vendor + contract-tests + consumer + server d.ts
   self-contained)四段全绿。
 - `npm run build` 全绿,且 `node -e "import('./dist/opencc-core.mjs')"`
-  实测能加载 —— 新增顶层 import 是本仓库 bundle 循环依赖的已知触发方式,
-  构建绿不等于能加载,必须单独验。
+  实测能加载(225 个导出)—— 新增顶层 import 是本仓库 bundle 循环依赖的
+  已知触发方式,构建绿不等于能加载,必须单独验。
 - `test/unit/mods-eventDispatch.integration.test.ts` 走**真实磁盘加载 →
   真实派发**链路,并做过反向探针:改错载荷断言、把门禁两种方向各改一次、
   让 mod 不订阅 —— 四种改法都会变红。绿灯不是恒真的。
+- **第三批的每一项都单独做过反向探针**(2026-10-13):把 `withEngineInterface`
+  的 arity 判断短路成恒真、`clock.after` 退回返回 void、
+  `isModExplicitlyEnabled` 的默认值退回 `!== false`、`toDto` 退回 `?? true`
+  —— 四处改坏分别让对应测试文件变红(1 / 2 / 2 / 2 项)。绿灯对应着的是真实
+  行为,不是恒真断言。
 - **未做**:真实 Web UI 会话里的 smoke(需要一个能跑 turn 的模型配置)。
   上面那条集成用例覆盖的是「事件真的派发到 mod」,不等于「一整轮对话里
   每个派发点都接对了」。

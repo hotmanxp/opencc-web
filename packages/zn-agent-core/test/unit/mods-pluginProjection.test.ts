@@ -30,6 +30,7 @@ const {
 const {
   getModsAsPlugins,
   isModEnabled,
+  isModExplicitlyEnabled,
   modPluginId,
   modNameForPluginId,
   isModBuiltinId,
@@ -65,6 +66,47 @@ describe('mods → plugin 投影', () => {
       // 永远按「启用」处理刚被关掉的 mod。
       userConfigStore.data = { enabledPlugins: { 'demo@mods': false } }
       expect(isModEnabled('demo', false)).toBe(false)
+    })
+
+    describe('optIn 内置 mod(加载器门禁)', () => {
+      it('从未碰过 → 关闭(与功能型 mod 相反)', () => {
+        // 这是 optIn 的全部意义:诊断类 mod 订阅全部事件,默认加载会让每个
+        // dispatch 点永久走慢路径,所以它出厂即关。
+        expect(isModExplicitlyEnabled('mod-probe', true)).toBe(false)
+      })
+
+      it('显式置 true → 打开', () => {
+        userConfigStore.data = { enabledPlugins: { 'mod-probe@builtin': true } }
+        expect(isModExplicitlyEnabled('mod-probe', true)).toBe(true)
+      })
+
+      it('显式置 false → 关闭', () => {
+        userConfigStore.data = { enabledPlugins: { 'mod-probe@builtin': false } }
+        expect(isModExplicitlyEnabled('mod-probe', true)).toBe(false)
+      })
+
+      it('与 isModEnabled 对同一份数据给出相反答案 —— 这正是要防的形态', () => {
+        // 两个谓词对缺键的默认值相反。对功能型 mod 它们一致,对 optIn 的
+        // 不一致 —— 而插件列表那一行若按 isModEnabled 算,会把一个从没有
+        // 人打开过的 mod 报成「已启用」,连它唯一的开关控件都显示成已开。
+        userConfigStore.data = {}
+        expect(isModEnabled('mod-probe', true)).toBe(true)
+        expect(isModExplicitlyEnabled('mod-probe', true)).toBe(false)
+
+        // 键一旦写下来,两者才收敛。
+        userConfigStore.data = { enabledPlugins: { 'mod-probe@builtin': true } }
+        expect(isModEnabled('mod-probe', true)).toBe(true)
+        expect(isModExplicitlyEnabled('mod-probe', true)).toBe(true)
+      })
+
+      it('与写入端同源:setModEnabled 写的键它读得到', () => {
+        // 回归防线 —— 这两个函数曾经读两个不同的文件(写入 ~/.zai.json 的
+        // user config,读取 settings.json 级联),于是用户在 UI 上打开它,
+        // 加载器永远读到 undefined,mod 从不加载。
+        userConfigStore.data = { enabledPlugins: { 'mod-probe@builtin': true } }
+        expect(isModExplicitlyEnabled('mod-probe', true)).toBe(true)
+        expect(modPluginId('mod-probe', true)).toBe('mod-probe@builtin')
+      })
     })
   })
 

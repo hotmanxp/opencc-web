@@ -106,6 +106,10 @@ export async function loadBuiltinMods(): Promise<{
       description: spec.description,
       version: spec.version,
       root: BUILTIN_ORIGIN,
+      // zai patch (2026-10-13, mods 同步第三批):optIn 得跟着发现记录走。
+      // 插件列表那一行据此改用 `=== true` 判定,否则缺键显示成「已启用」而
+      // 加载器从不加载 —— 而那一行的开关是唯一能把它打开的控件。
+      ...(spec.optIn === true ? { optIn: true } : {}),
     })
     // 门禁在 register() 之前:用户关掉的内置 mod 一次都不该跑 register,
     // 否则它的命令 / handler 会留在运行时里。

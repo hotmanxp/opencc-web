@@ -76,8 +76,78 @@ export type ModStore = {
 export type ModClock = {
   now(): Promise<number>
   sleep(ms: number): Promise<void>
-  after(ms: number, fn: () => void): Promise<void>
-  every(ms: number, fn: () => void): Promise<void>
+  /** Upstream `TimerCall` —— resolves to a handle whose `cancel()` stops it. */
+  after(ms: number, fn: () => void): Promise<Timer>
+  /** Upstream `TimerCall` —— resolves to a handle whose `cancel()` stops it. */
+  every(ms: number, fn: () => void): Promise<Timer>
+}
+
+/**
+ * Upstream `Timer` (2.1.296): "Stops it; a stopped timer never fires again."
+ *
+ * Returning nothing here is not a simplification —— upstream declares both as
+ * `TimerCall = (ms, fn) => Timer`, and a mod that follows the declaration
+ * cancels: `beforeDeadline` does `const timer = clock.after(ms, …);
+ * timer.cancel()` around every call it bounds, so against a void return that
+ * throws a `TypeError` inside the mod and the work it wrapped never runs.
+ */
+export type Timer = { cancel: () => void }
+
+/**
+ * Timers a mod has running, so unload can drop them.
+ *
+ * Keyed by mod name. A finished or cancelled timer is forgotten immediately
+ * rather than at the next unload: a mod that ticks in a loop would otherwise
+ * accumulate one dead entry per tick for the life of the session.
+ */
+const modTimers = new Map<string, Set<ReturnType<typeof setTimeout>>>()
+
+function registerModTimer(
+  modName: string,
+  ms: number,
+  fn: () => void,
+  repeating: boolean,
+): Timer {
+  const set = modTimers.get(modName) ?? new Set<ReturnType<typeof setTimeout>>()
+  modTimers.set(modName, set)
+
+  let stopped = false
+  const forget = () => {
+    if (stopped) return
+    stopped = true
+    set.delete(entry)
+    if (set.size === 0) modTimers.delete(modName)
+  }
+
+  // A one-shot forgets itself when it fires, so a long session that only ever
+  // calls `after` does not grow this set one entry per call.
+  const entry = repeating
+    ? setInterval(fn, ms)
+    : setTimeout(() => {
+        fn()
+        forget()
+      }, ms)
+  set.add(entry)
+
+  return {
+    cancel: () => {
+      if (repeating)
+        clearInterval(entry as unknown as ReturnType<typeof setInterval>)
+      else clearTimeout(entry)
+      forget()
+    },
+  }
+}
+
+/** Drop every timer `modName` still has running. Called on unload. */
+export function clearModTimers(modName: string): void {
+  const set = modTimers.get(modName)
+  if (!set) return
+  for (const entry of set) {
+    clearTimeout(entry)
+    clearInterval(entry as unknown as ReturnType<typeof setInterval>)
+  }
+  modTimers.delete(modName)
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,16 +1090,22 @@ export function buildModNouns(modName: string): ModNouns {
       ),
     // Scheduled work deliberately does not survive unload: a timer a mod
     // left behind would keep dispatching against a registry it no longer
-    // belongs to. The handle is not exposed, matching upstream's `after`/`every`
-    // being fire-and-forget.
+    // belongs to. So each timer is registered per mod and `clearModTimers`
+    // drops them all when it unloads.
+    //
+    // The handle IS returned, though. Upstream declares both as
+    // `TimerCall = (ms, fn) => Timer`, and the doc is explicit —— "cancel()
+    // before then stops it", "until cancel()". A mod that follows that contract
+    // cannot stop a timer it started without it, and one that bounds a call
+    // with it throws on the very first one.
     after: (ms, fn) =>
-      dispatchModOp('clock.after', { ms }, () => {
-        setTimeout(fn, ms)
-      }),
+      dispatchModOp('clock.after', { ms }, () =>
+        registerModTimer(modName, ms, fn, false),
+      ),
     every: (ms, fn) =>
-      dispatchModOp('clock.every', { ms }, () => {
-        setInterval(fn, ms)
-      }),
+      dispatchModOp('clock.every', { ms }, () =>
+        registerModTimer(modName, ms, fn, true),
+      ),
   }
 
   const env: ModEnv = {

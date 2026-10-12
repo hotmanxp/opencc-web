@@ -36,6 +36,7 @@ import {
   clearModStatus,
   emitModsSystemNotice,
 } from './engine.js'
+import { clearModTimers } from './nouns.js'
 import {
   ModValidationError,
   validateEntryPath,
@@ -174,6 +175,7 @@ async function loadSingleMod(root: string): Promise<LoadedMod | null> {
     // mod's UI behind permanently (oc-001). Release what it claimed.
     // zai patch: pane 在本 vendor 已随 TUI 能力面删除,只剩 status。
     clearModStatus(name)
+    clearModTimers(name)
     throw error
   }
   return mod
@@ -318,6 +320,10 @@ function purgeModState(name: string): void {
   // zai patch (2026-10-06): pane 是 TUI render site,已随 Web UI 体系删除,
   // 本 vendor 无 pane 注册表,故只清 status。
   clearModStatus(name)
+  // A timer outliving its mod keeps firing against a registry it no longer
+  // belongs to; `clock.after`/`every` hand back a handle, and this is where
+  // the ones a mod never cancelled get dropped.
+  clearModTimers(name)
   // The render cache and breaker count are keyed by mod registration, so they
   // clear when the mod leaves the registry — see registry.unregisterMod.
   unregisterMod(name)

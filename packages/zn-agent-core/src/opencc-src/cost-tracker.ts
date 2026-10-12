@@ -53,12 +53,10 @@ import {
 import { isFastModeEnabled } from './utils/fastMode.js'
 import { formatDuration, formatNumber } from './utils/format.js'
 import type { FpsMetrics } from './utils/fpsTracker.js'
+import { logForDebugging } from './utils/debug.js'
 import { getCanonicalName } from './utils/model/model.js'
 import { calculateUSDCost } from './utils/modelCost.js'
-import {
-  dispatchModEngineSync,
-  hasModHandlersFor,
-} from './mods/dispatch.js'
+import { dispatchModEngine, hasModHandlersFor } from './mods/dispatch.js'
 import { readSessionUsage } from './mods/sessionUsage.js'
 export {
   getTotalCostUSD as getTotalCost,
@@ -95,6 +93,10 @@ export function resetCostState(): void {
   // otherwise diff as "nothing moved" and raise nothing — the one update the
   // event exists for, lost to a stale comparison.
   lastMeasurement = undefined
+  // A dispatch still queued from the ledger just zeroed would run its handler
+  // against the fresh, empty one — a status line reading `$.session.usage()`
+  // would render the new session's zeros a second late.
+  measureQueue = Promise.resolve()
 }
 
 type StoredCostState = {
@@ -506,19 +508,55 @@ function measureSession(): void {
     rateLimitCount: rateLimits.length,
   }
 
-  dispatchModEngineSync(
-    'session.measure',
-    {
-      context: {
-        ...(context.tokens !== undefined ? { tokens: context.tokens } : {}),
-        window: context.window,
-        ...(context.percent !== undefined ? { percent: context.percent } : {}),
+  // Upstream awaits this: `await Qte().session.measure({…})`. Its result map
+  // carries `"session.measure": void 0` — nothing a handler returns is
+  // load-bearing — so what the await buys is the handler's own completion, not
+  // a result this host reads.
+  //
+  // Dispatching synchronously bought nothing and cost a working mod its
+  // lifetime: `dispatchModEngineSync` cannot await, so the promise a correct
+  // async handler returns is dropped, booked as a failure, and
+  // `addToTotalSessionCost` is called once per response — the breaker
+  // (5 consecutive) unloaded a published status line after three, with the
+  // line itself rendering correctly right up to that point.
+  //
+  // Serialized, as upstream's is: a handler that reads `$.session.usage()` and
+  // writes `ui.status` must not interleave with the next measurement.
+  enqueueMeasure(async () =>
+    dispatchModEngine(
+      'session.measure',
+      {
+        context: {
+          ...(context.tokens !== undefined ? { tokens: context.tokens } : {}),
+          window: context.window,
+          ...(context.percent !== undefined ? { percent: context.percent } : {}),
+        },
+        rateLimits: rateLimits.map(r => ({ ...r })),
+        ...(usd !== undefined ? { cost: { usd } } : {}),
+        changed,
       },
-      rateLimits: rateLimits.map(r => ({ ...r })),
-      ...(usd !== undefined ? { cost: { usd } } : {}),
-      changed,
-    },
+      () => undefined,
+    ),
+  )
+}
+
+/**
+ * One measurement at a time — upstream's `Ce`/`An` pair (bundle @29755444).
+ * The diff above stays synchronous so the `changed` computation cannot race
+ * itself; only the dispatch is queued.
+ */
+let measureQueue: Promise<void> = Promise.resolve()
+
+function enqueueMeasure(run: () => Promise<unknown>): void {
+  measureQueue = measureQueue.then(run).then(
     () => undefined,
+    error => {
+      logForDebugging(
+        `[mods] session.measure dispatch failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    },
   )
 }
 

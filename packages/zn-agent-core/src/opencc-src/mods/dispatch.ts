@@ -167,6 +167,11 @@ async function invokeModHandler(
     return lastNext
   }) as ModNext
   trackingNext.to = (nextE, tier) => next.to(nextE, tier)
+  // The handler receives `trackingNext`, so upstream's `next.event` and
+  // `next.origin` have to be carried onto it or a mod reading them sees
+  // undefined — the same failure the bare `next` had.
+  trackingNext.event = next.event
+  trackingNext.origin = next.origin
   const standIn = (): Record<string, unknown> =>
     nextCalled && lastNext !== undefined ? lastNext : { continue: true }
 
@@ -249,6 +254,15 @@ export async function runModChain(
       branchResults.set(next, branch)
       return branch
     }) as ModNext
+    // Upstream `Next` (d.ts:6543) is not a bare function — it is a callable
+    // carrying `event`, `origin`, `signal`, `budget`, `trace` and `is`. A mod
+    // written against that contract reads `next.event` to route without
+    // knowing which hook it was reached through.
+    //
+    // Additive: a handler that only calls `next(e)` and `next.to(e, tier)` —
+    // which is every handler opencc's own mods have — is unaffected.
+    next.event = entry.event
+    next.origin = { plugin: modName, tier: entry.tier ?? 'builtin' }
     // `next.to(e, tier)` — hand control to a named tier instead of the
     // adjacent one, skipping everything between. Upstream `d.ts:5241`: "prepend
     // may name append, builtin or core, append core; it never skips a tier with
@@ -349,6 +363,12 @@ function withAbort(next: ModNext, signal: AbortSignal): ModNext {
     signal.aborted
       ? Promise.resolve({ continue: true })
       : next.to(e, tier)
+  // Everything else `next` carries has to cross this wrapper too. It did not,
+  // and the omission is invisible until a mod reads `next.event`: this
+  // function is what a handler is actually handed, so anything not copied here
+  // is undefined by the time a hook can see it.
+  wrapped.event = next.event
+  wrapped.origin = next.origin
   return wrapped
 }
 
@@ -626,6 +646,7 @@ export function refreshOpChains(): void {
       const list = chains.get(spec.event) ?? []
       list.push({
         modName: mod.manifest.name,
+        event: spec.event,
         handler: spec.handler,
         tier: spec.tier ?? fallback,
         matcher: spec.matcher,
@@ -777,6 +798,12 @@ export function dispatchModEngineSync<T>(
       if (e !== undefined) current = e as Record<string, unknown>
       return current
     }) as unknown as ModNext
+    // Upstream `Next.event` / `Next.origin` — see the async chain for why.
+    // The synchronous paths build their own `next` inline, so the same two
+    // properties have to be set here or a mod reading them sees undefined on
+    // every event dispatched from a render or a response path.
+    next.event = event
+    next.origin = { plugin: modName, tier: tier ?? 'builtin' }
     // `as ModNext['to']`: the declared type is promise-shaped because it is
     // shared with the async chains; this one answers immediately.
     next.to = ((targetE, targetTier) => {
@@ -963,6 +990,12 @@ export function dispatchModOpSync<T>(
       if (e !== undefined) current = e as Record<string, unknown>
       return current
     }) as unknown as ModNext
+    // Upstream `Next.event` / `Next.origin` — see the async chain for why.
+    // The synchronous paths build their own `next` inline, so the same two
+    // properties have to be set here or a mod reading them sees undefined on
+    // every event dispatched from a render or a response path.
+    next.event = event
+    next.origin = { plugin: modName, tier: tier ?? 'builtin' }
     // `as ModNext['to']`: the declared type is promise-shaped because it is
     // shared with the async chains; this one answers immediately.
     next.to = ((targetE, targetTier) => {
@@ -1172,6 +1205,7 @@ export function buildModHookMatchers(mods: readonly LoadedMod[]): {
       const group = groups.get(key) ?? []
       group.push({
         modName: mod.manifest.name,
+        event: spec.event,
         handler: spec.handler,
         tier: spec.tier ?? defaultTierFor(mod),
         matcher: spec.matcher,

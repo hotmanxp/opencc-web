@@ -25,11 +25,33 @@ import type {
  * promise because that is what the one-shot paths hand it; on the streaming
  * paths it returns the stream beneath instead, and `runModStreamChain` is
  * what actually drives it.
+ *
+ * Always the TWO-parameter shape, because that is what the dispatch layer
+ * invokes. A handler written upstream's way — `($: EngineInterface, e, next)`,
+ * `MatchedHook` at d.ts:5758 — is accepted at registration and normalized to
+ * this shape by `withEngineInterface`; see `ModHandlerInput`.
  */
 export type ModHandler = (
   e: Record<string, unknown>,
   next: ModNext,
 ) => unknown | Promise<unknown>
+
+/**
+ * What `ctx.on()` accepts: opencc's own `(e, next)`, or upstream's
+ * `($: EngineInterface, e, next)` with the engine first.
+ *
+ * Two types rather than one union because the dispatch layer INVOKES a
+ * `ModHandler`, and a union that includes the three-parameter form is not
+ * callable with two arguments. Keeping the union at the registration boundary
+ * lets both be written while everything downstream stays one shape.
+ */
+export type ModHandlerInput =
+  | ModHandler
+  | ((
+      $: unknown,
+      e: Record<string, unknown>,
+      next: ModNext,
+    ) => unknown | Promise<unknown>)
 
 /**
  * `next` — run the layers beneath — with `next.to` to hand control to a named
@@ -175,6 +197,17 @@ export type KnownMod = {
    * 一个 mod,得先找得到它。内置 mod 存 `BUILTIN_ORIGIN` 哨兵(没有真实路径)。
    */
   root?: string | undefined
+  /**
+   * zai patch (2026-10-13, mods 同步第三批):随 bundle 发行但默认关着的
+   * 内置 mod。
+   *
+   * 必须存下来是因为**两个启用态谓词对缺键的默认值相反**:加载器读
+   * `=== true`(未打开即关闭),插件列表那一行读 `!== false`(未碰过即启用)。
+   * 对功能型 mod 两者一致,对 `optIn` 的不是 —— 而这一行恰恰是唯一能把
+   * 它打开的控件,显示成「已启用」就等于把唯一的修复入口标成已修好。
+   * 磁盘 mod 恒为 false,只有内置声明能置 true。
+   */
+  optIn?: boolean | undefined
 }
 
 let knownMods = new Map<string, KnownMod>()
@@ -183,7 +216,12 @@ export function noteDiscoveredMod(
   name: string,
   builtin: boolean,
   userConfig?: Record<string, unknown>,
-  meta?: { description?: string; version?: string; root?: string },
+  meta?: {
+    description?: string
+    version?: string
+    root?: string
+    optIn?: boolean
+  },
 ): void {
   if (knownMods.has(name)) return
   knownMods.set(name, { builtin, userConfig, ...meta })

@@ -253,4 +253,56 @@ describe('assemblePluginList — mod 投影', () => {
     expect(r.plugins).toHaveLength(1)
     expect(r.plugins[0].mod).toBeUndefined()
   })
+
+  // zai patch (2026-10-13, mods 同步第三批):optIn 内置 mod 的启用态判定。
+  describe('optIn 内置 mod', () => {
+    function makeOptInMod(): LoadedPlugin {
+      // repository 决定 DTO 的 id(`toDto` 对 isBuiltin 直接取 repository),
+      // 内置 mod 的投影给的是 `<name>@builtin` 而不是 `@mods`。
+      return makePlugin({
+        name: 'demo',
+        isBuiltin: true,
+        source: 'demo@builtin',
+        repository: 'demo@builtin',
+        mod: {
+          modName: 'demo',
+          root: '(builtin)',
+          builtin: true,
+          handlerEvents: [],
+          toolNames: [],
+          commandNames: [],
+          optIn: true,
+        },
+      })
+    }
+
+    it('键不存在 → 显示关闭,而加载器也判定它没开', () => {
+      // 这一行原本按 `?? true` 算,报「已启用」;加载器读 `=== true`,从不
+      // 加载。两边对同一个事实给出相反答案,而这一行的开关是唯一能打开
+      // 它的控件 —— 显示成已开,那个控件就再也点不动了。
+      const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, undefined, new Map(), undefined, [makeOptInMod()])
+      expect(r.plugins[0].enabled).toBe(false)
+    })
+
+    it('显式 false → 关闭', () => {
+      const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, { 'demo@builtin': false }, new Map(), undefined, [makeOptInMod()])
+      expect(r.plugins[0].enabled).toBe(false)
+    })
+
+    it('显式 true → 开启', () => {
+      const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, { 'demo@builtin': true }, new Map(), undefined, [makeOptInMod()])
+      expect(r.plugins[0].enabled).toBe(true)
+    })
+
+    it('同一份数据下,功能型 mod 与 optIn mod 读出相反的默认值', () => {
+      // optIn 只对内置 mod 有意义;磁盘 mod 恒走 `?? true`。若把 optIn 的
+      // 谓词错施到磁盘 mod 上,用户新装的 mod 会显示成关闭。
+      const both = assemblePluginList(
+        EMPTY_LOAD, EMPTY_V2, {}, new Map(), undefined,
+        [makeDiskMod(), makeOptInMod()],
+      )
+      expect(both.plugins.find(p => p.name === 'demo' && p.mod?.builtin === false)?.enabled).toBe(true)
+      expect(both.plugins.find(p => p.mod?.builtin === true)?.enabled).toBe(false)
+    })
+  })
 })

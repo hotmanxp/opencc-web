@@ -280,6 +280,8 @@ export type HookCallback = {
  */
 export type ModChainEntry = {
   modName: string
+  /** The event this entry was registered against — upstream `Next.event`. */
+  event: string
   handler: (e: Record<string, unknown>, next: ModNext) => unknown
   /** Upstream tier this handler sits at; defaults to `builtin`. */
   tier?: ModTier

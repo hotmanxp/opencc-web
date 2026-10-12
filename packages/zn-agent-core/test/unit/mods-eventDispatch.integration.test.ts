@@ -66,6 +66,24 @@ export function register(ctx) {
   ctx.on('turn.complete', (e, next) => { note('turn.complete'); return next(e) })
   ctx.on('session.end', (e, next) => { note('session.end'); return next(e) })
 
+  // 上游契约形态:handler 是 (\$: EngineInterface, e, next),三个参数,\$ 在
+  // 最前(MatchedHook d.ts:5758)。按 opencc 自己的 (e, next) 形态调用它,
+  // \$ 就是那个事件,下面读 \$.plugin 会拿到 undefined —— handler 抛错、
+  // 派发层归因后继续走,mod 看上去「装了但什么都没做」。
+  ctx.on('prompt.section', (\$, e, next) => {
+    note('engine.\$.plugin', \$.plugin?.name ?? '(undefined)')
+    return next(e)
+  })
+
+  // next 带 event / origin(Next d.ts:6543):一个 handler 挂了多个事件时靠它
+  // 路由,不必知道自己是被哪条链唤起的。
+  ctx.on('session.end', (e, next) => {
+    note('next.event', String(next.event ?? '(undefined)'))
+    note('next.origin.plugin', String(next.origin?.plugin ?? '(undefined)'))
+    note('next.origin.tier', String(next.origin?.tier ?? '(undefined)'))
+    return next(e)
+  })
+
   ctx.registerTool({
     name: 'echo',
     description: 'echo back',
@@ -76,6 +94,12 @@ export function register(ctx) {
       await ctx.store.set('last', String(input.v ?? ''))
       const read = await ctx.store.get('last')
       ctx.clock.now()
+      // 上游 \`TimerCall = (ms, fn) => Timer\`,句柄的 cancel() 能停掉定时器。
+      // 返回 void 时一个按契约写 \`t = clock.after(ms, …); t.cancel()\` 的
+      // mod 会在这里 TypeError,它包的那段工作从此不再执行。
+      const t = await ctx.clock.after(5, () => note('timer.fired'))
+      note('timer.handle', typeof t?.cancel)
+      t.cancel()
       return { echoed: read }
     },
   })
@@ -166,6 +190,51 @@ describe('mods 事件接线 — 端到端', () => {
     expect(JSON.stringify(out)).toContain('hi')
   })
 
+  it('上游契约:三参数 handler 拿到的第一个参数是 engine 而不是事件', async () => {
+    // 反向探针:这条断言在派发层按 (e, next) 调 handler 时会读到
+    // '(undefined)' —— 事件没有 plugin 字段。arity 决定形态,不是标志位。
+    const { loadMods } = await import('../../src/opencc-src/mods/hooks.js')
+    const { dispatchModOp } = await import('../../src/opencc-src/mods/dispatch.js')
+
+    await loadMods()
+    const hits = () => (globalThis as Record<string, Record<string, unknown>>)[HITS]
+
+    await dispatchModOp('prompt.section', { name: 'claudeMd' }, e => e)
+    // 模版里的 `\$` 转义成字面 `$`,所以 mod 记下的键是 `engine.$.plugin`
+    expect(hits()['engine.$.plugin:last']).toBe('smoke')
+  })
+
+  it('上游契约:next 带 event 与 origin', async () => {
+    const { loadMods } = await import('../../src/opencc-src/mods/hooks.js')
+    const { dispatchModOp } = await import('../../src/opencc-src/mods/dispatch.js')
+
+    await loadMods()
+    const hits = () => (globalThis as Record<string, Record<string, unknown>>)[HITS]
+
+    await dispatchModOp('session.end', { reason: 'clear' }, e => e)
+    expect(hits()['next.event:last']).toBe('session.end')
+    expect(hits()['next.origin.plugin:last']).toBe('smoke')
+    expect(hits()['next.origin.tier:last']).toBe('user')
+  })
+
+  it('上游契约:clock.after 交回可取消的句柄', async () => {
+    // 反向探针:句柄不存在时下面 typeof t?.cancel 记下的是 'undefined',
+    // 而一个按契约写 t.cancel() 的 mod 会在那里 TypeError。
+    const { loadMods } = await import('../../src/opencc-src/mods/hooks.js')
+    const { getModTools } = await import('../../src/opencc-src/mods/engine.js')
+
+    await loadMods()
+    const hits = () => (globalThis as Record<string, Record<string, unknown>>)[HITS]
+
+    const tool = getModTools().find(t => t.name === 'mods_smoke_echo')!
+    await tool.call({ v: 'hi' }, {} as never)
+
+    expect(hits()['timer.handle:last']).toBe('function')
+    // cancel() 真的停掉了它 —— 否则这里会记到一次 timer.fired
+    await new Promise(r => setTimeout(r, 30))
+    expect(hits()['timer.fired']).toBeUndefined()
+  })
+
   it('session gate:不可见的 mod 的 handler 被跳过,可见的照常执行', async () => {
     const { loadMods } = await import('../../src/opencc-src/mods/hooks.js')
     const { getLoadedMods, setSessionModGate, clearSessionModGate } = await import(
@@ -179,7 +248,15 @@ describe('mods 事件接线 — 端到端', () => {
 
     // `runModChain` 吃的是 `ModChainEntry`(refreshOpChains 建的那种),
     // 不是裸的 `ModHandlerSpec` —— 后者没有 modName,门禁会恒假。
-    const entry = { modName: mod.manifest.name, handler: spec.handler, tier: 'user' } as never
+    //
+    // `event` 也要带上:它是 `next.event` 的来源,少了它一个按上游契约写的
+    // handler 读到的就是 undefined(见下面 nextContract 那条用例)。
+    const entry = {
+      modName: mod.manifest.name,
+      event: spec.event,
+      handler: spec.handler,
+      tier: 'user',
+    }
     const hits = () => (globalThis as Record<string, Record<string, unknown>>)[HITS]
 
     // 没设门禁 = 全部可见(与上游一致)

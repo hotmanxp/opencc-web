@@ -1,7 +1,6 @@
 import { BUILTIN_MARKETPLACE_NAME, MODS_MARKETPLACE_NAME } from '../plugins/builtinPlugins.js'
 import type { LoadedPlugin } from '../types/plugin.js'
 import { getUserConfigJson } from '../utils/userConfigJson.js'
-import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
 import { BUILTIN_ORIGIN, getKnownMods, getLoadedMods } from './registry.js'
 
 /**
@@ -54,6 +53,13 @@ export type ModPluginInfo = {
   toolNames: string[]
   /** 注册的命令名(`register` 里声明时的裸名字)。 */
   commandNames: string[]
+  /**
+   * zai patch (2026-10-13, mods 同步第三批):随 bundle 发行但默认关着。
+   *
+   * UI 侧的启用态判定要靠它选谓词 —— 对它读「缺键即启用」,对普通 mod 读
+   * 「缺键即关闭」,见 `KnownMod['optIn']`。
+   */
+  optIn?: boolean
 }
 
 /** mod 的启用态键。id 改名了它也保持稳定。 */
@@ -105,10 +111,18 @@ export function isModEnabled(modName: string, builtin: boolean): boolean {
  * wrong for an `optIn` one, where absent has to mean off. Without this an
  * opt-in mod ships dormant and can never be started, because writing `true` is
  * the only state that differs from the default.
+ *
+ * zai patch (2026-10-13, mods 同步第三批):读 `getUserConfigJson()`,与
+ * `isModEnabled` 和 `setModEnabled` 的写入端同一处。此前这里读的是上游的
+ * `getSettings_DEPRECATED()`(settings.json 级联)—— 那是**另一个文件**:
+ * `setModEnabled` 写进 `~/.zai.json`,开关又往回读 settings.json,于是
+ * `optIn` 内置 mod 的门禁永远读到 undefined,用户在 UI 上打开它也加载不了。
+ * 症状与上游 e47bd606 同类但更硬:上游是两个谓词读同一处、只是默认值相反,
+ * zai 这边是读写根本不在一个存储。
  */
 export function isModExplicitlyEnabled(modName: string, builtin: boolean): boolean {
   const id = modPluginId(modName, builtin)
-  return getSettings_DEPRECATED()?.enabledPlugins?.[id] === true
+  return getUserConfigJson().enabledPlugins?.[id] === true
 }
 
 /**
@@ -163,6 +177,10 @@ export function getModsAsPlugins(): LoadedPlugin[] {
         handlerEvents: mod?.handlers.map(h => h.event) ?? [],
         toolNames: mod?.tools.map(t => t.name) ?? [],
         commandNames: mod?.commands.map(c => c.name) ?? [],
+        // zai patch (2026-10-13, mods 同步第三批):取发现层那份,与
+        // description / version 同理 —— 被禁用 / 未开启的 optIn mod 没有
+        // 已加载对象可问,而它恰恰是最需要标对状态的那一类。
+        ...(meta.optIn === true ? { optIn: true } : {}),
       },
     })
   }

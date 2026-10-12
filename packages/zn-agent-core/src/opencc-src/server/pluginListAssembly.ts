@@ -111,9 +111,14 @@ function toDto(
       ? 'builtin'
       : deriveScope(plugin.name, installedV2)
   // enabled: built-in always reads enabledPlugins; otherwise read from settings.
-  const enabled = isBuiltin
-    ? (enabledSettings?.[id] ?? true)
-    : (enabledSettings?.[id] ?? plugin.enabled === true)
+  // zai patch (2026-10-13, mods 同步第三批):`optIn` 的内置 mod 走另一个谓词。
+  // 加载器对它是 `=== true`(缺键 = 关),这里若按 `?? true` 算,那一行会显示
+  // 「已启用」而加载器从不加载它 —— 而这一行的开关就是唯一能打开它的控件。
+  const enabled = plugin.mod?.optIn === true
+    ? enabledSettings?.[id] === true
+    : isBuiltin
+      ? (enabledSettings?.[id] ?? true)
+      : (enabledSettings?.[id] ?? plugin.enabled === true)
   return {
     id,
     name: plugin.name,
