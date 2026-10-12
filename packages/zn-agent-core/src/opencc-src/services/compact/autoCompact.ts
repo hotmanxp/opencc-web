@@ -24,6 +24,7 @@ import {
   type RecompactionInfo,
 } from './compact.js'
 import { runPostCompactCleanup } from './postCompactCleanup.js'
+import { gateSessionCompact } from '../../mods/sessionCompact.js'
 import { trySessionMemoryCompaction } from './sessionMemoryCompact.js'
 import {
   AUTOCOMPACT_BUFFER_TOKENS,
@@ -472,54 +473,50 @@ export async function autoCompactIfNeeded(
     querySource,
   }
 
-  // EXPERIMENT: Try session memory compaction first
-  const sessionMemoryResult = await trySessionMemoryCompaction(
-    messages,
-    toolUseContext.agentId,
-    recompactionInfo.autoCompactThreshold,
-  )
-  if (sessionMemoryResult) {
-    // Reset lastSummarizedMessageId since session memory compaction prunes messages
-    // and the old message UUID will no longer exist after the REPL replaces messages
-    setLastSummarizedMessageId(undefined)
-    runPostCompactCleanup(querySource)
-    // Reset cache read baseline so the post-compact drop isn't flagged as a
-    // break. compactConversation does this internally; SM-compact doesn't.
-    // BQ 2026-03-01: missing this made 20% of tengu_prompt_cache_break events
-    // false positives (systemPromptChanged=true, timeSinceLastAssistantMsg=-1).
-    if (true) {
-      notifyCompaction(querySource ?? 'compact', toolUseContext.agentId)
-    }
-    markPostCompaction()
-    return {
-      wasCompacted: true,
-      compactionResult: sessionMemoryResult,
-      consecutiveFailures: 0,
-    }
-  }
-
+  // Upstream `session.compact` with `trigger: 'auto'`. The gate wraps both
+  // compaction paths — session memory and the summariser — because a veto that
+  // only guarded one would let the other compact anyway, and upstream documents
+  // the event as "when the conversation is ABOUT TO be compacted".
+  //
+  // Inside the try, because both paths can fail and the catch is where the
+  // circuit breaker's failure accounting lives. A gate outside it would let a
+  // `compactConversation` throw escape uncounted, and autocompact would retry
+  // the failing compaction forever with its failure counter still at zero.
+  let gated: Awaited<
+    ReturnType<
+      typeof gateSessionCompact<
+        { sessionMemory: CompactionResult } | { summarised: CompactionResult }
+      >
+    >
+  >
   try {
-    const compactionResult = await compactConversation(
+    gated = await gateSessionCompact({
+      trigger: 'auto',
       messages,
-      toolUseContext,
-      cacheSafeParams,
-      true, // Suppress user questions for autocompact
-      undefined, // No custom instructions for autocompact
-      true, // isAutoCompact
-      recompactionInfo,
-    )
-
-    // Reset lastSummarizedMessageId since legacy compaction replaces all messages
-    // and the old message UUID will no longer exist in the new messages array
-    setLastSummarizedMessageId(undefined)
-    runPostCompactCleanup(querySource)
-
-    return {
-      wasCompacted: true,
-      compactionResult,
-      // Reset failure count on success
-      consecutiveFailures: 0,
-    }
+      ...(toolUseContext.agentId !== undefined
+        ? { agentId: toolUseContext.agentId }
+        : {}),
+      run: async ({ messages: chosen }) => {
+        // EXPERIMENT: Try session memory compaction first
+        const sessionMemory = await trySessionMemoryCompaction(
+          chosen,
+          toolUseContext.agentId,
+          recompactionInfo.autoCompactThreshold,
+        )
+        if (sessionMemory) return { sessionMemory }
+        return {
+          summarised: await compactConversation(
+            chosen,
+            toolUseContext,
+            cacheSafeParams,
+            true, // Suppress user questions for autocompact
+            undefined, // No custom instructions for autocompact
+            true, // isAutoCompact
+            recompactionInfo,
+          ),
+        }
+      },
+    })
   } catch (error) {
     const wasUserAbort = hasExactErrorMessage(error, ERROR_MESSAGE_USER_ABORT)
     if (wasUserAbort) {
@@ -562,5 +559,45 @@ export async function autoCompactIfNeeded(
       circuitBreakerActive: circuitBreakerTripped,
       circuitBreakerTripped,
     }
+  }
+
+  if (gated.type === 'skipped') {
+    // The conversation stays as it is, so the model keeps working against a
+    // window it is about to overflow. That is the mod's call to make, and
+    // upstream's veto says the same thing. Reported as a plain non-compaction
+    // rather than a failure: nothing failed, a hook answered.
+    return { wasCompacted: false }
+  }
+
+  if ('sessionMemory' in gated.result) {
+    // Reset lastSummarizedMessageId since session memory compaction prunes messages
+    // and the old message UUID will no longer exist after the REPL replaces messages
+    setLastSummarizedMessageId(undefined)
+    runPostCompactCleanup(querySource)
+    // Reset cache read baseline so the post-compact drop isn't flagged as a
+    // break. compactConversation does this internally; SM-compact doesn't.
+    // BQ 2026-03-01: missing this made 20% of tengu_prompt_cache_break events
+    // false positives (systemPromptChanged=true, timeSinceLastAssistantMsg=-1).
+    if (true) {
+      notifyCompaction(querySource ?? 'compact', toolUseContext.agentId)
+    }
+    markPostCompaction()
+    return {
+      wasCompacted: true,
+      compactionResult: gated.result.sessionMemory,
+      consecutiveFailures: 0,
+    }
+  }
+
+  // Reset lastSummarizedMessageId since legacy compaction replaces all messages
+  // and the old message UUID will no longer exist in the new messages array
+  setLastSummarizedMessageId(undefined)
+  runPostCompactCleanup(querySource)
+
+  return {
+    wasCompacted: true,
+    compactionResult: gated.result.summarised,
+    // Reset failure count on success
+    consecutiveFailures: 0,
   }
 }

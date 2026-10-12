@@ -356,7 +356,10 @@ export const AgentTool = buildTool({
     cwd
   }: AgentToolInput, toolUseContext, canUseTool, assistantMessage, onProgress?) {
     const startTime = Date.now();
-    const model = isCoordinatorMode() ? undefined : modelParam;
+    // zai patch (2026-10-12, mods 同步):`const` → `let`。`agent.spawn` 的
+    // 派发结果会改写 `model`(上游就是为此把它从 const 放开的),而那个 hunk
+    // 不含 mods 关键字,按「只搬 mods 相关 hunk」的口径没被带过来。
+    let model = isCoordinatorMode() ? undefined : modelParam;
 
     // Get app state for permission mode and agent filtering
     const appState = toolUseContext.getAppState();
@@ -474,6 +477,120 @@ export const AgentTool = buildTool({
       } as unknown as {
         data: Output;
       };
+    }
+
+    // Upstream `agent.offer` at dispatch — "whether the model is offered the
+    // agent type, in its listing AND at dispatch". The listing half is
+    // `filterOfferedAgents`, applied where the description and the
+    // `agent_listing_delta` attachment are built; this is the other half.
+    //
+    // It has to exist separately because the listing is a cache. The gate that
+    // carries the list is off by default and the attachment path re-announces
+    // from the transcript, so a model can name a `subagent_type` it was never
+    // shown — and one a mod withheld — with no handler left to stop it.
+    //
+    // Only asked when the call named a type. A fork (no `subagent_type`) is
+    // the current thread, not an agent type being offered, and asking about
+    // `undefined` would hand every `agent.offer` hook a match it cannot use.
+    if (subagent_type !== undefined) {
+      const offeredDef = toolUseContext.options.agentDefinitions.activeAgents.find(
+        a => a.agentType === subagent_type,
+      )
+      if (offeredDef !== undefined) {
+        const stillOffered = await dispatchModEngine<{ isOffered: boolean }>(
+          'agent.offer',
+          {
+            agent: offeredDef.agentType,
+            description: offeredDef.whenToUse,
+            source: offeredDef.source,
+            provider:
+              offeredDef.source === 'plugin'
+                ? { plugin: offeredDef.plugin, tier: 'user' }
+                : offeredDef.source === 'built-in'
+                  ? { plugin: 'engine', tier: 'core' }
+                  : { plugin: 'engine', tier: 'user' },
+            tool_use_id: assistantMessage?.message?.id ?? '',
+          },
+          e => ({ isOffered: e.isOffered !== false }),
+        )
+        if (!stillOffered.isOffered) {
+          // Surfaced as the tool's error so the model reads WHY no subagent
+          // started, the same way `agent.spawn`'s own `deny` is — the model is
+          // the one that asked, and it has to learn the answer changed.
+          throw new Error(
+            `Agent type '${subagent_type}' is not available.`,
+          )
+        }
+      }
+    }
+
+    // Upstream `agent.spawn` — "what the Agent tool decided about the
+    // subagent it is about to start, before its model is resolved". It sits
+    // here for exactly that reason: below this point `subagent_type` has been
+    // resolved into a definition and `model` into a concrete id, and a hook
+    // that rewrote either would be writing to a value nothing reads again.
+    //
+    // The teammate branch above is a different call and returns on its own,
+    // so it never reaches here — which matches upstream, where `agent.spawn`
+    // is the Agent tool's spawn and not a teammate's.
+    if (hasModHandlersFor('agent.spawn')) {
+      const decided = await dispatchModEngine<{
+        deny?: string
+        prompt: string
+        description: string
+        subagentType?: string
+        model?: string
+        name?: string
+        cwd?: string
+        background: boolean
+      }>(
+        'agent.spawn',
+        {
+          tool_use_id: assistantMessage?.message?.id ?? '',
+          prompt,
+          description: description ?? '',
+          // The type as the call asked for it, not a resolved one: that is
+          // the only value a rewrite can still mean anything about.
+          subagentType: subagent_type,
+          model,
+          name,
+          cwd,
+          background: run_in_background === true,
+          fork: isForkSubagentEnabled() && subagent_type === undefined,
+          parentModel: toolUseContext.options.mainLoopModel,
+          parentAgentId: toolUseContext.agentId,
+          permissionMode: appState.toolPermissionContext.mode,
+        },
+        e => ({
+          // Carried explicitly: a core that rebuilt the result from the
+          // rewritable fields alone would drop the refusal on the floor and
+          // spawn anyway.
+          deny: typeof e.deny === 'string' ? e.deny : undefined,
+          prompt: typeof e.prompt === 'string' ? e.prompt : prompt,
+          description:
+            typeof e.description === 'string' ? e.description : (description ?? ''),
+          subagentType:
+            typeof e.subagentType === 'string'
+              ? e.subagentType
+              : subagent_type,
+          model: typeof e.model === 'string' ? e.model : model,
+          name: typeof e.name === 'string' ? e.name : name,
+          cwd: typeof e.cwd === 'string' ? e.cwd : cwd,
+          background: e.background === true,
+        }),
+      )
+      if (decided.deny !== undefined) {
+        // Upstream surfaces the reason as the tool's error, so the model
+        // reads why no subagent started rather than seeing an empty result.
+        throw new Error(decided.deny)
+      }
+      prompt = decided.prompt
+      description = decided.description
+      subagent_type = decided.subagentType
+      model = decided.model
+      name = decided.name
+      cwd = decided.cwd
+      run_in_background = decided.background
     }
 
     // Fork subagent experiment routing:

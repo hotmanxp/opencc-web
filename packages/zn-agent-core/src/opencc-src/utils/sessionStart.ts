@@ -1,4 +1,5 @@
 import { getMainThreadAgentType } from '../bootstrap/state.js'
+import { setSessionFacts } from '../mods/nouns.js'
 import type { HookResultMessage } from '../types/message.js'
 import { createAttachmentMessage } from './attachments.js'
 import { logForDebugging } from './debug.js'

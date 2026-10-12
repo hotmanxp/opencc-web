@@ -10,6 +10,11 @@ import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
 import { AGENT_TOOL_NAME } from './constants.js'
 import { isForkSubagentEnabled } from './forkSubagent.js'
+import {
+  dispatchModEngineSync,
+  hasModHandlersFor,
+} from '../../mods/dispatch.js'
+import { logForDebugging } from '../../utils/debug.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
 function getToolsDescription(agent: AgentDefinition): string {
@@ -46,6 +51,60 @@ export function formatAgentLine(agent: AgentDefinition): string {
 }
 
 /**
+ * Upstream `agent.offer` — "whether the model is offered the agent type, in
+ * its listing and at dispatch". A hook answering `{isOffered: false}` drops
+ * it from both.
+ *
+ * One filter, two call sites: the inline description in `getPrompt` and the
+ * `agent_listing_delta` attachment that replaced it. Both draw the same pool,
+ * so a mod that vetoes an agent and gets it listed anyway — because the gate
+ * that now carries the listing was never taught the veto — is the failure
+ * this single chokepoint exists to make impossible.
+ *
+ * Synchronous because both callers are. `getAgentListingDeltaAttachment` is
+ * called in a `for…of` from compact.ts with no place to await, and a hook
+ * that answers with a promise is counted as the failure it is rather than
+ * silently passing the agent through.
+ *
+ * `provider` is the providing plugin and its tier, and upstream pins it — a
+ * hook cannot rewrite it. opencc has no tier for an agent that came from a
+ * settings file rather than a plugin, so those report `{plugin: 'engine',
+ * tier: 'user'}`: not the engine's own, and not a mod's either.
+ */
+export function filterOfferedAgents(
+  agents: readonly AgentDefinition[],
+): AgentDefinition[] {
+  if (!hasModHandlersFor('agent.offer')) return [...agents]
+  const kept: AgentDefinition[] = []
+  for (const agent of agents) {
+    const provider =
+      agent.source === 'plugin'
+        ? { plugin: agent.plugin, tier: 'user' }
+        : agent.source === 'built-in'
+          ? { plugin: 'engine', tier: 'core' }
+          : { plugin: 'engine', tier: 'user' }
+    const offered = dispatchModEngineSync<boolean>(
+      'agent.offer',
+      {
+        agent: agent.agentType,
+        description: agent.whenToUse,
+        source: agent.source,
+        provider,
+      },
+      e => e.isOffered !== false,
+    )
+    if (offered === false) {
+      logForDebugging(
+        `[mods] agent.offer: "${agent.agentType}" is withheld from the model's listing by a mod`,
+      )
+      continue
+    }
+    kept.push(agent)
+  }
+  return kept
+}
+
+/**
  * Whether the agent list should be injected as an attachment message instead
  * of embedded in the tool description. When true, getPrompt() returns a static
  * description and attachments.ts emits an agent_listing_delta attachment.
@@ -68,10 +127,13 @@ export async function getPrompt(
   isCoordinator?: boolean,
   allowedAgentTypes?: string[],
 ): Promise<string> {
-  // Filter agents by allowed types when Agent(x,y) restricts which agents can be spawned
-  const effectiveAgents = allowedAgentTypes
-    ? agentDefinitions.filter(a => allowedAgentTypes.includes(a.agentType))
-    : agentDefinitions
+  // Filter agents by allowed types when Agent(x,y) restricts which agents can be spawned,
+  // then by whatever `agent.offer` hooks still put on the table.
+  const effectiveAgents = filterOfferedAgents(
+    allowedAgentTypes
+      ? agentDefinitions.filter(a => allowedAgentTypes.includes(a.agentType))
+      : agentDefinitions,
+  )
 
   // Fork subagent feature: when enabled, insert the "When to fork" section
   // (fork semantics, directive-style prompts) and swap in fork-aware examples.

@@ -708,8 +708,20 @@ Before running a command that changes system state (such as restarts, deletes, o
     // the cache.
   ]
 
-  const resolvedDynamicSections =
+  // zai patch (2026-10-12, mods 同步):`resolveSystemPromptSections` 上游改成了
+  // 返回 `{name, text}[]`(为了 `prompt.compose` 能按 section 名定位),这里取回
+  // `.text`,保持本函数 `string[]` 的返回类型与既有行为不变。
+  //
+  // **`prompt.compose` 在 zai 侧尚未接线**,已进 `UNAVAILABLE_EVENTS` —— 按协议
+  // 自己定的规矩,不接就拒,不留「注册成功但永不触发」那第三种状态。
+  //
+  // 要接的话是上游那 134 行:把 static/dynamic 两组 section 都建成
+  // `{id, text, scope}`,再交给 `composePromptSections` + `placeComposeBoundary`。
+  // 注意它会动 `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` 的位置,也就是动 prompt cache
+  // 边界 —— 那不是一个能顺手带过来的改动,单开一次做。
+  const resolvedDynamicSections = (
     await resolveSystemPromptSections(dynamicSections)
+  ).map(s => s.text)
 
   // Upstream 2.1.280 `KE()`: when the model resolves to a lean prompt, the six
   // static sections collapse into the single `# Harness` section. Dynamic

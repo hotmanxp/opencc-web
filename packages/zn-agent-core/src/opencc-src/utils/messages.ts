@@ -1,5 +1,6 @@
 // @ts-nocheck — pre-existing typecheck debt, see docs/feature-gating.md
 import { getAPIProvider } from './model/providers.js'
+import { dispatchModEngineSync, hasModHandlersFor } from '../mods/dispatch.js'
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type {
   ContentBlock,
@@ -2344,7 +2345,63 @@ export {
   wrapMessagesInSystemReminder,
 } from "./messages/planMode.js"
 
+/**
+ * Upstream `prompt.attachment` (d.ts:6552) — the text the model reads for an
+ * attachment, with the `<system-reminder>` framing around whatever the chain
+ * answers rather than inside it.
+ *
+ * The caller wraps with `ensureSystemReminderWrap` AFTER this returns, which is
+ * what puts the framing outside the hook's answer by construction rather than by
+ * care.
+ *
+ * SYNC, like `prompt.edit`: `normalizeMessagesForAPI` is a sync pass over the
+ * whole transcript on the request path, and making it async would ripple into
+ * every caller for a rewrite that is pure text. A hook can rewrite the text; it
+ * cannot await.
+ */
 export function normalizeAttachmentForAPI(
+  attachment: Attachment,
+): UserMessage[] {
+  const rendered = normalizeAttachmentForAPIInner(attachment)
+  // Upstream gates on the attachment kind: `Jl("prompt.attachment",
+  // {type: r.attachment.type})`. A mod that only rewrites `file` attachments
+  // should not make every other kind pay to render its text first.
+  if (!hasModHandlersFor('prompt.attachment', { type: attachment.type })) {
+    return rendered
+  }
+
+  const text = rendered
+    .map(m => (typeof m.message.content === 'string' ? m.message.content : ''))
+    .filter(Boolean)
+    .join('\n')
+  if (text === '') return rendered
+
+  const decided = dispatchModEngineSync<{ text: string | null }>(
+    'prompt.attachment',
+    {
+      type: attachment.type,
+      text,
+      // opencc has no settings-hook or plugin-context attachment origins: every
+      // attachment it builds is its own prose. Upstream pins this, so no hook
+      // can re-attribute one.
+      origin: { kind: 'engine' },
+    },
+    // `PromptAttachmentResult` (d.ts:6629) is `{text: string | null}` and null
+    // "leaves the attachment out of the request" — so the core answers null for
+    // anything that is not a string. Coercing a null back to the original text
+    // is what made `{text: null}` a silent no-op: the hook ran, answered, and
+    // the attachment went out anyway.
+    e => ({ text: typeof e.text === 'string' ? e.text : null }),
+  )
+  if (decided.text === null) return []
+  if (decided.text === text) return rendered
+
+  // Rebuilt as one message: a hook that joins or splits has already had its
+  // chance to shape the text, and the caller's wrapper adds the framing.
+  return [createUserMessage({ content: decided.text, isMeta: true })]
+}
+
+function normalizeAttachmentForAPIInner(
   attachment: Attachment,
 ): UserMessage[] {
   if (isAgentSwarmsEnabled()) {

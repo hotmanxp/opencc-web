@@ -18,8 +18,9 @@ import { microcompactMessages } from '../../services/compact/microCompact.js'
 import { runPostCompactCleanup } from '../../services/compact/postCompactCleanup.js'
 import { trySessionMemoryCompaction } from '../../services/compact/sessionMemoryCompact.js'
 import { setLastSummarizedMessageId } from '../../services/SessionMemory/sessionMemoryUtils.js'
+import { gateSessionCompact } from '../../mods/sessionCompact.js'
 import type { ToolUseContext } from '../../Tool.js'
-import type { LocalCommandCall } from '../../types/command.js'
+import type { LocalCommandCall, LocalCommandResult } from '../../types/command.js'
 import type { Message } from '../../types/message.js'
 import { hasExactErrorMessage } from '../../utils/errors.js'
 import { executePreCompactHooks } from '../../utils/hooks.js'
@@ -54,6 +55,37 @@ export const call: LocalCommandCall = async (args, context) => {
 
   const customInstructions = args.trim()
 
+  // Upstream `session.compact` with `trigger: 'manual'`. Wraps the WHOLE
+  // command rather than one compaction path, because `/compact` has three
+  // (session memory, reactive, summariser) and a veto that only guarded the
+  // summariser would let the other two run anyway.
+  const decision = await gateSessionCompact({
+    trigger: 'manual',
+    messages,
+    ...(customInstructions !== ''
+      ? { instructions: customInstructions }
+      : {}),
+    run: async ({ messages: chosen, instructions }) =>
+      runTheCompaction(chosen, instructions ?? '', context, abortController.signal),
+  })
+
+  if (decision.type === 'skipped') {
+    // Upstream: "the conversation stays as it is and one line says why". Not
+    // an error — the person asked for a compaction and a mod refused it, and
+    // throwing here would report a policy decision as a broken command.
+    return { type: 'text', value: `Compaction skipped: ${decision.reason}` }
+  }
+
+  return decision.result
+}
+
+/** `/compact`'s body, unchanged, once `session.compact` has cleared it. */
+async function runTheCompaction(
+  messages: Message[],
+  customInstructions: string,
+  context: ToolUseContext,
+  signal: AbortSignal,
+): Promise<LocalCommandResult> {
   try {
     // Try session memory compaction first if no custom instructions
     // (session memory compaction doesn't support custom instructions)
@@ -136,7 +168,7 @@ export const call: LocalCommandCall = async (args, context) => {
       displayText: buildDisplayText(context, result.userDisplayMessage),
     }
   } catch (error) {
-    if (abortController.signal.aborted) {
+    if (signal.aborted) {
       throw new Error('Compaction canceled.')
     } else if (hasExactErrorMessage(error, ERROR_MESSAGE_NOT_ENOUGH_MESSAGES)) {
       throw new Error(ERROR_MESSAGE_NOT_ENOUGH_MESSAGES)

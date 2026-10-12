@@ -127,6 +127,7 @@ import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js'
 import { filterAgentsByMcpRequirements } from '../tools/AgentTool/loadAgentsDir.js'
 import { AGENT_TOOL_NAME } from '../tools/AgentTool/constants.js'
 import {
+  filterOfferedAgents,
   formatAgentLine,
   shouldInjectAgentListInMessages,
 } from '../tools/AgentTool/prompt.js'
@@ -1611,6 +1612,11 @@ export function getAgentListingDeltaAttachment(
   if (allowedAgentTypes) {
     filtered = filtered.filter(a => allowedAgentTypes.includes(a.agentType))
   }
+  // The same `agent.offer` veto the inline description applies — see
+  // `filterOfferedAgents`. Leaving it out here would let a mod withhold an
+  // agent from the tool description and have it announced in a
+  // system-reminder anyway, which is the one outcome the veto exists to stop.
+  filtered = filterOfferedAgents(filtered)
 
   // Reconstruct announced set from prior deltas in the transcript.
   const announced = new Set<string>()

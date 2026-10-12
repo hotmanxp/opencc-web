@@ -55,6 +55,11 @@ import { formatDuration, formatNumber } from './utils/format.js'
 import type { FpsMetrics } from './utils/fpsTracker.js'
 import { getCanonicalName } from './utils/model/model.js'
 import { calculateUSDCost } from './utils/modelCost.js'
+import {
+  dispatchModEngineSync,
+  hasModHandlersFor,
+} from './mods/dispatch.js'
+import { readSessionUsage } from './mods/sessionUsage.js'
 export {
   getTotalCostUSD as getTotalCost,
   getTotalDuration,
@@ -85,6 +90,11 @@ export {
 export function resetCostState(): void {
   baseResetCostState()
   resetSessionCacheStats()
+  // The `session.measure` snapshot diffs against the last measurement raised.
+  // `/clear` zeroes the ledger, so a fresh session's first response would
+  // otherwise diff as "nothing moved" and raise nothing — the one update the
+  // event exists for, lost to a stale comparison.
+  lastMeasurement = undefined
 }
 
 type StoredCostState = {
@@ -415,5 +425,122 @@ export function addToTotalSessionCost(
       advisorUsage.model,
     )
   }
+
+  measureSession()
   return totalCost
 }
+
+/**
+ * Upstream `SessionMeasureInput` (2.1.296, written by the engine's own
+ * `/plugin-types`):
+ *
+ * ```ts
+ * type SessionMeasureInput = {
+ *   context: SessionContextUsage   // { tokens?, window, percent? }
+ *   rateLimits: SessionRateLimit[] // { kind, percentUsed, resetsAt? }
+ *   cost?: SessionCost             // { usd }
+ *   changed: UsageUnit[]           // 'context' | 'rateLimits' | 'cost'
+ * }
+ * ```
+ *
+ * "Fires when the engine measures the session and a unit moved… Observe;
+ * `next(e)` echoes `{ changed }`. `$.session.usage()`'s figures, **pushed, not
+ * polled**." So the payload is `$.session.usage()` itself, and `changed` is
+ * the load-bearing field — the shipped example dispatches on it
+ * (`toastPast90(e.rateLimits)`).
+ *
+ * `changed` is computed here by diffing against the last measurement raised,
+ * and an empty diff does not dispatch at all. That is what "a unit moved"
+ * means, and it is also where upstream's "one at a time, a burst folding into
+ * one more" comes from for free: a rate-limit reading that moves a third of a
+ * point, or a response that does not move the context fill, raises nothing.
+ */
+function measureSession(): void {
+  if (!hasModHandlersFor('session.measure')) return
+
+  const usage = readSessionUsage()
+  const context = usage.context
+  const cost = usage.cost
+  const rateLimits = usage.rateLimits
+
+  const changed: UsageUnit[] = []
+  const prior = lastMeasurement
+  if (
+    prior === undefined ||
+    prior.tokens !== context.tokens ||
+    prior.percent !== context.percent ||
+    prior.window !== context.window
+  ) {
+    changed.push('context')
+  }
+  // A whole point, per upstream: a window that drifts by a fraction is not an
+  // event, and comparing the rounded percent is what makes that true. The unit
+  // is named only when there IS a figure — upstream says the first
+  // measurement "names every unit it has a figure for", and an empty
+  // `rateLimits` is not one.
+  if (
+    rateLimits.length > 0 &&
+    (prior === undefined ||
+      Math.floor(prior.rateLimits) !== Math.floor(rateLimitPercent(rateLimits)) ||
+      prior.rateLimitCount !== rateLimits.length)
+  ) {
+    changed.push('rateLimits')
+  }
+  // `SessionMeasureInput.cost` is optional upstream ("absent where the host
+  // keeps no ledger"). opencc keeps one, so the figure is always there — but
+  // it is read defensively rather than asserted, so a future host that keeps
+  // no ledger reports the unit as unchanged instead of inventing a zero.
+  const usd = cost?.usd
+  if (usd !== undefined && (prior === undefined || prior.cost !== usd)) {
+    changed.push('cost')
+  }
+
+  if (changed.length === 0) return
+
+  lastMeasurement = {
+    tokens: context.tokens,
+    percent: context.percent,
+    window: context.window,
+    cost: usd,
+    rateLimits: rateLimitPercent(rateLimits),
+    rateLimitCount: rateLimits.length,
+  }
+
+  dispatchModEngineSync(
+    'session.measure',
+    {
+      context: {
+        ...(context.tokens !== undefined ? { tokens: context.tokens } : {}),
+        window: context.window,
+        ...(context.percent !== undefined ? { percent: context.percent } : {}),
+      },
+      rateLimits: rateLimits.map(r => ({ ...r })),
+      ...(usd !== undefined ? { cost: { usd } } : {}),
+      changed,
+    },
+    () => undefined,
+  )
+}
+
+/** Upstream `UsageUnit`. */
+type UsageUnit = 'context' | 'rateLimits' | 'cost'
+
+/**
+ * The most-used window, as a whole percent. opencc publishes no rate limits
+ * (`readSessionUsage` answers `[]`, which is upstream's own "empty off a
+ * subscription or before the first reading"), so this is 0 until a host does.
+ */
+function rateLimitPercent(rateLimits: readonly { percentUsed: number }[]): number {
+  return rateLimits[0]?.percentUsed ?? 0
+}
+
+let lastMeasurement:
+  | {
+      tokens: number | undefined
+      percent: number | undefined
+      window: number
+      cost: number | undefined
+      rateLimits: number
+      rateLimitCount: number
+    }
+  | undefined

@@ -35,11 +35,15 @@ base 做**三方合并**,24 处冲突逐个裁决。这样 vendor 的本地适�
 
 ### 已接 / 已拒
 
-- **`UNAVAILABLE_EVENTS`(7 个)**:按名拒掉,订阅即抛带原因的错。
+- **`UNAVAILABLE_EVENTS`**:按名拒掉,订阅即抛带原因的错。
   上游 6 个(`audio.play` `audio.speak` `ui.blit` `ui.message` `ui.fault`
-  `prompt.autocomplete`)+ **zai 加的 1 个**(`ui.render`,见下)。
-- 其余事件在 `MOD_EVENTS` 里声明。**「声明了」不等于「有 dispatch 点」**——
-  `docs/mods-upstream-gaps.md` §二 列了上游自己的 15 个空挂事件,zai 同样有。
+  `prompt.autocomplete`)+ 上游 2026-10-12 补的 12 个(`ui.press` `ui.select`
+  `ui.input` `session.receive` `session.attach` `session.detach`
+  `session.authorize` `plugin.register` `engine.create` `agent.register`
+  `mcp.call` `mcp.connect`)+ **zai 加的 1 个**(`ui.render`,见下)。
+  上游那 12 个把 `docs/mods-upstream-gaps.md` §二 的「15 个真待接」清掉了 12 个
+  ——剩下 3 个已接线(`session.measure` / `session.compact` / `agent.offer`)。
+- 其余事件在 `MOD_EVENTS` 里声明。**「声明了」不等于「有 dispatch 点」**。
   静态分析才是判据,`/mod-probe` 分不清「没接线」和「本次没调用」。
 
 ### zai 额外拒掉:`ui.render`
@@ -59,6 +63,63 @@ mod 以为改写生效了,实际什么都没发生。故按 `protocol.ts` 自己
 `SessionEnd` / `Stop` / `Notification` **不再是 mod 事件**。
 它们是宿主 hook 词汇,在上游属于 classic 通道。`ctx.on('PreToolUse', …)`
 现在抛 `unsupported event`,错误信息里点名 `tool.call` 是它的对应。
+
+### 事件派发点的同步口径
+
+派发点分布在**非 mods 文件**里(`query.ts` `toolExecution.ts`
+`processUserInput.ts` `attribution.ts` `forkedAgent.ts` `messages.ts`
+`api.ts` `sessionStart.ts` `systemPromptSections.ts` `prompts.ts`
+`commands.ts` `AgentTool.tsx` `compact.ts` `autoCompact.ts` `cost-tracker.ts` …)。
+
+这些文件在 vendor 的基线**比 `c855981d` 还老**,所以:
+
+- 三方合并不适用 —— git 会把 vendor 的「没有」读成「有意删除」并保留,
+  结果是零改动(实测 14 个文件全是 no-op)。
+- 实际做法:**只搬含 mods 关键字的 hunk**,逐文件 `patch` 上去。含
+  `mods/dispatch` / `dispatchMod*` / `hasModHandlersFor` / `MOD_EVENTS` 等标记。
+- 副作用:某些**配套的非 mods hunk** 因此没被带过来,需要在原地补。已补的:
+  - `attribution.ts`:上游把原函数改名 `computeAttributionTexts` 并降为模块私有,
+    上面再加一层导出的 `getAttributionTexts` 走派发。改名 hunk 不含 mods 关键字,
+    不补就与新加的那层重名。
+  - `AgentTool.tsx`:`model` 由 `const` 改 `let`(`agent.spawn` 的结果要改写它)。
+  - `commands.ts`:mods dispatch 的 import 那一 hunk 被 reject,手工补上。
+
+**TUI 派发点未搬**:`ink/ink.tsx`(`setTerminalWriter` 给 `$.ui.notify`)、
+`screens/REPL.tsx`(`prompt.read` / `prompt.fill`)、`hooks/useTextInput.ts`
+(`prompt.edit`)、`services/PromptSuggestion/promptSuggestion.ts`(`prompt.suggest`)、
+`components/agents/generateAgent.ts` —— 全是 React/Ink 面,理由见 §三.1。
+
+`prompt.compose` 也未接:`constants/prompts.ts` 上游那 134 行会把 static/dynamic
+两组 section 建成 `{id, text, scope}` 再交给 `composePromptSections` +
+`placeComposeBoundary`,而后者会动 `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` 的位置
+——也就是动 prompt cache 边界。vendor 侧暂取回 `.text` 保持 `string[]` 返回,
+**该事件已列入待拒清单**(见 §五)。
+
+### 待拒清单(声明了但 vendor 侧无派发点)
+
+这些事件在 `MOD_EVENTS` 里,但 zai 侧没有 dispatch 点。按协议自己的规矩它们
+应当进 `UNAVAILABLE_EVENTS`;本轮**没有**自动加,因为逐条确认「确实没接」
+需要一次完整的事件审计(方法见下),猜着加会把已接线的事件误拒:
+
+```
+prompt.read  prompt.fill  prompt.suggest  prompt.edit
+prompt.mention  prompt.compose
+ui.open  ui.close  ui.panes  ui.invalidate  ui.selection
+ui.resolve  ui.scroll  ui.focus  ui.copy  ui.notify
+process.spawn
+```
+
+**审计方法**(别用 grep 事件名的笨办法 —— `HOST_EVENT_BRIDGE` 的键是带引号的
+属性,不匹配 `dispatchMod*(` 的裸调用式样,会误判):
+
+1. 先扣掉 `UNAVAILABLE_EVENTS` 里已拒的;
+2. 再扣掉 `dispatch.ts` 的 `HOST_EVENT_BRIDGE`(`tool.call` / `session.start` /
+   `session.end` / `turn.complete` 走宿主 hook 桥接,没有字面量调用点);
+3. 剩下才是真死事件;
+4. **判定脚本必须剥掉注释再匹配** —— 名字出现在散文里不等于有 dispatch 点。
+
+上游的 `mods/declaredButDead.test.ts` 就是这个审计的固化版,值得照搬一份
+到 `test/unit/`(它现在跑不到,因为 vitest exclude 了 `src/opencc-src/**`)。
 
 ---
 

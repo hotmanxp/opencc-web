@@ -1,5 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import { buildModCommands } from './mods/engine.js'
+import { dispatchModEngine, hasModHandlersFor } from './mods/dispatch.js'
 import addDir from './commands/add-dir/index.js'
 import autofixPr from './commands/autofix-pr/index.js'
 import backfillSessions from './commands/backfill-sessions/index.js'
@@ -545,7 +546,74 @@ function isWorkflowCommand(cmd: Command): boolean {
  * memoized, but availability and isEnabled checks run fresh every call so
  * auth changes (e.g. /login) take effect immediately.
  */
+/**
+ * Every command this session offers, after `command.describe`.
+ *
+ * Upstream lets a mod rewrite what a command says it is — its description, its
+ * argument hint — and hide one outright. This host has no `isHidden` on its
+ * own command type, so the field is read off the hook's answer and honoured
+ * here, which is what makes `isHidden: true` do something rather than being a
+ * value nothing consumes.
+ *
+ * The name a hook sees is the real one, not `userFacingName`: a plugin that
+ * strips its own prefix wants the prefix-less name in its matcher, and
+ * upstream pins `command` for the same reason.
+ */
 export async function getCommands(cwd: string): Promise<Command[]> {
+  const computed = await computeCommands(cwd)
+  if (!hasModHandlersFor('command.describe')) {
+    return computed
+  }
+  const described: Command[] = []
+  for (const c of computed) {
+    // Upstream gates per command: `Jl("command.describe", {command: n.command})`.
+    // Without this a mod whose matcher names two of thirty commands still pays
+    // a dispatch and a `next(e)` round trip for the other twenty-eight.
+    //
+    // The command still gets pushed either way — skipping the DISPATCH is not
+    // skipping the command, and dropping it here would silently remove a
+    // command from the list.
+    if (!hasModHandlersFor('command.describe', { command: c.name })) {
+      described.push(c)
+      continue
+    }
+    const answer = await dispatchModEngine<{
+      command: string
+      description: string
+      argumentHint?: string
+      isHidden: boolean
+    }>(
+      'command.describe',
+      {
+        command: c.name,
+        description: c.description ?? '',
+        argumentHint: (c as { argumentHint?: string }).argumentHint,
+        isHidden: (c as { isHidden?: boolean }).isHidden === true,
+        immediate: (c as { immediate?: boolean }).immediate === true,
+        provider: (c as { source?: string }).source ?? 'built-in',
+      },
+      e => ({
+        command: String(e.command ?? c.name),
+        description: typeof e.description === 'string' ? e.description : '',
+        argumentHint:
+          typeof e.argumentHint === 'string' ? e.argumentHint : undefined,
+        isHidden: e.isHidden === true,
+      }),
+    )
+    if (answer.isHidden) continue
+    described.push({
+      ...c,
+      name: answer.command,
+      description: answer.description,
+      ...(answer.argumentHint !== undefined
+        ? { argumentHint: answer.argumentHint }
+        : {}),
+    } as Command)
+  }
+  return described
+}
+
+async function computeCommands(cwd: string): Promise<Command[]> {
   const allCommands = await loadAllCommands(cwd)
 
   // Get dynamic skills discovered during file operations

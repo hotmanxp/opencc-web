@@ -12,6 +12,7 @@
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import type { PromptCommand } from '../commands.js'
+import { dispatchModEngine, hasModHandlersFor } from '../mods/dispatch.js'
 import type { QuerySource } from '../constants/querySource.js'
 import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
 import { query } from '../query.js'
@@ -201,9 +202,22 @@ export async function prepareForkedCommandContext(
 ): Promise<PreparedForkedContext> {
   // Get skill content with $ARGUMENTS replaced
   const skillPrompt = await command.getPromptForCommand(args, context)
-  const skillContent = skillPrompt
+  const joined = skillPrompt
     .map(block => (block.type === 'text' ? block.text : ''))
     .join('\n')
+  // Upstream gates on the skill name: `Jl("skill.prompt", {skill: e})`. Unlike
+  // the other sites there was no gate here at all, so this dispatch ran for
+  // every forked command. The join is cheap but not free, and it is now built
+  // once for both the payload and the ungated fallback.
+  const skillContent = hasModHandlersFor('skill.prompt', {
+    skill: command.name,
+  })
+    ? await dispatchModEngine(
+        'skill.prompt',
+        { skill: command.name, text: joined },
+        async e => String(e.text ?? ''),
+      )
+    : joined
 
   // Parse and prepare allowed tools
   const allowedTools = parseToolListFromCLI(command.allowedTools ?? [])
