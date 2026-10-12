@@ -70,29 +70,64 @@ const RuntimeEvent = z.discriminatedUnion('type', [
              error: z.object({ category: z.string(), message: z.string(),
                                recoverable: z.boolean() }),
              toolUseId: z.string().optional() }),
-  // 阶段 1 只有 trigger='auto'; manual 走原 kind:'compacted'(不变).
+  // zai patch (2026-10-12, compact 事件接线): postTokens / savedTokens 改
+  // optional —— vendor 的 compact boundary 消息 (systemFactories.ts:204
+  // createCompactBoundaryMessage) 的 compactMetadata 里**没有** post-compact
+  // token 数: `postCompactTokenCount` 只存在于 CompactionResult
+  // (services/compact/compact.ts:317),从没进过 boundary message. auto 路径
+  // (compact.ts:638) 只传 3 个实参, 连 messagesSummarized 都是 undefined.
+  // 之前这里写死必填, 接线时只能填 0 → UI 会显示「节省 0 tokens」说谎.
+  // 现在省略这两个字段, 由前端 applyCompactionEvent 分叉文案.
+  //
   // 同时 spread Base (拿到 eventId / ts) 与显式 timestamp: 前者是
   // ServerEvent union 共有, eventBus.history 续读 (Last-Event-ID 比对)
-  // 与 SSE id: line 推送都依赖; 后者是压缩事件的"语义时间" (brief
-  // Step 2 原文), 前端 applyCompactionEvent 用 timestamp + 5000ms 计算
-  // toast expiresAt. Base.ts 与 timestamp 同时存在 → emit 时两条都填,
+  // 与 SSE id: line 推送都依赖; 后者是压缩事件的"语义时间"
+  // (brief Step 2 原文), 前端 applyCompactionEvent 用 timestamp + 5000ms
+  // 计算 toast expiresAt. Base.ts 与 timestamp 同时存在 → emit 时两条都填,
   // 客户端可任选. zod discriminatedUnion 允许成员字段冗余, 字段全集
   // (spread 后的 Base + 显式 timestamp) 完全合法.
   z.object({ ...Base.shape, type: z.literal('runtime.compacted'),
              sessionId: z.string(),
              trigger: z.enum(['auto', 'manual']),
              preTokens: z.number(),
-             postTokens: z.number(),
-             savedTokens: z.number(),
+             postTokens: z.number().optional(),
+             savedTokens: z.number().optional(),
              timestamp: z.number() }),
-  // runtime.retrying: emitted when the model caller retries after a recoverable
-  // error (e.g. 529 overload). Frontend uses this to show a retrying toast.
-  z.object({ ...Base.shape, type: z.literal('runtime.retrying'),
-             sessionId: z.string(), turnIndex: z.number(),
-             attempt: z.number(),
-             delayMs: z.number(),
-             nextAttemptAtMs: z.number(),
-             category: z.enum(['llm_provider_overloaded', 'llm_provider_server', 'llm_provider_rate_limit']) }),
+  // zai patch (2026-10-12): compact_boundary —— 会话被压缩的分界线, 落进
+  // 前端 messages 而非 toasts, 是 transcript 里**常驻**的那一条(刷新后
+  // 仍在); runtime.compacted 是 5s 就消失的一次性提示. 两者配套.
+  //
+  // 为什么需要独立事件: vendor 的压缩边界是以 `system` + `subtype:
+  // 'compact_boundary'` 的 Message 形式 yield 出来的
+  // (opencc-src/query.ts 的 `for (const message of postCompactMessages)
+  // yield message`), compat/runtime/sdkEventAdapter.ts:109 明确放行、:251
+  // 直通成 RuntimeEvent —— 但 translator 一直没有 case 'system', 落到
+  // `default: break` 被静默丢弃. 这是"压缩时 UI 毫无反应"的根因之一.
+  //
+  // 形态与 loadTranscriptMessages 的历史回放**共用一个 type**, 所以实时流与
+  // 刷新回放走同一套渲染分支, 不必写两份。
+  //
+  // 但两条路径的**内容完整度不同**, 别按"完全一致"理解: 回放路径会额外把
+  // auto 摘要正文挂到 summary 字段(attachSummaryToBoundary), 实时路径拿不到
+  // —— vendor 的摘要是 user 消息带 isCompactSummary, 而 adapter 对 user 消息
+  // 只在含 tool_result 块时才产出事件(sdkEventAdapter.ts 的 tool_result
+  // 分支), 纯文本摘要走空循环直接 return, 事件流里根本没有它。
+  // 后果: 实时分界线没有展开箭头(CompactBoundaryDivider 对无 summary 的情况
+  // 渲染静态线), 刷新后才出现 ▼。这是已知取舍, 不是 bug —— 要消掉得让
+  // adapter 为 isCompactSummary 单独产出一条事件, 属于跨 core 的改动。
+  z.object({ ...Base.shape, type: z.literal('compact_boundary'),
+             sessionId: z.string(),
+             trigger: z.enum(['auto', 'manual']),
+             preTokens: z.number(),
+             messagesSummarized: z.number().optional() }),
+  // zai patch 2026-10-12: 删掉 runtime.retrying。
+  // 它此前有 schema + useAgentStore 的 case + 单测, 但**全仓没有任何生产者**
+  // —— 后台重试循环(DefaultBackgroundRuntime.runOne 的 catch 分支)只
+  // classifyRetryableError + retrySleep, 不 emit 任何事件。于是它是一条
+  // 永远跑不到的死路径, 且因为没进 eventSource 的 NAMED_EVENT_TYPES,
+  // 连"事件发了被丢"都不会发生。
+  // 真要做重试提示, 该在重试循环 emit 并经 stateChangeBus → stateBridge
+  // → SSE 打通, 而不是留一个孤立的 schema。
 ])
 
 const SessionEvent = z.discriminatedUnion('type', [

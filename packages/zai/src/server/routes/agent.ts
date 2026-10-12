@@ -710,23 +710,54 @@ export async function* translateRuntimeEvents(
         yield errEvent;
         break;
       }
-      case "compaction.completed": {
-        // 阶段 1 翻译层: queryLoop (Task 16) 会在 autocompact 触发时 yield
-        // 这个内部事件, 翻译层把它翻成 SSE `runtime.compacted` 给前端 reducer.
-        // trigger='manual' 的 /compact 命令仍走原 kind:'compacted' 路径, 不
-        // 经过这里 — 这里只对应 auto 路径.
-        // 字段严格匹配 shared/events.ts schema: 没有 spread Base (无 eventId/ts),
-        // 显式 timestamp 字段 (zod discriminatedUnion 不要求成员字段一致).
-        const trigger = (ev.trigger as "auto" | "manual") ?? "auto";
-        const preTokens = typeof ev.preTokens === "number" ? ev.preTokens : 0;
-        const postTokens = typeof ev.postTokens === "number" ? ev.postTokens : 0;
+      case "system": {
+        // zai patch (2026-10-12, compact 事件接线): vendor 的压缩边界是以
+        // `system` + `subtype:'compact_boundary'` 的 Message 形式 yield 出来的
+        // (opencc-src/query.ts 的 `for (const message of postCompactMessages)
+        // yield message`), compat/runtime/sdkEventAdapter.ts:109 明确放行、
+        // :251 直通成 RuntimeEvent —— 但这里一直没有 case 'system', 事件落到
+        // 末尾的 `default: break` 被静默丢弃. 这是"压缩时 UI 毫无反应"的根因.
+        //
+        // 一次产出两个事件, 职责不同:
+        //   ① compact_boundary  → 落进前端 messages, 是 transcript 里常驻的
+        //      分界线(刷新后仍在, 形态与 loadTranscriptMessages 历史回放一致);
+        //   ② runtime.compacted → 5s 自动消失的一次性 toast 提示.
+        //
+        // auto / manual 两条路径的 boundary 形状相同(system + subtype +
+        // compactMetadata), 所以这里不区分触发来源 —— 真正的 auto 边界由
+        // query loop 产出, 手动 /compact 走 POST /agent/command 不经过本函数.
+        //
+        // 其他 system subtype(init / task_started / status 等)一律 break,
+        // 不引入新行为 —— 它们要么已被 adapter 消费, 要么本就不该渲染.
+        if (ev.subtype !== "compact_boundary") break;
+        // compactMetadata 的实际字段见 opencc-src/utils/messages/
+        // systemFactories.ts:204: {trigger, preTokens, userContext?,
+        // messagesSummarized?, preCompactDiscoveredTools?}. 注意**没有**
+        // postCompact token 数 —— 那个值只存在于 CompactionResult 里, 从没
+        // 进过 boundary message, 所以 runtime.compacted 只带 preTokens,
+        // 由前端分叉文案(不显示"节省 0 tokens"这种谎话).
+        const meta = (ev.compactMetadata ?? {}) as {
+          trigger?: "auto" | "manual";
+          preTokens?: number;
+          messagesSummarized?: number;
+        };
+        const trigger: "auto" | "manual" = meta.trigger ?? "auto";
+        const preTokens =
+          typeof meta.preTokens === "number" ? meta.preTokens : 0;
+        yield {
+          type: "compact_boundary",
+          sessionId,
+          trigger,
+          preTokens,
+          ...(typeof meta.messagesSummarized === "number"
+            ? { messagesSummarized: meta.messagesSummarized }
+            : {}),
+        };
         yield {
           type: "runtime.compacted",
           sessionId,
           trigger,
           preTokens,
-          postTokens,
-          savedTokens: preTokens - postTokens,
           timestamp: Date.now(),
         };
         break;

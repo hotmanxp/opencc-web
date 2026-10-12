@@ -156,8 +156,9 @@ describe('createAnthropicModelCaller — 529 retry loop', () => {
     expect(thrown).toBeInstanceOf(Error)
     expect((thrown as Error).status).toBe(529)
     expect(mockClient.messages.create).toHaveBeenCalledTimes(1)
-    const retrying = collected.filter((e) => e.type === 'runtime.retrying')
-    expect(retrying).toHaveLength(0)
+    // zai patch 2026-10-12: 原先这里还断言「没发 runtime.retrying」。
+    // 该事件已随死路径一起删除(schema + store case + 生产者全无), 且
+    // 本用例是 it.skip —— 断言恒为 0、无信息量, 故移除。
   })
 
   it.skip('T6: does NOT retry on 401 (auth error)', async () => {
@@ -167,8 +168,7 @@ describe('createAnthropicModelCaller — 529 retry loop', () => {
     expect(thrown).toBeInstanceOf(Error)
     expect((thrown as Error).status).toBe(401)
     expect(mockClient.messages.create).toHaveBeenCalledTimes(1)
-    const retrying = collected.filter((e) => e.type === 'runtime.retrying')
-    expect(retrying).toHaveLength(0)
+    // 同上: runtime.retrying 已删除, 该断言恒为 0, 移除。
   })
 })
 

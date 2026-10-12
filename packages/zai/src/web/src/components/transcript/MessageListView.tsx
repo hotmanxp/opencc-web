@@ -6,6 +6,7 @@ import { deriveTranscriptNodes, type GroupItem, type ToolGroupStatus } from './d
 import { getRenderer } from '../toolRenderers/registry.js'
 import { deriveTurnArtifacts, type TurnArtifacts } from './deriveTurnArtifacts.js'
 import { TurnArtifactsBlock } from './TurnArtifactsBlock.js'
+import CompactBoundaryDivider from './CompactBoundaryDivider.js'
 
 /** 组内一项的 React key: eventId 优先, 退回「类型-下标」。 */
 function itemKey(it: GroupItem): string {
@@ -194,6 +195,15 @@ export function MessageListView({ messages, streaming }: Props) {
               key={`think-${node.index}-${i}`}
               msg={node.message}
               streaming={node.index === visibleMessages.length - 1}
+            />
+          )
+        } else if (node.kind === 'compactBoundary') {
+          // 压缩分界线 —— 常驻在 transcript 里, 刷新后仍在(历史回放同样
+          // 产出 compact_boundary 消息, 见 loadTranscriptMessages)。
+          el = (
+            <CompactBoundaryDivider
+              key={`compact-${node.index}-${i}`}
+              message={node.message}
             />
           )
         } else if (node.kind === 'ask') {

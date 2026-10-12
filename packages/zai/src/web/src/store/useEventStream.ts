@@ -170,6 +170,12 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     case 'runtime.compacted':
       store.getState().applyRuntimeEvent(event)
       break
+    // compact_boundary — 压缩分界线(zai patch 2026-10-12)。落进 messages
+    // (常驻,刷新后仍在),与 runtime.compacted 的 5s toast 是两件事。
+    // 漏这个 case 的症状:toast 照弹,但对话流里的分隔线永远不出现。
+    case 'compact_boundary':
+      store.getState().applyRuntimeEvent(event)
+      break
     case 'session.created':
     case 'session.deleted':
     case 'session.renamed':
@@ -207,6 +213,7 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     case 'server.error':
     case 'toast':
     case 'system.restarting':
+    case 'system.stopping':
     case 'system.restart.canceled':
       useAppStore.getState().applySystemEvent(event)
       break
@@ -247,6 +254,24 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     case 'app.update.failed':
       useAppStore.getState().applyAppUpdate(event)
       break
+    default: {
+      // 穷尽性守卫 (zi patch 2026-10-12): shared/events.ts 的 ServerEvent
+      // union 加新成员时, 漏加 case 会在类型检查时报 "not assignable to
+      // never", 而不是运行时静默丢帧。
+      //
+      // ⚠️ 同 eventSource.ts 的断言一样受限于 packages/zai/tsconfig.json
+      // **排除了 src/web** —— 目前 `tsc --noEmit` 检查不到本文件, 所以这道
+      // default 是给 IDE 与将来 web 纳入 typecheck 后的护栏。真正在 CI 上
+      // 生效的是 useEventStream.test.ts 里对 compact_boundary 的路由断言。
+      //
+      // 为什么值得加: 这个 switch 原本既无 default 也无断言, 漏 case 完全
+      // 无感 —— compact_boundary 就是这么漏的(2026-10-12), 表现是"toast 会弹
+      // 但分隔线不出现"。同一类坑在 eventSource.ts 的 NAMED_EVENT_TYPES
+      // 已经踩过 4 次。
+      const _exhaustive: never = event
+      void _exhaustive
+      break
+    }
   }
   }
 }

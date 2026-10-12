@@ -3,9 +3,21 @@ import type { ServerEvent } from '../../../shared/events.js';
 import type { OutputStyle, WorkMode } from '../../../shared/settings.js';
 import type { StreamState } from '../lib/eventSource.js';
 
+// 服务重启/停服中态 —— 为「正在重启 / 已停服」的 UI 横幅准备的**状态层**。
+//
+// `phase` 有两个值, 对应 server/routes/system.ts 两条不同的退出路径:
+//   restarting — /api/system/restart, 进程会重新起来(带 reason);
+//   stopping   — /api/system/stop, 整个服务退出不再回来(无 reason 字段)。
+//
+// zai patch 2026-10-12: `stopping` 原先没有对应态, 且三个事件都没进
+// eventSource 白名单 → 这层状态此前永远是 null。
+//
+// ⚠️ 现状: **还没有组件读这个字段** —— SettingsDrawer 的重启/停服按钮是
+// fire-and-forget, 靠页面自己断开来表达"服务没了"。本次只把状态接通,
+// 横幅 UI 仍待建。建的时候两个 phase 必须分开文案: 重启会回来, 停服不会。
 export type ServiceState = {
-  phase: 'restarting';
-  reason: 'user_action' | 'auto_recovery' | 'update';
+  phase: 'restarting' | 'stopping';
+  reason?: 'user_action' | 'auto_recovery' | 'update';
   deadlineMs: number;
 } | null;
 
@@ -424,6 +436,18 @@ export const useAppStore = create<AppState>((set) => ({
         serviceState: {
           phase: 'restarting',
           reason: event.reason,
+          deadlineMs: event.deadlineMs,
+        },
+      };
+    }
+    // zai patch 2026-10-12: 停服态。与 restarting 分开是因为它**不会**
+    // 恢复 —— 页面不会自己回来, 横幅只是让用户知道刚才那次「重启」其实是
+    // 停服, 不要再等。schema 里 stopping 不带 reason, 故 reason 留空。
+    if (event.type === 'system.stopping') {
+      return {
+        ...state,
+        serviceState: {
+          phase: 'stopping',
           deadlineMs: event.deadlineMs,
         },
       };

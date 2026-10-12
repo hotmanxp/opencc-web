@@ -5,6 +5,7 @@ import zhCN from 'antd/locale/zh_CN';
 import AppRouter from './router';
 import { useEventStream } from './store/useEventStream';
 import { useEffectiveTheme } from './hooks/useEffectiveTheme.js';
+import CompactionToastDock from './components/CompactionToastDock';
 
 /* DARK: 主题色用 Tailwind orange-500 (#f97316) — 比 #ff6600 更柔和; 次要
    文字提到 slate-300/600 让 antd 默认组件在深背景上清晰可读.
@@ -55,6 +56,10 @@ export default function App() {
     >
       <BrowserRouter>
         <AppRouter />
+        {/* 压缩提示条挂在这里而非 AgentConversation —— SSE 只 dispatch 到根
+            useAgentStore 单例, 而 AgentConversation 被多个弹窗以各自的
+            AgentStoreContext 复用。详见组件头注释。 */}
+        <CompactionToastDock />
       </BrowserRouter>
     </ConfigProvider>
   );

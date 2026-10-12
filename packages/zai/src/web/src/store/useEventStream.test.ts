@@ -133,4 +133,85 @@ describe('useEventStream batch dispatch', () => {
     expect(useSuperTaskStore.getState().supervisorSessionId).toBe('sup-x')
     loadSpy.mockRestore()
   })
+
+  // 回归 (2026-10-12): compact_boundary 曾漏掉 applyBatchTo 的 switch case。
+  // switch 原本既无 default 也无断言, 漏 case 时事件**静默穿过** —— 症状是
+  // "toast 会弹(那个 case 在), 但对话流里的分隔线永远不出现"。
+  // 4 个 compact 单测全绿也照样漏: 它们直接调 applyRuntimeEvent / 测
+  // translator, 都没走过「EventSource 白名单 + 这个 dispatch switch」这条
+  // 真实链路 —— mock 把 bug 藏住了。
+  it('compact_boundary 路由到 applyRuntimeEvent 并落进 messages', () => {
+    applyBatch([
+      {
+        type: 'compact_boundary', eventId: 'eb1', ts: 1, seq: 1,
+        sessionId: 's1', trigger: 'auto', preTokens: 180000,
+        messagesSummarized: 42,
+      },
+    ] as never)
+    const msgs = useAgentStore.getState().messages
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]).toMatchObject({
+      type: 'compact_boundary',
+      trigger: 'auto',
+      preTokens: 180000,
+      messagesSummarized: 42,
+    })
+  })
+
+  it('compact_boundary 重放(同 eventId)不重复追加 —— SSE 重连会重发同一帧', () => {
+    const ev = {
+      type: 'compact_boundary', eventId: 'eb-dup', ts: 1, seq: 7,
+      sessionId: 's1', trigger: 'auto', preTokens: 1000,
+    }
+    applyBatch([ev] as never)
+    applyBatch([ev] as never)
+    // 分界线是纯追加事件(无 upsert 语义), 漏去重就会画出两条线。
+    expect(
+      useAgentStore.getState().messages.filter(
+        (m) => m.type === 'compact_boundary',
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('runtime.compacted 路由到 toast 而不是 messages', () => {
+    applyBatch([
+      {
+        type: 'runtime.compacted', eventId: 'ec1', ts: 1, seq: 1,
+        sessionId: 's1', trigger: 'auto', preTokens: 180000,
+        timestamp: Date.now(),
+      },
+    ] as never)
+    expect(useAgentStore.getState().toasts).toHaveLength(1)
+    expect(
+      useAgentStore.getState().messages.some(
+        (m) => m.type === 'runtime.compacted',
+      ),
+    ).toBe(false)
+  })
+
+  it('system.stopping 路由到 applySystemEvent 并置 stopping 态 (2026-10-12 补登)', () => {
+    // 此前 system.stopping 既不在白名单也不在 dispatch switch, serviceState
+    // 永远停在 null。注意: 该状态目前**还没有 UI 读取**(横幅待建), 这里守
+    // 的是状态层 —— 将来接横幅时这条用例就是它的地基。
+    useAppStore.setState({ serviceState: null })
+    applyBatch([
+      { type: 'system.stopping', eventId: 'es1', ts: 1, seq: 1, deadlineMs: 5000 },
+    ] as never)
+    expect(useAppStore.getState().serviceState).toEqual({
+      phase: 'stopping', deadlineMs: 5000,
+    })
+  })
+
+  it('system.restarting 路由到 applySystemEvent 并置 restarting 态', () => {
+    useAppStore.setState({ serviceState: null })
+    applyBatch([
+      {
+        type: 'system.restarting', eventId: 'es2', ts: 1, seq: 1,
+        reason: 'user_action', deadlineMs: 5000,
+      },
+    ] as never)
+    expect(useAppStore.getState().serviceState).toEqual({
+      phase: 'restarting', reason: 'user_action', deadlineMs: 5000,
+    })
+  })
 })

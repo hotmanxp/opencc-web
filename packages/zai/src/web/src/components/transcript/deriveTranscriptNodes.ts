@@ -24,6 +24,10 @@ export type TranscriptNode =
   | { kind: 'toolGroup'; items: GroupItem[]; startIndex: number; endIndex: number }
   | { kind: 'thinking'; message: AgentMessage; index: number }
   | { kind: 'ask'; message: AgentMessage; index: number }
+  // zai patch (2026-10-12): 压缩分界线独立成节点 —— 它在视觉上是一条分隔线,
+  // 不是一条消息;塞进 text 桶会被 MessageBubble 当未知类型渲染成 null(等于
+  // 隐形),或者在 text 桶里破坏正文段落的连续性。
+  | { kind: 'compactBoundary'; message: AgentMessage; index: number }
 
 const TOOL_TYPES = new Set(['tool_use:start', 'tool_use:done', 'tool_use:error', 'tool_use:invalid', 'tool_use:denied'])
 
@@ -92,15 +96,16 @@ export function deriveTranscriptNodes(messages: AgentMessage[]): TranscriptNode[
       textStart = -1
       continue
     }
-    // Otherwise text bucket (user / assistant text / compact_boundary / unknown)
-    flushGroup(i - 1)
+    // 压缩分界线: 切断当前文本段与工具段, 独立成节点。
     if (t === 'compact_boundary') {
-      // Boundary ends the current text run and starts a new one
+      flushGroup(i - 1)
       if (textBuf.length) pushText(textBuf, out, textStart, i)
-      textStart = i
-      textBuf.push(m)
+      textStart = -1
+      out.push({ kind: 'compactBoundary', message: m, index: i })
       continue
     }
+    // Otherwise text bucket (user / assistant text / unknown)
+    flushGroup(i - 1)
     if (textBuf.length === 0) textStart = i
     textBuf.push(m)
   }

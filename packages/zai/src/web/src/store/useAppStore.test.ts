@@ -119,3 +119,40 @@ describe('maxVisibleMessages', () => {
     expect(useAppStore.getState().maxVisibleMessages).toBe(50)
   })
 })
+
+describe('serviceState — 重启 / 停服通道 (2026-10-12 补登白名单)', () => {
+  // 这三个事件此前既没进 eventSource 的 NAMED_EVENT_TYPES、也没进
+  // useEventStream 的 dispatch switch, 整条链路是哑的; useAppStore 里
+  // applySystemEvent 的分支写得再对也收不到事件。
+  test('system.restarting → phase restarting, 带 reason/deadlineMs', () => {
+    useAppStore.setState({ serviceState: null })
+    useAppStore.getState().applySystemEvent({
+      type: 'system.restarting', eventId: 'e1', ts: 1, seq: 1,
+      reason: 'user_action', deadlineMs: 5000,
+    } as never)
+    expect(useAppStore.getState().serviceState).toEqual({
+      phase: 'restarting', reason: 'user_action', deadlineMs: 5000,
+    })
+  })
+
+  // stopping 是独立语义: 服务退出后不会再起来, 横幅只是告知"别等了"。
+  test('system.stopping → phase stopping (无 reason)', () => {
+    useAppStore.setState({ serviceState: null })
+    useAppStore.getState().applySystemEvent({
+      type: 'system.stopping', eventId: 'e2', ts: 1, seq: 1, deadlineMs: 5000,
+    } as never)
+    expect(useAppStore.getState().serviceState).toEqual({
+      phase: 'stopping', deadlineMs: 5000,
+    })
+  })
+
+  test('system.restart.canceled → 清空 serviceState', () => {
+    useAppStore.setState({
+      serviceState: { phase: 'restarting', reason: 'user_action', deadlineMs: 5000 },
+    })
+    useAppStore.getState().applySystemEvent({
+      type: 'system.restart.canceled', eventId: 'e3', ts: 1, seq: 1,
+    } as never)
+    expect(useAppStore.getState().serviceState).toBeNull()
+  })
+})
