@@ -59,6 +59,8 @@ import {
   toolToAPISchema,
 } from '../../utils/api.js'
 import { getOauthAccountInfo } from '../../utils/auth.js'
+import { hasModHandlersFor } from '../../mods/dispatch.js'
+import { resolveToolDescriptions } from '../../mods/toolDescribe.js'
 import {
   getStreamingAbortMessage,
   isExpectedSideTaskAbortReason,
@@ -1215,6 +1217,28 @@ async function* queryModel(
     }
   }
 
+  // Upstream `tool.describe` — the chain that rewrites what a tool's description
+  // says to the model. Skipped outright with no subscribers: this sits on the
+  // request path, and the resolution is per-tool and async.
+  const describedDescriptions = hasModHandlersFor('tool.describe')
+    ? await resolveToolDescriptions({
+        tools,
+        promptOptions: {
+          getToolPermissionContext: options.getToolPermissionContext,
+          agents: options.agents,
+          allowedAgentTypes: options.allowedAgentTypes,
+        },
+        isDeferredByHost: name => deferredToolNames.has(name),
+      })
+    : null
+  if (describedDescriptions) {
+    // A hook that deferred a tool has to actually defer it, or the next block
+    // re-derives the set from isDeferredTool and discards the hook's answer.
+    for (const tool of describedDescriptions.deferred) {
+      deferredToolNames.add(tool)
+    }
+  }
+
   // Even if tool search mode is enabled, skip if there are no deferred tools
   // AND no MCP servers are still connecting. When servers are pending, keep
   // ToolSearch available so the model can discover tools after they connect.
@@ -1321,6 +1345,7 @@ async function* queryModel(
         agents: options.agents,
         allowedAgentTypes: options.allowedAgentTypes,
         model: options.model,
+        description: describedDescriptions?.descriptions.get(tool.name),
         deferLoading: willDefer(tool),
       }),
     ),

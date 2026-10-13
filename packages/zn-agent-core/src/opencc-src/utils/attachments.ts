@@ -52,6 +52,7 @@ import { getViewedTeammateTask } from '../state/selectors.js'
 import { logError } from './log.js'
 import { logAntError } from './debug.js'
 import { isENOENT, toError } from './errors.js'
+import { dispatchModEngine, hasModHandlersFor } from '../mods/dispatch.js'
 import type { DiagnosticFile } from '../services/diagnosticTracking.js'
 import { diagnosticTracker } from '../services/diagnosticTracking.js'
 import type {
@@ -2061,9 +2062,27 @@ async function processAtMentionedFilesWithDependencies(
   const files = extractAtMentionedFiles(input)
   if (files.length === 0) return []
 
+  // Upstream `prompt.mention` — the chain a mention's path runs before anything
+  // is attached. It sits ahead of the read so a hook can DENY a path, and so it
+  // sees the path as written rather than a finished attachment it could only
+  // inspect.
+  const mentionPaths = hasModHandlersFor('prompt.mention')
+    ? await Promise.all(
+        files.map(file =>
+          dispatchModEngine<{ allow: boolean }>(
+            'prompt.mention',
+            { path: file },
+            e => ({ allow: e.allow !== false }),
+          ).then(d => (d.allow ? file : null)),
+        ),
+      )
+    : files
+  const allowed = mentionPaths.filter((f): f is string => f !== null)
+  if (allowed.length === 0) return []
+
   const appState = toolUseContext.getAppState()
   const results = await mapWithConcurrency(
-    files,
+    allowed,
     ATTACHMENT_FILE_IO_CONCURRENCY,
     async file => {
       try {

@@ -176,6 +176,13 @@ export async function toolToAPISchema(
     agents: AgentDefinition[]
     allowedAgentTypes?: string[]
     model?: string
+    /**
+     * The description as `tool.describe` already resolved it. Passed in rather
+     * than read off the tool because the text the model gets is what
+     * `tool.prompt()` returns — `tool.description` is undefined for the
+     * built-in tools — so a mod's rewrite has to BE that rendered text.
+     */
+    description?: string
     /** When true, mark this tool with defer_loading for tool search */
     deferLoading?: boolean
     cacheControl?: {
@@ -220,12 +227,14 @@ export async function toolToAPISchema(
 
     base = {
       name: tool.name,
-      description: await tool.prompt({
-        getToolPermissionContext: options.getToolPermissionContext,
-        tools: options.tools,
-        agents: options.agents,
-        allowedAgentTypes: options.allowedAgentTypes,
-      }),
+      description:
+        options.description ??
+        (await tool.prompt({
+          getToolPermissionContext: options.getToolPermissionContext,
+          tools: options.tools,
+          agents: options.agents,
+          allowedAgentTypes: options.allowedAgentTypes,
+        })),
       input_schema,
     }
 

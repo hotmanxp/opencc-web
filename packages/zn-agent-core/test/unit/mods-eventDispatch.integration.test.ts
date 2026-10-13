@@ -66,6 +66,12 @@ export function register(ctx) {
   ctx.on('turn.complete', (e, next) => { note('turn.complete'); return next(e) })
   ctx.on('session.end', (e, next) => { note('session.end'); return next(e) })
 
+  // 本轮补的接线:turn.start(query.ts)与 prompt.mention(attachments.ts)。
+  // 两者此前在 vendor 侧连 import 都没有 —— 声明为可用却零派发点,mod 订阅了
+  // 也永远收不到。这里断言的是「这两个事件面 mod 能真的订阅并命中」。
+  ctx.on('turn.start', (e, next) => { note('turn.start', String(e.text ?? '')); return next(e) })
+  ctx.on('prompt.mention', (e, next) => { note('prompt.mention', String(e.path ?? '')); return next(e) })
+
   // 上游契约形态:handler 是 (\$: EngineInterface, e, next),三个参数,\$ 在
   // 最前(MatchedHook d.ts:5758)。按 opencc 自己的 (e, next) 形态调用它,
   // \$ 就是那个事件,下面读 \$.plugin 会拿到 undefined —— handler 抛错、
@@ -288,5 +294,47 @@ describe('mods 事件接线 — 端到端', () => {
 
     clearSessionModGate('s-hidden')
     clearSessionModGate('s-shown')
+  })
+
+  it('本轮补的接线:turn.start 与 prompt.mention 可订阅、可命中,载荷可读', async () => {
+    // 反向探针的判据:如果 vendor 侧这两个事件没有订阅登记,下面第一组
+    // expect 会直接红 —— 不是「恰好没调用所以没断言」。
+    const { loadMods } = await import('../../src/opencc-src/mods/hooks.js')
+    const { dispatchModEngine, hasModHandlersFor } = await import(
+      '../../src/opencc-src/mods/dispatch.js'
+    )
+
+    await loadMods()
+    expect(hasModHandlersFor('turn.start'), 'turn.start 应该有订阅者').toBe(true)
+    expect(hasModHandlersFor('prompt.mention'), 'prompt.mention 应该有订阅者').toBe(
+      true,
+    )
+
+    const hits = () => (globalThis as Record<string, Record<string, unknown>>)[HITS]
+
+    // query.ts 派发的就是这一对载荷:text 取最后一条非 isMeta 的 user 消息,
+    // turnId 由 core 兜底回填。
+    await dispatchModEngine<{ turnId: string }>(
+      'turn.start',
+      { text: '这一轮要做的事', turnId: 'mod-turn-1' },
+      e => ({
+        turnId:
+          typeof e.turnId === 'string' && e.turnId !== '' ? e.turnId : 'mod-turn-1',
+      }),
+    )
+    expect(hits()['turn.start']).toBe(1)
+    expect(hits()['turn.start:last']).toBe('这一轮要做的事')
+
+    // attachments.ts 派发的是 { path },并按 core 回调返回的 allow 决定这个
+    // 路径还折不继续。默认路径放行 —— core 答 allow:true 时结果必须原样通过,
+    // 否则等于把每一次 @ 提及都静默吞掉。
+    const allowed = await dispatchModEngine<{ allow: boolean }>(
+      'prompt.mention',
+      { path: 'src/index.ts' },
+      e => ({ allow: e.allow !== false }),
+    )
+    expect(allowed.allow).toBe(true)
+    expect(hits()['prompt.mention']).toBe(1)
+    expect(hits()['prompt.mention:last']).toBe('src/index.ts')
   })
 })

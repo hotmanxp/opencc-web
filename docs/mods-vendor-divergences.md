@@ -66,6 +66,44 @@ user config,`isModExplicitlyEnabled` 读的是 `getSettings_DEPRECATED()`
 > **读写的存储必须先验过往返**。`~/.zai.json` 里 `demo-mod@mods` /
 > `modctl@builtin` 两个真实键就是证据 —— 它们只存在于 user config。
 
+### 第四批(2026-10-13,派发点补漏)
+
+前三批搬的是 `mods/` 目录本体。第四批是一次**事后审计**发现的补漏:
+`mods/` 内的导出符号面已经与上游对齐,但**非 mods 文件里的派发点**漏了四处,
+结果是这四个事件在 `MOD_ENGINE_EVENTS` / `MOD_OP_EVENTS` 里声明为可用、
+实际零派发 —— 正是本文件 §二警告的第三种状态「注册成功但永不触发」。
+
+| 事件 | 漏在哪 | 症状 |
+|---|---|---|
+| `turn.start` | `query.ts` —— 该文件**一个 mods import 都没有**,整份 mods 接线全缺 | mod 最常用的时机 hook 永不触发;`$.turn.abort` 也拿不到控制器 |
+| `prompt.mention` | `utils/attachments.ts` | mod 无法 DENY 一个 `@` 提及路径 |
+| `tool.describe` | `services/api/claude.ts` 缺 `resolveToolDescriptions` 调用点 | `mods/toolDescribe.ts` 本身已同步,但改写工具描述**永远不生效** |
+| `session.usage` / `session.messages` | `query.ts` 缺每轮刷新门禁 | 事件本身由 `nouns.ts` 派发(可用),但 mod 读到的是**上一轮**数据 |
+
+补 `tool.describe` 时还牵出一处更深的漏同步:`utils/api.ts` 的
+`toolToAPISchema` 签名缺 `description?: string` —— 上游把它作为**入参**传入
+(`options.description ?? await tool.prompt(...)`),因为 `tool.description` 对内置
+工具是 undefined,模型实际看到的文本必须就是 mod 改写后的那份。只补 `claude.ts`
+不改 `api.ts` 会静默无效。
+
+**审计方法**(比 §二 那条更省事,推荐作为下轮同步的固定动作):
+
+```bash
+# 上游含 mods 派发标记的文件(排除 src/mods/ 与测试)
+grep -rln "dispatchMod\|hasModHandlersFor\|runModChain" src/ \
+  --include='*.ts' --include='*.tsx' | grep -v '^src/mods/' | grep -v test
+# 逐文件比对两边「含标记的代码行集合」,取只在上游出现的行
+```
+
+⚠️ **pattern 必须精确**。用 `Mod` / `getMod\w*` 之类宽泛的词会命中
+`Model` / `Modal` / `Mode`,`query.ts` 会被算成「有 49 处 mods 代码」而实际
+一个都没有 —— 正是这次差点漏判的原因。只用
+`dispatchMod\w*|hasModHandlersFor|runModChain|MOD_RENDER_EVENT|subscribeModPanes`。
+
+**排除掉走 `HOST_EVENT_BRIDGE` 的**:`dispatch.ts` 的桥接表只有
+`tool.call` / `session.start` / `session.end` / `turn.complete` 四个,
+它们没有字面量调用点;其余事件必须靠调用点,调用点缺失即死事件。
+
 ## 二、事件面
 
 上游声明 **109 个点号事件**(`MOD_ENGINE_EVENTS` + `MOD_OP_EVENTS`),
@@ -115,6 +153,9 @@ mod 以为改写生效了,实际什么都没发生。故按 `protocol.ts` 自己
   结果是零改动(实测 14 个文件全是 no-op)。
 - 实际做法:**只搬含 mods 关键字的 hunk**,逐文件 `patch` 上去。含
   `mods/dispatch` / `dispatchMod*` / `hasModHandlersFor` / `MOD_EVENTS` 等标记。
+- ⚠️ **`patch` 失败是静默的** —— hunk 上下文对不上时它只报 rejects,不报错,
+  于是 `query.ts` 整份文件一个 hunk 都没搬成,看起来却像「搬过了」。
+  搬完必须用 §一 第四批那条审计命令逐文件复核,**不要靠「我 patch 过」**。
 - 副作用:某些**配套的非 mods hunk** 因此没被带过来,需要在原地补。已补的:
   - `attribution.ts`:上游把原函数改名 `computeAttributionTexts` 并降为模块私有,
     上面再加一层导出的 `getAttributionTexts` 走派发。改名 hunk 不含 mods 关键字,
@@ -136,28 +177,34 @@ mod 以为改写生效了,实际什么都没发生。故按 `protocol.ts` 自己
 ### 待拒清单(声明了但 vendor 侧无派发点)
 
 这些事件在 `MOD_EVENTS` 里,但 zai 侧没有 dispatch 点。按协议自己的规矩它们
-应当进 `UNAVAILABLE_EVENTS`;本轮**没有**自动加,因为逐条确认「确实没接」
-需要一次完整的事件审计(方法见下),猜着加会把已接线的事件误拒:
+应当进 `UNAVAILABLE_EVENTS`。**这份清单已被 `test/unit/mods-deadEvents.test.ts`
+取代** —— 那条测试每个 run 都重算一遍,并给每条钉上理由。
+
+2026-10-13 实测后仍无派发点的(13 条):
 
 ```
-prompt.read  prompt.fill  prompt.suggest  prompt.edit
-prompt.mention  prompt.compose
+prompt.suggest  prompt.edit  prompt.compose
 ui.open  ui.close  ui.panes  ui.invalidate  ui.selection
 ui.resolve  ui.scroll  ui.focus  ui.copy  ui.notify
-process.spawn
 ```
 
-**审计方法**(别用 grep 事件名的笨办法 —— `HOST_EVENT_BRIDGE` 的键是带引号的
-属性,不匹配 `dispatchMod*(` 的裸调用式样,会误判):
+分成三类:`prompt.*` 三条是 TUI 或 prompt-cache 边界;`ui.open`/`close`/`panes`/
+`invalidate`/`selection` 五条随 pane 系统整体删除;`ui.resolve`/`scroll`/`focus`/
+`copy` 与 `ui.notify` 依赖 `mods/ui/` 元素树或终端通知面。
 
-1. 先扣掉 `UNAVAILABLE_EVENTS` 里已拒的;
-2. 再扣掉 `dispatch.ts` 的 `HOST_EVENT_BRIDGE`(`tool.call` / `session.start` /
-   `session.end` / `turn.complete` 走宿主 hook 桥接,没有字面量调用点);
-3. 剩下才是真死事件;
-4. **判定脚本必须剥掉注释再匹配** —— 名字出现在散文里不等于有 dispatch 点。
+⚠️ 旧版本这里列的 17 条里有 **4 条是错的**,它们其实早就接上了 ——
+`prompt.read`、`prompt.fill`、`process.spawn` 派发在 `mods/nouns.ts`,
+`prompt.mention` 是第四批补上的。错因值得记住:**grep 事件名时要求
+`dispatchMod` 与事件名同一行会漏判**,`mods/nouns.ts` 里那几处全是跨行写法:
 
-上游的 `mods/declaredButDead.test.ts` 就是这个审计的固化版,值得照搬一份
-到 `test/unit/`(它现在跑不到,因为 vitest exclude 了 `src/opencc-src/**`)。
+```js
+spawn: async args =>
+  dispatchModStream<ModProcessSpawnChunk, ModProcessSpawnResult>(
+    'process.spawn',        // ← 上一行是 dispatchMod*,这一行才是事件名
+```
+
+同理,判定脚本若不剥注释,名字出现在散文里会被当成派发点。
+
 
 ---
 
@@ -288,11 +335,21 @@ dependency」)、`getPowerShellTool`(lazy + gate)、各 `false ?` 死分支。
 - `$.env` 无任何过滤:任意 mod 可读 `ANTHROPIC_API_KEY` 及任何环境变量,
   `env.set` 还能写宿主进程环境。同一份代码里 `tool.check` 严守「插件只能
   收紧」,两种安全标准并存。改信任模型应单独一个 PR(详见 gaps §一)。
+- **`turn.complete` 不带 `turnId`**(2026-10-13 实测,上游同款)。`query.ts` 搬来的
+  `turn.start` 会 mint 一个 `modTurnId` 并 `openModTurn` 登记,上游注释也写着
+  「the id it mints is what `turn.complete` carries」—— 但 `turn.complete` 走
+  `HOST_EVENT_BRIDGE` 的 `Stop` 宿主 hook,载荷来自那个 hook,实测只有
+  `stop_reason` / `reason`,**没有 `turnId`**(对照 `mods/builtin/modctl.ts:212`
+  就只读这两个字段)。后果:mod 拿 `turn.start` 的 `turnId` 无法与
+  `turn.complete` 对齐,只能靠自己的时序记账。`$.turn.abort` 那侧是通的
+  (`openModTurn` 登记了控制器)。这是上游自身的注释与实现脱节,不是 zai 漏搬;
+  要修得改上游或另立一个 `turn.end` 事件,不要在 vendor 侧私自给
+  `turn.complete` 塞字段 —— 那会让 zai 的事件载荷与上游不一致。
 
 ## 六、验证到什么程度
 
-- `pnpm --filter @zn-ai/zn-agent-core test` 全绿(1338 项 / 182 文件,含
-  mods 端到端接线用例)。
+- `pnpm --filter @zn-ai/zn-agent-core test` 全绿(1345 项 / 183 文件,含
+  mods 端到端接线用例与死事件审计)。
 - `npm run typecheck`(vendor + contract-tests + consumer + server d.ts
   self-contained)四段全绿。
 - `npm run build` 全绿,且 `node -e "import('./dist/opencc-core.mjs')"`
@@ -306,6 +363,30 @@ dependency」)、`getPowerShellTool`(lazy + gate)、各 `false ?` 死分支。
   `isModExplicitlyEnabled` 的默认值退回 `!== false`、`toDto` 退回 `?? true`
   —— 四处改坏分别让对应测试文件变红(1 / 2 / 2 / 2 项)。绿灯对应着的是真实
   行为,不是恒真断言。
+
+### 第四批新增的两条防线(2026-10-13)
+
+- **`test/unit/mods-deadEvents.test.ts`** —— 把上面「待拒清单」的重算固化成
+  测试:声明可用的事件,扣掉按名拒斥与 `HOST_EVENT_BRIDGE`,剩下的必须有
+  字面量派发点。它自带三向探针:已知能派发的必须扫得到(`turn.start`
+  `prompt.mention` `tool.describe` `turn.step`)、白名单里的必须扫不到、
+  桥接事件必须**没有**字面量调用点(否则同一事件两个入口)。
+  - 反向探针实测:删掉 `query.ts` 的 `turn.start` 整块(17 行)→ 主审计与探针
+    **同时变红**,报「声明为可用却没有任何派发路径: turn.start」。
+  - 它写这条时自己抓出了作者的一个错误结论:`prompt.read` / `process.spawn`
+    曾被误列进「上游也没接」的白名单,实际两边都有派发 —— 白名单反向校验
+    (「这些事件已经能派发了,应从清单移除」)当场变红拦下。
+- **集成测试补了 `turn.start` / `prompt.mention` 两个订阅与一条用例**(6→7 条)。
+
+### 这两条防线抓不到什么
+
+写下来是为了不让后人把绿灯读得太宽:
+
+- `mods-deadEvents` 抓**整块缺失**,抓不到**调用点被改坏**。把
+  `hasModHandlersFor('turn.start')` 短路成 `false`,字面量还在,测试全绿。
+- 集成测试抓**派发层**,抓不到**接线点**。同样短路 `query.ts` 的门禁,那
+  7 条用例同样全绿 —— `query.ts` 的主循环无法在单测里驱动。
+- 两层都绿**不等于**接线正确,只等于「没发现明显问题」。
 - **未做**:真实 Web UI 会话里的 smoke(需要一个能跑 turn 的模型配置)。
-  上面那条集成用例覆盖的是「事件真的派发到 mod」,不等于「一整轮对话里
-  每个派发点都接对了」。
+  上面那两条覆盖的是「事件能派发到 mod」与「派发点在源码里」,不等于
+  「一整轮对话里每个派发点都接对了」。
