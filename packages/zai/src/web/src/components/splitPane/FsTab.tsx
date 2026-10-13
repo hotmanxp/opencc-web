@@ -16,7 +16,7 @@ import { DocumentPreview } from '../documentPreview/index.js';
 import { useAgentStore } from '../../store/useAgentStore.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
-import { FsContextMenu, FsCreateDialog } from './FsContextMenu.js';
+import { FsContextMenu, FsCreateDialog, parentDirOf } from './FsContextMenu.js';
 import { useFsWrite } from './useFsWrite.js';
 import { useCodeThemeMode } from '../../hooks/useCodeThemeMode.js';
 import { LazyMonacoCodeView, type MonacoCodeViewApi } from './MonacoCodeView.js';
@@ -540,6 +540,14 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   // 新建弹窗的目标。**必须活在 FsTab**,不能放在 FsContextMenu 里 ——
   // 菜单关闭时那个组件被整体卸载,state 跟着消失,弹窗永不渲染。
   const [createTarget, setCreateTarget] = useState<{ type: 'file' | 'dir'; dir: string } | null>(null);
+  // 树里最后点击的目录(相对 cwd;'' = 项目根,null = 还没点过)。
+  // 工具栏「新建」按它建,而不是永远建在项目根 —— 点开 examples 再新建,
+  // 就该落在 examples/ 而不是根目录。点文件则记它的父目录(同右键菜单口径)。
+  // 仅在切换 cwd 时重置(见下面的 reset effect):刷新 / 展开折叠不该把用户
+  // 的落脚点打回根目录。
+  const [lastPickedDir, setLastPickedDir] = useState<string | null>(null);
+  // 工具栏「新建」的实际目标目录:没点过任何节点才回退项目根。
+  const createBaseDir = lastPickedDir ?? '';
   // Search-mode toggle. When non-empty after trim, the left pane renders
   // <FsSearchList> instead of the directory tree. Right-side preview
   // (selected/file) is unchanged — search results reuse setSelected().
@@ -759,6 +767,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setEditSha256(null);
     setSaveError(null);
     setViewMode('preview');
+    // 「新建」落脚点是相对**旧** cwd 的路径,换项目后不再有效。
+    setLastPickedDir(null);
     initialContentRef.current = '';
     lastSavedContentRef.current = '';
   }, [cwd]);
@@ -944,12 +954,12 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       trigger={['click']}
       menu={{
         items: [
-          { key: 'file', label: '新建文件', 'data-testid': 'fs-create-menu-file', onClick: () => setCreateTarget({ type: 'file', dir: '' }) },
-          { key: 'dir', label: '新建文件夹', 'data-testid': 'fs-create-menu-dir', onClick: () => setCreateTarget({ type: 'dir', dir: '' }) },
+          { key: 'file', label: '新建文件', 'data-testid': 'fs-create-menu-file', onClick: () => setCreateTarget({ type: 'file', dir: createBaseDir }) },
+          { key: 'dir', label: '新建文件夹', 'data-testid': 'fs-create-menu-dir', onClick: () => setCreateTarget({ type: 'dir', dir: createBaseDir }) },
         ],
       }}
     >
-      <Button size="small" icon={<FilePlusIcon />} title="在项目根目录新建" data-testid="fs-create-btn">
+      <Button size="small" icon={<FilePlusIcon />} title={`在 ${createBaseDir || '项目根目录'} 新建`} data-testid="fs-create-btn">
         新建
       </Button>
     </Dropdown>
@@ -1197,6 +1207,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                   // adding an unloaded dir to expandedKeys triggers loadData
                   // since renderTree leaves `children` undefined until loaded.
                   const key = String(info.node.key);
+                  // 记住落脚点,工具栏「新建」据此建(点文件→它的父目录)。
+                  setLastPickedDir(parentDirOf(key, info.node.isLeaf ? 'file' : 'dir'));
                   if (info.node.isLeaf) {
                     openFile(key);
                   } else {

@@ -23,27 +23,45 @@
  *
  * 语义对得上:SessionStart hook 的产出按定义就是「会话启动时给模型看的上下文」,
  * 每次 API call 前注入正是它该去的地方。
+ *
+ * 按 sessionId 分开存:provider 是进程级注册的,但它每次调用都会拿到当前
+ * sessionId,查询也必须按 sessionId 命中 —— 否则先启动的会话会把上下文泄漏给
+ * 后启动的会话。
  */
-
-/** 本进程最后一次 SessionStart hook 产出的附加上下文(去重后的快照)。 */
-let sessionStartContexts: string[] = []
 
 /**
- * 记下 SessionStart hook 的产出,供 pre-API-call reminder provider 注入。
+ * 各会话 SessionStart hook 产出的附加上下文(去重后的快照),按 sessionId 存。
  *
- * 用「替换」而非「累加」:这是最后一次派发的结果,重复调用应覆盖,否则每次
+ * 必须按会话分开存:provider 每次 LLM API call 前都会按当前 sessionId 取值,
+ * 用进程级单例会让 A 会话启动时产出的上下文被注入到 B 会话的每一次调用里。
+ */
+const sessionStartContexts = new Map<string, readonly string[]>()
+
+/**
+ * 记下某个会话 SessionStart hook 的产出,供 pre-API-call reminder provider 注入。
+ *
+ * 用「替换」而非「累加」:这是该会话最后一次派发的结果,重复调用应覆盖,否则每次
  * reload 都会往里堆一份同样的内容。
  */
-export function setSessionStartContexts(contexts: string[]): void {
-  sessionStartContexts = [...new Set(contexts.filter(c => typeof c === 'string' && c.trim() !== ''))]
+export function setSessionStartContexts(sessionId: string, contexts: string[]): void {
+  sessionStartContexts.set(
+    sessionId,
+    [...new Set(contexts.filter(c => typeof c === 'string' && c.trim() !== ''))],
+  )
 }
 
-/** 读回当前上下文。返回副本,外部改动不污染模块级状态。 */
-export function getSessionStartContexts(): readonly string[] {
-  // 必须拷贝:`sessionStartContexts` 是进程级单例,provider 每次 API call 前
-  // 都会读它,若把内部数组直接交出去,任何调用方的 push/splice 都会永久改掉
-  // 后续所有会话注入的内容。
-  return [...sessionStartContexts]
+/** 读回某个会话的上下文。返回副本,外部改动不污染模块级状态。 */
+export function getSessionStartContexts(sessionId: string): readonly string[] {
+  // 必须拷贝:provider 每次 API call 前都会读它,若把内部数组直接交出去,任何
+  // 调用方的 push/splice 都会永久改掉后续所有会话注入的内容。
+  return [...(sessionStartContexts.get(sessionId) ?? [])]
+}
+
+/**
+ * 丢弃某个会话的上下文。会话删除时必须调用,否则 Map 随会话数单调增长。
+ */
+export function clearSessionStartContexts(sessionId: string): void {
+  sessionStartContexts.delete(sessionId)
 }
 
 /**
@@ -74,5 +92,5 @@ export function extractAdditionalContexts(
 
 /** 清空存储。For tests only. */
 export function __resetSessionStartContextsForTesting(): void {
-  sessionStartContexts = []
+  sessionStartContexts.clear()
 }

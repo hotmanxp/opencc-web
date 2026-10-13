@@ -1191,3 +1191,67 @@ describe('AgentInputBox — 桌面附件自动附带', () => {
     })
   })
 })
+
+// 压缩过程中禁止继续对话 (2026-10-12)。
+//
+// 压缩会重写 transcript 边界(旧消息被摘要替换),期间提交的 prompt 会落在
+// 错误的锚点上。三个入口都要拦: 发送按钮 disabled、Enter 的 canSubmit、
+// handleSend 的兜底 early-return —— 这里覆盖前两个,第三个由「Enter 也不发」
+// 间接证明(canSubmit 已 false 时根本走不到 handleSend)。
+describe('AgentInputBox — 压缩期间禁用发送', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset()
+    useAgentStore.setState({
+      status: 'idle',
+      compacting: false,
+      queuedPrompts: [],
+      messages: [],
+      sendSeq: 0,
+    })
+  })
+
+  test('compacting=false: 有输入时发送按钮可点', async () => {
+    render(<AgentInputBox />)
+    setDraftText(editorRoot(), '压缩前发的消息')
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-input-send-button')).not.toBeDisabled(),
+    )
+  })
+
+  test('compacting=true: 发送按钮 disabled', async () => {
+    useAgentStore.setState({ compacting: true })
+    render(<AgentInputBox />)
+    setDraftText(editorRoot(), '压缩期间的消息')
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-input-send-button')).toBeDisabled(),
+    )
+  })
+
+  test('compacting=true: Enter 也不发送 (canSubmit 经 handlersRef 取最新值)', async () => {
+    useAgentStore.setState({ compacting: true })
+    render(<AgentInputBox />)
+    const ed = editorRoot()
+    setDraftText(ed, '按回车也不该发')
+    pressEditorKey(ed, 'Enter')
+    // 让 keymap 的异步回调跑完
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(vi.mocked(api.post)).not.toHaveBeenCalled()
+  })
+
+  test('compacting 结束后按钮恢复可点', async () => {
+    useAgentStore.setState({ compacting: true })
+    render(<AgentInputBox />)
+    setDraftText(editorRoot(), '恢复后能发')
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-input-send-button')).toBeDisabled(),
+    )
+    act(() => {
+      useAgentStore.setState({ compacting: false })
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-input-send-button')).not.toBeDisabled(),
+    )
+  })
+})

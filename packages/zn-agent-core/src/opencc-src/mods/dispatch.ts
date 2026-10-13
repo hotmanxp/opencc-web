@@ -290,17 +290,22 @@ export async function runModChain(
     }
     try {
       const budgeted = await withBudget((hookSignal) => {
-        // Unlinked in `finally`: `{ once: true }` only fires if the signal
-        // aborts, and a hook that finishes in time leaves both listeners
-        // attached. On a session-scoped outer signal that is one pair per hook
-        // per dispatch, for the life of the session — upstream unlinks
-        // explicitly (bundle @3803457: `finally { g?.() }`).
+        // Unlinked on the handler's PROMISE, not on the synchronous call:
+        // `invokeModHandler` suspends at its first `await`, so a
+        // `try/finally` wrapped around the CALL ran at t=0 and detached both
+        // listeners before the hook had done anything. The budget's abort then
+        // never reached `withAbort`, leaving a timed-out hook free to call
+        // `next()` and drive the shared `index` cursor a second time, against
+        // the skip-path chain — which ran the core tier twice for one event.
+        // Upstream unlinks explicitly too (bundle @3803457: `finally { g?.() }`)
+        // — but against the awaited hook, which is the whole difference.
         const unlink = linkSignals(signal, hookSignal)
-        try {
-          return invokeModHandler(modName, handler, current, withAbort(next, unlink.signal))
-        } finally {
-          unlink.dispose()
-        }
+        return invokeModHandler(
+          modName,
+          handler,
+          current,
+          withAbort(next, unlink.signal),
+        ).finally(() => unlink.dispose())
       })
       if (budgeted.timedOut) {
         logForDebugging(

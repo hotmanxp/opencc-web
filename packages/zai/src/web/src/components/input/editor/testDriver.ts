@@ -131,9 +131,17 @@ export function setCaretAt(el: HTMLElement, offset: number): void {
 
 /**
  * 查找承载激活 token 高亮的文本片段(行内样式 `--cmd-token-color`)。
- * @param container - 搜索范围,通常传 render 的 container。
+ *
+ * 必须限定在编辑器根内搜:发送按钮的内联样式也引用同一个 CSS 变量
+ * (`background: var(--cmd-token-color)`,见 AgentInputBox 的发送按钮),
+ * 搜整个 document 会稳定误命中按钮 —— 既让「不渲染 token-mark」那几条
+ * 断言永远为假,也让「渲染了 token-mark」那条拿到按钮而不是 token 本身。
+ * @param container - 搜索范围,通常传 render 的 container 或 document.body。
  * @returns 命中的元素,没有则 null。
  */
 export function tokenMarkOf(container: HTMLElement): HTMLElement | null {
-  return container.querySelector<HTMLElement>('[style*="--cmd-token-color"]');
+  const scope = container.matches('[data-testid="agent-input-editor"]')
+    ? container
+    : (container.querySelector<HTMLElement>('[data-testid="agent-input-editor"]') ?? container);
+  return scope.querySelector<HTMLElement>('[style*="color: var(--cmd-token-color)"]');
 }

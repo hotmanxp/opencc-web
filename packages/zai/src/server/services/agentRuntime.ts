@@ -187,8 +187,11 @@ inboxReminderProviderRegistered = true
 // SessionStart 的产出按定义就是「会话启动时给模型看的上下文」,每次调用前注入
 // 正是它该去的位置;hook 自己产出的 message 属于 REPL 的消息流,headless 侧没有
 // 对应位置,故只取 hook_additional_context 一类(见 sessionStartBridge.ts)。
-registerExtraReminderProvider(() => {
-  const contexts = getSessionStartContexts()
+//
+// 必须按 sid 取:provider 是进程级注册的,不分会话的话先启动的会话会把上下文
+// 泄漏给后启动的会话(与上面 drainInboxReminder(sid) 同一纪律)。
+registerExtraReminderProvider((sid: string) => {
+  const contexts = getSessionStartContexts(sid)
   if (contexts.length === 0) return null
   return contexts.join('\n')
 })

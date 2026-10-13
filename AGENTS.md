@@ -13,174 +13,97 @@
 | zai 前端 | React + Zustand + AntD + Vite | 18.3 / 4.5 / 5.22 / 8.1 |
 | zai 服务端 | Express + SSE | ^4.21 |
 | zn-agent-core vendor | opencc 0.20.0(Bun 兼容(un-stripped)) | — |
-| 测试 | Vitest | ^5.0.3(两个包已统一;vitest 5 起 `vite` 是必需 peer dep) |
+| 测试 | Vitest | ^5.0.3(vitest 5 起 `vite` 是必需 peer dep) |
 
-> 两个 workspace 包当前均为 `0.12.0`(`@zn-ai/zai` / `@zn-ai/zn-agent-core`,版本号同步 bump)。
+> 两个 workspace 包版本号同步 bump,当前均为 `0.13.4`(`@zn-ai/zai` / `@zn-ai/zn-agent-core`)。
 
 ## 目录
 
 | 目录 | 职责 |
 |------|------|
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
-| `packages/zn-agent-core/` | `src/compat/`(verbatim 移植的 zai 兼容垫片)+ `src/opencc-src/`(opencc 0.20.0 拷贝,Bun 兼容(un-stripped));`scripts/bundle-opencc.ts` 把 `src/bundle-entry.ts` 编成单一 `dist/opencc-core.mjs`(esbuild bundle)。**运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出**(2026-08-16 起废除全部 subpath);`dist/bundle-entry.d.ts` 由 `bundle-opencc.ts` 机械生成,与 bundle 同步 |
-| `docs/` | 设计/参考/操作指南;`docs/superpowers/specs/` 是各特性 spec,`docs/superpowers/plans/` 是实施计划 |
-| `examples/` `scripts/` | 示例 / 仓库脚本 |
+| `packages/zn-agent-core/` | `src/compat/`(zai 兼容垫片)+ `src/opencc-src/`(opencc 0.20.0 拷贝);`scripts/bundle-opencc.ts` 把 `src/bundle-entry.ts` 编成单一 `dist/opencc-core.mjs` |
+| `docs/` | `DEVELOPMENT_REFERENCE.md` 实现细节;`docs/superpowers/specs/` 各特性 spec,`docs/superpowers/plans/` 实施计划 |
+
+**运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出**(2026-08-16 起废除全部 subpath)。`dist/bundle-entry.d.ts` 由 `bundle-opencc.ts` 机械生成,与 bundle 同步。
 
 ## 本机数据目录 `~/.zai/`
 
-zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(根目录常量 `ZAI_DIR = join(homedir(), '.zai')`,见 `packages/zai/src/server/services/paths.ts:23`)。**plugin 元数据/缓存全部在此目录**;`~/.claude/plugins/` 只是历史遗留的 Claude Code 副本,迁移后不再改动。
+根目录常量 `ZAI_DIR = join(homedir(), '.zai')`(`packages/zai/src/server/services/paths.ts:23`)。**plugin 元数据/缓存全部在此目录**;`~/.claude/plugins/` 只是历史遗留副本,迁移后不再改动。
 
 | 路径 | 职责 |
 |------|------|
-| `~/.zai/plugins/` | **plugin 元数据 + 缓存根**。`installed_plugins.json`(V2 schema)在这里;实际 plugin 文件在 `cache/<marketplace>/<plugin>/<version>/`,`<version>/.in_use/` 空目录标记当前使用版本。**改 plugin 走这里**,不要回 `~/.claude/plugins/cache/`。 |
-| `~/.zai/projects/` | 项目级数据(per-cwd,按 cwd 路径分段命名) |
-| `~/.zai/agents/` `~/.zai/skills/` | 用户级 agent/skill 定义(zai CLI 的 `agents`/`skills` 子命令来源;`ZAI_SKILLS_DIRS=''` 显式禁用) |
-| `~/.zai/settings.json` | 用户级 zai 设置(全局);**项目级** 走 `<cwd>/.zai/settings.json`,不要混 |
-| `~/.zai/tasks/` | 任务定义持久化 |
-| `~/.zai/plans/` | plan 文件持久化 |
-| `~/.zai/weixin/` | 微信机器人子系统:`accounts/`(QR 凭据)、`locks/`、`sync/`、`context-tokens/`、`media/`、`sessions.json`(conversationKey → sessionId)、`pairings.json`、`owner.json`、`inbox-pending/`(崩溃重放)、`memory/<hash>/`(会话记忆,见 `services/weixinBot/weixinMemory.ts`) |
+| `~/.zai/plugins/` | **plugin 元数据 + 缓存根**。`installed_plugins.json`(V2 schema);plugin 文件在 `cache/<marketplace>/<plugin>/<version>/`,`<version>/.in_use/` 标记当前使用版本 |
+| `~/.zai/projects/` | 项目级数据(per-cwd) |
+| `~/.zai/agents/` `~/.zai/skills/` | 用户级 agent/skill 定义(`agents`/`skills` 子命令来源) |
+| `~/.zai/settings.json` | 用户级设置;**项目级**走 `<cwd>/.zai/settings.json`,不要混 |
+| `~/.zai/tasks/` `~/.zai/plans/` | 任务定义 / plan 持久化 |
+| `~/.zai/weixin/` | 微信子系统(`accounts/` `locks/` `sync/` `context-tokens/` `media/` `sessions.json` 等),详见 `DEVELOPMENT_REFERENCE.md` §15 |
 
 **关键陷阱**:
-- **plugin 改文件走 `~/.zai/plugins/cache/claude-plugins-official/<name>/<version>/`**,不要去 `~/.claude/plugins/cache/`(迁移后 zai 不读)。
-- **LSP/MCP 类 plugin**(typescript-lsp / pyright-lsp / context7 / chrome-devtools-mcp / ralph-loop / code-review)在 `~/.zai/plugins/cache/` 下有缓存但 zai 的 `/api/plugins` 不返回——要么缺 `.claude-plugin/plugin.json`、要么走 LSP/MCP 路径被静默排除。
-- **`~/.zai/zn-assets/`** 是 `paths.ts:7-17` 注释里描述的预期 layout,当前未部署,实际 `@zn-ai/plugin` 资源走 `~/.agents/skills`(见 `agentRuntime.ts:557` 注释「默认走 `~/.agents/skills`」)。
+- **改 plugin 走 `~/.zai/plugins/cache/claude-plugins-official/<name>/<version>/`**,不要回 `~/.claude/plugins/cache/`。
+- **LSP/MCP 类 plugin**(typescript-lsp / pyright-lsp / context7 / chrome-devtools-mcp / ralph-loop / code-review)有缓存但 `/api/plugins` 不返回 —— 要么缺 `.claude-plugin/plugin.json`,要么走 LSP/MCP 路径被静默排除。
+- `~/.zai/zn-assets/` 是注释里描述的预期 layout,**当前未部署**;实际 `@zn-ai/plugin` 资源走 `~/.agents/skills`。
 
 ## 强制开发规则
 
-- **系统提示词一律用英文**:所有写入代码的系统提示词(system prompt)——包括 Agent 定义描述(description/systemPrompt)、subagent 提示词、工具描述、LLM 指令模板——**必须用英文编写,禁止直接写中文**。用户可见的 UI 文案走 i18n,不受此限。**Why:** 提示词是发给模型的,英文指令遵循度与跨模型稳定性更好,且避免编码/ tokenizer 问题。**How to apply:** 新增/修改任何 prompt 字符串(Agent 描述、`prompt:` 字段、skill/agent frontmatter description、vendor 内的提示词补丁)时检查一遍。
-- **真实浏览器验收(非必须,先询问)**:问题修复或特性新增完成前,**询问用户**是否要启动 ego-browser 真实浏览器验证(走完用户路径:页面加载、按钮点击、表单提交、截图等);用户确认后再用 `/ego-browser` skill 执行,不再作为强制完成门禁。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。**ego-browser 在 zai dev 跑着时(SSE 长连接)实际可用**——通过 `browser-operator` skill 调真实浏览器(ego-browser)即可。早期 `feedback-ego-browser-sse-blocked` memory 已过时,不要因为旧经验跳过视觉验证。
-- **API 端点索引**(集中挂载在 `packages/zai/src/server/index.ts` 的 `app.use` 区段,约 232-303 行;全部经 `app.use('/api', <router>)` 前缀,子路径看各 `routes/*.ts` 内部声明):
-  - **对话与运行时**:`/api/agent/*`(sessions / sessions/:id/state / prompt / sessions/:id/model / sessions/:id/mode / answer 等)、`/api/agent/settings`(`routes/agentSettings.ts`:work-mode / output-style / theme / auto-update / main-agent / computer-use + `GET /agent/computer-use/status`)、`/api/agent/approve*`(`routes/approve.ts`:`/approve`、`/approve/reject`、`/approve/file`)、`/api/agent/permission-response`(`routes/permission.ts`)、`/api/agent/sessions/archive`(`routes/sessionArchive.ts`)、`/api/session-state`、`/api/slash`、`/api/transcript/*`、`/api/voice/getASRToken`
-  - **终端与执行**:`/api/terminal/*`(`/terminal/environment`、`/terminal/shells`、`/terminal/list`、`/terminal/create`、`/terminal/:id/{events(SSE),write,resize,rename,close}` —— 分屏 Bash 面板的持久 PTY 终端(node-pty + xterm.js,多 tab),详见 `routes/terminal.ts` 与 `docs/superpowers/specs/2026-09-22-zai-pty-terminal-design.md`)、`/api/bash-tasks`、`/api/bash-repl`、`/api/repl-history`、`/api/exec`(GET+POST,带 cwd 透传)、`/api/git`
-  - **文件与资源**:`/api/fs/*`(`routes/fs.ts`:`/fs/list`、`/fs/file`(GET 读 + PUT 写)、`/fs/upload`、`/fs/search`、`/fs/content-search`)、`/api/fs/picker`(`routes/fsPicker.ts`)、`/api/desktop/fs/*`、`/api/desktop/wallpaper/*`、`/api/resources`、`/api/dirs`、`/api/quickstart`
-  - **任务工厂**:`/api/super-tasks`(`routes/superTasks.ts`:`/super-tasks` 列表 + DELETE、`/super-tasks/settings`(GET+PUT)、`/super-tasks/spawn-agents`、`/super-tasks/spawn-agents/:name/register`、`/super-tasks/:id`、`/super-tasks/:id/intake-check`)、`/api/tasks`、`/api/v2-tasks`
-  - **实例与子进程**:`/api/instances`、`/api/internal/*`(`routes/internal/childEvent.ts` → `/internal/child-event`、`routes/internal/pushAction.ts` → `/internal/push-action`;**子实例 → 主实例的事件回传通道**)、`/api/system`(`/system/status`、`/system/restart`、`/system/restart/cancel`、`/system/stop`)、`/api/login`、`/api/config`
-  - **外部集成**:`/api/aa/*`(`routes/aa/{pairing,status,debug}.ts`,挂 `/api/aa`:`/pairing/{status,start,poll,cancel}`、`/config`、`/status`、`/debug/{discover,sessionmap}` —— **Agents-Anywhere 云端接入**的配对与状态通道。**AA 前端入口按 `--aa` 门控**(2026-09-30 起):`GET /api/system` 回 `aaEnabled: isAaEnabled()`,Layout / MobileLayout hydrate 进 `useAppStore.instanceContext.aaEnabled`,据此决定是否渲染 `/manage` 的「AA 桥」tab(未启用时 `?tab=aa` 回落「配置」)、`/instances` 每行的 AA 开关、以及 `AASettings` 页本身(未启用时返回 null,不再有「重启加 --aa」提示卡)。**门控语义是 fail-open**:老后端(`/api/system` 不回 aaEnabled 字段)与 undefined 同义,按启用处理 —— 滚动期不能让 AA 实例上的入口被误藏;只有显式 false 才藏。等所有 zai 实例都升级完、关闭旧版 dist 后,可以收紧回 `=== true`,相关注释在 `useAppStore.ts` / `Layout.tsx` / `MobileLayout.tsx` 里)、`/api/weixin/*`(`/status`、`/connect`、`/disconnect`、`/settings`、`/setup/*`、`/pairings/*`、`/owner/takeover`、`/send` 等,详见 `routes/weixin.ts`)、`/api/mcp/*`(`/mcp/status`、`/mcp/reconnect`)、`/api/plugins`
-  - **中间件**:`/proxy`(`reverseProxyMw`)、`/agent`(`redirectMobileUA`,按 UA 跳移动端)
-
-- **路由访问路径**:zai 提供多条顶层路径(`router.tsx`),验证时务必按目标切路由,不要靠缩窗口判断:
-  - **`/`** → 重定向到 `/agent`(标准实例)或 `/super-tasks`(任务工厂实例);由 `TaskFactoryRedirect` 根据 `instanceContext.app` 分流。
-  - **`/login`** → 登录页(`pages/Login.tsx`),顶层菜单入口(免进 tab)。
-  - **`/manage`** → 管理面板(`pages/Manage.tsx`),用 AntD Tabs 切换 `resources` / `config` / `dirs` / `tools` 四个 tab。老 URL `/tools` `/resources` `/config` `/dirs` 通过 `<Navigate>` 重定向到 `/manage?tab=<key>`,书签不丢。
-  - **`/agent`** → PC 端(`Layout.tsx` + `pages/Agent.tsx`(内含 `<AgentConversation>` 子组件),左侧 Sider + 右侧分屏 tab)。默认入口。task-factory 实例下 `<TaskFactoryAgentEntry>` 会重定向到 `/super-tasks`。
-  - **`/dashboard`** → 仪表盘(`pages/Dashboard.tsx`)。
-  - **`/instances`** → 实例管理(`pages/Instances.tsx`),受 `<InstanceRouteGuard>` 包裹——instance 子实例直接 URL 访问会被重定向到 `/agent`。
-  - **`/m`** → 移动端(`pages/MobileAgent.tsx`,整页重写为顶部 hamburger + 底部输入 + Drawer),走 `MobileLayout`(无 Sider,挂 visualViewport)。验证 mobile-only 功能(`MobileQuickDrawer` / `useBashRepl` 在 drawer 内的 toast 等)时务必切到这里。视口宽度 `< 768`(`useIsMobile.ts` `MOBILE_BREAKPOINT=768`)时 `Layout` 自身也会响应式收紧(隐藏 Sider、SplitPane 收起),但这跟 `/m` 是两条独立路径,**显式 mobile 路由不依赖视口宽度**。ego-browser 验证 mobile drawer 时直接访问 `/m`,无需 `Emulation.setDeviceMetricsOverride`。
-  - **`/m-super-tasks`** → 移动端任务工厂页(`pages/MobileSuperTasks.tsx`),与 `/m` 是两条独立顶层路径,不按 instance profile 分流——移动端由 lan-agent 卡片或直接 URL 显式进入。
-  - **`/desktop`** → PC 端办公桌面(`pages/Desktop.tsx` + `components/desktop/`,2026-08-26 起 draft)。**脱离 Layout**(无 Sider)、全屏沉浸式:壁纸 + Dock + 可拖拽浮窗(资源管理器 + Agent 对话),资源拖入 `AttachmentZone` 即作为 `@` 文件引用上下文。验证时直接访问 `/desktop`,**不走 `/agent`**。资源 API 走 `/api/desktop/fs/*`(`routes/desktopFs.ts`,挂在 `app.use('/api', ...)` 下)。
-  - **`/super-tasks`** → 任务工厂面板(`pages/SuperTasks.tsx`,2026-09-04 起),脱离 Layout 的顶层路由,与 `/desktop` 并列;`/`、`/agent`、通配 fallback 都在 task-factory 实例下落到这里。
-  - **`*`** → 通配 fallback:`TaskFactoryRedirect` 把未知路径分流到 `/super-tasks`(任务工厂)或 `/agent`(标准实例)。
-- **core 改动必须先 build:core**:`packages/zn-agent-core/` 改完后的修复或特性,ego-browser 验证前**必须**先 `pnpm run build:core`。zai 进程通过 `node_modules/@zn-ai/zn-agent-core/` 加载的内容里,`dist/opencc-core.mjs` 单一 bundle、`dist/bundle-entry.d.ts`(主入口 types,机械生成)、以及 `dist/opencc-src/server/*.d.ts` 等被 bundle-entry 引用的小段 d.ts 都是构建产物,改源不会自动生效;不重建就用 ego 验证会复现到旧 core 行为,误导排错。仅改 `packages/zai/src/web/`(纯前端)或只改 zai 服务端源码(无 core 依赖)时**不需要** build:core。
-- **Node-direct runtime(默认)**:`zai dev` 默认走 Node,入口为 `tsx --loader .../bun-protocol.mjs`,通过 loader 拦截 `bun:bundle` / `bun:feature`(漏掉会 `ERR_UNSUPPORTED_ESM_URL_SCHEME`)。保留 `dev:bun`(`bun run src/cli/index.ts dev`)作为可选快速运行方式。opencc vendor 是 un-stripped 全量,Node 冷启动加载较慢,属预期。
-- **opencc-src vs compat**:`src/opencc-src/` 是 opencc 上游拷贝,但**允许修改**(类型修复、zai 补丁——改后需 `build:core` 生效)。`src/compat/` 是 zai 专属别名载体。**zai 调用方统一从主入口 `@zn-ai/zn-agent-core` 取值**(2026-08-16 起全部 subpath 已废除);`src/bundle-entry.ts` 把 vendor 与 compat 符号聚合 re-export,主入口暴露 plugin DTO 等类型(`export type * from './opencc-src/server/index.js'`)与运行时。**禁止**用 tsc 整编 opencc-src(拖入 UI 传递依赖);`dist/opencc-src/server/*.d.ts` 由 `tsc -p tsconfig.server.json` 机械发射,由 `scripts/verify-server-types-self-contained.mjs` 守护 self-contained。
-- **vendor 终端 UI 已被就地 stub(2026-10-04)**:opencc 的 ink / React 终端 UI 在 zai 里从不渲染(无 DOM/TTY),`src/opencc-src/{commands,components,ink}/` 下 426 个 `.tsx` 的组件函数体已就地替换为 `return null`,累计净删约 7.4 万行。**读这些文件时不要再找 UI 逻辑**——它们只剩类型、常量、hooks 与签名。改动约束:
-  - **三条签名不变量**(改组件时必须守住,否则 tsc 立刻报):① `LocalJSXCommandCall` 返回 `Promise<ReactNode>`,非 async 的 `call`(如 `commands/doctor`)stub 必须是 `return Promise.resolve(null)` 而非 `return null`;② 带显式返回标注的组件(`React.ReactElement`)要把标注放宽成 `T | null`;③ **async 函数绝不能加 `| null`** —— 那会把契约从 `Promise<ReactNode>` 变成 `Promise<ReactNode> | null`,打挂 `commands/chrome` 的 index.ts
-  - **模块顶层 `React.createContext(...)` 不受组件 stub 保护**:这类调用发生在任何组件之外(见 `components/CtrlOToExpand.tsx`)。删掉 react import 后 **tsc 无感、build:core 绿、bundle 字节数不变**,只有真正 `import` bundle 才炸 `React is not defined` —— 改完务必 `node -e "import('./dist/opencc-core.mjs')"` 实测,别只看构建
-  - **保留死函数 / 常量是刻意的**:`extractCodeBlocks`、`CHROME_ROWS`、`MAX_VISIBLE_ITEMS` 等 408 个声明运行时同样死,但记录了组件原本做什么,恢复组件或读上游时要参考。只清了悬空 import 与无人引用的 type/interface(不留空壳 `import {  } from`)
-  - **构建期的 `uiComponentStubPlugin` / `inkRenderStubPlugin` 仍在跑**(`scripts/bundle-opencc.ts`),与源码 stub 有重叠。它们兜着未 stub 的文件与将来同步进来的新 UI,暂不摘
-  - **四个工具脚本可重跑**:`stub-ui-sources.ts`(组件体 stub,splice 模式只改字符区间)、`prune-unused-imports.ts`(删未使用 import,含 react 整文件 guard)、`drop-dead-types.ts`(删死 type/interface)、`scan-dead-code.ts`(只读审计)。**审计类脚本必须先用 `DEAD_PROBE` 之类的探针验证"能检出已知死代码"再用** —— 这批脚本开发中出现过两次反向 bug:只做文件内计数导致 1712 个假阳性,以及 URL 解析错误导致"0 个死代码"这种更危险的假阴性
-  - **清理是迭代收敛的**:类型互相引用、删类型会让 import 变未使用。要跑到两个脚本都报 0 才算收敛(实测 3 轮)
-  - **未纳入**:`screens/` `tasks/` `state/` `context/` `hooks/` `utils/` —— React 与 zai 真正调用的逻辑混装(AppState store、LocalAgentTask 生命周期),需逐文件判断
-- **CodeGraph 优先**:理解代码用 `codegraph_explore` 单调用,不要 grep + read 轮询;索引未初始化时跑 `codegraph init -i`。`codegraph_context` / `codegraph_trace` 当前 v1.4.1 不可用。
-- **端口使用(必查)**:启动 `zai dev` / `zai start` 或任何本地服务前,先 `lsof -i :<port>` 确认端口空闲再起。显式 `--port` / `--api-port` 被占用必须报错退出(EADDRINUSE,dev.ts/start.ts 已实现),**禁止**静默递增换端口——多个实例静默换端口共享同一 API key 是请求风暴根因(见 `docs/superpowers/plans/` 请求风暴修复)。只有未显式指定端口时才允许自动扫描(`ports.ts resolveServerPort`)。开发中如需多实例,用不同 `--port` 显式指定空闲端口。
-- **微信通道归属:只有 `app=weixin` 的专用实例跑通道**:主实例(用户日常访问的 Web 服务)**不再自己跑微信通道** —— 它启动时按 `settings.weixinBot.enabled` 检查机器级 owner 锁,无锁则拉起一个 `app=weixin` 的受管子实例独占通道(默认端口 9199、cwd 默认用户主目录,均在微信面板可配)。判定锚点 `isWeixinChannelHost()`(`src/server/services/weixinBot/channelProfile.ts:36-37`,`process.env.ZAI_APP === WEIXIN_CHANNEL_PROFILE`,`WEIXIN_CHANNEL_PROFILE = 'weixin'`);编排逻辑 `src/server/services/weixinBot/weixinDedicatedInstance.ts`(端口/目录/锁检查/拉起),通道启动 `src/server/services/weixinBot/weixinRuntimeBoot.ts`(受管 + weixin 双门禁),`src/server/services/weixinBot/WeixinBotManager.ts:90` 注释里还有一道同样的 profile 门禁兜底。**Why 必须同进程**:入站注入走进程内 `getSessionInbox().followup()`、出站镜像订阅进程内 `eventBus`,所以"收发消息"与"跑 agent turn"不能拆到两个进程 —— 专用实例必须是一个完整 zai 进程,不能是轻量转发进程。**已知副作用**:专用实例的会话只出现在它自己的 Web UI(默认 9199),主实例看不到(无跨实例会话聚合);重启主实例会连带停掉专用实例(`shutdownInstanceSupervisor`)再重新拉起;改了端口/cwd/dmPolicy 等需重启专用实例才生效(面板的保存动作会自动重启它)。**微信配置入口只在主实例显示(2026-09-13)**:设置页底部的「微信机器人」入口按 `instanceContext.instanceId == null` 门控(`SettingsDrawer.tsx:920` 的 `weixinConfigVisible`)——受管子进程(app=weixin 专用实例 / task-factory / 用户自定义实例)不渲染该入口,避免在子实例上重复配置。**判据不能用 `isManagedChild`**(代码注释 908-913 行显式反驳:主实例在某些 supervisor 启动路径下 `isManagedChild` 也是 true,会让主实例误关微信入口);`instanceId` 只由 `services/instanceSupervisor.ts` 给 spawn 出来的实例注入,与下方 `showServiceSection` 的 `isManagedChild && instanceId != null` 互补。`instanceContext` 未 hydrate 时按主实例处理(显示),裸 `zai dev` 行为不变。前端门控只影响可见性,`/api/weixin/*` 路由本身对子实例**不**做拦截(专用实例自己要调这些接口连通道)。
-- **分屏 Bash 面板 = 持久 PTY 终端(2026-09-22 起)**:桌面分屏的 `Bash` tab 走 `/api/terminal/*` + `node-pty`(每个 tab 一个长期存活的交互式 shell,状态与 CWD 天然保持),而 `/api/bash-repl`(每条命令一次 `sh -c`)现在只服务移动端快捷 Bash 与命令历史 —— 两者并存是有意为之。**三条不能踩的约束**:(1) `node-pty` 是原生模块,必须留在 `pnpm-workspace.yaml` 的 `allowBuilds` 与根 `package.json` 的 `pnpm.onlyBuiltDependencies` 里,否则装出 load 不了的 `pty.node`;装不上时 `/api/terminal/environment` 返回 `available:false` + `hint`,面板显式报错而不是退回 REPL。(2) **只有可见 tab 开 SSE** —— HTTP/1.1 同源并发连接有限(agent 流 + bash-tasks 流已占数条),切 tab 关旧开新,新连接首帧 `snapshot` 恢复整屏。(3) **PTY 进程必须显式回收**:关 tab(`/close`)、删会话(`DELETE /api/agent/sessions/:id` → `disposeSession`)、进程退出(`runtimeLifecycle.closeServer` → `disposeAll`)三处缺一会留孤儿 zsh。设计与差异(不接管 PS1、读用户 rc、透传完整 env、无 retain/attachment 控制)见 `docs/superpowers/specs/2026-09-22-zai-pty-terminal-design.md`。
-- **小步可逆**:实现细节见 `docs/DEVELOPMENT_REFERENCE.md`;设计/取舍见 `docs/superpowers/specs/` 与对应 `plans/`。
-- **测试粒度:功能改动后只跑相关单元测试**:`pnpm -r test` 全量跑 zai + zn-agent-core 全部 520+ 测试文件,约 4.5 分钟(zai 串行 ~260s + core ~10-20s)。**别为了提速去撤 `packages/zai/vitest.config.ts` 的 `fileParallelism: false`** —— vitest 5 下实测并行能压到 ~60s,但会稳定复现 flaky(PdfRenderer 翻页 5 轮挂 3 轮、replHistory 偶发 30s 超时),而这两条测试隔离单跑都 100% 稳定,是全量并发下的资源争抢。功能改动后只跑**直接受影响**的测试文件(以及它们的依赖文件若有连锁影响),用路径过滤:
-  ```bash
-  # 改了 packages/zai/src/web/src/components/SettingsDrawer.tsx
-  pnpm --filter @zn-ai/zai test src/web/src/components/SettingsDrawer.test.tsx \
-                                test/web/components/SettingsDrawer.restart.test.tsx
-  # 改了 packages/zai/src/server/routes/instances.ts
-  pnpm --filter @zn-ai/zai test test/server/routes/instances.test.ts
-  ```
-  仅在以下情况才跑 `pnpm -r test`:跨 workspace 重构、合并前 sanity check、CI 镜像。**禁止**把全量测试当成"完成前必跑"——这是浪费 token 和时间,反馈回路越长越容易错过真实问题。
-
-- **样式规范:优先 Tailwind utility class**:`packages/zai` 已预装 Tailwind 3.4.15,`packages/zai/tailwind.config.ts` + `postcss.config.js` + `src/web/src/index.css`(`@tailwind base/components/utilities`) 链路完整,content 扫描 `./src/web/src/**/*.{ts,tsx}` + `index.html`。**新写 / 修改组件时一律用 Tailwind utility class,不要写 `style={{...}}`**。迁移基线:2026-09-13 已把 ~750 处 `style={{...}}` 转 className,剩 ~200 处保留 inline(均为运行时计算值)。参考 [`docs/superpowers/plans/2026-09-13-zai-inline-style-to-tailwind-migration.md`](docs/superpowers/plans/2026-09-13-zai-inline-style-to-tailwind-migration.md) 了解边界场景。
-  - **走 Tailwind class**:静态布局 / 间距 / 颜色 / 字体 / 边框 / 圆角 / 阴影 / 显隐。如 `{ padding: 24 }` → `p-6`,`{ display: 'flex', gap: 4 }` → `flex gap-1`,`{ fontSize: 12, color: 'var(--text-secondary)' }` → `text-xs text-[var(--text-secondary)]`。
-  - **CSS 变量值**:走 Tailwind arbitrary value,例如 `text-[var(--text-primary)]`、`bg-[var(--bg-elevated,#1c1c26)]`、`border-l-[3px] border-l-[var(--accent-start)]`。
-  - **保留 inline**的合法场景(7 类):(1) 运行时计算值 — 拖拽坐标 `left/top/width/height/zIndex`、动态 `maxWidth/maxHeight`、右键菜单位置 `ctx.x/ctx.y`;(2) `calc()` / `env()` 视口与安全区,如 `height: 'calc(100vh - 140px)'`、`paddingBottom: 'env(safe-area-inset-bottom)'`;(3) **AntD 组件的 `styles={{...}}` 语义槽位** — AntD cssinjs 注入 style 标签且优先级压 Tailwind,必须用 `styles` prop;(4) 事件驱动 DOM 修改 — `onMouseEnter={(e) => e.currentTarget.style.background = ...}` 保留或重构为 state + className 切换;(5) `keyframes` 动画属性 — `animation: 'zai-blink 1s steps(1) infinite'` 之类,`<style>{'@keyframes ...'}</style>` 块整体保留;(6) `writingMode`、复杂 `backdropFilter`(`blur(18px) saturate(1.4)`)、SVG 内联 `fill`/`stroke`;(7) AntD 组件单个 `style` prop(如 `<RobotFilled style={{ fontSize: 48, color: 'var(--accent-start)' }} />`,且不便拆为外层 wrapper)。
-  - **代码评审**:违反上述规则的新增 `style={{...}}` 应被驳回,除非 comment 注明属于上述 7 类合法场景之一。
-- **页面样式改动不跑单元测试**:`packages/zai/src/web/src/index.css` 或组件内 `style={{...}}` / `styles={{...}}` 的样式变更不需要跑 vitest。happy-dom/jsdom 不渲染真实 CSS cascade、不模拟 paint、不读浏览器合成层尺寸,跑过也不代表对齐正确,反倒容易把没意义的红绿当成"已验证"。完成前用 `/ego-browser` 真实浏览器验:`pnpm --filter @zn-ai/zai dev -- --port <空闲>` 起服务,ego 打开对应页面,**度量出像素级证据**(rect / getComputedStyle / 截图对比)才算数。仅改样式时禁止把单测当成完成门禁。
+- **系统提示词一律用英文**:所有写入代码的 prompt —— Agent 描述(`description`/`systemPrompt`)、subagent 提示词、工具描述、LLM 指令模板、skill/agent frontmatter description —— **禁止写中文**。用户可见 UI 文案走 i18n,不受此限。
+- **core 改动必须先 `build:core`**:改完 `packages/zn-agent-core/` 后,用 ego-browser 验证前**必须**先 `pnpm run build:core`。`dist/opencc-core.mjs`、`dist/bundle-entry.d.ts`、`dist/opencc-src/server/*.d.ts` 全是构建产物,改源不自动生效,不重建会复现旧行为误导排错。仅改 `packages/zai/src/web/`(纯前端)时不需要。
+- **真实浏览器验收(先询问,非强制门禁)**:完成前**询问用户**是否跑 `/ego-browser`(走完用户路径 + 截图),确认后再执行;环境阻塞必须显式报告。**不要 kill 920x 端口的进程** —— 920x 是 zai 正式服务端口,kill 后真实实例不可用;改用其他空闲端口(如 8101 起)或 `pnpm --filter @zn-ai/zai dev` 独立实例。ego-browser 在 zai dev 跑着(SSE 长连接)时实际可用。
+- **测试粒度:只跑直接受影响的文件**:`pnpm -r test` 全量 520+ 文件约 4.5 分钟,**别为了提速去撤 `packages/zai/vitest.config.ts` 的 `fileParallelism: false`** —— 并行会稳定复现 flaky(PdfRenderer 翻页、replHistory 30s 超时),而两者隔离单跑 100% 稳定。仅跨 workspace 重构 / 合并前 sanity check / CI 才跑全量。
+- **样式:优先 Tailwind utility class**,不要写 `style={{...}}`。Tailwind 3.4.15 链路完整(`tailwind.config.ts` + `postcss.config.js` + `index.css`)。**保留 inline 的 7 类合法场景**见 `DEVELOPMENT_REFERENCE.md` §20;评审时不在 7 类之列的新增 inline 应驳回。
+- **样式改动不跑单元测试**:happy-dom/jsdom 不渲染 CSS cascade、不模拟 paint,红绿没意义。改 `index.css` 或组件样式后用 `/ego-browser` 度量像素级证据(rect / getComputedStyle / 截图对比)才算数。
+- **端口使用(必查)**:起任何本地服务前先 `lsof -i :<port>` 确认空闲。显式 `--port`/`--api-port` 被占用必须报错退出(EADDRINUSE),**禁止静默递增换端口** —— 多实例静默换端口共享同一 API key 是请求风暴根因。只有未指定端口时才允许自动扫描(`ports.ts resolveServerPort`)。多实例开发用不同 `--port` 显式指定。
+- **Node-direct runtime(默认)**:`zai dev` 入口是 `tsx --loader .../bun-protocol.mjs`,loader 拦截 `bun:bundle`/`bun:feature`(漏掉报 `ERR_UNSUPPORTED_ESM_URL_SCHEME`)。`dev:bun` 是可选快速路径。vendor 是 un-stripped 全量,Node 冷启动慢属预期。
+- **`opencc-src` 允许修改**(类型修复、zai 补丁,改后需 `build:core`);`src/compat/` 是 zai 专属别名载体。**禁止**用 tsc 整编 `opencc-src`(拖入 UI 传递依赖);`dist/opencc-src/server/*.d.ts` 由 `tsc -p tsconfig.server.json` 机械发射,由 `scripts/verify-server-types-self-contained.mjs` 守护。
+- **vendor 终端 UI 已就地 stub(2026-10-04)**:426 个 `.tsx` 组件体已替换为 `return null`,**读这些文件不要找 UI 逻辑**。改组件时守住三条签名不变量(`LocalJSXCommandCall` 非 async 的 `call` 必须 `return Promise.resolve(null)`;显式返回标注放宽成 `T | null`;**async 函数绝不能加 `| null`**),并注意模块顶层 `React.createContext` 不受保护 —— 改完必须 `node -e "import('./dist/opencc-core.mjs')"` 实测。完整约束见 `DEVELOPMENT_REFERENCE.md` §19。
+- **微信通道只有 `app=weixin` 的专用实例跑**:主实例不再自己跑微信通道,启动时按 `settings.weixinBot.enabled` 检查机器级 owner 锁,无锁则拉起受管子实例独占通道(默认端口 9199)。必须同进程(入站注入与出站镜像都走进程内 `getSessionInbox()` / `eventBus`)。**微信配置入口只在主实例显示**,判据是 `instanceContext.instanceId == null`(`SettingsDrawer.tsx:920` 的 `weixinConfigVisible`),**不能用 `isManagedChild`**。详见 `DEVELOPMENT_REFERENCE.md` §15。
+- **分屏 Bash 面板 = 持久 PTY**(`node-pty` + xterm.js,多 tab)。三条约束:① `node-pty` 是原生模块,必须在 `pnpm-workspace.yaml` 的 `allowBuilds` 与根 `package.json` 的 `pnpm.onlyBuiltDependencies` 里,否则装出 load 不了的 `pty.node`;② **只有可见 tab 开 SSE**(同源连接数有限),切 tab 关旧开新,新连接首帧 `snapshot` 恢复整屏;③ **PTY 必须显式回收**三处 —— 关 tab / 删会话(`disposeSession`) / 进程退出(`disposeAll`),缺一会留孤儿 zsh。详见 `DEVELOPMENT_REFERENCE.md` §16。
+- **CodeGraph 优先**:理解代码用 `codegraph_explore` 单调用,不要 grep + read 轮询;索引未初始化跑 `codegraph init -i`(`codegraph_context` / `codegraph_trace` 在 v1.4.1 不可用)。
+- **API 端点索引**与**前端路由路径表**(`/agent` `/m` `/desktop` `/super-tasks` 等)见 `DEVELOPMENT_REFERENCE.md` §17 / §18 —— 验证功能前先查目标路由,不要靠缩窗口判断。
+- **小步可逆**:实现细节见 `docs/DEVELOPMENT_REFERENCE.md`,设计与取舍见 `docs/superpowers/specs/` 与对应 `plans/`。
 
 ## 常用验证命令
 
-```bash
-# TypeScript 类型检查(顶层 + 各 workspace)
-pnpm -r exec tsc --noEmit
+| 命令 | 用途 |
+|------|------|
+| `pnpm -r exec tsc --noEmit` | TypeScript 类型检查(顶层 + 各 workspace) |
+| `pnpm run build:core` | 只构建 `@zn-ai/zn-agent-core`(loader / bundle / d.ts) |
+| `pnpm run build:web` | 只构建 zai 前端(vite → `dist/web`) |
+| `pnpm run build:zai` | 只构建 `@zn-ai/zai`(tsc + vite,假设 core 已构建) |
+| `pnpm run build` | core → zai 链式全量(发版 / 冷启动) |
+| `pnpm --filter @zn-ai/zai test <path>` | 跑单个受影响测试文件 |
+| `pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715` | 独立端口起 dev(见下方两条约束) |
+| `/ego-browser` | 真实浏览器验收(需先询问用户) |
 
-# 单 workspace 构建(开发期加速反馈,只编自己改过的部分)
-pnpm run build:core           # 只构建 @zn-ai/zn-agent-core(loader / opencc-core.mjs bundle / bundle-entry.d.ts / opencc-src/server/*.d.ts)
-pnpm run build:web            # 只构建 @zn-ai/zai 的前端(vite → dist/web)
-pnpm run build:zai            # 只构建 @zn-ai/zai(tsc + vite,假设 core 已构建)
-# pnpm run build 仍是 core → zai 的链式全量构建(发版 / 冷启动场景)
-
-# 单元测试 — 只跑相关文件,不要全量
-pnpm --filter @zn-ai/zai test <path/to/file.test.tsx>   # 单文件
-pnpm -r test -t "<describe-block-name>"                  # 按 describe 名匹配
-
-# 启动 dev(zai + 前端)
-pnpm --filter @zn-ai/zai dev
-# 指定独立端口(避免与 920x 正式服务 / 8101 已占用实例冲突)
-# 注意: `--` 是必需的 — `--port` / `--api-port` 是 zai CLI 的参数,
-# 要靠 pnpm 的 `--` 透传,否则被 pnpm 自身吞掉或传给上一层。
-# 默认 Vite 8101 / Express 7715;未显式指定时这两个端口被占用会自动扫描;
-# 显式指定时若被占用会 EADDRINUSE 报错退出,不会静默换端口。
-pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715
-# 禁止: 顶层 `pnpm dev` 会同时跑所有 workspace 的 dev — zai 之外,
-# zn-agent-core 的 dev 是 `tsc -b --watch`,会拒绝 `--port` 参数(TS5072),
-# 整条 dev 链路失败。需要 core tsc watch 时单独跑:
-pnpm --filter @zn-ai/zn-agent-core exec tsc -b --watch
-
-# 真实浏览器验收(强制项)
-/ego-browser                  # 通过 skill 调 ego-browser 驱动 zai Web UI
-```
+> 起 dev 时 `--` 是必需的 —— `--port`/`--api-port` 是 zai CLI 的参数,要靠 pnpm 的 `--` 透传,否则被 pnpm 自身吞掉。**禁止顶层 `pnpm dev`**:会同时跑所有 workspace,zn-agent-core 的 dev 是 `tsc -b --watch`,会拒绝 `--port`(TS5072)导致整链失败;需要 core tsc watch 时单独跑 `pnpm --filter @zn-ai/zn-agent-core exec tsc -b --watch`。
 
 ## 发布流程
 
-```bash
-# patch / minor / major
-pnpm release:patch
-pnpm release:minor
-pnpm release:major
+`pnpm release:patch` / `release:minor` / `release:major`。
+
+**已知坑点**:`pnpm publish` 在 workspace 上下文中 auth 传递有问题,第二个包(`@zn-ai/zai`)会报 `ENEEDAUTH`,即使 `npm whoami` 正常 —— 脚本已内置 fallback 自动降级到 `npm publish`;`npm publish` 不识别 `workspace:*` 协议,降级时脚本自动替换为实际版本号再发布,发布后恢复。
+
+## 提交规范
+
+```text
+HRMSV3-ZN-WEBSITE#668 <type>(scope): 描述
 ```
 
-**已知坑点**：
-- `pnpm publish` 在 workspace 上下文中 auth 传递有问题，第二个包（`@zn-ai/zai`）会报 `ENEEDAUTH`，即使 `npm whoami` 正常。**解决方案**：脚本已内置 fallback 自动降级到 `npm publish`。
-- `npm publish` 不识别 pnpm 的 `workspace:*` 协议，如果降级到 `npm publish`，脚本会自动将 `workspace:*` 替换为实际版本号再发布，发布后恢复原始内容。
+类型词遵循 Conventional Commits(`feat` `fix` `docs` `refactor` `chore`)。完整约定见 [`CONTRIBUTING.md`](./CONTRIBUTING.md)。
 
 ## 文档入口
 
 | 类别 | 路径 |
 |------|------|
-| 架构与实现细节 | `docs/DEVELOPMENT_REFERENCE.md` |
-| 架构总览研究 | `docs/superpowers/specs/2026-07-25-opencc-web-architecture-overview.md` |
-| SSE 状态推送设计 | `docs/superpowers/specs/2026-07-19-sse-state-push-design.md` |
-| 会话压缩设计 | `docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md` |
-| opencc-src 直取约定 | `docs/superpowers/plans/2026-08-01-compat-direct-opencc-src-permissions.md` |
-| OpenCC Server 运行时 | `docs/superpowers/specs/2026-08-01-opencc-server-runtime-design.md` |
-| Provider/Model 路由覆盖 | `docs/superpowers/specs/2026-08-03-provider-model-route-overrides-design.md` |
-| Agent 实例管理 | `docs/superpowers/specs/2026-08-03-zai-agent-instance-manager-design.md` |
-| OpenCC Adapter(Node/tsx) | `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md`(Bun 版已 deprecated) |
-| 类型化 RPC client stub | `docs/superpowers/specs/2026-08-16-rpc-type-safe-client-stubs.md` |
-| 命令生命周期事件埋点 | `docs/superpowers/specs/2026-08-16-command-lifecycle-events.md` |
-| Session inbox 机制 | `docs/superpowers/specs/2026-08-17-zai-session-inbox-mechanism-design.md` |
-| PresentFile 单文件展示工具 | `docs/superpowers/specs/2026-09-24-zai-present-file-design.md` |
-| Main agent slots | `docs/superpowers/specs/2026-08-20-zai-main-agent-slots-design.md` |
-| Subagent claude-code provider | `docs/superpowers/specs/2026-08-21-zai-subagent-claude-code-provider-design.md` |
-| Subagent codex provider | `docs/superpowers/specs/2026-08-21-zai-subagent-codex-provider-design.md` |
-| Subagent opencode provider(draft) | `docs/superpowers/specs/2026-09-03-zai-subagent-opencode-provider-design.md` |
-| Runtime printts SSE web bridge | `docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md` |
-| zai Desktop 办公桌面 | `docs/superpowers/specs/2026-08-26-zai-desktop-office-design.md` + `plans/2026-08-26-zai-desktop-office-plan.md` |
-| Headless runtime vs vendor REPL 对比 | `docs/superpowers/specs/2026-08-27-zai-headless-runtime-vs-vendor-repl-comparison.md` |
-| cwd 多会话持久化 | `docs/superpowers/specs/2026-09-14-zai-cwd-multi-session-persistence.md` |
-| 文档预览 | `docs/superpowers/specs/2026-09-21-document-preview-design.md` |
-| Auto memory 多会话 | `docs/superpowers/specs/2026-09-23-zai-auto-memory-multisession-design.md` |
-| 会话归档 | `docs/superpowers/specs/2026-09-23-zai-session-archive-design.md` |
-| Turn artifacts | `docs/superpowers/specs/2026-09-24-zai-turn-artifacts-design.md` |
-| vendor 终端 UI 清理 | AGENTS.md「vendor 终端 UI 已被就地 stub(2026-10-04)」条 + `packages/zn-agent-core/scripts/{stub-ui-sources,prune-unused-imports,drop-dead-types,scan-dead-code}.ts` |
 | mods 插件系统 | **`docs/mods-vendor-divergences.md` 是入口** —— 先读它,再读 `docs/mods-upstream-contract.md`(上游 2.1.296 契约)/ `mods-upstream-gaps.md`(上游未完成项)。前四份是上游原文、描述的是 **opencc 而非 vendor**;偏差清单记录 zai 侧的有意分叉(TUI 删除、session 门禁、`ctx.fs` 授权门、`ui.render` 按名拒斥)与测试环境的两处必要修正。改动 `packages/zn-agent-core/src/opencc-src/mods/` 前必读。 |
+| 实现细节(规则级要求以本文件为准) | [`docs/DEVELOPMENT_REFERENCE.md`](./docs/DEVELOPMENT_REFERENCE.md) |
+| API 端点索引 / 前端路由 / Tailwind 边界 / vendor UI stub | 同上 §17 / §18 / §20 / §19 |
+| 特性 spec(设计取舍) | `docs/superpowers/specs/` |
+| 实施计划(历史与进行中) | `docs/superpowers/plans/` |
+| 贡献与提交约定 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 
-> 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。**新特性开工前先在此目录搜既有 spec**,避免重复设计。
+> spec / plan 完整列表见对应目录,命名 `YYYY-MM-DD-<topic>.md`(当前 124 篇 spec / 131 篇 plan)。**新特性开工前先在 `docs/superpowers/specs/` 搜既有 spec**,避免重复设计;命名对应的近期文档直接用文件名检索。
 
-<!-- updated: 2026-09-29 (核对 HEAD ea257fef 实况:API 端点索引重写并补 /api/aa /api/internal /api/mcp /api/fs /api/git 等新增端点组;修正 openccInit.ts / SettingsDrawer.tsx 行号漂移;测试规模 190+ → 500+;补 5 篇未收录 spec) -->
+<!-- updated: 2026-10-13 (cherry-pick sync-1013:文档入口表补 mods 插件系统一行) -->
+<!-- updated: 2026-10-12 (185 → 107 行:API 端点索引/前端路由/vendor UI stub/Tailwind 边界下沉到 DEVELOPMENT_REFERENCE §17-20;微信与 PTY 两段压缩为规则 + 指针;28 行 bash 块改表格;修正 §15 过时的集成点(主实例已不跑微信通道);版本号 0.12.0 → 0.13.4;补提交规范章节) -->

@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { eventBus } from './eventBus.js';
 import { initZaiSettingsCache, readZaiSettings, resolveAutoUpdate } from './zaiSettingsStore.js';
 import { getCliStatuses } from './detect.js';
@@ -131,7 +132,14 @@ async function run(): Promise<void> {
       'npm',
       ['install', '-g', `${PACKAGE_NAME}@${to}`, '--prefer-online', '--no-progress', '--no-audit', '--no-fund'],
       sink,
-      { timeout: 600_000 }, // 10min — 全局 install 偶尔慢(网络/解包)
+      {
+        timeout: 600_000, // 10min — 全局 install 偶尔慢(网络/解包)
+        // cwd 必须与 probeGlobalPrefixWritable 的探测 cwd 一致。探测刻意跑在
+        // homedir() 以绕开用户 cwd 下的项目级 .npmrc;这里若沿用 process.cwd(),
+        // 那份 .npmrc 同样会改写本次安装的全局 prefix,门禁刚验过的可写性
+        // 就落在了另一个目录上,等于没验。
+        cwd: homedir(),
+      },
     );
     ok = code === 0;
     if (!ok) errorMsg = `npm install -g ${PACKAGE_NAME}@${to} exited with code ${code}`;

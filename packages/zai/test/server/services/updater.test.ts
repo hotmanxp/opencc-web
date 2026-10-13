@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ServerEvent } from '../../../src/shared/events.js'
 
@@ -189,6 +189,25 @@ describe('maybeAutoUpdate', () => {
     const complete = recordedEvents.find((e) => e.type === 'app.update.complete') as Extract<ServerEvent, { type: 'app.update.complete' }>
     expect(complete.from).toBe('0.3.8')
     expect(complete.to).toBe('0.3.11')
+  })
+
+  it('runs npm install from homedir, the same cwd the permission probe used', async () => {
+    mockGetCliStatuses.mockResolvedValue([
+      { name: 'zai', pkg: '@zn-ai/zai', bin: 'zai', installed: true,
+        path: '/x', currentVersion: '0.3.8', latestVersion: '0.3.11' },
+    ])
+    mockSpawn.mockResolvedValue({ code: 0, signal: null })
+
+    const { maybeAutoUpdate } = await import('../../../src/server/services/updater.js')
+    await maybeAutoUpdate()
+
+    // 探测刻意跑在 homedir() 以绕开用户 cwd 下的项目级 .npmrc;安装若沿用
+    // process.cwd(),那份 .npmrc 会改写本次安装的全局 prefix,门禁验的就白验了。
+    // beforeEach 已把 HOME 指向隔离 dataDir,它与 process.cwd() 必然不同,
+    // 这条断言因此是有牙齿的 —— 只断言 cwd 存在会误判为通过。
+    const opts = mockSpawn.mock.calls[0][3] as { cwd?: string }
+    expect(opts?.cwd).toBe(homedir())
+    expect(opts?.cwd).not.toBe(process.cwd())
   })
 
   it('emits failed (without spawning npm) when global prefix is not writable', async () => {

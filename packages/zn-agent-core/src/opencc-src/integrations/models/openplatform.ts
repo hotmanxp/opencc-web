@@ -191,4 +191,15 @@ export default [
     contextWindow: 1_000_000,
     maxOutputTokens: 384_000,
   }),
+  defineModel({
+    id: 'openplatform-deepseek-v4.1-flash',
+    label: 'DeepSeek V4.1 Flash (Open Platform)',
+    brandId: 'openplatform',
+    vendorId: 'anthropic',
+    classification: ['chat', 'reasoning', 'coding'],
+    defaultModel: 'deepseek-v4.1-flash',
+    capabilities: openplatformCapabilities,
+    contextWindow: 1_048_576,
+    maxOutputTokens: 262_144,
+  }),
 ]

@@ -3,7 +3,7 @@ import { useAgentStore } from '../store/useAgentStore'
 
 /**
  * 压缩过程态指示条 —— 渲染 `useAgentStore.compacting`,压缩期间显示
- * 「正在压缩…」。
+ * 「正在压缩历史对话…」。
  *
  * **刻意不与 CompactionToastDock 合并**(二者并列挂在 App.tsx):
  * toast 池靠每条的 `expiresAt`(timestamp + 5000)自动回收,压缩常耗时
@@ -39,7 +39,7 @@ export default function CompactingIndicator() {
     >
       <div className="flex items-center gap-2 rounded-lg border border-[var(--border-primary,#e2e8f0)] bg-[var(--bg-elevated,#1c1c26)] px-3 py-2 text-xs text-[var(--text-primary,#1f2937)] shadow-lg">
         <Spin size="small" />
-        <span className="whitespace-nowrap">正在压缩…</span>
+        <span className="whitespace-nowrap">正在压缩历史对话…</span>
       </div>
     </div>
   )

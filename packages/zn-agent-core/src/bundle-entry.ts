@@ -127,6 +127,7 @@ export {
 // reminder provider 读出注入。见 server/sessionStartBridge.ts 的说明。
 export {
   getSessionStartContexts,
+  clearSessionStartContexts,
 } from './opencc-src/server/sessionStartBridge.js'
 // zai patch (2026-09-23): skill 目录热更新 —— vendor 的 chokidar watcher。
 //

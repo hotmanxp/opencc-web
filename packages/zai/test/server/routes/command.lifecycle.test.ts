@@ -144,27 +144,6 @@ describe('POST /agent/command — command.run / command.done lifecycle', () => {
     expect(events[1].result).toBe('compacted')
   })
 
-  it('local command status 路径 emit done(status)', async () => {
-    const reg = await getRegistry()
-    reg.register({
-      type: 'local',
-      name: 'fake-status',
-      description: 'test',
-      call: async () => ({ kind: 'status', payload: { ok: true } }),
-    } as Command)
-
-    const app = await mountApp()
-    const res = await request(app)
-      .post('/agent/command')
-      .send({ name: 'fake-status', args: '' })
-
-    expect(res.status).toBe(200)
-    expect(res.body.type).toBe('status')
-
-    const events = lifecycleEvents()
-    expect(events[1].result).toBe('status')
-  })
-
   it('local command message 路径 emit done(message)', async () => {
     const reg = await getRegistry()
     reg.register({

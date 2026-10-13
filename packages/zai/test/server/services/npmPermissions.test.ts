@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
 import { chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -27,6 +27,29 @@ function stubPrefixError() {
 
 let workDir: string
 
+// 复刻 npmPermissions 里的落盘路径推导(win32 无 lib 一层)。测试直接按平台
+// 摆出对应的目录布局,断言门禁对这组路径逐层判定。
+const ROOT_SEGMENTS = process.platform === 'win32' ? ['node_modules'] : ['lib', 'node_modules']
+const BIN_SEGMENTS = process.platform === 'win32' ? [] : ['bin']
+
+/** 造出 prefix 下的安装目录,返回最深那层路径。 */
+function makeInstallDir(prefix: string, segments: string[]): string {
+  const p = join(prefix, ...segments)
+  mkdirSync(p, { recursive: true })
+  return p
+}
+
+/** 递归恢复写权限 —— 只 chmod 顶层删不掉测试里置成 r-x 的子目录。 */
+function restoreWrite(dir: string): void {
+  if (!existsSync(dir)) return
+  try {
+    chmodSync(dir, 0o700)
+  } catch {
+    return
+  }
+  for (const name of readdirSync(dir)) restoreWrite(join(dir, name))
+}
+
 beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), 'zai-npmperm-'))
   mockExecFile.mockReset()
@@ -34,8 +57,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  // 恢复写权限,否则 rmSync 删不掉只读目录。
-  chmodSync(workDir, 0o700)
+  restoreWrite(workDir)
   rmSync(workDir, { recursive: true, force: true })
 })
 
@@ -88,5 +110,42 @@ describe('probeGlobalPrefixWritable', () => {
     stubPrefix('   \n')
     const r = await probeGlobalPrefixWritable()
     expect(r).toEqual({ writable: null, prefix: null })
+  })
+
+  // 以下三条覆盖「prefix 本身可写,但 npm 真正的落盘点不可写」的布局 ——
+  // 只探 prefix 一层会漏判,放行后仍由 npm 自己撞 EACCES 喷原始堆栈。
+
+  it('returns writable=false when prefix is writable but the global root below it is not', async () => {
+    const { probeGlobalPrefixWritable } = await import('../../../src/server/services/npmPermissions.js')
+    const prefix = join(workDir, 'prefix')
+    mkdirSync(prefix)
+    chmodSync(makeInstallDir(prefix, ROOT_SEGMENTS), 0o500) // root-owned 残留
+    stubPrefix(prefix)
+    const r = await probeGlobalPrefixWritable()
+    expect(r).toEqual({ writable: false, prefix })
+  })
+
+  // win32 下 npm 把命令 shim 直接落在 prefix(BIN_SEGMENTS 为空),没有独立的
+  // bin 层可测,跳过以免退化成「测 prefix 可写性」的假阳性。
+  it.skipIf(process.platform === 'win32')('returns writable=false when the bin dir exists but is not writable', async () => {
+    const { probeGlobalPrefixWritable } = await import('../../../src/server/services/npmPermissions.js')
+    const prefix = join(workDir, 'prefix')
+    mkdirSync(prefix)
+    makeInstallDir(prefix, ROOT_SEGMENTS) // 包目录正常可写
+    chmodSync(makeInstallDir(prefix, BIN_SEGMENTS), 0o500) // 命令软链目录才是瓶颈
+    stubPrefix(prefix)
+    const r = await probeGlobalPrefixWritable()
+    expect(r).toEqual({ writable: false, prefix })
+  })
+
+  it('returns writable=true when prefix and every existing install dir are writable', async () => {
+    const { probeGlobalPrefixWritable } = await import('../../../src/server/services/npmPermissions.js')
+    const prefix = join(workDir, 'prefix')
+    mkdirSync(prefix)
+    makeInstallDir(prefix, ROOT_SEGMENTS)
+    makeInstallDir(prefix, BIN_SEGMENTS)
+    stubPrefix(prefix)
+    const r = await probeGlobalPrefixWritable()
+    expect(r).toEqual({ writable: true, prefix })
   })
 })

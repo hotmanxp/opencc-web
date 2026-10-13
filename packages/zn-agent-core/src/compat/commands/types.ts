@@ -46,20 +46,9 @@ export interface PromptCommand {
   getPromptForCommand(args: string, context: CommandContext): Promise<ContentBlockParam[]>
 }
 
-export interface StatusPayload {
-  sessionId?: string | null
-  cwd: string
-  cwdName: string
-  branch: string
-  model: string
-  permissionMode?: string
-  version: string
-}
-
 export type LocalCommandResult =
   | { kind: 'cleared' }
   | { kind: 'compacted'; removedMessages: number; summary?: string }
-  | { kind: 'status'; payload: StatusPayload }
   | { kind: 'message'; text: string }
   | { kind: 'error'; message: string }
 

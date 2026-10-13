@@ -378,6 +378,48 @@ dependency」)、`getPowerShellTool`(lazy + gate)、各 `false ?` 死分支。
     (「这些事件已经能派发了,应从清单移除」)当场变红拦下。
 - **集成测试补了 `turn.start` / `prompt.mention` 两个订阅与一条用例**(6→7 条)。
 
+### 第五批(2026-10-13,审查 sync-1013 发现的 bug)
+
+`runModChain` 的**每 hook 预算**有一条此前没人发现的缺陷,现补在
+`dispatch.ts` 并由 `test/unit/mods-hookBudget.test.ts` 守住。
+
+每 hook 10s(`MOD_HOOK_BUDGET_MS`),超时则跳过该 handler、继续跑它下面的,
+并记一次失败给熔断器。超时之后**必须**让那个慢 handler 后续的 `next()`
+变成 no-op —— 否则它会再去驱动 `runFrom` 共享的 `index` 游标,与「跳过它、
+继续往下」那条链对撞,同一个事件的 core tier 会跑两次。
+
+守卫本该由 `withAbort(next, unlink.signal)` 承担,而 `unlink` 的 signal 是
+`linkSignals(signal, hookSignal)` 把**外层** signal 与**预算** signal 合成的。
+解链却写成:
+
+```js
+try { return invokeModHandler(modName, handler, current, withAbort(next, unlink.signal)) }
+finally { unlink.dispose() }
+```
+
+`invokeModHandler` 在第一个 `await` 处挂起,所以这个 `finally` 在 **t=0** 就跑了
+—— handler 还没做任何事,两个 abort listener 已经摘掉。预算超时时的
+`controller.abort()` 到不了 `withAbort`,守卫形同虚设。
+
+**只在传了 `signal` 时犯**:不传时 `linkSignals` 直接返回预算自己的 controller,
+守卫本来就好使。而传 signal 的正是最要紧的两条路 —— `utils/hooks.ts` 的
+executeHooks 复合链(terminal 是 `coreRunner`,会把宿主的**全部 core hook**
+再跑一遍)与桥接宿主 hook(`tool.call` / PreToolUse 等)。这就是它躲过测试的原因。
+
+修复是解链挂到 handler 的 **promise** 上而非同步调用外:
+
+```js
+return invokeModHandler(modName, handler, current, withAbort(next, unlink.signal))
+  .finally(() => unlink.dispose())
+```
+
+上游同样显式解链(bundle @3803457 `finally { g?.() }`)—— 区别在于上游解的是
+**await 之后**的 hook。
+
+> **教训与 `patch` 静默失败同源**:这里的错误同样只在**很窄的条件下**显形
+> (必须传 `signal`),且症状是「某次 core hook 跑了两次」这种需要真实时序才
+> 看得见的东西。反向探针里把 `.finally` 改回 `try/finally`,第一条用例立刻变红。
+
 ### 这两条防线抓不到什么
 
 写下来是为了不让后人把绿灯读得太宽:

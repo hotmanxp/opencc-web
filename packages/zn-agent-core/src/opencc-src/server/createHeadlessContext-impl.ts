@@ -425,7 +425,7 @@ export async function createHeadlessContextImpl(
     const startMessages = (await processSessionStartHooks('startup', {
       sessionId: sessionIdForSlot,
     })) as unknown as Array<Record<string, unknown>>
-    setSessionStartContexts(extractAdditionalContexts(startMessages))
+    setSessionStartContexts(sessionIdForSlot, extractAdditionalContexts(startMessages))
   } catch (error) {
     // SessionStart hook 是可选增强;失败不影响 headless context 建立。
     logForDebugging(

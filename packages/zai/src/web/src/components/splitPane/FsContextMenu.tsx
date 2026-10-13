@@ -44,8 +44,11 @@ async function postFsCommand(endpoint: 'reveal' | 'open-terminal' | 'delete', pa
 /**
  * 右键节点的**同级父目录**(相对 cwd,POSIX 分隔符;根返回 '')。
  * 「新建」落在这里:在目录上右键 → 建进它自己;在文件上右键 → 建进它旁边。
+ *
+ * 工具栏「新建」也复用它算「当前点击目录」——点目录落在目录自身,
+ * 点文件落在它的父目录(见 FsTab 的 lastPickedDir)。
  */
-function parentDirOf(path: string, kind?: 'file' | 'dir'): string {
+export function parentDirOf(path: string, kind?: 'file' | 'dir'): string {
   if (kind === 'dir') return path;
   const idx = path.lastIndexOf('/');
   return idx < 0 ? '' : path.slice(0, idx);

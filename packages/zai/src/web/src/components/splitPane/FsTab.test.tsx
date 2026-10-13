@@ -21,19 +21,31 @@ vi.mock('./useFsContentSearch.js', () => ({ useFsContentSearch: vi.fn() }));
 vi.mock('./useFsWrite.js', () => ({
   useFsWrite: vi.fn(() => ({ save: vi.fn(), saving: false })),
 }));
-vi.mock('./FsContextMenu.js', () => ({
-  FsContextMenu: vi.fn(({ path, onClose }) => (
-    <div data-testid="ctx-menu-stub" data-path={path}>
-      <button onClick={onClose}>close</button>
-    </div>
-  )),
-  // FsCreateDialog 是 2026-10-11 从 FsContextMenu 里拆出来的独立弹窗
-  // (挂 FsTab 层级,不能随右键菜单卸载)。这里给个 stub,免得 FsTab 的
-  // 单测去拉真实 antd Modal。
-  FsCreateDialog: vi.fn(({ target }) => (
-    <div data-testid="create-dialog-stub" data-open={String(target !== null)} />
-  )),
-}));
+vi.mock('./FsContextMenu.js', async (importOriginal) => {
+  // parentDirOf 是纯函数(算「新建」的落脚目录),工具栏「新建」按当前点击的
+  // 目录建文件时要用 —— 保留真实现,别把它 stub 掉,否则「落在点击目录」这条
+  // 行为在单测里测的是空气。
+  const actual = await importOriginal<typeof import('./FsContextMenu.js')>();
+  return {
+    parentDirOf: actual.parentDirOf,
+    FsContextMenu: vi.fn(({ path, onClose }) => (
+      <div data-testid="ctx-menu-stub" data-path={path}>
+        <button onClick={onClose}>close</button>
+      </div>
+    )),
+    // FsCreateDialog 是 2026-10-11 从 FsContextMenu 里拆出来的独立弹窗
+    // (挂 FsTab 层级,不能随右键菜单卸载)。这里给个 stub,免得 FsTab 的
+    // 单测去拉真实 antd Modal。data-dir 让测试断言弹窗的目标目录。
+    FsCreateDialog: vi.fn(({ target }) => (
+      <div
+        data-testid="create-dialog-stub"
+        data-open={String(target !== null)}
+        data-type={target?.type ?? ''}
+        data-dir={target?.dir ?? ''}
+      />
+    )),
+  };
+});
 // 文档预览渲染层(2026-09-21):FsTab 只负责「按 kind 分发」,真正的解析由
 // components/documentPreview 里的渲染器做。这里只 stub 掉 DocumentPreview
 // 组件本身(其余导出如 isRenderableDocumentKind 保持真实实现,FilePreviewBody
@@ -1453,4 +1465,65 @@ it('搜索框只在「文件」tab 渲染 (搜索作用于文件树, 不是当�
   expect(screen.queryByTestId('fs-search-mode')).toBeNull();
   fireEvent.click(screen.getByTestId('fs-tab-files'));
   expect(screen.getByTestId('fs-search-input')).toBeTruthy();
+});
+
+// --- 工具栏「新建」: 落在当前点击的目录, 而不是永远项目根 ---
+
+it('工具栏「新建」落在当前点击的目录 (没点过任何节点才回退项目根)', () => {
+  // 回归:工具栏「新建」此前把 dir 硬编码成 ''(永远项目根),
+  // 点开 examples/ 再新建依然建在根上 —— 与右键菜单的 parentDirOf 口径
+  // 不一致。现在记 lastPickedDir,点目录落在该目录本身。
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [{ name: 'examples', path: 'examples', type: 'dir', size: null }] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+
+  // 还没点过任何节点 → 项目根(dir = '')
+  fireEvent.click(screen.getByTestId('fs-create-btn'));
+  fireEvent.click(screen.getByText('新建文件'));
+  expect(screen.getByTestId('create-dialog-stub').getAttribute('data-dir')).toBe('');
+
+  // 点目录 → 落在该目录里
+  clickTreeNode('examples');
+  fireEvent.click(screen.getByTestId('fs-create-btn'));
+  fireEvent.click(screen.getByText('新建文件夹'));
+  const dialog = screen.getByTestId('create-dialog-stub');
+  expect(dialog.getAttribute('data-open')).toBe('true');
+  expect(dialog.getAttribute('data-type')).toBe('dir');
+  expect(dialog.getAttribute('data-dir')).toBe('examples');
+});
+
+it('工具栏「新建」点文件时落在该文件的父目录', () => {
+  // 与右键菜单同口径:在 examples/a.ts 上右键 → 新建建在旁边。
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [{ name: 'a.ts', path: 'examples/a.ts', type: 'file', size: 1 }] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/examples/a.ts', name: 'a.ts', size: 1, mtime: '', content: 'a' },
+    loading: false, error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  clickTreeNode('a.ts');   // 打开文件 tab,树让位
+  fireEvent.click(screen.getByTestId('fs-tab-files'));  // 回「文件」tab 才能点工具栏
+  fireEvent.click(screen.getByTestId('fs-create-btn'));
+  fireEvent.click(screen.getByText('新建文件'));
+  expect(screen.getByTestId('create-dialog-stub').getAttribute('data-dir')).toBe('examples');
+});
+
+it('切换 cwd 会重置「新建」落脚点回项目根', () => {
+  // lastPickedDir 是相对**旧** cwd 的路径,换项目后不再有效。
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [{ name: 'examples', path: 'examples', type: 'dir', size: null }] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  const { rerender } = render(<FsTab cwd="/repo1" />);
+  clickTreeNode('examples');
+  rerender(<FsTab cwd="/repo2" />);
+  fireEvent.click(screen.getByTestId('fs-create-btn'));
+  fireEvent.click(screen.getByText('新建文件'));
+  expect(screen.getByTestId('create-dialog-stub').getAttribute('data-dir')).toBe('');
 });

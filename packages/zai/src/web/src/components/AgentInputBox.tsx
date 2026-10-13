@@ -169,6 +169,9 @@ export default React.memo(function AgentInputBox({
   // zai race fix: createNewSession 异步窗口(~50–200ms)期间禁用 Send + 短路 Enter。
   // 见 useAgentStore.createNewSession 注释。
   const creatingSession = useAgentStoreOrCtx((s) => s.creatingSession);
+  // 压缩过程中的会话不可再发消息: 压缩会重写 transcript 的边界, 中途插入的
+  // prompt 会被一起摘掉/错位。与 creatingSession 同一条短路路径(见 sendDisabled)。
+  const compacting = useAgentStoreOrCtx((s) => s.compacting);
   const activeSessionId = useAgentStoreOrCtx((s) => s.activeSessionId);
   const isMobile = useAppStore((s) => s.isMobile);
   // dsh 连接状态指示 (2026-08-15): SSE 断流时显示"重连中…/连接已断开",
@@ -266,6 +269,19 @@ export default React.memo(function AgentInputBox({
   const runtime = runtimeRef.current;
   const projection = runtime.projection;
   const input = projection.detectText;
+  // 发送按钮的**单一**禁用判据 —— 按钮的 disabled / 底色 / 字色 / cursor
+  // 四处视觉态此前是同一条件的四份拷贝,加一个条件就得改四处(漏一处会
+  // 出现"按钮能点但长成不可点的样子"或反之)。集中成一个布尔。
+  //
+  // compacting: 压缩会重写 transcript 边界(旧消息被摘要替换),期间插入的
+  // prompt 会落在错误的锚点上。与 creatingSession 同一条短路路径。
+  //
+  // 按钮与 Enter 分两个值: **按钮**多一条"输入为空"(没东西可发就别亮),
+  // **Enter 不能有**这条 —— 只挂图片、文字为空的草稿是合法的一发
+  // (handleSend 的图片附件分支),拿按钮的判据去挡 Enter 会把它堵死。
+  const sendBlocked =
+    creatingSession || compacting || pendingAsk?.status === "pending";
+  const sendDisabled = sendBlocked || input.trim().length === 0;
   // 光标(activeAtToken 定位 @-token 用):每次提交都会重投影,折叠光标由
   // 投影直接给出;范围选区时退到选区末尾。
   const cursor = projection.caret ?? projection.selection?.end ?? input.length;
@@ -585,9 +601,6 @@ export default React.memo(function AgentInputBox({
             message.success(
               `已压缩 ${data.payload?.removedMessages ?? 0} 条历史`,
             );
-            break;
-          case "status":
-            message.info(`状态: ${JSON.stringify(data.payload)}`);
             break;
           case "message":
             message.info(data.payload?.text ?? "");
@@ -1080,7 +1093,12 @@ export default React.memo(function AgentInputBox({
     // (line ~1039),这里是 Enter / Send button / 编程触发三入口的统一拦截。
     // 非 race 时(`creatingSession=false`):即便 sessionId 为空也走原 fallback
     // 路径(sid = sessionId || activeSessionId || undefined),保持向后兼容。
-    if (creatingSession) return;
+    //
+    // compacting 同理: 压缩在重写 transcript 边界, 期间提交的 prompt 会落到
+    // 错误的锚点上。按钮与 Enter 都已拦, 这里是三入口(Enter / Send button /
+    // 编程触发)的最终兜底 —— 前两者的 disabled/canSubmit 都是渲染层的,
+    // 不能保证覆盖所有调用方。
+    if (creatingSession || compacting) return;
     // 投影里 chip 展开为剪贴板文本(@path)再发送 —— 后端协议不变:
     // 收到的还是「文本里夹着 @相对路径」。
     const expanded = runtime.projection.clipboardText;
@@ -1119,12 +1137,6 @@ export default React.memo(function AgentInputBox({
               `压缩完成,移除 ${result.payload.removedMessages} 条`,
             );
             await storeApi.getState().loadSessions();
-            return;
-          case "status":
-            message.info(
-              `cwd: ${result.payload.cwd}\nmodel: ${result.payload.model}\nsession: ${result.payload.sessionId ?? "-"}`,
-              5,
-            );
             return;
           case "prompt":
             // 与 opencc 一致: 只显示用户输入的 `/<command-name> <args>`,
@@ -1231,15 +1243,15 @@ export default React.memo(function AgentInputBox({
   // 运行时注册(纯文本绑定 / 撤销历史 / 更新监听)、键盘映射、token 高亮
   // transform 都在这里装到编辑器上;卸载时整体摘掉。handlers 用 ref 转发到
   // 最新闭包,避免每次渲染重新注册命令(重注册会丢原生 undo 栈的连续性)。
-  const handlersRef = useRef({ arbitrateKey, handleSend, addAttachments, runtime });
-  handlersRef.current = { arbitrateKey, handleSend, addAttachments, runtime };
+  const handlersRef = useRef({ arbitrateKey, handleSend, addAttachments, runtime, sendBlocked });
+  handlersRef.current = { arbitrateKey, handleSend, addAttachments, runtime, sendBlocked };
   useEffect(() => {
     const rt = runtimeRef.current!;
     const unregisterEditor = rt.register();
     const unregisterKeymap = registerComposerKeymap(rt.editor, {
       arbitrate: (key) => handlersRef.current.arbitrateKey(key),
       dismissPopup: () => setShowSkillMenu(false),
-      canSubmit: () => !creatingSession && pendingAsk?.status !== "pending",
+      canSubmit: () => !handlersRef.current.sendBlocked,
       submit: () => void handlersRef.current.handleSend(),
       intakeFiles: (files) => void handlersRef.current.addAttachments([...files]),
       pasteText: (text) => rt.paste(text),
@@ -1813,8 +1825,9 @@ export default React.memo(function AgentInputBox({
           {/* 输入框右侧"发送 / 停止"按钮组 —
               - 桌面 + 移动端通用, 桌面端补回键盘快捷键的可视化入口(只读 Esc
                 提示不够显式), 移动端替代之前的 isMobile-only 停止按钮.
-              - 「发送」: 输入框非空 + 非 streaming + 非 creatingSession +
+              - 「发送」: 输入框非空 + 非 streaming + 非 creatingSession + 非 compacting +
                 无 pendingAsk 时可点, 与 Enter 等价(handleSend);
+                判据集中在 sendDisabled(见其定义处),按钮四态视觉全用它;
               - 「停止」: 仅 streaming 时显示, 与按 Esc 完全一致 — 调
                 storeApi.getState().stop(), 与 AgentConversation 的全局 Esc
                 处理路径走同一套后端 abort + status 流, 不绕过任何清理逻辑.
@@ -1844,11 +1857,7 @@ export default React.memo(function AgentInputBox({
                 onClick={() => {
                   void handleSend();
                 }}
-                disabled={
-                  creatingSession ||
-                  pendingAsk?.status === "pending" ||
-                  input.trim().length === 0
-                }
+                disabled={sendDisabled}
                 style={{
                   // 发送按钮的动态视觉态(条件 + CSS var + 实际 hex 混合)用 inline
                   // 表达更顺,Tailwind 写四组 disabled-state 不直观,保留 inline.
@@ -1858,30 +1867,17 @@ export default React.memo(function AgentInputBox({
                   justifyContent: "center",
                   gap: 4,
                   padding: "6px 14px",
-                  background:
-                    creatingSession ||
-                    pendingAsk?.status === "pending" ||
-                    input.trim().length === 0
+                  background: sendDisabled
                       ? "var(--bg-faint-08)"
                       : "var(--cmd-token-color)",
                   border: "none",
                   borderRadius: 6,
                   // 文字不是白:启用态底色是浅橙(#f97316)/浅紫(#a78bfa),
                   // 白字对浅色底的对比度只有 ~2.7~2.9:1,深色字能到 5.4:1 以上。
-                  color:
-                    creatingSession ||
-                    pendingAsk?.status === "pending" ||
-                    input.trim().length === 0
-                      ? "var(--text-tertiary)"
-                      : "#1e1b4b",
+                  color: sendDisabled ? "var(--text-tertiary)" : "#1e1b4b",
                   fontWeight: 600,
                   fontSize: 13,
-                  cursor:
-                    creatingSession ||
-                    pendingAsk?.status === "pending" ||
-                    input.trim().length === 0
-                      ? "not-allowed"
-                      : "pointer",
+                  cursor: sendDisabled ? "not-allowed" : "pointer",
                 }}
               >
                 <ArrowUpIcon />

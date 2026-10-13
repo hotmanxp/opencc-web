@@ -45,7 +45,7 @@ function buildApp(router: express.IRouter) {
 beforeEach(() => {
   // 重置 module 缓存 → `services/commands/registry.ts` 的 `initialized`
   // 标志位回到 false,`registerBuiltinCommands()` 在每个测试首次进路由
-  // 时都会重新注册 clear/compact/status/handoff 这 4 条 builtin 命令。
+  // 时都会重新注册 clear/compact/handoff 这 3 条 builtin 命令。
   // 不用显式调 setCommandRegistry(null):下个测试 import 进来的
   // getCommandRegistry() 会得到新的 InMemoryRegistry 单例。
   vi.resetModules()

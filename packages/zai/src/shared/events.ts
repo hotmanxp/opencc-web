@@ -363,14 +363,13 @@ const CommandEvent = z.discriminatedUnion('type', [
     sessionId: z.string(),
     commandId: z.string(),
     name: z.string(),
-    // 出口类型: 'cleared' / 'compacted' / 'status' / 'message' / 'prompt' /
+    // 出口类型: 'cleared' / 'compacted' / 'message' / 'prompt' /
     // 'error' / 'unknown'。union 与 routes/command.ts 的 res.json 类型严格
     // 对齐,新增 kind 时必须同步这里(以及 routes/command.ts 的 res.json),
     // zod 编译期拦截飘移。
     result: z.enum([
       'cleared',
       'compacted',
-      'status',
       'message',
       'prompt',
       'error',

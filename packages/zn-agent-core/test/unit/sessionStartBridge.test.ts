@@ -17,6 +17,7 @@ import {
   getSessionStartContexts,
   extractAdditionalContexts,
   __resetSessionStartContextsForTesting,
+  clearSessionStartContexts,
 } from '../../src/opencc-src/server/sessionStartBridge.js'
 
 describe('sessionStartBridge', () => {
@@ -66,31 +67,51 @@ describe('sessionStartBridge', () => {
 
   describe('存储', () => {
     it('set 后能读回', () => {
-      setSessionStartContexts(['x', 'y'])
-      expect(getSessionStartContexts()).toEqual(['x', 'y'])
+      setSessionStartContexts('s1', ['x', 'y'])
+      expect(getSessionStartContexts('s1')).toEqual(['x', 'y'])
     })
 
     it('重复项去重', () => {
-      setSessionStartContexts(['dup', 'dup', 'other'])
-      expect(getSessionStartContexts()).toEqual(['dup', 'other'])
+      setSessionStartContexts('s1', ['dup', 'dup', 'other'])
+      expect(getSessionStartContexts('s1')).toEqual(['dup', 'other'])
     })
 
     it('过滤空串与纯空白', () => {
-      setSessionStartContexts(['ok', '', '   ', null as unknown as string])
-      expect(getSessionStartContexts()).toEqual(['ok'])
+      setSessionStartContexts('s1', ['ok', '', '   ', null as unknown as string])
+      expect(getSessionStartContexts('s1')).toEqual(['ok'])
     })
 
     it('set 是替换而非累加 —— 重复派发(如 reload)不该往里堆', () => {
-      setSessionStartContexts(['first'])
-      setSessionStartContexts(['second'])
-      expect(getSessionStartContexts()).toEqual(['second'])
+      setSessionStartContexts('s1', ['first'])
+      setSessionStartContexts('s1', ['second'])
+      expect(getSessionStartContexts('s1')).toEqual(['second'])
     })
 
     it('读回的是副本,外部改动不污染内部状态', () => {
-      setSessionStartContexts(['a'])
-      const got = getSessionStartContexts() as string[]
+      setSessionStartContexts('s1', ['a'])
+      const got = getSessionStartContexts('s1') as string[]
       got.push('mutated')
-      expect(getSessionStartContexts()).toEqual(['a'])
+      expect(getSessionStartContexts('s1')).toEqual(['a'])
+    })
+
+    it('A 会话的上下文不会泄漏到 B 会话', () => {
+      setSessionStartContexts('A', ['A 的上下文'])
+      setSessionStartContexts('B', ['B 的上下文'])
+      expect(getSessionStartContexts('A')).toEqual(['A 的上下文'])
+      expect(getSessionStartContexts('B')).toEqual(['B 的上下文'])
+    })
+
+    it('未注册的会话读到空结果而不是别人的内容', () => {
+      setSessionStartContexts('A', ['A 的上下文'])
+      expect(getSessionStartContexts('never-seen')).toEqual([])
+    })
+
+    it('clear 只丢指定会话', () => {
+      setSessionStartContexts('A', ['a'])
+      setSessionStartContexts('B', ['b'])
+      clearSessionStartContexts('A')
+      expect(getSessionStartContexts('A')).toEqual([])
+      expect(getSessionStartContexts('B')).toEqual(['b'])
     })
   })
 })

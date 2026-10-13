@@ -22,10 +22,10 @@ describe('CompactingIndicator', () => {
     expect(container.innerHTML).toBe('')
   })
 
-  test('compacting=true 时显示「正在压缩…」', () => {
+  test('compacting=true 时显示「正在压缩历史对话…」', () => {
     useAgentStore.setState({ compacting: true })
     const { container } = renderToHtml()
-    expect(container.textContent).toContain('正在压缩')
+    expect(container.textContent).toContain('正在压缩历史对话')
     // 语义提示给屏幕阅读器
     expect(container.querySelector('[role="status"]')).not.toBeNull()
   })
