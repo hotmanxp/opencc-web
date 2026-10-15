@@ -476,6 +476,14 @@ function isWindowsSandboxPolicyViolation(): boolean {
 const isBackgroundTasksDisabled =
 // eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: schema must be defined at module load
 isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS);
+
+// Mirrors BashTool's gate: assistant-mode auto-background is OFF by default;
+// opt in with CLAUDE_BASH_AUTO_BACKGROUND=1. PowerShell's threshold is
+// ASSISTANT_BLOCKING_BUDGET_MS (15s) vs Bash's 2s, and the path is also
+// feature-gated by KAIROS, but the opt-in semantics are the same.
+const isAssistantAutoBackgroundEnabled =
+// eslint-disable-next-line custom-rules/no-process-env-top-level -- Intentional: gate evaluated at module load
+isEnvTruthy(process.env.CLAUDE_BASH_AUTO_BACKGROUND);
 const fullInputSchema = lazySchema(() => z.strictObject({
   command: z.string().describe('The PowerShell command to execute'),
   timeout: semanticNumber(z.number().optional()).describe(`Optional timeout in milliseconds (max ${getMaxTimeoutMs()})`),
@@ -1121,7 +1129,7 @@ async function* runPowerShellCommand({
   // In assistant mode, the main agent should stay responsive. Auto-background
   // blocking commands after ASSISTANT_BLOCKING_BUDGET_MS so the agent can keep
   // coordinating instead of waiting. The command keeps running — no state loss.
-  if (false && getKairosActive() && isMainThread && !isBackgroundTasksDisabled && run_in_background !== true) {
+  if (false && getKairosActive() && isAssistantAutoBackgroundEnabled && isMainThread && !isBackgroundTasksDisabled && run_in_background !== true) {
     setTimeout(() => {
       if (shellCommand.status === 'running' && backgroundShellId === undefined) {
         assistantAutoBackgrounded = true;

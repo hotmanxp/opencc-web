@@ -31,7 +31,6 @@ import { lazySchema } from '../../utils/lazySchema.js';
 import { logError } from '../../utils/log.js';
 import { createUserMessage, extractTextContent, isSyntheticMessage, normalizeMessages } from '../../utils/messages.js';
 import { getAgentModel } from '../../utils/model/agent.js';
-import { resolveOutOfProcessTeammateProvider } from '../../services/api/agentRouting.js';
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { getInitialSettings } from '../../utils/settings/settings.js';
 import { permissionModeSchema } from '../../utils/permissions/PermissionMode.js';
@@ -93,8 +92,14 @@ const baseInputSchema = lazySchema(() => z.object({
   description: z.string().describe('A short (3-5 word) description of the task'),
   prompt: z.string().describe('The task for the agent to perform'),
   subagent_type: z.string().optional().describe('The type of specialized agent to use for this task'),
-  model: z.enum(['sonnet', 'opus', 'haiku']).optional().describe("Optional model override for this agent. Takes precedence over the agent definition's model frontmatter. If omitted, uses the agent definition's model, or inherits from the parent."),
-  run_in_background: z.boolean().optional().describe('Set to true to run this agent in the background. You will be notified when it completes.')
+  // zod v4 的 `.trim()` 是内置 transformation —— 等价「剥首尾空白」,
+  // 同时能被原生 `toJSONSchema()` 表达成 JSON Schema 的 `pattern`,模型侧
+  // 仍能拿到约束。**不能用 `.transform(v => v.trim())`**:那种写法在
+  // `toJSONSchema()` 里会直接抛 "Transforms cannot be represented in JSON
+  // Schema"(utils/api.ts:208 每个 tool 每次 LLM 调用都跑一次,AgentTool
+  // 永远在场 → 整轮 API 直接 500)。
+  model: z.string().trim().min(1).optional().describe("Optional model override for this agent. Takes precedence over the agent definition's model frontmatter. If omitted, uses the agent definition's model, or inherits from the parent. Accepts any non-empty model string (e.g., 'sonnet', 'opus', 'haiku', or custom model IDs from your provider). Leading/trailing whitespace is trimmed. Ignored when forking (omit subagent_type to fork) — forks always inherit the parent model. Set this only when EXPLICITLY asked by the user for a specific model, never because the task seems small, simple, or cheap; otherwise omit it so the subagent uses the default."),
+  run_in_background: z.boolean().optional().describe('An agent runs in the background only if you pass run_in_background: true; the call then returns at once and you will be notified when it completes. Without it the call blocks until the agent finishes. Use it for long-running work so the user can give you other tasks meanwhile; leave it off when your very next action depends on this agent\'s result.')
 }));
 
 // Full schema combining base + multi-agent params + isolation
@@ -351,7 +356,10 @@ export const AgentTool = buildTool({
     cwd
   }: AgentToolInput, toolUseContext, canUseTool, assistantMessage, onProgress?) {
     const startTime = Date.now();
-    const model = isCoordinatorMode() ? undefined : modelParam;
+    // zai patch (2026-10-12, mods 同步):`const` → `let`。`agent.spawn` 的
+    // 派发结果会改写 `model`(上游就是为此把它从 const 放开的),而那个 hunk
+    // 不含 mods 关键字,按「只搬 mods 相关 hunk」的口径没被带过来。
+    let model = isCoordinatorMode() ? undefined : modelParam;
 
     // Get app state for permission mode and agent filtering
     const appState = toolUseContext.getAppState();
@@ -469,6 +477,120 @@ export const AgentTool = buildTool({
       } as unknown as {
         data: Output;
       };
+    }
+
+    // Upstream `agent.offer` at dispatch — "whether the model is offered the
+    // agent type, in its listing AND at dispatch". The listing half is
+    // `filterOfferedAgents`, applied where the description and the
+    // `agent_listing_delta` attachment are built; this is the other half.
+    //
+    // It has to exist separately because the listing is a cache. The gate that
+    // carries the list is off by default and the attachment path re-announces
+    // from the transcript, so a model can name a `subagent_type` it was never
+    // shown — and one a mod withheld — with no handler left to stop it.
+    //
+    // Only asked when the call named a type. A fork (no `subagent_type`) is
+    // the current thread, not an agent type being offered, and asking about
+    // `undefined` would hand every `agent.offer` hook a match it cannot use.
+    if (subagent_type !== undefined) {
+      const offeredDef = toolUseContext.options.agentDefinitions.activeAgents.find(
+        a => a.agentType === subagent_type,
+      )
+      if (offeredDef !== undefined) {
+        const stillOffered = await dispatchModEngine<{ isOffered: boolean }>(
+          'agent.offer',
+          {
+            agent: offeredDef.agentType,
+            description: offeredDef.whenToUse,
+            source: offeredDef.source,
+            provider:
+              offeredDef.source === 'plugin'
+                ? { plugin: offeredDef.plugin, tier: 'user' }
+                : offeredDef.source === 'built-in'
+                  ? { plugin: 'engine', tier: 'core' }
+                  : { plugin: 'engine', tier: 'user' },
+            tool_use_id: assistantMessage?.message?.id ?? '',
+          },
+          e => ({ isOffered: e.isOffered !== false }),
+        )
+        if (!stillOffered.isOffered) {
+          // Surfaced as the tool's error so the model reads WHY no subagent
+          // started, the same way `agent.spawn`'s own `deny` is — the model is
+          // the one that asked, and it has to learn the answer changed.
+          throw new Error(
+            `Agent type '${subagent_type}' is not available.`,
+          )
+        }
+      }
+    }
+
+    // Upstream `agent.spawn` — "what the Agent tool decided about the
+    // subagent it is about to start, before its model is resolved". It sits
+    // here for exactly that reason: below this point `subagent_type` has been
+    // resolved into a definition and `model` into a concrete id, and a hook
+    // that rewrote either would be writing to a value nothing reads again.
+    //
+    // The teammate branch above is a different call and returns on its own,
+    // so it never reaches here — which matches upstream, where `agent.spawn`
+    // is the Agent tool's spawn and not a teammate's.
+    if (hasModHandlersFor('agent.spawn')) {
+      const decided = await dispatchModEngine<{
+        deny?: string
+        prompt: string
+        description: string
+        subagentType?: string
+        model?: string
+        name?: string
+        cwd?: string
+        background: boolean
+      }>(
+        'agent.spawn',
+        {
+          tool_use_id: assistantMessage?.message?.id ?? '',
+          prompt,
+          description: description ?? '',
+          // The type as the call asked for it, not a resolved one: that is
+          // the only value a rewrite can still mean anything about.
+          subagentType: subagent_type,
+          model,
+          name,
+          cwd,
+          background: run_in_background === true,
+          fork: isForkSubagentEnabled() && subagent_type === undefined,
+          parentModel: toolUseContext.options.mainLoopModel,
+          parentAgentId: toolUseContext.agentId,
+          permissionMode: appState.toolPermissionContext.mode,
+        },
+        e => ({
+          // Carried explicitly: a core that rebuilt the result from the
+          // rewritable fields alone would drop the refusal on the floor and
+          // spawn anyway.
+          deny: typeof e.deny === 'string' ? e.deny : undefined,
+          prompt: typeof e.prompt === 'string' ? e.prompt : prompt,
+          description:
+            typeof e.description === 'string' ? e.description : (description ?? ''),
+          subagentType:
+            typeof e.subagentType === 'string'
+              ? e.subagentType
+              : subagent_type,
+          model: typeof e.model === 'string' ? e.model : model,
+          name: typeof e.name === 'string' ? e.name : name,
+          cwd: typeof e.cwd === 'string' ? e.cwd : cwd,
+          background: e.background === true,
+        }),
+      )
+      if (decided.deny !== undefined) {
+        // Upstream surfaces the reason as the tool's error, so the model
+        // reads why no subagent started rather than seeing an empty result.
+        throw new Error(decided.deny)
+      }
+      prompt = decided.prompt
+      description = decided.description
+      subagent_type = decided.subagentType
+      model = decided.model
+      name = decided.name
+      cwd = decided.cwd
+      run_in_background = decided.background
     }
 
     // Fork subagent experiment routing:
@@ -842,6 +964,15 @@ export const AgentTool = buildTool({
       cwd,
       description,
       agentName: name,
+      // Module 1551 wiring: pass through the new params when the call site
+      // has them in scope.
+      ...(worktreeInfo?.worktreeBranch
+        ? { worktreeBranch: worktreeInfo.worktreeBranch }
+        : {}),
+      ...(name ? { name } : {}),
+      ...(toolUseContext.toolUseId
+        ? { toolUseId: toolUseContext.toolUseId }
+        : {}),
     };
 
     // Helper to wrap execution with a cwd override. Worktree wins if present;
@@ -879,11 +1010,16 @@ export const AgentTool = buildTool({
           // Clear worktreePath from metadata so resume doesn't try to use
           // a deleted directory, but keep an explicit child-repo cwd when
           // present so resume can still land in the target repository.
-          void writeAgentMetadata(asAgentId(earlyAgentId), {
-            agentType: selectedAgent.agentType,
-            source: selectedAgent.source,
-            ...(cwd && { cwd }),
-            ...(description && { description }),
+          void clearWorktreeFromAgentMetadata({
+            agentId: asAgentId(earlyAgentId),
+            removedWorktreePath: worktreePath,
+            spawnMetadata: {
+              agentType: selectedAgent.agentType,
+              source: selectedAgent.source,
+              ...(cwd && { cwd }),
+              ...(description && { description }),
+              ...(worktreeBranch && { worktreeBranch }),
+            },
           }).catch(_err => logForDebugging(`Failed to clear worktree metadata: ${_err}`));
           return {};
         }

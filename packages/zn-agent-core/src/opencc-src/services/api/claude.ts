@@ -59,6 +59,8 @@ import {
   toolToAPISchema,
 } from '../../utils/api.js'
 import { getOauthAccountInfo } from '../../utils/auth.js'
+import { hasModHandlersFor } from '../../mods/dispatch.js'
+import { resolveToolDescriptions } from '../../mods/toolDescribe.js'
 import {
   getStreamingAbortMessage,
   isExpectedSideTaskAbortReason,
@@ -110,10 +112,8 @@ import {
 import { getAPIContextManagement } from '../compact/apiMicrocompact.js'
 import { getStreamIdleTimeoutMs } from './openaiShim.js'
 
+import * as autoModeStateModule from '../../utils/permissions/autoModeState.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
-const autoModeStateModule = true
-  ? (require('../../utils/permissions/autoModeState.js') as typeof import('../../utils/permissions/autoModeState.js'))
-  : null
 
 import type { ClientOptions } from '@anthropic-ai/sdk'
 import {
@@ -1217,6 +1217,28 @@ async function* queryModel(
     }
   }
 
+  // Upstream `tool.describe` — the chain that rewrites what a tool's description
+  // says to the model. Skipped outright with no subscribers: this sits on the
+  // request path, and the resolution is per-tool and async.
+  const describedDescriptions = hasModHandlersFor('tool.describe')
+    ? await resolveToolDescriptions({
+        tools,
+        promptOptions: {
+          getToolPermissionContext: options.getToolPermissionContext,
+          agents: options.agents,
+          allowedAgentTypes: options.allowedAgentTypes,
+        },
+        isDeferredByHost: name => deferredToolNames.has(name),
+      })
+    : null
+  if (describedDescriptions) {
+    // A hook that deferred a tool has to actually defer it, or the next block
+    // re-derives the set from isDeferredTool and discards the hook's answer.
+    for (const tool of describedDescriptions.deferred) {
+      deferredToolNames.add(tool)
+    }
+  }
+
   // Even if tool search mode is enabled, skip if there are no deferred tools
   // AND no MCP servers are still connecting. When servers are pending, keep
   // ToolSearch available so the model can discover tools after they connect.
@@ -1323,6 +1345,7 @@ async function* queryModel(
         agents: options.agents,
         allowedAgentTypes: options.allowedAgentTypes,
         model: options.model,
+        description: describedDescriptions?.descriptions.get(tool.name),
         deferLoading: willDefer(tool),
       }),
     ),
@@ -2907,13 +2930,23 @@ async function* queryModel(
       try {
         // Fall back to non-streaming mode
         const result = yield* executeNonStreamingRequest(
-          { model: options.model, source: options.querySource, effortValue: effort },
+          {
+            model: options.model,
+            source: options.querySource,
+            // Must match the streaming path (and the watchdog fallback above).
+            // Dropping it here sent a routed sub-agent's ENTIRE conversation to
+            // the global default provider instead of its agentModels endpoint —
+            // a privacy leak, not just a wrong model (cc-013).
+            providerOverride: options.providerOverride,
+            effortValue: effort,
+          },
           {
             model: options.model,
             fallbackModel: options.fallbackModel,
             thinkingConfig,
             ...(isFastModeEnabled() && { fastMode: isFastMode }),
             signal,
+            querySource: options.querySource,
           },
           paramsFromContext,
           (attempt, _startTime, tokens) => {
@@ -3275,7 +3308,12 @@ export function accumulateUsage(
   messageUsage: Readonly<NonNullableUsage>,
 ): NonNullableUsage {
   return {
-    input_tokens: totalUsage?.input_tokens ?? 0 + messageUsage?.input_tokens ?? 0,
+    // Parenthesised like every sibling field below: `+` binds tighter than
+    // `??`, so the unparenthesised form parsed as
+    // `total ?? (0 + message) ?? 0` and never actually added the two totals —
+    // cumulative input_tokens just echoed the first turn's value (cc-012).
+    input_tokens:
+      (totalUsage?.input_tokens ?? 0) + (messageUsage?.input_tokens ?? 0),
     cache_creation_input_tokens:
       (totalUsage?.cache_creation_input_tokens ?? 0) +
       (messageUsage?.cache_creation_input_tokens ?? 0),

@@ -1,9 +1,9 @@
 import { defineModel } from '../define.js'
 
-// All 13 model descriptors live under brandId 'openplatform'. The catalog
-// on the zn-nova gateway references all 13. Each defaultModel is the bare
-// apiName the 平安 Nova gateway expects (no zhiniao- prefix, unlike the
-// wizard-ai gateway).
+// All 18 model descriptors live under brandId 'openplatform'. The catalog
+// on the zn-nova gateway references all of them. Each defaultModel is the
+// bare apiName the 平安 Nova gateway expects (no zhiniao- prefix, unlike
+// the wizard-ai gateway).
 //
 // Context/output values are sourced from src/utils/model/openaiContextWindows.ts
 // (zhiniao-* entries for shared M2.7 / Qwen / GLM models; static table
@@ -31,6 +31,17 @@ export default [
     vendorId: 'anthropic',
     classification: ['chat', 'reasoning', 'vision', 'coding'],
     defaultModel: 'MiniMax-M3',
+    capabilities: openplatformCapabilities,
+    contextWindow: 1_000_000,
+    maxOutputTokens: 512_000,
+  }),
+  defineModel({
+    id: 'openplatform-minimax-m3.1-flash-preview',
+    label: 'MiniMax M3.1 Flash Preview (Open Platform)',
+    brandId: 'openplatform',
+    vendorId: 'anthropic',
+    classification: ['chat', 'reasoning', 'vision', 'coding'],
+    defaultModel: 'MiniMax-M3.1-Flash-Preview',
     capabilities: openplatformCapabilities,
     contextWindow: 1_000_000,
     maxOutputTokens: 512_000,
@@ -179,5 +190,16 @@ export default [
     capabilities: openplatformCapabilities,
     contextWindow: 1_000_000,
     maxOutputTokens: 384_000,
+  }),
+  defineModel({
+    id: 'openplatform-deepseek-v4.1-flash',
+    label: 'DeepSeek V4.1 Flash (Open Platform)',
+    brandId: 'openplatform',
+    vendorId: 'anthropic',
+    classification: ['chat', 'reasoning', 'coding'],
+    defaultModel: 'deepseek-v4.1-flash',
+    capabilities: openplatformCapabilities,
+    contextWindow: 1_048_576,
+    maxOutputTokens: 262_144,
   }),
 ]

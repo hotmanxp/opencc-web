@@ -9,7 +9,7 @@
  * NOT write AppState tasks / team files here — LocalAgentTask's lifecycle
  * assumes an in-process `runAgent` loop, while CLI children emit an event
  * stream that maps naturally onto `mirrorAppendBgEvent`. If AppState
- * registration is ever needed (teammate roster / TaskOutput), the fields
+ * registration is ever needed (teammate roster), the fields
  * `spawnCliAgent` already returns (`agent_id`, `task_id`, `name`,
  * `team_name`, `model`) are all in place to build it.
  *

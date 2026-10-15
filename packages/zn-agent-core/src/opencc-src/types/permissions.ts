@@ -207,6 +207,14 @@ export type PermissionAskDecision<
   blockedPath?: string
   metadata?: PermissionMetadata
   /**
+   * If true, the permission dialog must not offer "always allow" options even
+   * when the global policy would. Set for skills from third-party plugins:
+   * writing a persistent allow rule for a skill the user did not author and
+   * may not control is a privilege escalation. The user can still allow the
+   * single invocation.
+   */
+  suppressAlwaysAllowRule?: boolean
+  /**
    * If true, this ask decision was triggered by a bashCommandIsSafe_DEPRECATED security check
    * for patterns that splitCommand_DEPRECATED could misparse (e.g. line continuations, shell-quote
    * transformations). Used by bashToolHasPermission to block early before splitCommand_DEPRECATED

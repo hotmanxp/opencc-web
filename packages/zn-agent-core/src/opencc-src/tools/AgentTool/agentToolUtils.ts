@@ -64,7 +64,13 @@ import { isInProcessTeammate } from '../../utils/teammateContext.js'
 import { getTokenCountFromUsage } from '../../utils/tokens.js'
 import { getCwd } from '../../utils/cwd.js'
 import { getParentSessionId } from '../../utils/teammate.js'
+import { BASH_TOOL_NAME } from '../BashTool/toolName.js'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../ExitPlanModeTool/constants.js'
+import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.js'
+import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
+import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/constants.js'
+import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
+import { GREP_TOOL_NAME } from '../GrepTool/prompt.js'
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from './constants.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 export type ResolvedAgentTools = {
@@ -249,10 +255,30 @@ export const agentToolResultSchema = lazySchema(() =>
     // results verbatim without re-validation). Used to gate the sync
     // result trailer — one-shot built-ins skip the SendMessage hint.
     agentType: z.string().optional(),
-    content: z.array(z.object({ type: z.literal('text'), text: z.string() })),
+    content: z.array(
+      z.object({
+        type: z.literal('text'),
+        text: z.string(),
+        citations: z.array(z.unknown()).nullable().optional(),
+      }),
+    ),
     totalToolUseCount: z.number(),
     totalDurationMs: z.number(),
     totalTokens: z.number(),
+    resolvedModel: z.string().optional(),
+    modelsUsed: z.array(z.string()).optional(),
+    toolStats: z
+      .object({
+        readCount: z.number().optional(),
+        searchCount: z.number().optional(),
+        bashCount: z.number().optional(),
+        editFileCount: z.number().optional(),
+        linesAdded: z.number().optional(),
+        linesRemoved: z.number().optional(),
+        otherToolCount: z.number().optional(),
+        frameCount: z.number().optional(),
+      })
+      .optional(),
     usage: z.object({
       input_tokens: z.number(),
       output_tokens: z.number(),
@@ -271,6 +297,12 @@ export const agentToolResultSchema = lazySchema(() =>
           ephemeral_5m_input_tokens: z.number(),
         })
         .nullable(),
+      output_tokens_details: z
+        .object({
+          thinking_tokens: z.number().nullable().optional(),
+        })
+        .optional(),
+      iterations: z.array(z.unknown()).optional(),
     }),
   }),
 )
@@ -310,6 +342,68 @@ export function countToolUses(messages: MessageType[]): number {
   return count
 }
 
+/**
+ * Per-tool counters over an agent's message history. Mirrors upstream `nl()`
+ * at offset 15407553 — used to surface toolStats on the agent result for
+ * downstream telemetry and resume UI.
+ *
+ * `linesAdded`/`linesRemoved` are summed from Edit/Write tool inputs;
+ * `frameCount` is reserved for future frame-based tools (always 0 today).
+ */
+export function countToolStats(messages: MessageType[]): {
+  readCount?: number
+  searchCount?: number
+  bashCount?: number
+  editFileCount?: number
+  linesAdded?: number
+  linesRemoved?: number
+  otherToolCount?: number
+  frameCount?: number
+} {
+  const stats = {
+    readCount: 0,
+    searchCount: 0,
+    bashCount: 0,
+    editFileCount: 0,
+    linesAdded: 0,
+    linesRemoved: 0,
+    otherToolCount: 0,
+    frameCount: 0,
+  }
+  for (const m of messages) {
+    if (m.type !== 'assistant') continue
+    for (const block of m.message.content) {
+      if (block.type !== 'tool_use') continue
+      const input = (block.input ?? {}) as Record<string, unknown>
+      switch (block.name) {
+        case FILE_READ_TOOL_NAME:
+          stats.readCount++
+          break
+        case GREP_TOOL_NAME:
+        case GLOB_TOOL_NAME:
+          stats.searchCount++
+          break
+        case BASH_TOOL_NAME:
+          stats.bashCount++
+          break
+        case FILE_EDIT_TOOL_NAME:
+        case FILE_WRITE_TOOL_NAME:
+          stats.editFileCount++
+          if (typeof input['new_string'] === 'string') {
+            stats.linesAdded += input['new_string'].split('\n').length
+          }
+          if (typeof input['old_string'] === 'string') {
+            stats.linesRemoved += input['old_string'].split('\n').length
+          }
+          break
+        default:
+          stats.otherToolCount++
+      }
+    }
+  }
+  return stats
+}
+
 export function finalizeAgentTool(
   agentMessages: MessageType[],
   agentId: string,
@@ -320,6 +414,10 @@ export function finalizeAgentTool(
     startTime: number
     agentType: string
     isAsync: boolean
+    agentDepth?: number
+    source?: string
+    pluginId?: string
+    modelsUsed?: string[]
   },
 ): AgentToolResult {
   const {
@@ -329,6 +427,10 @@ export function finalizeAgentTool(
     startTime,
     agentType,
     isAsync,
+    agentDepth,
+    source,
+    pluginId,
+    modelsUsed,
   } = metadata
 
   const lastAssistantMessage = getLastAssistantMessage(agentMessages)
@@ -355,6 +457,13 @@ export function finalizeAgentTool(
 
   const totalTokens = getTokenCountFromUsage(lastAssistantMessage.message.usage)
   const totalToolUseCount = countToolUses(agentMessages)
+  const toolStats = countToolStats(agentMessages)
+  const durationMs = Date.now() - startTime
+  const finalModel =
+    modelsUsed && modelsUsed.length > 0
+      ? modelsUsed[modelsUsed.length - 1]!
+      : resolvedAgentModel
+  const modelSwapped = (modelsUsed?.length ?? 1) > 1
 
   logEvent('tengu_agent_tool_completed', {
     agent_type:
@@ -365,10 +474,21 @@ export function finalizeAgentTool(
     response_char_count: content.length,
     assistant_message_count: agentMessages.length,
     total_tool_uses: totalToolUseCount,
-    duration_ms: Date.now() - startTime,
+    duration_ms: durationMs,
     total_tokens: totalTokens,
     is_built_in_agent: isBuiltInAgent,
     is_async: isAsync,
+    agent_depth: agentDepth as
+      | AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+      | undefined,
+    agent_source:
+      source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    plugin_id:
+      pluginId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    final_model:
+      finalModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    model_swapped:
+      modelSwapped as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
 
   // Signal to inference that this subagent's cache chain can be evicted.
@@ -386,9 +506,12 @@ export function finalizeAgentTool(
     agentId,
     agentType,
     content,
-    totalDurationMs: Date.now() - startTime,
+    totalDurationMs: durationMs,
     totalTokens,
     totalToolUseCount,
+    resolvedModel: finalModel,
+    ...(modelsUsed && modelsUsed.length > 0 ? { modelsUsed } : {}),
+    toolStats,
     usage: lastAssistantMessage.message.usage,
   }
 }

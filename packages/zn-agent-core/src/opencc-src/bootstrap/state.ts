@@ -81,6 +81,11 @@ type State = {
   // trajectories fail fast rather than conditioning the model on fake
   // tool_results.
   strictToolResultPairing: boolean
+  // Set from the --disable-slash-commands CLI option at startup. SkillTool
+  // reads this lazily in isEnabled(): the REPL only filters the command
+  // list, so without this the tool stays advertised and the model can
+  // still invoke skills the user asked to disable.
+  disableSlashCommands: boolean
   sdkAgentProgressSummariesEnabled: boolean
   userMsgOptIn: boolean
   clientType: string
@@ -307,6 +312,7 @@ function getInitialState(): State {
     isInteractive: true,
     kairosActive: false,
     strictToolResultPairing: false,
+    disableSlashCommands: false,
     sdkAgentProgressSummariesEnabled: false,
     userMsgOptIn: false,
     clientType: 'cli',
@@ -497,6 +503,25 @@ function getSdkContext(): SdkContext | undefined {
  */
 export function getMemoryCwd(): string | undefined {
   return getSdkContext()?.memoryCwd
+}
+
+/**
+ * zai patch: sessionId scoped to the current async chain, **no STATE
+ * fallback**. Same contract as `getMemoryCwd` — undefined means "no SDK
+ * context active", letting the caller decide what to do instead of
+ * silently receiving the process-global `STATE.sessionId`.
+ *
+ * Why this exists: `getSessionId()` falls back to `STATE.sessionId`, a
+ * process-wide singleton that any session's prompt overwrites. Callers
+ * that must not cross sessions (e.g. subagent_control's per-session task
+ * filter) need to tell "mine" from "whoever ran last", and only this
+ * accessor can. Production wraps every `stream.next()` in
+ * `runWithSdkContext({ sessionId })` — see
+ * `server/createOpenccRuntime-impl.ts:1023` — so inside a query this
+ * always resolves.
+ */
+export function getSdkSessionId(): SessionId | undefined {
+  return getSdkContext()?.sessionId
 }
 
 export function getSessionId(): SessionId {
@@ -1265,6 +1290,14 @@ export function setStrictToolResultPairing(value: boolean): void {
   STATE.strictToolResultPairing = value
 }
 
+export function getDisableSlashCommands(): boolean {
+  return STATE.disableSlashCommands
+}
+
+export function setDisableSlashCommands(value: boolean): void {
+  STATE.disableSlashCommands = value
+}
+
 // Field name 'userMsgOptIn' avoids excluded-string substrings ('BriefTool',
 // 'SendUserMessage' — case-insensitive). All callers are inside feature()
 // guards so these accessors don't need their own (matches getKairosActive).
@@ -1624,6 +1657,33 @@ export function clearRegisteredPluginHooks(): void {
     }
   }
 
+  STATE.registeredHooks = Object.keys(filtered).length > 0 ? filtered : null
+}
+
+/**
+ * zai patch (2026-10-06, mods 同步):按 identity 摘除指定的 matcher 条目。
+ *
+ * 供 `src/mods/hooks.ts` 在 unload / reload 时原子换掉 mod composite
+ * matcher —— 与 loadPluginHooks 的 clear-then-register 配对同构,但只动
+ * 自己注册的那几条(clearRegisteredPluginHooks 会连带清掉别的 callback
+ * hook)。没注册过的条目静默跳过。
+ *
+ * 同步自 opencc `src/bootstrap/state.ts`(mods-p1 分支)。
+ */
+export function unregisterHookMatchers(
+  toRemove: RegisteredHookMatcher[],
+): void {
+  if (!STATE.registeredHooks || toRemove.length === 0) {
+    return
+  }
+  const removeSet = new Set(toRemove)
+  const filtered: Partial<Record<HookEvent, RegisteredHookMatcher[]>> = {}
+  for (const [event, matchers] of Object.entries(STATE.registeredHooks)) {
+    const kept = (matchers ?? []).filter(m => !removeSet.has(m))
+    if (kept.length > 0) {
+      filtered[event as HookEvent] = kept
+    }
+  }
   STATE.registeredHooks = Object.keys(filtered).length > 0 ? filtered : null
 }
 

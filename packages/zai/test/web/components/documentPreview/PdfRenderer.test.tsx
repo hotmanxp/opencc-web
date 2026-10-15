@@ -256,7 +256,11 @@ describe('PdfRenderer 翻页按钮', () => {
     expect(screen.getByTestId('pdf-prev')).toBeDisabled()
 
     fireEvent.click(screen.getByTestId('pdf-next'))
-    expect(screen.getByTestId('pdf-page-indicator')).toHaveTextContent(`2 / ${NUM_PAGES}`)
+    // 必须等:翻页是 state 更新驱动的异步重渲染,同步断言会跟 flush 抢跑。
+    // 并行跑时 CPU 争抢让这个竞态稳定复现(3 轮挂 2 轮),串行时是偶发。
+    await waitFor(() =>
+      expect(screen.getByTestId('pdf-page-indicator')).toHaveTextContent(`2 / ${NUM_PAGES}`),
+    )
     expect(screen.getByTestId('pdf-prev')).toBeEnabled()
   })
 })

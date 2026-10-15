@@ -10,6 +10,11 @@ import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
 import { AGENT_TOOL_NAME } from './constants.js'
 import { isForkSubagentEnabled } from './forkSubagent.js'
+import {
+  dispatchModEngineSync,
+  hasModHandlersFor,
+} from '../../mods/dispatch.js'
+import { logForDebugging } from '../../utils/debug.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
 function getToolsDescription(agent: AgentDefinition): string {
@@ -46,6 +51,60 @@ export function formatAgentLine(agent: AgentDefinition): string {
 }
 
 /**
+ * Upstream `agent.offer` — "whether the model is offered the agent type, in
+ * its listing and at dispatch". A hook answering `{isOffered: false}` drops
+ * it from both.
+ *
+ * One filter, two call sites: the inline description in `getPrompt` and the
+ * `agent_listing_delta` attachment that replaced it. Both draw the same pool,
+ * so a mod that vetoes an agent and gets it listed anyway — because the gate
+ * that now carries the listing was never taught the veto — is the failure
+ * this single chokepoint exists to make impossible.
+ *
+ * Synchronous because both callers are. `getAgentListingDeltaAttachment` is
+ * called in a `for…of` from compact.ts with no place to await, and a hook
+ * that answers with a promise is counted as the failure it is rather than
+ * silently passing the agent through.
+ *
+ * `provider` is the providing plugin and its tier, and upstream pins it — a
+ * hook cannot rewrite it. opencc has no tier for an agent that came from a
+ * settings file rather than a plugin, so those report `{plugin: 'engine',
+ * tier: 'user'}`: not the engine's own, and not a mod's either.
+ */
+export function filterOfferedAgents(
+  agents: readonly AgentDefinition[],
+): AgentDefinition[] {
+  if (!hasModHandlersFor('agent.offer')) return [...agents]
+  const kept: AgentDefinition[] = []
+  for (const agent of agents) {
+    const provider =
+      agent.source === 'plugin'
+        ? { plugin: agent.plugin, tier: 'user' }
+        : agent.source === 'built-in'
+          ? { plugin: 'engine', tier: 'core' }
+          : { plugin: 'engine', tier: 'user' }
+    const offered = dispatchModEngineSync<boolean>(
+      'agent.offer',
+      {
+        agent: agent.agentType,
+        description: agent.whenToUse,
+        source: agent.source,
+        provider,
+      },
+      e => e.isOffered !== false,
+    )
+    if (offered === false) {
+      logForDebugging(
+        `[mods] agent.offer: "${agent.agentType}" is withheld from the model's listing by a mod`,
+      )
+      continue
+    }
+    kept.push(agent)
+  }
+  return kept
+}
+
+/**
  * Whether the agent list should be injected as an attachment message instead
  * of embedded in the tool description. When true, getPrompt() returns a static
  * description and attachments.ts emits an agent_listing_delta attachment.
@@ -68,10 +127,13 @@ export async function getPrompt(
   isCoordinator?: boolean,
   allowedAgentTypes?: string[],
 ): Promise<string> {
-  // Filter agents by allowed types when Agent(x,y) restricts which agents can be spawned
-  const effectiveAgents = allowedAgentTypes
-    ? agentDefinitions.filter(a => allowedAgentTypes.includes(a.agentType))
-    : agentDefinitions
+  // Filter agents by allowed types when Agent(x,y) restricts which agents can be spawned,
+  // then by whatever `agent.offer` hooks still put on the table.
+  const effectiveAgents = filterOfferedAgents(
+    allowedAgentTypes
+      ? agentDefinitions.filter(a => allowedAgentTypes.includes(a.agentType))
+      : agentDefinitions,
+  )
 
   // Fork subagent feature: when enabled, insert the "When to fork" section
   // (fork semantics, directive-style prompts) and swap in fork-aware examples.
@@ -82,17 +144,13 @@ export async function getPrompt(
 
 ## When to fork
 
-Fork yourself (omit \`subagent_type\`) when the intermediate tool output isn't worth keeping in your context. The criterion is qualitative \u2014 "will I need this output again" \u2014 not task size.
-- **Research**: fork open-ended questions. If research can be broken into independent questions, launch parallel forks in one message. A fork beats a fresh subagent for this \u2014 it inherits context and shares your cache.
-- **Implementation**: prefer to fork implementation work that requires more than a couple of edits. Do research before jumping to implementation.
+Fork yourself (omit \`subagent_type\`) when the intermediate tool output isn't worth keeping in your context. The criterion is qualitative \u2014 "will I need this output again" \u2014 not task size. Fork open-ended questions. If research can be broken into independent questions, launch parallel forks in one message. A fork beats a fresh subagent for this \u2014 it inherits context and shares your cache.
 
-Forks are cheap because they share your prompt cache. Don't set \`model\` on a fork \u2014 a different model can't reuse the parent's cache. Pass a short \`name\` (one or two words, lowercase) so the user can see the fork in the teams panel and steer it mid-run.
+Forks are cheap because they share your prompt cache.
 
-**Don't peek.** The tool result includes an \`output_file\` path — do not Read or tail it unless the user explicitly asks for a progress check. You get a completion notification; trust it. Reading the transcript mid-flight pulls the fork's tool noise into your context, which defeats the point of forking. If you need to course-correct, use SendMessage — never Read.
+**Don't peek.** The tool result includes an \`output_file\` path \u2014 do not Read or tail it. You get a completion notification; trust it. Reading the transcript mid-flight pulls the fork's tool noise into your context, which defeats the point of forking.
 
-**Don't race.** After launching, you know nothing about what the fork found. Never fabricate or predict fork results in any format — not as prose, summary, or structured output. The notification arrives as a user-role message in a later turn; it is never something you write yourself. If the user asks a follow-up before the notification lands, tell them the fork is still running — give status, not a guess.
-
-**Don't take over.** A fork that looks stuck is usually in its read phase, not failing. Course-correct with SendMessage; never write its output yourself or discard its result when it lands. Override belongs to the Review phase.
+**Don't race.** After launching, you know nothing about what the fork found. Never fabricate or predict fork results in any format \u2014 not as prose, summary, or structured output. The notification arrives as a user-role message in a later turn; it is never something you write yourself. If the user asks a follow-up before the notification lands, tell them the fork is still running \u2014 give status, not a guess.
 
 **Writing a fork prompt.** Since the fork inherits your context, the prompt is a *directive* — what to do, not what the situation is. Be specific about scope: what's in, what's out, what another agent is handling. Don't re-explain background.
 `
@@ -245,7 +303,7 @@ When NOT to use the ${AGENT_TOOL_NAME} tool:
 ${whenNotToUseSection}
 
 Usage notes:
-- Always include a short description (3-5 words) summarizing what the agent will do${concurrencyNote}
+- Always include a short description summarizing what the agent will do${concurrencyNote}
 - When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.${
     // eslint-disable-next-line custom-rules/no-process-env-top-level
     !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS) &&
@@ -258,6 +316,7 @@ Usage notes:
   }
 - To continue a previously spawned agent, use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name as the \`to\` field. The agent resumes with its full context preserved. ${forkEnabled ? 'Each fresh Agent invocation with a subagent_type starts without context — provide a complete task description.' : 'Each Agent invocation starts fresh — provide a complete task description.'}
 - The agent's outputs should generally be trusted
+- Each agent type's model, reasoning effort, and tools come from its definition (\`.claude/agents/*.md\` frontmatter or SDK \`agents\`).
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.)${forkEnabled ? '' : ", since it is not aware of the user's intent"}
 - If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
 - If the user specifies that they want you to run agents "in parallel", you MUST send a single message with multiple ${AGENT_TOOL_NAME} tool use content blocks. For example, if you need to launch both a build-validator agent and a test-runner agent in parallel, send a single message with both tool calls.

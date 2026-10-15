@@ -1,6 +1,10 @@
 // @ts-nocheck
 
 import { runtimeFeature } from '../utils/envUtils'
+// zai patch (2026-10-05, bug `delete-session-resurrects--by-zai`): 已删会话的
+// append 守卫。跨 vendor/compat 边界的 import 在本仓已有先例(见 hooks.ts、
+// createOpenccRuntime-impl.ts 等)。
+import { isSessionDeleted } from '../../compat/runtime/deletedSessions.js'
 import type { UUID } from 'crypto'
 import type { Dirent } from 'fs'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
@@ -83,6 +87,7 @@ import { getBranch } from './git.js'
 import { gracefulShutdownSync, isShuttingDown } from './gracefulShutdown.js'
 import { parseJSONL } from './json.js'
 import { logError } from './log.js'
+import { emitModsSystemNotice } from '../mods/engine.js'
 import { extractTag, isCompactBoundaryMessage } from './messages.js'
 import { sanitizePath } from './path.js'
 import {
@@ -607,6 +612,23 @@ export type AgentMetadata = {
   /** Source of the agent definition (e.g. 'built-in', 'projectSettings').
    * Used on resume to verify the resolved definition matches the original. */
   source?: string
+  /** True if the user explicitly stopped this agent (vs. natural completion).
+   * Forwarded from upstream module 1551 to enable per-agent cleanup UX. */
+  stoppedByUser?: boolean
+  /** Parent agent id when this agent was spawned by another subagent
+   * (e.g. workflow / teammate spawn chain). */
+  parentAgentId?: string
+  /** True if this agent was steered by a plugin (e.g. skill-driven loop).
+   * Forwarded from upstream module 1551. */
+  pluginSteered?: boolean
+  /** API request shape ('foreground' | 'background') used at spawn time.
+   * Persisted so resume picks up the same shape. */
+  requestShape?: 'foreground' | 'background'
+  /** Explicit non-interactive session flag passed at spawn. */
+  requestNonInteractive?: boolean
+  /** True once the worktree has been cleanly removed for this agent
+   * (set by clearWorktreeFromAgentMetadata). */
+  worktreeCleanlyRemoved?: boolean
 }
 
 /**
@@ -1753,6 +1775,14 @@ class Project {
     if (this.shouldSkipPersistence()) {
       return
     }
+    // zai patch (2026-10-05, bug `delete-session-resurrects--by-zai`):会话被
+    // DELETE 后,仍在跑的 turn 会在自己的 finally 里继续 append。真正的重建者
+    // 就是这条链(materializeSessionFile → appendEntry → appendDirectlyToFile,
+    // 后者是 `mkdir(dirname) + appendFile`,会把刚删掉的 transcript 重新创建)。
+    // 守卫必须落在这里 —— 只护 compat 侧 legacyTranscriptStore 拦不住本链路。
+    if (isSessionDeleted(sessionId)) {
+      return
+    }
 
     const currentSessionId = getSessionId() as UUID
     const isCurrentSession = sessionId === currentSessionId
@@ -1881,7 +1911,7 @@ class Project {
         const isNewUuid = !messageSet.has(entry.uuid)
         if (isAgentSidechain || isNewUuid) {
           // Enqueue write — appendToFile handles ENOENT by creating directories
-          void this.enqueueWrite(targetFile, entry)
+          const written = this.enqueueWrite(targetFile, entry)
 
           if (!isAgentSidechain) {
             // messageSet is main-file-authoritative. Sidechain entries go to a
@@ -1892,7 +1922,19 @@ class Project {
             // and --resume's buildConversationChain terminates at the dangling ref.
             // Same constraint for remote (inc-4718 above): sidechain persisting a
             // UUID the main thread hasn't written yet → 409 when main writes it.
+            //
+            // Add synchronously (a second record for the same uuid arriving before
+            // the flush lands must dedup, not double-write) but ROLL BACK on
+            // failure. Without the rollback the uuid stays in the set forever, so
+            // every later retry is skipped as a duplicate and the message is lost
+            // for good — a single failed append silently deleted a chunk of the
+            // conversation, and logError writes only to a log the user never reads.
             messageSet.add(entry.uuid)
+            void written.catch(error => {
+              if (messageSet.delete(entry.uuid)) {
+                this.reportTranscriptWriteFailure(entry, error)
+              }
+            })
 
             if (isTranscriptMessage(entry)) {
               await this.persistToRemote(sessionId, entry)
@@ -1908,6 +1950,25 @@ class Project {
         throw new Error(`Unhandled session storage entry type: ${entryType}`)
       }
     }
+  }
+
+  /**
+   * A transcript append failed and its uuid was rolled back, so the message
+   * can be re-recorded later. Tell the user instead of losing it quietly —
+   * logError alone writes only to a log nobody reads.
+   *
+   * Deliberately does NOT re-enqueue a retry: a failed append has already
+   * settled its queue slot and released the rewrite barrier, and re-queueing
+   * behind it would stall every later write. Rolling the uuid back is what
+   * makes a real retry possible.
+   */
+  private reportTranscriptWriteFailure(entry: Entry, error: unknown): void {
+    logError(error)
+    const message = error instanceof Error ? error.message : String(error)
+    emitModsSystemNotice(
+      `Failed to save this message to the session transcript: ${message}. ` +
+        `It is still in this conversation but may be missing if you exit now.`,
+    )
   }
 
   /**

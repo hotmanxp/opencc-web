@@ -149,6 +149,7 @@ const _runtimeShape: OpenccRuntime = {
     update: async () => ({ success: true, message: 'ok' }),
     listMarketplaces: async () => [],
     addMarketplace: async () => ({ success: true, message: 'ok' }),
+    updateMarketplace: async () => ({ success: true, message: 'ok' }),
     reload: async () => ({ success: true, message: 'ok' }),
   },
   // zai patch (2026-09-22): MCP live view surface — see serverTypes.ts

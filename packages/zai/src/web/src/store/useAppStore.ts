@@ -3,9 +3,21 @@ import type { ServerEvent } from '../../../shared/events.js';
 import type { OutputStyle, WorkMode } from '../../../shared/settings.js';
 import type { StreamState } from '../lib/eventSource.js';
 
+// 服务重启/停服中态 —— 为「正在重启 / 已停服」的 UI 横幅准备的**状态层**。
+//
+// `phase` 有两个值, 对应 server/routes/system.ts 两条不同的退出路径:
+//   restarting — /api/system/restart, 进程会重新起来(带 reason);
+//   stopping   — /api/system/stop, 整个服务退出不再回来(无 reason 字段)。
+//
+// zai patch 2026-10-12: `stopping` 原先没有对应态, 且三个事件都没进
+// eventSource 白名单 → 这层状态此前永远是 null。
+//
+// ⚠️ 现状: **还没有组件读这个字段** —— SettingsDrawer 的重启/停服按钮是
+// fire-and-forget, 靠页面自己断开来表达"服务没了"。本次只把状态接通,
+// 横幅 UI 仍待建。建的时候两个 phase 必须分开文案: 重启会回来, 停服不会。
 export type ServiceState = {
-  phase: 'restarting';
-  reason: 'user_action' | 'auto_recovery' | 'update';
+  phase: 'restarting' | 'stopping';
+  reason?: 'user_action' | 'auto_recovery' | 'update';
   deadlineMs: number;
 } | null;
 
@@ -66,6 +78,13 @@ interface AppState {
   // 当前仅支持 'task-factory'):router.tsx 的 TaskFactoryRedirect 据此把
   // / 与 /agent 重定向到 /super-tasks。`null` 表示未识别 / 未配置(profile
   // 为空),undefined 表示字段未回传(向后兼容旧的 GET /api/system 响应)。
+  // aaEnabled 是本次进程是否带 `--aa` 启动(后端 isAaEnabled());AA 配置入口
+  // (/manage「AA 桥」tab、实例管理每行的 AA 开关、AASettings 页)一律按它门控。
+  // **fail-open**:undefined 与 true 同义 —— 旧版后端(`/api/system` 没回
+  // aaEnabled 字段)滚动时,前端拿不到信号,这时按「启用」处理,避免把 AA
+  // 实例上的入口误藏。只有显式 false 才藏。等所有 zai 实例都升级完、关闭
+  // 这台机器上的旧版 dist 后,可以把这个 fail-open 收紧回 `=== true`,
+  // 同时把 Layout / MobileLayout 里 `!== false` 改回 `=== true`。
   instanceContext: {
     cwd: string;
     cwdName: string;
@@ -77,6 +96,7 @@ interface AppState {
     supervisorPid?: number | null;
     instanceId?: string | null;
     app?: string | null;
+    aaEnabled?: boolean;
   } | null;
   setConnected: (v: boolean) => void;
   setInstanceContext: (ctx: {
@@ -90,6 +110,7 @@ interface AppState {
     supervisorPid?: number | null;
     instanceId?: string | null;
     app?: string | null;
+    aaEnabled?: boolean;
   }) => void;
   applyJobEvent: (event: ServerEvent) => void;
   applySystemEvent: (event: ServerEvent) => void;
@@ -224,6 +245,7 @@ interface AppState {
    *   - 'checking' / 'installing' → 顶部 antd notification(轻量提示)
    *   - 'complete' → Modal.info「升级到 vX.Y.Z 完成,请重启 zai 以生效」
    *   - 'failed'   → Modal.error「升级失败:<err>」
+   *   - 'idle'     → 无需升级的终态,UpdateNotifier 销毁顶部通知
    *
    * dismissedKey 是 `${from}->${to}` 或纯 `error`;dismiss 后同 key
    * 不再触发弹窗(用户已经知道了),但新一轮 installing 会重置 dismissedKey。
@@ -418,6 +440,18 @@ export const useAppStore = create<AppState>((set) => ({
         },
       };
     }
+    // zai patch 2026-10-12: 停服态。与 restarting 分开是因为它**不会**
+    // 恢复 —— 页面不会自己回来, 横幅只是让用户知道刚才那次「重启」其实是
+    // 停服, 不要再等。schema 里 stopping 不带 reason, 故 reason 留空。
+    if (event.type === 'system.stopping') {
+      return {
+        ...state,
+        serviceState: {
+          phase: 'stopping',
+          deadlineMs: event.deadlineMs,
+        },
+      };
+    }
     if (event.type === 'system.restart.canceled') {
       return { ...state, serviceState: null };
     }
@@ -451,6 +485,10 @@ export const useAppStore = create<AppState>((set) => ({
     switch (event.type) {
       case 'app.update.checking':
         return { ...state, appUpdate: { status: 'checking' } }
+      // 无需升级 — 流程终态。UpdateNotifier 靠它销毁 duration:0 的
+      // 「正在检查」通知,不清 dismissedKey(本轮没有弹窗发生过)。
+      case 'app.update.idle':
+        return { ...state, appUpdate: { status: 'idle' } }
       case 'app.update.installing':
         return {
           ...state,

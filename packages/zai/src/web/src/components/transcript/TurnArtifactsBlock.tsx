@@ -111,7 +111,7 @@ export function TurnArtifactsBlock({ files }: { files: ArtifactFile[] }) {
         <SparklesIcon className="shrink-0 text-[var(--accent-start)]" />
         <span>本轮产物 · {files.length} 个文件</span>
         <ChevronRightIcon
-          className={`ml-auto shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
         />
       </button>
       {open && (

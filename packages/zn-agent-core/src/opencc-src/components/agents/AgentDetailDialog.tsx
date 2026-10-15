@@ -2,8 +2,6 @@ import * as React from 'react'
 
 import type { Tools } from '../../Tool.js'
 import type { AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
-import { Dialog } from '../design-system/Dialog.js'
-import { AgentDetail } from './AgentDetail.js'
 
 type Props = {
   agent: AgentDefinition
@@ -28,22 +26,6 @@ export function AgentDetailDialog({
   title,
   onCancel,
   hideInputGuide,
-}: Props): React.ReactNode {
-  const [routing, setRouting] = React.useState(false)
-  return (
-    <Dialog
-      title={title}
-      onCancel={onCancel}
-      hideInputGuide={hideInputGuide}
-      isCancelActive={!routing}
-    >
-      <AgentDetail
-        agent={agent}
-        tools={tools}
-        allAgents={allAgents}
-        onBack={onBack}
-        onRoutingChange={setRouting}
-      />
-    </Dialog>
-  )
+}: Props): React.ReactNode | null {
+  return null;
 }

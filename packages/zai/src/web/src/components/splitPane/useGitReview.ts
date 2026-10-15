@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { gitApi } from '../../lib/gitApi.js';
 import type {
   GitBranchEntry,
@@ -44,7 +44,13 @@ export interface UseGitReviewResult {
   worktrees: GitWorktree[];
 
   /** Right-pane diff (working-tree file or commit). */
-  diff: { text: string; isUntracked: boolean; loading: boolean; error: string | null };
+  diff: {
+    text: string;
+    isUntracked: boolean;
+    isBinary: boolean;
+    loading: boolean;
+    error: string | null;
+  };
 
   loading: boolean;
   error: string | null;
@@ -76,6 +82,7 @@ export function useGitReview(args: UseGitReviewArgs): UseGitReviewResult {
   const [diff, setDiff] = useState<UseGitReviewResult['diff']>({
     text: '',
     isUntracked: false,
+    isBinary: false,
     loading: false,
     error: null,
   });
@@ -159,24 +166,41 @@ export function useGitReview(args: UseGitReviewArgs): UseGitReviewResult {
   }, []);
 
   // ── Diff fetcher (file or commit) ─────────────────────────────────────
+  // A file whose only change is staged (`A ` / `M ` / `D `) has an empty
+  // worktree side, so asking for it would render a blank pane — read the
+  // index instead. Files with unstaged edits keep the worktree view, which is
+  // where the newest content lives. Derived as a boolean so the 5s status poll
+  // (a fresh `entries` array every time) can't retrigger the diff fetch.
+  const selectedStaged = useMemo(() => {
+    const entry = entries.find((e) => e.path === selectedPath);
+    return entry !== undefined && entry.staged && entry.xy[1] === ' ';
+  }, [entries, selectedPath]);
+
   useEffect(() => {
     if (!cwd) {
-      setDiff({ text: '', isUntracked: false, loading: false, error: null });
+      setDiff({ text: '', isUntracked: false, isBinary: false, loading: false, error: null });
       return;
     }
     let cancelled = false;
-    setDiff({ text: '', isUntracked: false, loading: true, error: null });
+    setDiff({ text: '', isUntracked: false, isBinary: false, loading: true, error: null });
     const run = async (): Promise<void> => {
       try {
         if (mode === 'changes' && selectedPath) {
-          const res = await gitApi.diff(cwd, selectedPath);
+          const res = await gitApi.diff(cwd, selectedPath, { staged: selectedStaged });
           if (cancelled) return;
           if (!res.ok) {
-            setDiff({ text: '', isUntracked: false, loading: false, error: res.error ?? '读取 diff 失败' });
+            setDiff({
+              text: '',
+              isUntracked: false,
+              isBinary: false,
+              loading: false,
+              error: res.error ?? '读取 diff 失败',
+            });
           } else {
             setDiff({
               text: res.diff ?? '',
               isUntracked: res.isUntracked ?? false,
+              isBinary: res.isBinary ?? false,
               loading: false,
               error: null,
             });
@@ -185,23 +209,31 @@ export function useGitReview(args: UseGitReviewArgs): UseGitReviewResult {
           const res = await gitApi.commitDiff(cwd, selectedCommit);
           if (cancelled) return;
           if (!res.ok) {
-            setDiff({ text: '', isUntracked: false, loading: false, error: res.error ?? '读取 commit diff 失败' });
+            setDiff({
+              text: '',
+              isUntracked: false,
+              isBinary: false,
+              loading: false,
+              error: res.error ?? '读取 commit diff 失败',
+            });
           } else {
             setDiff({
               text: res.diff ?? '',
               isUntracked: false,
+              isBinary: false,
               loading: false,
               error: null,
             });
           }
         } else {
-          setDiff({ text: '', isUntracked: false, loading: false, error: null });
+          setDiff({ text: '', isUntracked: false, isBinary: false, loading: false, error: null });
         }
       } catch (err) {
         if (cancelled) return;
         setDiff({
           text: '',
           isUntracked: false,
+          isBinary: false,
           loading: false,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -211,7 +243,7 @@ export function useGitReview(args: UseGitReviewArgs): UseGitReviewResult {
     return () => {
       cancelled = true;
     };
-  }, [cwd, mode, selectedPath, selectedCommit]);
+  }, [cwd, mode, selectedPath, selectedCommit, selectedStaged]);
 
   // ── Initial isRepo probe + poll loop ──────────────────────────────────
   useEffect(() => {

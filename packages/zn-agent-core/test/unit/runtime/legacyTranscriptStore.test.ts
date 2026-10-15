@@ -16,12 +16,13 @@
  * (openccRuntime-transcript-persist.test.ts)各自独立。
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { TranscriptStore, sanitizePath } from '../../../src/compat/runtime/legacyTranscriptStore.js'
+import { __resetDeletedSessionsForTests } from '../../../src/compat/runtime/deletedSessions.js'
 
 let dataDir: string
 
@@ -155,6 +156,77 @@ describe('TranscriptStore.patch — model/providerId persistence', () => {
     expect(messages.filter((m: any) => m?.type === 'session-meta')).toHaveLength(0)
   })
 
+})
+
+// zai patch (2026-09-28): effort 的落盘 / 回读。
+//
+// 这三处曾经全是空的, 于是 effort 从 PATCH 进去后只改了内存: patchSession
+// 的落盘条件只认 model/providerId/mainAgent, findLatestSessionMeta 不取
+// effort, list() 也不投影。表现是「API 收下了、transcript 里没有、会话列表
+// 恒为 undefined」—— 用户设什么强度, 刷新即丢, 且上游拿不到 reasoning.effort。
+describe('TranscriptStore — effort persistence', () => {
+  const EFFORTS = ['xhigh', 'max', 'off', 'high'] as const
+
+  it('effort-only patch writes a session-meta line (落盘条件含 effort)', async () => {
+    const cwd = '/Users/test/effort-write'
+    const sessionId = 'sess-effort-write'
+    directWriteJsonl(dataDir, cwd, sessionId, [
+      { type: 'user', message: { role: 'user', content: 'x' }, uuid: 'u', timestamp: 1 },
+    ])
+    const store = new TranscriptStore(dataDir)
+    // 只带 effort —— model/providerId/mainAgent 全为 undefined, 旧的
+    // 落盘条件不成立。
+    await store.patch(sessionId, { effort: 'xhigh' }, { cwd })
+
+    const { messages } = await store.read(sessionId, { cwd })
+    const metaLines = messages.filter((m: any) => m?.type === 'session-meta')
+    expect(metaLines).toHaveLength(1)
+    expect(metaLines[0].effort).toBe('xhigh')
+  })
+
+  it.each(EFFORTS)('read() restores effort=%s after restart (REGISTRY empty)', async (effort) => {
+    const cwd = '/Users/test/effort-read'
+    const sessionId = `sess-effort-read-${effort}`
+    directWriteJsonl(dataDir, cwd, sessionId, [
+      { type: 'user', message: { role: 'user', content: 'hi' }, uuid: 'u1', timestamp: 1 },
+      { type: 'session-meta', effort, uuid: 'm1', timestamp: 3 },
+    ])
+
+    // 新实例 = 重启后 REGISTRY 为空
+    const reader = new TranscriptStore(dataDir)
+    const { meta } = await reader.read(sessionId, { cwd })
+    expect((meta as any).effort).toBe(effort)
+  })
+
+  it('list() projects effort so the picker can highlight it (sidebar after restart)', async () => {
+    const cwd = '/Users/test/effort-list'
+    const sessionId = 'sess-effort-list'
+    directWriteJsonl(dataDir, cwd, sessionId, [
+      { type: 'user', message: { role: 'user', content: 'hi' }, uuid: 'u1', timestamp: 1 },
+      { type: 'session-meta', model: 'MiniMax-M3.1-Flash-Preview', effort: 'max', uuid: 'm1', timestamp: 3 },
+    ])
+
+    const reader = new TranscriptStore(dataDir)
+    const list = await reader.list({ cwd })
+    const entry = list.find((s) => s.sessionId === sessionId)
+    expect((entry as any)?.effort).toBe('max')
+  })
+
+  it('takes the latest session-meta line when effort is patched repeatedly', async () => {
+    const cwd = '/Users/test/effort-latest'
+    const sessionId = 'sess-effort-latest'
+    directWriteJsonl(dataDir, cwd, sessionId, [
+      { type: 'user', message: { role: 'user', content: 'x' }, uuid: 'u', timestamp: 1 },
+    ])
+    const store = new TranscriptStore(dataDir)
+    for (const effort of EFFORTS) {
+      await store.patch(sessionId, { effort }, { cwd })
+    }
+
+    const reader = new TranscriptStore(dataDir)
+    const list = await reader.list({ cwd })
+    expect((list.find((s) => s.sessionId === sessionId) as any)?.effort).toBe('high')
+  })
 })
 
 describe('TranscriptStore.read — model/providerId rebuild from disk', () => {
@@ -392,6 +464,72 @@ describe('sanitizePath (跨包导出)', () => {
       const store = new TranscriptStore(dir)
       await store.create({ cwd, model: 'm' }, { cwd })
       expect(existsSync(join(dir, 'projects', sanitizePath(cwd)))).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  // ========== 已删会话的 stale 守卫(M4 / `delete-session-resurrects--by-zai`) ==========
+  //
+  // DELETE /agent/sessions/:id 删掉 transcript 后,一个**仍在跑**的 turn 会在
+  // 自己的 finally 里继续 append。而 appendEntry 是 `mkdir + append` ——
+  // 目录和文件被重新创建,被删的会话自己复活。路由侧已经把
+  // abortSessionController 挪到 store.remove 之前(主修法),但 abort 是异步
+  // 生效的,turn 可能在收到 signal 前已排队一次写;这个集合是第二道闸。
+
+  it('remove 之后再 append 不会把 transcript 写回来', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-stale-append-'))
+    try {
+      __resetDeletedSessionsForTests()
+      const cwd = '/Users/foo/code/stale'
+      const store = new TranscriptStore(dir)
+      await store.create({ cwd, model: 'm' }, { cwd })
+      const sid = 'sess-to-delete'
+      await store.appendMessageEntry(sid, { type: 'user', text: 'before' }, { cwd })
+      const file = join(dir, 'projects', sanitizePath(cwd), `${sid}.jsonl`)
+      expect(existsSync(file)).toBe(true)
+
+      await store.remove(sid, { cwd })
+      expect(existsSync(file)).toBe(false)
+
+      // 模拟被删会话的 turn 迟到地 finally append
+      await store.appendMessageEntry(sid, { type: 'assistant', text: 'late write' }, { cwd })
+
+      expect(existsSync(file)).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('未删除的会话照常 append(守卫不误伤)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-stale-append-ok-'))
+    try {
+      __resetDeletedSessionsForTests()
+      const cwd = '/Users/foo/code/stale-ok'
+      const store = new TranscriptStore(dir)
+      await store.create({ cwd, model: 'm' }, { cwd })
+      const sid = 'sess-alive'
+      await store.appendMessageEntry(sid, { type: 'user', text: 'hi' }, { cwd })
+      const file = join(dir, 'projects', sanitizePath(cwd), `${sid}.jsonl`)
+      expect(existsSync(file)).toBe(true)
+      expect(readFileSync(file, 'utf-8')).toContain('hi')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('删 A 不影响 B —— 守卫按 sid 生效', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-stale-append-ab-'))
+    try {
+      __resetDeletedSessionsForTests()
+      const cwd = '/Users/foo/code/stale-ab'
+      const store = new TranscriptStore(dir)
+      await store.create({ cwd, model: 'm' }, { cwd })
+      await store.appendMessageEntry('sess-A', { type: 'user', text: 'a' }, { cwd })
+      await store.remove('sess-A', { cwd })
+
+      await store.appendMessageEntry('sess-B', { type: 'user', text: 'b' }, { cwd })
+      expect(existsSync(join(dir, 'projects', sanitizePath(cwd), 'sess-B.jsonl'))).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

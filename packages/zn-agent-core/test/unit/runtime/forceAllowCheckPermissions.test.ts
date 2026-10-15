@@ -75,13 +75,12 @@ describe('forceAllow(tools) checkPermissions mutation', () => {
     const { forceAllowCheckPermissions } = await import(
       '../../../src/compat/tools/opencc/builtin.js'
     )
-    // SkillTool.checkPermissions returns ask when no allow rule
-    // matches (line 581 of vendor tools/SkillTool/SkillTool.ts). Even
-    // though zai uses its own skillTool wrapper, the vendor SkillTool
-    // is also passed through `getOpenccBuiltinTools` and could be hit
-    // if the runtime code accidentally dispatches a tool_use to it.
-    // Force-allow its checkPermissions too so the LLM never sees an
-    // upstream ask on the vendor path.
+    // Modelled on vendor SkillTool, whose checkPermissions returns `ask`
+    // when no allow rule matches (vendor tools/SkillTool/SkillTool.ts:581).
+    // Vendor SkillTool is the Skill the model actually sees — it sits in
+    // `getTools()`'s pool (vendor tools.ts:getAllBaseTools) and zai no
+    // longer ships its own — so an `ask` here would surface to the LLM as
+    // an upstream permission prompt. Force-allow it like the other tools.
     const tool: any = {
       name: 'Skill',
       async checkPermissions(_input: unknown) {

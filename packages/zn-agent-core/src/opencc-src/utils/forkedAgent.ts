@@ -12,6 +12,7 @@
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import type { PromptCommand } from '../commands.js'
+import { dispatchModEngine, hasModHandlersFor } from '../mods/dispatch.js'
 import type { QuerySource } from '../constants/querySource.js'
 import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
 import { query } from '../query.js'
@@ -201,9 +202,22 @@ export async function prepareForkedCommandContext(
 ): Promise<PreparedForkedContext> {
   // Get skill content with $ARGUMENTS replaced
   const skillPrompt = await command.getPromptForCommand(args, context)
-  const skillContent = skillPrompt
+  const joined = skillPrompt
     .map(block => (block.type === 'text' ? block.text : ''))
     .join('\n')
+  // Upstream gates on the skill name: `Jl("skill.prompt", {skill: e})`. Unlike
+  // the other sites there was no gate here at all, so this dispatch ran for
+  // every forked command. The join is cheap but not free, and it is now built
+  // once for both the payload and the ungated fallback.
+  const skillContent = hasModHandlersFor('skill.prompt', {
+    skill: command.name,
+  })
+    ? await dispatchModEngine(
+        'skill.prompt',
+        { skill: command.name, text: joined },
+        async e => String(e.text ?? ''),
+      )
+    : joined
 
   // Parse and prepare allowed tools
   const allowedTools = parseToolListFromCLI(command.allowedTools ?? [])
@@ -270,6 +284,13 @@ export type SubagentContextOverrides = {
   agentId?: AgentId
   /** Override the agentType (for subagents with a specific type) */
   agentType?: string
+  /**
+   * Whether the subagent runs detached (run_in_background / coordinator /
+   * fork). Synchronous subagents are torn down at their final response, so
+   * tools like Bash use this to decide whether a background command can
+   * outlive the agent that started it.
+   */
+  isAsync?: boolean
   /** Override the messages array */
   messages?: Message[]
   /** Override the readFileState (e.g., fresh cache instead of clone) */
@@ -455,6 +476,9 @@ export function createSubagentContext(
     // Generate new agentId for subagents (each subagent should have its own ID)
     agentId: overrides?.agentId ?? createAgentId(),
     agentType: overrides?.agentType,
+    ...(overrides?.isAsync !== undefined
+      ? { parentAgentIsAsync: overrides.isAsync }
+      : {}),
     ...(overrides?.queryLifecycle
       ? { queryLifecycle: overrides.queryLifecycle }
       : {}),

@@ -191,6 +191,28 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   // d.ts,镜像到 ./index.js(src/index.ts 提供 declare-only 契约);运行时值
   // 由 esbuild 打进 opencc-core.mjs。
   './opencc-src/utils/skills/skillChangeDetector.js': './index.js',
+  // zai patch (2026-10-05): background-bash notification output path. zai's
+  // BashNotifier needs `getTaskOutputPath` from opencc-src/utils/task/diskOutput
+  // to populate <output-file> in its self-rendered <task-notification> (the
+  // vendor module is excluded from main tsc, mirror to ./index.js — runtime
+  // value is inlined into the esbuild bundle; type mirror uses index.d.ts).
+  './opencc-src/utils/task/diskOutput.js': './index.js',
+  // zai patch (2026-10-08, 手动 /compact 接线 P0): 压缩后缓存清理与
+  // compact-warning 抑制。zai 手动 /compact 绕开 vendor 链路,必须显式补
+  // 这两个(自动压缩由 autoCompact.ts 内部完成)。vendor 模块被 tsc 排除,
+  // 镜像到 ./index.js;运行时值由 esbuild 打进 opencc-core.mjs。
+  './opencc-src/services/compact/postCompactCleanup.js': './index.js',
+  './opencc-src/services/compact/compactWarningState.js': './index.js',
+  // zai patch (2026-10-06, mods 同步): 用户 JS 扩展系统(src/mods/)的四个
+  // 公共模块。vendor opencc-src 整体被 tsc 排除,没有独立 d.ts,镜像到
+  // ./index.js(src/index.ts 提供 declare-only 契约);运行时值由 esbuild
+  // 打进 opencc-core.mjs。加载本身由 createHeadlessContext 内部触发,
+  // 这里导出的是 zai-server 的管理面(reload/unload/命令与工具池信号)。
+  './opencc-src/mods/hooks.js': './index.js',
+  './opencc-src/mods/engine.js': './index.js',
+  './opencc-src/mods/registry.js': './index.js',
+  './opencc-src/mods/builtin.js': './index.js',
+  './opencc-src/mods/manifest.js': './index.js',
 }
 
 /** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。
@@ -220,6 +242,31 @@ function rewriteDtsSourcePath(line: string): string {
  *  .length === 0` 判断 — bundle-opencc 自己会写 Tool.d.ts 到 dist/opencc-
  *  src/Tool.d.ts(zai patch 2026-08-20),让 dist 永远非空,误判 warm。 */
 const TSC_PROBE = join(ROOT, 'dist', 'compat', 'cwdStore.d.ts')
+
+/** Trees whose d.ts are emitted by tsc somewhere in this same build, so a
+ *  warm dist that predates a brand-new module there must not hard-fail:
+ *  `compat/*` is in the main project's root file set and its d.ts lands in
+ *  the `tsc -b` step that runs right after this script; `opencc-src/server/*`
+ *  is emitted by the `tsc -p tsconfig.server.json` step later in this script.
+ *  Everything else under `opencc-src/` is excluded from tsc and must be
+ *  mirrored via DTS_PATH_REWRITE. */
+const TSC_EMITTED_PREFIXES = ['compat/', 'opencc-src/server/'] as const
+
+function isTscEmittedTarget(target: string): boolean {
+  const rel = target.replace(/^\.\//, '')
+  if (!TSC_EMITTED_PREFIXES.some((prefix) => rel.startsWith(prefix))) return false
+  // Only defer when the source module actually exists — tsc will emit its
+  // d.ts. A re-export with no source at all is a genuine dangling export and
+  // still fails the assertion below.
+  const base = join(ROOT, 'src', rel.replace(/\.js$/, ''))
+  return (
+    existsSync(`${base}.ts`) ||
+    existsSync(`${base}.tsx`) ||
+    existsSync(`${base}.d.ts`) ||
+    existsSync(join(base, 'index.ts'))
+  )
+}
+
 function assertDtsTargetsResolve(bundleEntryDts: string): void {
   if (!existsSync(TSC_PROBE)) {
     console.log(
@@ -231,13 +278,12 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
   for (const m of bundleEntryDts.matchAll(fromRe)) {
     const target = m[1]
     if (target === './package.json' || !target.startsWith('.')) continue
-    // opencc-src/server/* targets are mechanically emitted later in THIS
-    // script by the `tsc -p tsconfig.server.json` step (their files are in
-    // tsconfig.server.json include), so a warm dist that predates a new
-    // server module must not hard-fail here before that step runs. Dangling
-    // refs are still caught by typecheck:consumer + verify-server-types-
-    // self-contained (the same net the cold-build guard relies on).
-    if (target.startsWith('./opencc-src/server/')) continue
+    // Targets in a tree tsc emits d.ts for (see TSC_EMITTED_PREFIXES) resolve
+    // once those steps run, so a warm dist that predates a new module there
+    // must not hard-fail here. Dangling refs are still caught downstream:
+    // typecheck:consumer + verify-server-types-self-contained (the same net
+    // the cold-build guard relies on).
+    if (isTscEmittedTarget(target)) continue
     const expected = join(OUT_DIR, target.replace(/\.js$/, '.d.ts'))
     if (!existsSync(expected)) {
       console.error(
@@ -1811,40 +1857,30 @@ console.log(`[bundle-opencc] compress-tool-history: ${COMPRESS_TOOL_HISTORY_OUT}
     stdio: ['inherit', 'pipe', 'pipe'],
   })
   if (proc.status !== 0) {
-    // tsc reports errors in vendored transitive files (the opencc-src
-    // tree has known vendor-type drift — 89× TS2742 lodash portability
-    // + other assorted strict-mode issues — that does not affect our
-    // server public surface). The server emit contract is "the two
-    // required d.ts files exist" — we sanity-check that below. tsc
-    // emits declaration files for the include files regardless of
-    // errors in transitive dependencies (default `noEmitOnError: false`),
-    // so the d.ts we need are written before this branch fires.
+    // zai patch 2026-10-04:这段原本把 tsc 的错误降级成一行 note 就继续
+    // 构建,理由写的是「vendor 有已知类型漂移(89× TS2742 lodash
+    // portability 等),不影响 server 公共表面」。那个前提已经不成立:
+    // 当天把 server/ 里 12 个真实类型错误修掉后,`tsc -p tsconfig.server.json`
+    // 已经是 0 错。既然如此,继续吞错误只会让下一次漂移静默通过 ——
+    // 改成硬失败,与 build 链上其它闸门一致。
     //
-    // The runtime contract is enforced by vitest
-    // (test/unit/server/headless-context.test.ts), NOT by `tsc -p
-    // tsconfig.server.json`. Vendor files MAY be edited for type fixes
-    // (see AGENTS.md — opencc-src is a zai patch surface, not a frozen
-    // upstream copy); any remaining errors are logged as a one-line
-    // summary and we rely on the required-d.ts sanity check below.
+    // emit 本身不受影响:tsc 默认 noEmitOnError:false,声明文件在报错时
+    // 也会写进 tmp 目录;但 dist 的 server d.ts 拷贝在下面,硬失败就意味着
+    // 这批 d.ts 不会进 dist —— 构建中断,不会产出半成品。
     //
-    // tsc writes its errors to stdout (not stderr) by default; capture
-    // from both streams so the count is accurate regardless of host
-    // tsc version.
+    // tsc 默认把错误写到 stdout(不是 stderr),两路都转发给调用方。
     const stdoutStr = proc.stdout?.toString() ?? ''
     const stderrStr = proc.stderr?.toString() ?? ''
+    if (stdoutStr) process.stderr.write(stdoutStr)
+    if (stderrStr) process.stderr.write(stderrStr)
     const errorCount = (stdoutStr.match(/error TS/g) ?? []).length +
       (stderrStr.match(/error TS/g) ?? []).length
-    if (errorCount > 0) {
-      process.stderr.write(
-        `[bundle-opencc] note: tsc -p tsconfig.server.json reported ${errorCount} errors in vendored transitive files; ` +
-          `relying on the emit + required-d.ts sanity check below.\n`,
-      )
-      // Temporary: dump full stderr/stdout to investigate remaining errors.
-      if (process.env.BUNDLE_OPENCC_DEBUG_TS) {
-        if (proc.stdout) process.stderr.write(proc.stdout)
-        if (proc.stderr) process.stderr.write(proc.stderr)
-      }
-    }
+    console.error(
+      `[bundle-opencc] tsc -p tsconfig.server.json failed with ${errorCount} error(s) — ` +
+        `server 类型发射中止。修掉上面的错误后重跑(类型闸门:` +
+        `pnpm --filter @zn-ai/zn-agent-core typecheck)。`,
+    )
+    process.exit(1)
   }
 
   // Copy the two server d.ts files from the tmp emit into the real

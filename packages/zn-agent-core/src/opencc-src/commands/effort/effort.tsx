@@ -3,10 +3,9 @@ import * as React from 'react';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../../services/analytics/index.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
-import type { LocalJSXCommandOnDone, LocalJSXCommandContext } from '../../types/command.js';
-import { type EffortValue, getDisplayedEffortLevel, getEffortEnvOverride, getEffortValueDescription, isEffortLevel, isOpenAIEffortLevel, modelSupportsUltracode, modelUsesOpenAIEffort, openAIEffortToStandard, toPersistableEffort } from '../../utils/effort.js';
-import { EffortPicker } from '../../components/EffortPicker.js';
-import { getInitialSettings, updateSettingsForSource } from '../../utils/settings/settings.js';
+import type { LocalJSXCommandOnDone } from '../../types/command.js'
+import { type EffortValue, getDisplayedEffortLevel, getEffortEnvOverride, getEffortValueDescription, isEffortLevel, isOpenAIEffortLevel, modelSupportsUltracode, openAIEffortToStandard, toPersistableEffort } from '../../utils/effort.js'
+import { updateSettingsForSource } from '../../utils/settings/settings.js'
 import { isWorkflowsDisabled } from '../../utils/envUtils.js';
 import { getMainLoopModel } from '../../utils/model/model.js';
 import { isUltracodeActive } from '../../utils/ultracode.js';
@@ -341,18 +340,5 @@ export function handleSelect(
 }
 
 function EffortPickerWrapper({ onDone }: { onDone: LocalJSXCommandOnDone }) {
-  const setAppState = useSetAppState();
-  const model = useMainLoopModel();
-  const usesOpenAIEffort = modelUsesOpenAIEffort(model);
-
-  function onPickerSelect(effort: EffortValue | undefined) {
-    // Delegate to the standalone exported function
-    handleSelect(effort, onDone, setter => setAppState(setter as unknown as Parameters<typeof setAppState>[0]));
-  }
-
-  function handleCancel() {
-    onDone('Cancelled');
-  }
-
-  return <EffortPicker onSelect={onPickerSelect} onCancel={handleCancel} />;
+  return null;
 }

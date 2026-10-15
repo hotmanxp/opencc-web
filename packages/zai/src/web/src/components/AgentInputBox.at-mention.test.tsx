@@ -1,4 +1,10 @@
 // @vitest-environment happy-dom
+// @-mention 文件补全的组件级测试。
+//
+// 输入面已经是 Lexical contenteditable(不再是受控 textarea),因此「打字」
+// 走编辑器的 insertText、「按键」走真实 keydown → Lexical 命令分发,
+// chip 断言读可见 DOM。草稿内容一律用 detect 投影核对(chip = 1 个 U+FFFC),
+// 与应用层 token 探测用的是同一份坐标文本。
 import { describe, expect, test, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -6,6 +12,13 @@ import { useAgentStore, type V2TaskItem } from "../store/useAgentStore.js";
 import { useAppStore } from "../store/useAppStore.js";
 import { api } from "../lib/api.js";
 import { AGENT_INPUT_INSERT_EVENT } from "../lib/agentInputEvents.js";
+import {
+  detectTextOf,
+  editorRoot,
+  pressEditorKey,
+  setDraftText,
+  tokenMarkOf,
+} from "./input/editor/testDriver.js";
 
 const v2 = (id: string, subject: string, status: V2TaskItem["status"]): V2TaskItem => ({
   id, subject, status, blocks: [], blockedBy: [], updatedAt: 0,
@@ -84,16 +97,11 @@ beforeEach(() => {
   });
 });
 
-async function typeText(ta: HTMLTextAreaElement, text: string) {
-  // 用 fireEvent.change 模拟受控 textarea;同时手动同步 cursor state(组件在 onChange 里改)。
-  fireEvent.change(ta, { target: { value: text, selectionStart: text.length } });
-}
-
 describe("AgentInputBox — @-mention 文件补全", () => {
   test("敲 @ → 弹出文件候选 popup", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const ed = editorRoot();
+    setDraftText(ed, "@");
     await waitFor(() => {
       expect(screen.getByTestId("file-mention-popover")).toBeInTheDocument();
     });
@@ -106,15 +114,15 @@ describe("AgentInputBox — @-mention 文件补全", () => {
 
   test("邮箱 foo@bar.com 不触发 popup", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "foo@bar.com");
+    const ed = editorRoot();
+    setDraftText(ed, "foo@bar.com");
     expect(screen.queryByTestId("file-mention-popover")).not.toBeInTheDocument();
   });
 
   test("行中段 @src 触发 popup(query 含 / 走 dir-scoped)", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "看一下 @src/foo");
+    const ed = editorRoot();
+    setDraftText(ed, "看一下 @src/foo");
     await waitFor(() => {
       expect(screen.getByTestId("file-mention-popover")).toBeInTheDocument();
     });
@@ -124,18 +132,18 @@ describe("AgentInputBox — @-mention 文件补全", () => {
     });
   });
 
-  test("鼠标点击 file 候选 → draft 变为占位符 chip + 尾随空格", async () => {
+  test("鼠标点击 file 候选 → draft 变为 chip 占位 + 尾随空格", async () => {
     const { container } = render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const ed = editorRoot(container);
+    setDraftText(ed, "@");
     const row = await screen.findByTestId("file-mention-row-src/foo.ts");
     // mousedown 而非 click:测试用 fireEvent.mouseDown 模拟
     fireEvent.mouseDown(row, { preventDefault: () => {} });
-    // draft 里 chip 只占一个 U+FFFC 占位符 + 空格(不再是整段 @path 文本)
+    // chip 在 detect 投影里恰好占 1 个 U+FFFC + 尾随空格
     await waitFor(() => {
-      expect(ta.value).toBe("\ufffc ");
+      expect(detectTextOf(ed)).toBe("￼ ");
     });
-    // backdrop 渲染真实 chip(path / type 正确)
+    // 编辑器里渲染真实 chip(path / type 正确)
     await waitFor(() => {
       const chip = container.querySelector(
         '[data-testid="mention-chip"][data-mention-path="src/foo.ts"]',
@@ -147,13 +155,13 @@ describe("AgentInputBox — @-mention 文件补全", () => {
 
   test("点击目录 → 下钻:token 变为 @src/ 纯文本,不落 chip", async () => {
     const { container } = render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const ed = editorRoot(container);
+    setDraftText(ed, "@");
     const row = await screen.findByTestId("file-mention-row-src");
     fireEvent.mouseDown(row, { preventDefault: () => {} });
     // dir 选择改为下钻:token 替换为 `@src/` 文本,不生成 chip
     await waitFor(() => {
-      expect(ta.value).toBe("@src/");
+      expect(detectTextOf(ed)).toBe("@src/");
     });
     expect(
       container.querySelector('[data-testid="mention-chip"]'),
@@ -162,8 +170,8 @@ describe("AgentInputBox — @-mention 文件补全", () => {
 
   test("选中目录后弹层保持打开,继续列子条目", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const ed = editorRoot();
+    setDraftText(ed, "@");
     await screen.findByTestId("file-mention-row-src");
     fireEvent.mouseDown(screen.getByTestId("file-mention-row-src"), {
       preventDefault: () => {},
@@ -177,35 +185,35 @@ describe("AgentInputBox — @-mention 文件补全", () => {
 
   test("键盘 ↑↓ + Enter 选中候选", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const ed = editorRoot();
+    setDraftText(ed, "@");
     await screen.findByTestId("file-mention-popover");
     // 等 items 加载完
     await screen.findByTestId("file-mention-row-src");
     // 默认 activeIndex=0 (src)。按 ArrowDown → 切到 README.md。
-    fireEvent.keyDown(ta, { key: "ArrowDown" });
-    fireEvent.keyDown(ta, { key: "Enter" });
+    pressEditorKey(ed, "ArrowDown");
+    pressEditorKey(ed, "Enter");
     await waitFor(() => {
-      expect(ta.value).toBe("\ufffc ");
+      expect(detectTextOf(ed)).toBe("￼ ");
     });
   });
 
   test("Escape 关闭 popup 并删除 @ token", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "hello @");
+    const ed = editorRoot();
+    setDraftText(ed, "hello @");
     expect(screen.getByTestId("file-mention-popover")).toBeInTheDocument();
-    fireEvent.keyDown(ta, { key: "Escape" });
+    pressEditorKey(ed, "Escape");
     await waitFor(() => {
       expect(screen.queryByTestId("file-mention-popover")).not.toBeInTheDocument();
     });
-    expect(ta.value).toBe("hello ");
+    expect(detectTextOf(ed)).toBe("hello ");
   });
 
-  test("外层 mousedown(点 textarea 外)关闭 popup", async () => {
+  test("外层 mousedown(点输入面外)关闭 popup", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const ed = editorRoot();
+    setDraftText(ed, "@");
     await screen.findByTestId("file-mention-popover");
     // 模拟在 document body 某处 mousedown(popover 容器外)
     fireEvent.mouseDown(document.body);
@@ -213,34 +221,34 @@ describe("AgentInputBox — @-mention 文件补全", () => {
       expect(screen.queryByTestId("file-mention-popover")).not.toBeInTheDocument();
     });
     // 输入框文本应只剩去掉 @ token 后的部分
-    expect(ta.value).toBe("");
+    expect(detectTextOf(ed)).toBe("");
   });
 
   test("@ 与 / slash 互斥:输入以 / 开头时不显示 @ popup", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "/foo");
+    const ed = editorRoot();
+    setDraftText(ed, "/foo");
     // slashItems 为空数组,所以 slash popup 不挂载,这部分只验证 at 也不挂。
     expect(screen.queryByTestId("file-mention-popover")).not.toBeInTheDocument();
   });
 
-  test("mirror-backdrop 把 active @-token 段染紫", async () => {
+  test("激活的 @-token 段被染成命令色", async () => {
     const { container } = render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "hello @foo");
-    // active atToken 段渲染为 span[data-decoration=token-mark],CSS
-    // 把它染紫(.agent-input-cmd-token 选择器)
+    const ed = editorRoot(container);
+    setDraftText(ed, "hello @foo");
+    // token 高亮现在是 TextNode 的行内样式(--cmd-token-color),不再是
+    // backdrop 里的装饰 span
     await waitFor(() => {
-      const mark = container.querySelector('[data-decoration="token-mark"]');
+      const mark = tokenMarkOf(container);
       expect(mark).not.toBeNull();
       expect(mark?.textContent).toBe("@foo");
     });
   });
 
-  test("选中 file 候选后 → backdrop 渲染 MentionChip(basename 展示,不显示全路径)", async () => {
+  test("选中 file 候选后 → 渲染 MentionChip(basename 展示,不显示全路径)", async () => {
     const { container } = render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const ed = editorRoot(container);
+    setDraftText(ed, "@");
     const row = await screen.findByTestId("file-mention-row-src/foo.ts");
     fireEvent.mouseDown(row, { preventDefault: () => {} });
     await waitFor(() => {
@@ -256,24 +264,24 @@ describe("AgentInputBox — @-mention 文件补全", () => {
     // chip 只展示 basename(用户原意:不在输入框里把全路径放出来)
     expect(chip?.textContent).toContain("foo.ts");
     expect(chip?.textContent).not.toContain("src/");
-    // textarea 里是占位符(发给 LLM 时再展开为 @path)
-    expect(ta.value).toBe("\ufffc ");
+    // detect 投影里是占位符(发给 LLM 时再展开为 @path)
+    expect(detectTextOf(ed)).toBe("￼ ");
   });
 
   test("目录 → 子文件连选:先点 src 下钻,再点 foo.ts 落为最终 chip", async () => {
     const { container } = render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const ed = editorRoot(container);
+    setDraftText(ed, "@");
     const row = await screen.findByTestId("file-mention-row-src");
     fireEvent.mouseDown(row, { preventDefault: () => {} });
     await waitFor(() => {
-      expect(ta.value).toBe("@src/");
+      expect(detectTextOf(ed)).toBe("@src/");
     });
     // 子文件选中才是最终选择:token 替换为 chip,popup 关闭
     const child = await screen.findByTestId("file-mention-row-src/foo.ts");
     fireEvent.mouseDown(child, { preventDefault: () => {} });
     await waitFor(() => {
-      expect(ta.value).toBe("\ufffc ");
+      expect(detectTextOf(ed)).toBe("￼ ");
     });
     const chip = container.querySelector(
       '[data-testid="mention-chip"][data-mention-path="src/foo.ts"]',
@@ -285,21 +293,25 @@ describe("AgentInputBox — @-mention 文件补全", () => {
     });
   });
 
-  test("typing 后输入框值正确,textarea 仍持有焦点(combobox 模式)", async () => {
-    render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    ta.focus();
-    await typeText(ta, "@");
-    // selectAtEntry 不卸载 textarea,focus 仍在 textarea。
-    await screen.findByTestId("file-mention-popover");
-    expect(document.activeElement).toBe(ta);
+  test("选中候选后输入面不重建(combo 模式:同一个 DOM 元素继续持有焦点)", async () => {
+    const { container } = render(<AgentInputBox />);
+    const ed = editorRoot(container);
+    ed.focus();
+    setDraftText(ed, "@");
+    const row = await screen.findByTestId("file-mention-row-src/foo.ts");
+    fireEvent.mouseDown(row, { preventDefault: () => {} });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mention-chip"]')).not.toBeNull();
+    });
+    // 选完 chip 之后还是同一个元素(没有 remount 掉焦点)
+    expect(editorRoot(container)).toBe(ed);
   });
 
   // AGENT_INPUT_INSERT_EVENT 仍然有效(分屏插入对话 → 现在插入为 @引用 chip)
   test("AGENT_INPUT_INSERT_EVENT 把路径插入为 chip,不影响后续 at-token", async () => {
-    render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@fo");
+    const { container } = render(<AgentInputBox />);
+    const ed = editorRoot(container);
+    setDraftText(ed, "@fo");
     await screen.findByTestId("file-mention-popover");
     // 模拟分屏插入一段路径:光标在 "o" 之后 → 前置空格分隔 + chip + 尾随空格
     act(() => {
@@ -308,9 +320,9 @@ describe("AgentInputBox — @-mention 文件补全", () => {
       );
     });
     await waitFor(() => {
-      expect(ta.value).toBe("@fo \ufffc ");
+      expect(detectTextOf(ed)).toBe("@fo ￼ ");
     });
-    const chip = document.querySelector('[data-testid="mention-chip"]');
+    const chip = container.querySelector('[data-testid="mention-chip"]');
     expect(chip?.getAttribute("data-mention-path")).toBe("/path/to");
   });
 });

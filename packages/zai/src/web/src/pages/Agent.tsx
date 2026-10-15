@@ -144,17 +144,6 @@ export default function Agent() {
     })();
   }, []);
 
-  // N 按钮处理函数: 在新 tab 打开 /agent?sid=newID, store.loadSessions 会
-  // 识别 newID 字面量 → 直接调 createNewSession 建一条新 transcript, 并把
-  // URL 同步成 server 回的真实 sid. 当前 tab 的会话状态完全不动.
-  const openNewSessionInNewTab = () => {
-    window.open(
-      `${window.location.origin}/agent?sid=newID`,
-      "_blank",
-      "noopener"
-    );
-  };
-
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
   // 修复: v2 tasks 的初始拉取已迁移到 useAgentStore.loadTranscript 内部,
   // 切 session → loadTranscript → 自动拉 v2 tasks. 这里不再重复拉.
@@ -185,10 +174,10 @@ export default function Agent() {
             // 收起时也要暴露创建入口, 否则收起后用户没法开新会话.
             // 用 absolute + transform 让三个图标按钮绝对居中于 40px 列宽,
             // 绕开 AntD Button 内部 icon 偏左导致的视觉不齐.
-            // 第 2 个 N 按钮 = 新 tab 打开 /agent?sid=newID (不影响当前 tab).
-            // 第 3 个按钮 = "展开会话历史" 切换 (PanelLeftOpenIcon).
-            // height = 96 让三个 28px 按钮 + 2 段 32px 间距全放下 (top 0/32/64).
-            <div className="relative w-full h-24">
+            // 第 1 个按钮 = 创建新会话 (PlusIcon).
+            // 第 2 个按钮 = "展开会话历史" 切换 (PanelLeftOpenIcon).
+            // height = 64 让两个 28px 按钮 + 1 段 32px 间距全放下 (top 0/32).
+            <div className="relative w-full h-16">
               <IconButton
                 size="small"
                 icon={<PlusIcon />}
@@ -202,29 +191,13 @@ export default function Agent() {
                 }
                 className="absolute top-0 left-1/2 -translate-x-1/2 w-7 h-7 p-0 inline-flex items-center justify-center"
               />
-              {/* N 按钮: 在新 tab 打开全新会话, 保留当前 tab 会话状态不变. */}
-              <Button
-                type="text"
-                size="small"
-                onClick={openNewSessionInNewTab}
-                disabled={isBusy}
-                title={
-                  isBusy
-                    ? "对话进行中,请等待当前回复结束"
-                    : "在新标签页打开新会话"
-                }
-                data-testid="new-session-in-new-tab"
-                className="absolute top-8 left-1/2 -translate-x-1/2 w-7 h-7 p-0 inline-flex items-center justify-center text-[#722ed1] font-mono font-bold text-[14px]"
-              >
-                N
-              </Button>
               <IconButton
                 size="small"
                 icon={<PanelLeftOpenIcon />}
                 onClick={sessionPanel.expand}
                 aria-label="展开会话历史"
                 title="展开会话历史"
-                className="absolute top-16 left-1/2 -translate-x-1/2 w-7 h-7 p-0 inline-flex items-center justify-center"
+                className="absolute top-8 left-1/2 -translate-x-1/2 w-7 h-7 p-0 inline-flex items-center justify-center"
               />
             </div>
           ) : (
@@ -246,22 +219,6 @@ export default function Agent() {
                       : "创建新会话"
                   }
                 />
-                {/* N 按钮: 在新 tab 打开全新会话, 不影响当前 tab. */}
-                <Button
-                  type="text"
-                  size="small"
-                  onClick={openNewSessionInNewTab}
-                  disabled={isBusy}
-                  title={
-                    isBusy
-                      ? "对话进行中,请等待当前回复结束"
-                      : "在新标签页打开新会话"
-                  }
-                  data-testid="new-session-in-new-tab"
-                  className="text-[#722ed1] font-mono font-bold text-[14px]"
-                >
-                  N
-                </Button>
                 <IconButton
                   size="small"
                   icon={<PanelLeftCloseIcon />}

@@ -189,7 +189,13 @@ export class BashBackgroundTracker {
   markFinished(
     taskId: string,
     status: 'completed' | 'failed' | 'killed',
-    info: { exitCode?: number; signal?: NodeJS.Signals } = {},
+    info: {
+      exitCode?: number
+      signal?: NodeJS.Signals
+      /** 终态输出。file mode 下 stdout/stderr 合并进同一 fd,stdout 即全量。 */
+      stdout?: string
+      stderr?: string
+    } = {},
   ): BashTaskInfo | undefined {
     const t = this.byId.get(taskId)
     if (!t) return undefined
@@ -197,6 +203,8 @@ export class BashBackgroundTracker {
     t.finishedAt = Date.now()
     if (info.exitCode !== undefined) t.exitCode = info.exitCode
     if (info.signal) t.signal = info.signal
+    if (info.stdout) t.stdout = info.stdout
+    if (info.stderr) t.stderr = info.stderr
     this.children.delete(taskId)
     // 终态变化是 critical info — 同步 emit, 不走 debounce。同时取消
     // pending debounce timer 防止重复 emit。

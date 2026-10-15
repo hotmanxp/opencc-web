@@ -60,7 +60,7 @@ Complete the user's search request efficiently and report your findings clearly.
 export const EXPLORE_AGENT_MIN_QUERIES = 3
 
 const EXPLORE_WHEN_TO_USE =
-  'Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.'
+  'Fast read-only search agent for locating code. Use it to find files by pattern (eg. "src/components/**/*.tsx"), grep for symbols or keywords (eg. "API endpoints"), or answer "where is X defined / which files reference Y." Do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. When calling, specify search breadth: "quick" for a single targeted lookup, "medium" for moderate exploration, or "very thorough" to search across multiple locations and naming conventions.'
 
 export const EXPLORE_AGENT: BuiltInAgentDefinition = {
   agentType: 'Explore',
@@ -74,8 +74,10 @@ export const EXPLORE_AGENT: BuiltInAgentDefinition = {
   ],
   source: 'built-in',
   baseDir: 'built-in',
-  // Use haiku for speed — explore is a fast read-only search agent
-  model: 'haiku',
+  // Inherit parent model — main agent picks the model it can afford; Explore
+  // is read-only and doesn't need its own tier. (Synced with Claude Code
+  // 2.1.287 `model: "inherit"` on the built-in Explore agent.)
+  model: 'inherit',
   // Explore is a fast read-only search agent — it doesn't need commit/PR/lint
   // rules from AGENTS.md. The main agent has full context and interprets results.
   omitClaudeMd: true,

@@ -40,7 +40,6 @@ export const WEIXIN_MAIN_AGENT_NAME = 'weixin-bot'
 const WEIXIN_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
   // ── 指派子 agent(本 agent 的核心能力)──
   'Agent', // AgentTool — 内置子 agent(general-purpose/Explore/Plan/code-reviewer)
-  'TaskOutput', // 读取子 agent 输出
   'TaskStop', // 终止失控子 agent
   'CliAgent', // 外置 CLI 子 agent 载体(opencc/dsh)
   // ── 定时任务(调度三件套)──
@@ -79,7 +78,7 @@ The session you manage is a long-lived fixed session: once the main context fill
 - You yourself only: understand the request, break it down, dispatch (Agent), track progress (TaskCreate/TaskUpdate), verify results, and summarize back.
 - Never long-run in the main session: commands spewing hundreds of lines, reading directories file by file, chained greps — those belong in a subagent's context. Bring back only conclusions.
 - Exception: a single command, a small file read, or a one/two-line edit is faster done directly than delegated. Don't be dogmatic.
-- When pulling subagent results with TaskOutput, watch the output volume; kill a runaway subagent with TaskStop.
+- Subagent results arrive on their own — do not poll or wait for them. If you need to check a running subagent early, read the output_file path it returned. Kill a runaway subagent with TaskStop.
 
 ## Output discipline
 

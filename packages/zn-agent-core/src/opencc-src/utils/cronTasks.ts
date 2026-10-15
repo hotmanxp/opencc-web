@@ -20,6 +20,8 @@ import {
   removeSessionCronTasks,
 } from '../bootstrap/state.js'
 import { computeNextCronRun, parseCronExpression } from './cron.js'
+import { replaceFileAtomic } from './atomicReplace.js'
+import * as lockfile from './lockfile.js'
 import { logForDebugging } from './debug.js'
 import { isFsInaccessible } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -171,6 +173,50 @@ export function hasCronTasksSync(dir?: string): boolean {
  * missing. Empty task list writes an empty file (rather than deleting) so
  * the file watcher sees a change event on last-task-removed.
  */
+/**
+ * Lock options for the cron read-modify-write mutex. Retries with backoff so a
+ * concurrent writer waits rather than failing the user's cron edit; a cron
+ * critical section is one small read plus one atomic write.
+ */
+const CRON_LOCK_OPTIONS = {
+  retries: {
+    retries: 30,
+    minTimeout: 5,
+    maxTimeout: 100,
+  },
+}
+
+/**
+ * Run a read-modify-write against the cron file under an exclusive lock.
+ *
+ * Every mutation below (add / delete / mark-fired) is a read of the whole task
+ * list followed by a write of the whole list. Two of those interleaving means
+ * the second writer's snapshot predates the first writer's change, so its write
+ * silently reverts the first — a newly created cron job simply disappears,
+ * with no error anywhere.
+ *
+ * The scheduler lock does not cover this: it elects which session drives the
+ * scheduler, and user-initiated adds/deletes never take it. Two sessions in
+ * the same directory, or a session and the scheduler, race freely.
+ */
+async function withCronTasksLock<T>(
+  dir: string | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const root = dir ?? getProjectRoot()
+  const lockDir = join(root, '.claude')
+  await mkdir(lockDir, { recursive: true })
+  // Lock the .claude directory itself rather than the cron file: proper-lockfile
+  // requires the lock target to exist and creates `<target>.lock`, while the
+  // cron file is replaced by rename on every write.
+  const release = await lockfile.lock(lockDir, CRON_LOCK_OPTIONS)
+  try {
+    return await fn()
+  } finally {
+    await release()
+  }
+}
+
 export async function writeCronTasks(
   tasks: CronTask[],
   dir?: string,
@@ -185,11 +231,9 @@ export async function writeCronTasks(
   const body: CronFile = {
     tasks: tasks.map(({ durable: _durable, sessionId: _sessionId, ...rest }) => rest),
   }
-  await writeFile(
-    getCronFilePath(root),
-    jsonStringify(body, null, 2) + '\n',
-    'utf-8',
-  )
+  // Atomic replace: a crash mid-write would otherwise leave a truncated file
+  // that safeParseJSON rejects, taking every scheduled task with it.
+  await replaceFileAtomic(getCronFilePath(root), jsonStringify(body, null, 2) + '\n')
 }
 
 /**
@@ -230,10 +274,12 @@ export async function addCronTask(
   }
   // durable 任务也带 sessionId(仅 runtime 语义:同进程内 fire 路由回创建
   // session;写盘时被 strip,重启后回落全局路由)。
-  const tasks = await readCronTasks()
-  tasks.push(sessionId ? { ...task, sessionId } : task)
-  await writeCronTasks(tasks)
-  return id
+  return withCronTasksLock(undefined, async () => {
+    const tasks = await readCronTasks()
+    tasks.push(sessionId ? { ...task, sessionId } : task)
+    await writeCronTasks(tasks)
+    return id
+  })
 }
 
 /**
@@ -259,10 +305,12 @@ export async function removeCronTasks(
     return
   }
   const idSet = new Set(ids)
-  const tasks = await readCronTasks(dir)
-  const remaining = tasks.filter(t => !idSet.has(t.id))
-  if (remaining.length === tasks.length) return
-  await writeCronTasks(remaining, dir)
+  return withCronTasksLock(dir, async () => {
+    const tasks = await readCronTasks(dir)
+    const remaining = tasks.filter(t => !idSet.has(t.id))
+    if (remaining.length === tasks.length) return
+    await writeCronTasks(remaining, dir)
+  })
 }
 
 /**
@@ -283,16 +331,18 @@ export async function markCronTasksFired(
 ): Promise<void> {
   if (ids.length === 0) return
   const idSet = new Set(ids)
-  const tasks = await readCronTasks(dir)
-  let changed = false
-  for (const t of tasks) {
-    if (idSet.has(t.id)) {
-      t.lastFiredAt = firedAt
-      changed = true
+  return withCronTasksLock(dir, async () => {
+    const tasks = await readCronTasks(dir)
+    let changed = false
+    for (const t of tasks) {
+      if (idSet.has(t.id)) {
+        t.lastFiredAt = firedAt
+        changed = true
+      }
     }
-  }
-  if (!changed) return
-  await writeCronTasks(tasks, dir)
+    if (!changed) return
+    await writeCronTasks(tasks, dir)
+  })
 }
 
 /**

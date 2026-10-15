@@ -207,7 +207,10 @@ describe('upstream 2.1.280 sync — cyber-risk instruction decoupled', () => {
 describe('upstream 2.1.280 sync — zai local patches preserved', () => {
   it('keeps the mermaid rendering guidance in # System', () => {
     expect(src).toContain('prefer a \\`\\`\\`mermaid fenced code block')
-    expect(src).toContain('Only these mermaid types render')
+    // 2026-10-05: 渲染器换成官方 mermaid.js 全量后,类型门已删,
+    // "只有这 6 种能渲染" 不再成立 —— 断言跟着能力走,并防止回退。
+    expect(src).toContain('Any standard mermaid diagram type renders')
+    expect(src).not.toContain('Only these mermaid types render')
   })
 
   it('keeps the per-session memory section cache key', () => {

@@ -20,6 +20,7 @@ import { Alert, Button, Spin, Typography } from "antd"
 import { FolderOpenIcon } from "lucide-react";
 import { MarkdownText } from "../markdown/MarkdownText.js"
 import { DocumentPreview, isRenderableDocumentKind } from "../documentPreview/index.js"
+import { extToLanguage } from "../splitPane/extToLang.js"
 import { useCodeThemeMode } from "../../hooks/useCodeThemeMode.js"
 
 // 本地类型副本是有意的(见下方 FilePreviewPayload 注释):既不要把 web 组件
@@ -63,17 +64,20 @@ function humanSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(2)} MB`
 }
 
+/**
+ * 语言判定复用 splitPane/extToLang 的完整表(与 FsTab 同源)。
+ *
+ * 这里曾有一份只覆盖 24 条的本地残缺副本,漏掉了 kt / swift / cpp / hpp /
+ * graphql / gql / php / toml / ps1 / fish 等 —— .kt 落到 `?? 'text'` 兜底,
+ * Prism 对 'text' 不产出任何 token,预览区就渲染成纯文本,而同一份文件在
+ * 「文件」tab(FsTab 走 extToLanguage)却正常高亮。同一个文件两处表现不一致。
+ *
+ * extToLanguage 未命中返回 null,这里回退成 'text' 保持既有行为:
+ * Prism 拿到未知语言不会抛错,只是不产 token。
+ */
 function detectLanguage(path: string): string {
-  const ext = path.toLowerCase().split('.').pop() ?? ''
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    mjs: 'javascript', cjs: 'javascript', json: 'json', jsonc: 'json',
-    py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java',
-    css: 'css', scss: 'scss', less: 'less', html: 'xml', xml: 'xml',
-    yaml: 'yaml', yml: 'yaml', toml: 'ini', ini: 'ini', sh: 'bash',
-    bash: 'bash', zsh: 'bash', sql: 'sql', md: 'markdown',
-  }
-  return map[ext] ?? 'text'
+  const basename = path.split(/[\\/]/).pop() ?? path
+  return extToLanguage(basename) ?? 'text'
 }
 
 function truncateLines(text: string, limit: number): { head: string; truncated: boolean } {

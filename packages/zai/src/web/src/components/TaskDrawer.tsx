@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import 'katex/dist/katex.min.css'
 import { remarkPlugins, rehypePlugins } from './markdown/markdownPlugins.js'
 import { MathBlock } from './markdown/MathBlock.js'
+import { MermaidBlock } from './markdown/MermaidBlock.js'
 import { Badge, Button, Drawer, Empty, Tag, Tooltip } from 'antd'
 import { useAppStore } from '../store/useAppStore'
 
@@ -111,6 +112,8 @@ const markdownComponents = {
     const match = /language-(\w+)/.exec(className || '')
     // 无语言标注的围栏块没有高亮可做,但必须走块级 <pre> 保留空白。
     if (!match) return <pre className={CODE_PRE_CLASS}><code>{code}</code></pre>
+    // Mermaid 围栏块出图,不当源码高亮 —— 与主 MarkdownText 同一套路由。
+    if (match[1] === 'mermaid') return <MermaidBlock code={code} />
     // Lazy: SyntaxHighlighter pulls in prism once per session. Until then
     // show the raw text inside the same padding/background so the user
     // doesn't see a layout jump.

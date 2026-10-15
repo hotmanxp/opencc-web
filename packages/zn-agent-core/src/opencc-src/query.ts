@@ -62,6 +62,7 @@ import {
   getQueryAbortSystemMessage,
   shouldCreateUserInterruptionMessage,
 } from './utils/abortReasons.js'
+import { fireTurnEnd } from './utils/turnLifecycle.js'
 import {
   createUserMessage,
   createUserInterruptionMessage,
@@ -87,6 +88,13 @@ import {
   getAttachmentMessages,
   startRelevantMemoryPrefetch,
 } from './utils/attachments.js'
+import { extractTextContent } from './utils/messages/content.js'
+import { dispatchModEngine, hasModHandlersFor } from './mods/dispatch.js'
+import { openModTurn, setSessionFacts } from './mods/nouns.js'
+import {
+  sessionStartedAt,
+  setSessionUsageFacts,
+} from './mods/sessionUsage.js'
 import {
   isAboveMaxActiveMessagesLimit,
   resolveMaxActiveMessagesLimit,
@@ -206,6 +214,30 @@ type AgentStepLimitConfig = {
 type AgentStepLimitState = AgentStepLimitConfig & {
   stepsUsed: number
   summaryRequested: boolean
+}
+
+/**
+ * The text upstream's `turn.start` carries: the LAST user message that is not
+ * `isMeta`, its text content, `""` when there is none.
+ *
+ * The content extractor returns a string AS IS. A user message whose content is
+ * a plain string — which opencc produces for several paths — would flatten to
+ * `""` under an `Array.isArray(content) ? … : []` guard, handing a mod an empty
+ * turn.
+ */
+function turnStartText(messages: readonly Message[]): string {
+  let last: Message | undefined
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!
+    if (m.type === 'user' && !m.isMeta) {
+      last = m
+      break
+    }
+  }
+  if (!last) return ''
+  const content = last.message?.content
+  if (typeof content === 'string') return content
+  return extractTextContent(Array.isArray(content) ? content : [])
 }
 
 function normalizeAgentStepLimit(
@@ -481,7 +513,6 @@ export {
   GrepTool,
   AgentTool,
   BackgroundAgentResultTool,
-  TaskOutputTool,
   WebFetchTool,
   WebSearchTool,
 } from './tools/index.js'
@@ -624,12 +655,57 @@ async function* queryLoop(
     state.toolUseContext,
   )
 
+  // Upstream `turn.start` — the turn begins before its first model call, and
+  // the id it mints is what `turn.complete` carries and `turn.abort` names.
+  // opencc has no turn id of its own, so one is minted here; the registry is
+  // what makes `$.turn.abort` able to reach this turn's controller at all.
+  const modTurnId = deps.uuid()
+  openModTurn(modTurnId, state.toolUseContext.abortController)
+
+  // `$.session.usage()` reads the session's start time, and
+  // `$.session.messages()` reads the live transcript — which this loop is the
+  // only place that holds outside React, since mods run with no component tree.
+  //
+  // Guarded by a subscription check: these are property writes, not work worth
+  // doing for a session nobody is watching. The usage token/cost figures are
+  // NOT published here — those come from the cost ledger, which any caller can
+  // read directly.
+  const modUsageWatched =
+    hasModHandlersFor('session.usage') || hasModHandlersFor('session.messages')
+  if (modUsageWatched) {
+    setSessionUsageFacts({ startedAt: sessionStartedAt() })
+  }
+
+  if (hasModHandlersFor('turn.start')) {
+    await dispatchModEngine<{ turnId: string }>(
+      'turn.start',
+      {
+        // Upstream's content extractor: the LAST user message that is not
+        // `isMeta`, its text content, "" when there is none. `isMeta` is
+        // model-visible but hidden from the person, so counting it would hand
+        // a mod text the user never typed.
+        text: turnStartText(state.toolUseContext.messages),
+        turnId: modTurnId,
+      },
+      e => ({
+        turnId:
+          typeof e.turnId === 'string' && e.turnId !== '' ? e.turnId : modTurnId,
+      }),
+    )
+  }
+
   // eslint-disable-next-line no-constant-condition
   while (true) {
     // Destructure state at the top of each iteration. toolUseContext alone
     // is reassigned within an iteration (queryTracking, messages updates);
     // the rest are read-only between continue sites.
     let { toolUseContext } = state
+
+    // Refresh what `$.session.messages()` reads. Per iteration, because
+    // `toolUseContext.messages` is rebuilt as the turn progresses.
+    if (modUsageWatched) {
+      setSessionFacts({ messages: toolUseContext.messages })
+    }
     const {
       messages,
       autoCompactTracking,
@@ -1318,8 +1394,14 @@ async function* queryLoop(
         try {
           let streamingFallbackOccured = false
           queryCheckpoint('query_api_streaming_start')
+          // Awaited: `prompt.context` is dispatched inside, and a hook may add
+          // or drop a context block before the request goes out.
+          const messagesWithUserContext = await prependUserContext(
+            messagesForQuery,
+            userContext,
+          )
           for await (const message of deps.callModel({
-            messages: prependUserContext(messagesForQuery, userContext),
+            messages: messagesWithUserContext,
             systemPrompt: fullSystemPrompt,
             thinkingConfig: toolUseContext.options.thinkingConfig,
             tools: toolsForModel,
@@ -2487,6 +2569,9 @@ if (
     // We were aborted during tool calls
     if (toolUseContext.abortController.signal.aborted) {
       const abortReason = toolUseContext.abortController.signal.reason
+      // Let long-running foreground commands hand themselves to the background
+      // instead of dying with the aborted turn — their output is still wanted.
+      fireTurnEnd()
       // chicago MCP: auto-unhide + lock release when aborted mid-tool-call.
       // This is the most likely Ctrl+C path for CU (e.g. slow screenshot).
       // Main thread only — see stopHooks.ts for the subagent rationale.

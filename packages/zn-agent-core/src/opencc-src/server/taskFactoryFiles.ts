@@ -5,6 +5,62 @@ import { join } from 'node:path'
 import { createHash, randomInt } from 'node:crypto'
 import YAML from 'yaml'
 
+/**
+ * 读一个可选文本文件:不存在 → null,其它错误照抛。
+ *
+ * zai patch (2026-10-05, bug `async-handler-rejection-kills-process`):
+ * 本文件多处 `existsSync(p) ? readFile(p) : fallback` 是 check-then-act ——
+ * existsSync 与 readFile 之间文件被删(用户删任务 / 归档清扫)就 ENOENT 抛出。
+ * 抛出的 rejected promise 经 async 路由一路冒泡成 unhandledRejection,在
+ * Express 4 下直接终止整个进程。所有「存在才读」的地方统一走这里,让上层
+ * 忘了 catch 也只是拿到 null,不会炸进程。
+ */
+async function readFileOrNull(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf-8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
+}
+
+/** readdir 的 ENOENT 兜底:目录不存在/被删 → 空列表。其它错误照抛。 */
+async function readdirOrEmpty(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw err
+  }
+}
+
+/**
+ * tmp + rename 写文件:读方要么看到完整旧内容,要么看到完整新内容。
+ *
+ * zai patch (2026-10-05, bug `non-atomic-write-data-loss` 同缺陷类)。task.yaml
+ * 用原地 `writeFile` 写时,fd 打开瞬间就把文件截断成 0 字节、内容才开始写。
+ * 对 task.yaml 尤其致命:`readTaskMeta` 优先读 task.yaml,读到空串会解析成
+ * `{id, status:'queued'}` 的最小 meta,**永久盖过**仍然完好的 legacy index.md ——
+ * 崩一次,一个任务的状态就归零且再也读不回来。
+ *
+ * 为什么在 vendor 里自带一份而不用 `compat/background/store/atomicWrite.ts`:
+ * 那份在 compat 树,本文件是 opencc-src vendor。这里刻意保持 vendor 不依赖
+ * compat —— 见 `scripts/verify-server-types-self-contained.mjs` 里 compat d.ts
+ * 会被 prune 的那套约束。10 行换零耦合,划算。
+ */
+let atomicTmpCounter = 0
+
+async function writeFileAtomic(path: string, content: string): Promise<void> {
+  const tmp = `${path}.${process.pid}.${atomicTmpCounter++}.tmp`
+  try {
+    await writeFile(tmp, content, 'utf-8')
+    await rename(tmp, path)
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {})
+    throw err
+  }
+}
+
 export type TaskStatus = 'queued' | 'processing' | 'paused' | 'verifying' | 'done' | 'failed'
 export type TaskBucketName = 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'
 export interface TaskSummary {
@@ -257,8 +313,18 @@ export function normalizeVerificationScope(v: unknown): VerificationScope | unde
   return (VERIFICATION_SCOPES as readonly string[]).includes(String(v)) ? (v as VerificationScope) : undefined
 }
 
-/** task.yaml 的内存表示(扁平 key-value)。null 表示字段被显式置空。 */
-export type TaskYaml = Record<(typeof TASK_YAML_FIELDS)[number], TaskYamlScalar>
+/**
+ * task.yaml 的内存表示(扁平 key-value)。null 表示字段被显式置空。
+ *
+ * zai patch 2026-10-04:原先是 `Record<...>`,即所有字段必填。但两条生产
+ * 路径都只写「实际存在」的键 —— parseTaskYaml 只填 yaml 里真有的键,
+ * createPoolTask 对 mode / attachments / changeType / verificationScope /
+ * changedFiles 一律走 `...(cond ? {k} : {})` 条件展开(task.yaml 干净原则,
+ * 不污染历史任务)。`Record` 与之矛盾,曾迫使 parse 路径用 `as TaskYaml`
+ * 绕过,并且让 createPoolTask 的对象字面量报 TS2322。改成 `Partial` 后
+ * 类型与实际行为一致,下游读 `meta.x` 拿到 `... | undefined` 也才是真相。
+ */
+export type TaskYaml = Partial<Record<(typeof TASK_YAML_FIELDS)[number], TaskYamlScalar>>
 
 export function taskFactoryRoot(): string {
   return process.env.ZAI_TASK_FACTORY_DIR ?? join(homedir(), '.zai', 'task-factory')
@@ -506,7 +572,7 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     ...(verificationScope ? { verificationScope } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
   }
-  await writeFile(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta), 'utf-8')
+  await writeFileAtomic(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta))
   if (mode === 'quick') {
     // quick 模式:只生成最小 spec.md(title/description/priority/cwd 快照),
     // 不生成 plan.md / brainstorm.md(intent:跳过 brainstorming,验收走轻量路径)。
@@ -560,16 +626,18 @@ async function readTaskMeta(id: string, bucket: TaskBucketName): Promise<TaskYam
   const dir = taskDir(bucket, id)
   const yamlPath = join(dir, TASK_YAML_FILENAME)
   const legacyPath = join(dir, LEGACY_INDEX_MD_FILENAME)
-  if (existsSync(yamlPath)) {
-    const text = await readFile(yamlPath, 'utf-8')
-    return parseTaskYaml(text)
+  // 单次 readFile 而非 existsSync 后再读:两者之间的删除会让 readFile 抛
+  // ENOENT(rejected promise → 进程级事故)。
+  const yamlText = await readFileOrNull(yamlPath)
+  if (yamlText !== null) {
+    return parseTaskYaml(yamlText)
   }
-  if (existsSync(legacyPath)) {
-    const text = await readFile(legacyPath, 'utf-8')
-    const meta = parseLegacyIndexMd(text)
+  const legacyText = await readFileOrNull(legacyPath)
+  if (legacyText !== null) {
+    const meta = parseLegacyIndexMd(legacyText)
     // 迁移:尽力而为;失败不抛(下次再迁)
     try {
-      await writeFile(yamlPath, serializeTaskYaml(meta), 'utf-8')
+      await writeFileAtomic(yamlPath, serializeTaskYaml(meta))
       await rm(legacyPath)
     } catch {
       // ignore — 读取路径仍然成功,下次再试
@@ -582,17 +650,22 @@ async function readTaskMeta(id: string, bucket: TaskBucketName): Promise<TaskYam
 function toSummary(id: string, bucket: TaskBucketName, meta: TaskYaml): TaskSummary {
   // 标量字段(2026-09-02 + dependsOn 后 TaskYamlScalar 变宽泛):用 String() 兜底
   // 把 number/boolean/null 统一规整成 string/null/undefined,避免 TaskSummary 字段类型不匹配。
-  const str = (v: TaskYamlScalar): string | null | undefined =>
+  // 参数含 undefined:TaskYaml 是 Partial,task.yaml 缺字段就是 undefined。
+  const str = (v: TaskYamlScalar | undefined): string | null | undefined =>
     v == null ? v : String(v)
   return {
     id, bucket,
     title: str(meta.title) ?? id,
     status: str(meta.status) ?? 'queued',
     cwd: str(meta.cwd) ?? process.cwd(),
-    description: meta.description == null ? undefined : str(meta.description),
-    agent: meta.agent == null ? undefined : str(meta.agent),
+    // 下面三处已用 `== null` 守卫排掉 null/undefined,str() 在这条分支上
+    // 必然返回 string,但它的签名带 null|undefined,过不了 TaskSummary 的
+    // `string | undefined`。守卫已排除 null,直接 String() 取确定的 string
+    // (与 str() 在非空输入上完全等价)。
+    description: meta.description == null ? undefined : String(meta.description),
+    agent: meta.agent == null ? undefined : String(meta.agent),
     verifierAgent: meta.verifierAgent == null ? null : str(meta.verifierAgent),
-    createdAt: meta.createdAt == null ? undefined : str(meta.createdAt),
+    createdAt: meta.createdAt == null ? undefined : String(meta.createdAt),
     startedAt: meta.startedAt == null ? undefined : str(meta.startedAt),
     completedAt: meta.completedAt == null ? undefined : str(meta.completedAt),
     executorTaskId: meta.executorTaskId == null ? null : str(meta.executorTaskId),
@@ -655,8 +728,8 @@ export function sortFinishedByCompletedDesc<T extends { completedAt?: string | n
 async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
   const root = taskFactoryRoot()
   const dir = join(root, bucket)
-  if (!existsSync(dir)) return []
-  const ids = (await readdir(dir)).filter((n) => !n.startsWith('.'))
+  // readdir 直接吃 ENOENT:existsSync 与 readdir 之间目录被删(归档清扫)不再炸。
+  const ids = (await readdirOrEmpty(dir)).filter((n) => !n.startsWith('.'))
   const out: TaskSummary[] = []
   for (const id of ids) {
     const meta = await readTaskMeta(id, bucket)
@@ -780,10 +853,12 @@ async function writeTaskMeta(id: string, bucket: TaskBucketName, patch: Partial<
   const legacyPath = join(dir, LEGACY_INDEX_MD_FILENAME)
   // 读旧 meta(task.yaml 优先;否则走 legacy 一次性迁移)
   let base: TaskYaml
-  if (existsSync(yamlPath)) {
-    base = parseTaskYaml(await readFile(yamlPath, 'utf-8'))
-  } else if (existsSync(legacyPath)) {
-    base = parseLegacyIndexMd(await readFile(legacyPath, 'utf-8'))
+  const yamlText = await readFileOrNull(yamlPath)
+  const legacyText = yamlText === null ? await readFileOrNull(legacyPath) : null
+  if (yamlText !== null) {
+    base = parseTaskYaml(yamlText)
+  } else if (legacyText !== null) {
+    base = parseLegacyIndexMd(legacyText)
   } else {
     throw new Error(`task ${id} not found in ${bucket}`)
   }
@@ -794,11 +869,11 @@ async function writeTaskMeta(id: string, bucket: TaskBucketName, patch: Partial<
     }
     next[k] = v
   }
-  await writeFile(yamlPath, serializeTaskYaml(next), 'utf-8')
-  // 旧文件存在则一并清掉
-  if (existsSync(legacyPath)) {
-    await rm(legacyPath).catch(() => {})
-  }
+  // 原子写:这是 markTaskStatus 的主路径,每次状态变更都走它。原地写一旦崩在
+  // 截断之后,0 字节的 task.yaml 会永久盖过 legacy index.md(见 writeFileAtomic)。
+  await writeFileAtomic(yamlPath, serializeTaskYaml(next))
+  // 旧文件存在则一并清掉(rm 的 ENOENT 本来就被 catch,无需先 existsSync)
+  await rm(legacyPath).catch(() => {})
   return next
 }
 
@@ -856,7 +931,7 @@ export async function getTaskDetails(id: string, bucket?: TaskBucketName): Promi
   const dir = taskDir(summary.bucket, id)
   const read = async (name: string, fallback: string) => {
     const f = join(dir, name)
-    return existsSync(f) ? readFile(f, 'utf-8') : fallback
+    return (await readFileOrNull(f)) ?? fallback
   }
   const [specMd, planMd, processMd, verificationMd, brainstormMd] = await Promise.all([
     read('docs/spec.md', ''), read('docs/plan.md', ''), read('process.md', ''),

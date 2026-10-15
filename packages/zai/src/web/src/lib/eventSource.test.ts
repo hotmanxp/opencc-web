@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest'
-import type { ServerEvent } from '../../../shared/events.js'
+// 值导入(不是 type): 白名单覆盖断言要从 union 本身派生出全部 type 清单。
+import { ServerEvent } from '../../../shared/events.js'
 import type { StreamState } from './eventSource.js'
 
 const notifMock = vi.hoisted(() => ({ error: vi.fn() }))
@@ -24,6 +25,10 @@ class MockEventSource {
   }
   addEventListener(name: string, handler: (e: { data: string }) => void) {
     ;(this.listeners[name] ??= []).push(handler)
+  }
+  /** 白名单覆盖断言用:实际注册过的 listener 名。 */
+  registeredNames(): string[] {
+    return Object.keys(this.listeners)
   }
   emitOpen() {
     this.onopen?.(new Event('open'))
@@ -53,6 +58,105 @@ describe('subscribeServerEvents', () => {
     expect(MockEventSource.instances[0].url).toBe(
       '/api/event?sid=sess-A%2Fwith%20space',
     )
+  })
+
+  test('无 sid + topics 时 URL 带 topics 白名单 (无会话页面收全局事件)', () => {
+    // 2026-09-30: /instances 在没有活跃会话时也要收 instance.changed,
+    // 走的是 /api/event?topics=... 而不是全量流(全量会串 prompt.ask)。
+    MockEventSource.instances = []
+    subscribeServerEvents(null, () => {}, undefined, ['system', 'instance'])
+    expect(MockEventSource.instances[0].url).toBe(
+      '/api/event?topics=system%2Cinstance',
+    )
+  })
+
+  test('有 sid 时忽略 topics 参数 (sid 切片已够,叠加白名单会误杀会话事件)', () => {
+    MockEventSource.instances = []
+    subscribeServerEvents('s1', () => {}, undefined, ['instance'])
+    expect(MockEventSource.instances[0].url).toBe('/api/event?sid=s1')
+  })
+
+  test('无 sid 且 topics 为空数组时退回全量流 (旧行为不变)', () => {
+    MockEventSource.instances = []
+    subscribeServerEvents(null, () => {}, undefined, [])
+    expect(MockEventSource.instances[0].url).toBe('/api/event')
+  })
+
+  test('compact_boundary 被 addEventListener 注册并派发到 onEvent', () => {
+    // 回归 (2026-10-12): compact_boundary 曾漏登记进 NAMED_EVENT_TYPES,
+    // EventSource 不为它注册 listener、帧直接消失 —— 表现是"toast 会弹但
+    // 对话流里的分隔线永远不出现", 刷新后才靠历史回放补上。之前 4 个单测
+    // 全绿也照样漏, 因为没有一个断言**白名单登记本身**。这条补上。
+    MockEventSource.instances = []
+    const onEvent = vi.fn()
+    subscribeServerEvents('s1', onEvent)
+    const es = MockEventSource.instances[0]
+    es.dispatchNamed('compact_boundary', {
+      type: 'compact_boundary',
+      eventId: 'e-bnd', ts: 1, seq: 1, sessionId: 's1',
+      trigger: 'auto', preTokens: 180000, messagesSummarized: 42,
+    })
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'compact_boundary', preTokens: 180000 }),
+    )
+  })
+
+  test('白名单覆盖 ServerEvent union 的每个 type (派生自 union 本身)', () => {
+    // 根治 compact_boundary 漏登记的那条测试 (2026-10-12)。
+    //
+    // 之前这里没有任何断言覆盖**白名单登记本身**: 4 个单测全绿, 因为它们
+    // 都只验证"已登记的事件能派发"。union 加了新成员而白名单漏登记 → 帧被
+    // EventSource 静默丢弃 → 单测无感。eventSource.ts 的注释已经为此写过
+    // 4 次警告(:73 / :84 / :90 / :103), 同一类坑踩了 4 次。
+    //
+    // 这条测试从 union 派生期望清单 —— union 加成员而白名单漏登记时立刻变红,
+    // 不再依赖"谁记得手写一条断言"。反向也查: 白名单里多出的、union 已删的
+    // 旧 type 是永不触发的死登记。
+    //
+    // 注意 packages/zai/tsconfig.json 的 include 只覆盖 src/server|cli|shared,
+    // **排除了 src/web** —— 所以 eventSource.ts 里的类型断言不会被 tsc 检查,
+    // 不能只靠它。这条运行时测试才是真正生效的那道闸。
+    MockEventSource.instances = []
+    subscribeServerEvents(null, () => {})
+    const registered = new Set(MockEventSource.instances[0].registeredNames())
+
+    // zod 4 里 ZodObject._def.shape 是**函数**(不是对象), 需调用取形状;
+    // discriminator 是 z.literal, 其值在 _def.value。optionsMap 已是
+    // Map<literal, schema>, 但它对 spread 合并的 union 语义不稳, 故走 options。
+    const unionTypes = (
+      ServerEvent as unknown as {
+        _def: {
+          options: Array<{
+            _def: { shape: () => { type: { _def: { value?: string; values?: string[] } } } }
+          }>
+        }
+      }
+    )._def.options.map((o) => {
+      const t = o._def.shape().type
+      return t?._def?.value ?? t?._def?.values?.[0]
+    })
+
+    expect(unionTypes.length).toBeGreaterThan(0)
+
+    // 刻意不登记的类型(2026-10-12 逐一查过, 不是漏登记):
+    //   weixin.inbound — **设计上就不该经 SSE 到 Web UI**。它用关联键当
+    //     sessionId(`weixin:<acct>:<chatType>:<chatId>`, 见
+    //     WeixinBotManager.ts:720 的注释), 而服务端 SSE 按当前 tab 的
+    //     zai sessionId 切片过滤, Web 面板永远匹配不上。面板改为打开时
+    //     轮询 /api/weixin/diagnostics 的 recentInbound 环形缓冲
+    //     (WeixinBotPanel.tsx:201 有同样说明)。所以这里**不该**登记 ——
+    //     登记了也只是让每条微信消息白跑一次 parse。
+    //
+    // 这条断言的价值: 除上面这一条外, union 里任何 type 没被登记都会红。
+    // 2026-10-12 正是靠它抓出 compact_boundary(system.restarting /
+    // stopping / restart.canceled 已于同日修复)。
+    const KNOWN_UNREGISTERED = new Set(['weixin.inbound'])
+    const missing = unionTypes.filter(
+      (t): t is string => !!t && !registered.has(t) && !KNOWN_UNREGISTERED.has(t),
+    )
+    // 反向:白名单里不能有 union 已删的旧 type(死登记)。
+    const stale = [...registered].filter((t) => !unionTypes.includes(t))
+    expect({ missing, stale }).toEqual({ missing: [], stale: [] })
   })
 
   test('dispatches named SSE events (runtime.delta) to onEvent', () => {

@@ -72,6 +72,7 @@ describe('cron fire → prompt dual dispatch (E2E)', () => {
     __resetMessageQueueAdapterBridgesForTests()
     delete (globalThis as any).__zaiSessionInboxFollowup
     delete (globalThis as any).__zaiCurrentSessionId
+    delete (globalThis as any).__zaiResolveCronSession
     mockOnFire = null
     mockOnFireTask = null
     mockStartCalled = 0
@@ -227,6 +228,61 @@ describe('cron fire → prompt dual dispatch (E2E)', () => {
 
     // vendor fallback 仍跑 —— 这是 P0 必须保住的不变量
     expect(enqueuePendingSpy).toHaveBeenCalledTimes(1)
+
+    handle.teardown()
+  })
+
+  it('falls back to __zaiResolveCronSession when all three sid sources are empty', async () => {
+    // 复现 durable 任务的真实故障态:writeCronTasks strip 掉 sessionId,
+    // 进程重启后 __zaiCurrentSessionId 也是空的。此前 prompt 被静默丢弃
+    // 而 scheduler 照写 lastFiredAt —— 「定时任务到点没反应」的根因。
+    delete (globalThis as any).__zaiCurrentSessionId
+    ;(globalThis as any).__zaiResolveCronSession = vi.fn(async () => 'sess-most-recent')
+
+    const handle = setupScheduledTasks({
+      sessionId: '', // v2 per-server 路径
+      getAppState: () => ({}),
+      isLoading: () => false,
+    })
+
+    expect(mockOnFireTask).not.toBeNull()
+    mockOnFireTask!({ id: 'durable1', cron: '7 1 * * *', prompt: 'nightly job', createdAt: Date.now() })
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    expect((globalThis as any).__zaiResolveCronSession).toHaveBeenCalledTimes(1)
+    expect(enqueuePendingSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ value: 'nightly job', sessionId: 'sess-most-recent' }),
+    )
+    expect(inboxFollowupSpy).toHaveBeenCalledWith(
+      'sess-most-recent',
+      expect.objectContaining({ content: 'nightly job' }),
+    )
+
+    handle.teardown()
+  })
+
+  it('resolver failure degrades to the old no-op path without rejecting', async () => {
+    delete (globalThis as any).__zaiCurrentSessionId
+    ;(globalThis as any).__zaiResolveCronSession = vi.fn(() => {
+      throw new Error('resolver explosion')
+    })
+
+    const handle = setupScheduledTasks({
+      sessionId: '',
+      getAppState: () => ({}),
+      isLoading: () => false,
+    })
+
+    // routeFire 是 async 且调用点不 await —— 逃逸的 rejection 会变成
+    // unhandledRejection,在 Node 22 默认配置下直接崩进程。
+    mockOnFireTask!({ id: 'durable2', cron: '7 1 * * *', prompt: 'doomed', createdAt: Date.now() })
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    // sid 仍为空 → zaiEnqueuePendingNotification 在调 vendor 桥之前就
+    // throw loud(见 messageQueueAdapter 的 sessionId 前置校验),被 routeFire
+    // 的 catch 吞掉。两条投递链路都不发生,fire 退化为 no-op。
+    expect(enqueuePendingSpy).not.toHaveBeenCalled()
+    expect(inboxFollowupSpy).not.toHaveBeenCalled()
 
     handle.teardown()
   })

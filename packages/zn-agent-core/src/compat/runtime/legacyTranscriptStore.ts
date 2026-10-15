@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getDefaultMode } from '../permissions.js'
+import { isSessionDeleted, markSessionDeleted } from './deletedSessions.js'
 
 // 与 opencc-src/utils/sessionStoragePortable.ts 的 sanitizePath 保持一致的
 // 内联实现 (compat 不能 import opencc-src, 否则把整个 vendor 图拖进
@@ -61,6 +62,12 @@ type Meta = {
   // findProfileForModel() can disambiguate when several saved
   // providerProfiles share the same model name.
   providerId?: string
+  // zai patch (2026-09-28): 会话当时的推理强度档位(per-session 落盘)。
+  // 与 model / providerId 同一条持久化通道:create() 从请求体写入,
+  // read() / list() 从 JSONL 的 session-meta 回读并投影给调用方。
+  // 声明为 string 而非档位联合 —— 落盘数据跨版本可读, 真正的白名单
+  // 校验在 modelCaller 的 ZAI_REQUEST_EFFORT_LEVELS 那一侧。
+  effort?: string
   // zai patch (2026-08-20): 会话当时选的主 Agent name(per-session 落盘)。
   mainAgent?: string
   permissionMode?: string
@@ -117,6 +124,9 @@ export class TranscriptStore {
   }
 
   private async appendEntry(sessionId: string, cwd: string, entry: unknown): Promise<void> {
+    // stale 守卫:会话已删 → 丢弃这次写。下面的 mkdir + append 会把刚删掉的
+    // transcript 重新创建出来(被删的会话自己复活)。
+    if (isSessionDeleted(sessionId)) return
     const fp = this.filePathFor(sessionId, cwd)
     await mkdir(join(fp, '..'), { recursive: true, mode: 0o700 })
     await writeFile(fp, JSON.stringify(entry) + '\n', { flag: 'a', mode: 0o600 })
@@ -151,10 +161,11 @@ export class TranscriptStore {
    * (readEntries already swallows per-line JSON parse errors, but
    * defence-in-depth here).
    */
-  private static findLatestSessionMeta(entries: any[]): { model?: string; providerId?: string; mainAgent?: string } | undefined {
+  private static findLatestSessionMeta(entries: any[]): { model?: string; providerId?: string; mainAgent?: string; effort?: string } | undefined {
     let latestModel: string | undefined
     let latestProviderId: string | undefined
     let latestMainAgent: string | undefined
+    let latestEffort: string | undefined
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i]
       if (e?.type !== 'session-meta') continue
@@ -167,13 +178,20 @@ export class TranscriptStore {
       if (latestMainAgent === undefined && typeof e.mainAgent === 'string' && e.mainAgent.length > 0) {
         latestMainAgent = e.mainAgent
       }
-      if (latestModel !== undefined && latestProviderId !== undefined && latestMainAgent !== undefined) break
+      // zai patch (2026-09-28): effort 同样按「字段级 latest wins」回读。
+      // 漏掉这一轴的话, 强度写进了 JSONL 却永远还原不出来 —— 会话列表恒为
+      // undefined, UI 高亮不到用户选过的档位。
+      if (latestEffort === undefined && typeof e.effort === 'string' && e.effort.length > 0) {
+        latestEffort = e.effort
+      }
+      if (latestModel !== undefined && latestProviderId !== undefined && latestMainAgent !== undefined && latestEffort !== undefined) break
     }
-    if (latestModel === undefined && latestProviderId === undefined && latestMainAgent === undefined) return undefined
+    if (latestModel === undefined && latestProviderId === undefined && latestMainAgent === undefined && latestEffort === undefined) return undefined
     return {
       ...(latestModel !== undefined ? { model: latestModel } : {}),
       ...(latestProviderId !== undefined ? { providerId: latestProviderId } : {}),
       ...(latestMainAgent !== undefined ? { mainAgent: latestMainAgent } : {}),
+      ...(latestEffort !== undefined ? { effort: latestEffort } : {}),
     }
   }
 
@@ -202,16 +220,34 @@ export class TranscriptStore {
   }
 
   async create(
-    meta: { cwd: string; model: string; permissionMode?: string },
+    meta: {
+      cwd: string
+      model: string
+      permissionMode?: string
+      sessionId?: string
+      // zai patch (2026-09-28): these two were accepted by the create route
+      // but silently dropped here, so a session created with a picked model
+      // / effort started on the default until a follow-up PATCH landed.
+      providerId?: string
+      effort?: string
+    },
     opts?: { cwd?: string },
   ): Promise<string> {
-    const sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    // zai patch (2026-09-27, AA integration): accept an external sessionId
+    // so AA's session.create RPC (which allocates the id client-side) can
+    // map to the same id in zai. Validate the shape (sess-... prefix) to
+    // avoid accepting arbitrary strings as transcript ids.
+    const sessionId = meta.sessionId && meta.sessionId.length > 0
+      ? (meta.sessionId.startsWith('sess-') ? meta.sessionId : `sess-${meta.sessionId}`)
+      : `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     const cwd = opts?.cwd ?? meta.cwd
     REGISTRY.set(this.key(sessionId, cwd), {
       cwd,
       model: meta.model,
       sessionId,
       createdAt: Date.now(),
+      ...(meta.providerId ? { providerId: meta.providerId } : {}),
+      ...(meta.effort ? { effort: meta.effort } : {}),
       ...(meta.permissionMode ? { permissionMode: meta.permissionMode } : {}),
     })
     // 落盘空文件占位, 让 list 扫目录时能立即看到这条会话 (sidebar 新建即出现)。
@@ -246,6 +282,10 @@ export class TranscriptStore {
         sessionId,
         ...(inferredTitle ? { title: inferredTitle } : { title: '' }),
         ...(persistedMeta?.providerId ? { providerId: persistedMeta.providerId } : {}),
+        // zai patch (2026-09-28): effort 的 REGISTRY-miss 回读分支。与
+        // providerId 同理 —— findLatestSessionMeta 取到了还得在这里投影
+        // 出去, 否则 read() 的调用方永远看不到。
+        ...(persistedMeta?.effort ? { effort: persistedMeta.effort } : {}),
         permissionMode: getDefaultMode(),
         createdAt: typeof entries[0]?.timestamp === 'number' ? entries[0].timestamp : Date.now(),
       },
@@ -287,6 +327,13 @@ export class TranscriptStore {
         model: stored?.model ?? persistedMeta?.model ?? 'unknown',
         ...(persistedMeta?.providerId && !stored?.providerId
           ? { providerId: persistedMeta.providerId }
+          : {}),
+        // zai patch (2026-09-28): effort 同样要过 list() —— 否则 JSONL 里
+        // 明明写了这个模型的推理强度, /api/agent/sessions 却恒不带它, 前端
+        // 拉列表后把 picker 高亮打回默认档, 用户设什么都是「丢了」。
+        // 语义与 model/providerId 一致: REGISTRY(活跃会话) 优先, 落盘的兜底。
+        ...(stored?.effort ?? persistedMeta?.effort
+          ? { effort: (stored?.effort ?? persistedMeta?.effort) as string }
           : {}),
         sessionId,
         // For sessions written by OpenccRuntime, REGISTRY has no entry
@@ -340,12 +387,17 @@ export class TranscriptStore {
           // 落盘失败不阻断内存更新
         }
       }
-      // zai patch: model / providerId 持久化。Picker / 模型切换时由
-      // /api/agent/sessions/:id PATCH 调用,只有写入 JSONL 才能跨进程重启
-      // 存活(REGISTRY 进程内,重启空,resolveModel Layer-1 直接失效)。
+      // zai patch: model / providerId / mainAgent / effort 持久化。Picker /
+      // 模型切换时由 /api/agent/sessions/:id PATCH 调用,只有写入 JSONL 才能跨
+      // 进程重启存活(REGISTRY 进程内,重启空,resolveModel Layer-1 直接失效)。
       // 与 title 的 custom-title 同模式:append 一条 discriminator 行,
       // 重启后 read() 扫 entries 合并回 meta。
-      if (opts?.cwd && (patch.model !== undefined || patch.providerId !== undefined || patch.mainAgent !== undefined)) {
+      //
+      // effort (2026-09-28) 必须在这里:只 PATCH effort 时上面三个字段全为
+      // undefined,旧条件不成立 → 只改内存不落盘,重启后强度归零,且
+      // findLatestSessionMeta 也还原不出来。'off' 也要写 —— 它是显式的
+      // 「不下发 reasoning 字段」,与「从未设过」语义不同。
+      if (opts?.cwd && (patch.model !== undefined || patch.providerId !== undefined || patch.mainAgent !== undefined || patch.effort !== undefined)) {
         try {
           await this.appendEntry(id, opts.cwd, {
             type: 'session-meta',
@@ -359,6 +411,9 @@ export class TranscriptStore {
               : {}),
             ...(typeof patch.mainAgent === 'string' && patch.mainAgent.length > 0
               ? { mainAgent: patch.mainAgent }
+              : {}),
+            ...(typeof patch.effort === 'string' && patch.effort.length > 0
+              ? { effort: patch.effort }
               : {}),
           })
         } catch {
@@ -387,7 +442,11 @@ export class TranscriptStore {
           // 走的是重建路径(磁盘文件已存在但 REGISTRY 没缓存),picker 选择
           // 也能跨重启保留。appendEntry 与上面 REGISTRY 命中分支使用相同的
           // session-meta 行格式。
-          if (patch.model !== undefined || patch.providerId !== undefined || patch.mainAgent !== undefined) {
+          //
+          // effort (2026-09-28): 与上面命中分支保持一致的两个字段 —— 落盘
+          // 条件含 effort、entry 行里带上 effort。只改一处会让「会话在
+          // REGISTRY 里 / 不在」表现不一致: 前者刷新后保留强度, 后者丢失。
+          if (patch.model !== undefined || patch.providerId !== undefined || patch.mainAgent !== undefined || patch.effort !== undefined) {
             try {
               await this.appendEntry(id, opts.cwd, {
                 type: 'session-meta',
@@ -401,6 +460,9 @@ export class TranscriptStore {
                   : {}),
                 ...(typeof patch.mainAgent === 'string' && patch.mainAgent.length > 0
                   ? { mainAgent: patch.mainAgent }
+                  : {}),
+                ...(typeof patch.effort === 'string' && patch.effort.length > 0
+                  ? { effort: patch.effort }
                   : {}),
               })
             } catch {
@@ -417,6 +479,9 @@ export class TranscriptStore {
   }
 
   async removeSession(id: string, opts?: { cwd?: string }) {
+    // 标记在删文件**之前**:从这一刻起,任何还在跑的 turn 的 append 都会被
+    // appendEntry 的 stale 守卫丢弃,不会把 transcript 重新 mkdir 出来。
+    markSessionDeleted(id)
     if (opts?.cwd) {
       REGISTRY.delete(this.key(id, opts.cwd))
       try {

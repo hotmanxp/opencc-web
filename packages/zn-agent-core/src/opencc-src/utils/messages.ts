@@ -1,5 +1,6 @@
 // @ts-nocheck — pre-existing typecheck debt, see docs/feature-gating.md
 import { getAPIProvider } from './model/providers.js'
+import { dispatchModEngineSync, hasModHandlersFor } from '../mods/dispatch.js'
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type {
   ContentBlock,
@@ -134,7 +135,6 @@ import {
 } from '../tools/FileReadTool/FileReadTool.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../tools/SendMessageTool/constants.js'
 import { TASK_CREATE_TOOL_NAME } from '../tools/TaskCreateTool/constants.js'
-import { TASK_OUTPUT_TOOL_NAME } from '../tools/TaskOutputTool/constants.js'
 import { TASK_UPDATE_TOOL_NAME } from '../tools/TaskUpdateTool/constants.js'
 import type { PermissionMode } from '../types/permissions.js'
 import { normalizeToolInput, normalizeToolInputForAPI } from './api.js'
@@ -1392,7 +1392,13 @@ export function normalizeMessagesForAPI(
   // hashes, breaking VCR fixture lookup. Computed once here so the pre-merge
   // injection (in the user case) and the post-merge sweep below share it.
   let injectSnipTags = false
-  if (false && process.env.NODE_ENV !== 'test') {
+  // zai patch (2026-10-08): 上游用 `if (false)` 做 external build 的 DCE，把整段
+  // 掐断成死代码 —— 结果 snip 工具虽已注册（tools.ts:271），prompt 也告诉模型去用
+  // system-generated `snip_id=...`，但上下文里从来没有这些标记，markForSnip 的短 ID
+  // 永远匹配不上 UUID，snipCompactIfNeeded 恒返回 tokensFreed=0（空转）。
+  // 此处恢复运行时判定：NODE_ENV==='test' 仍跳过（marker 会改 message 内容 hash，
+  // 破坏 VCR fixture 查找），其余一律以 isSnipRuntimeEnabled() 为准。
+  if (process.env.NODE_ENV !== 'test') {
     const { isSnipRuntimeEnabled } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../services/compact/snipCompact.js') as typeof import('../services/compact/snipCompact.js')
@@ -1897,7 +1903,14 @@ export function mergeUserMessages(a: UserMessage, b: UserMessage): UserMessage {
     content: string | ContentBlockParam[],
   ): string | ContentBlockParam[] =>
     isCollapseSummary ? stripSnipTagsFromContent(content) : content
-  if (false) {
+  // zai patch (2026-10-08): 与 normalizeMessagesForAPI 的注入门控同源 —— 上游
+  // `if (false)` 让下面的 isMeta 归正分支成为死代码，fallback 直接 `...a` 透传
+  // a.isMeta。于是「meta 消息 + 真实用户消息」合并后仍带 isMeta:true，而
+  // appendMessageTagToUserMessage 对 isMeta 消息跳过打标（apiTransform.ts:29），
+  // 真实用户内容因此永远拿不到 snip_id。query.ts 会把连续的 user 消息合并，
+  // 这条路径很常见，必须一起放开。NODE_ENV==='test' 保持关闭以免影响
+  // VCR fixture hashing（与注入门控的测试豁免保持一致）。
+  if (process.env.NODE_ENV !== 'test') {
     // A merged message is only meta if ALL merged messages are meta. If any
     // operand is real user content, the result must not be flagged isMeta
     // (so internal snip ids get injected and it's treated as user-visible content).
@@ -2332,7 +2345,63 @@ export {
   wrapMessagesInSystemReminder,
 } from "./messages/planMode.js"
 
+/**
+ * Upstream `prompt.attachment` (d.ts:6552) — the text the model reads for an
+ * attachment, with the `<system-reminder>` framing around whatever the chain
+ * answers rather than inside it.
+ *
+ * The caller wraps with `ensureSystemReminderWrap` AFTER this returns, which is
+ * what puts the framing outside the hook's answer by construction rather than by
+ * care.
+ *
+ * SYNC, like `prompt.edit`: `normalizeMessagesForAPI` is a sync pass over the
+ * whole transcript on the request path, and making it async would ripple into
+ * every caller for a rewrite that is pure text. A hook can rewrite the text; it
+ * cannot await.
+ */
 export function normalizeAttachmentForAPI(
+  attachment: Attachment,
+): UserMessage[] {
+  const rendered = normalizeAttachmentForAPIInner(attachment)
+  // Upstream gates on the attachment kind: `Jl("prompt.attachment",
+  // {type: r.attachment.type})`. A mod that only rewrites `file` attachments
+  // should not make every other kind pay to render its text first.
+  if (!hasModHandlersFor('prompt.attachment', { type: attachment.type })) {
+    return rendered
+  }
+
+  const text = rendered
+    .map(m => (typeof m.message.content === 'string' ? m.message.content : ''))
+    .filter(Boolean)
+    .join('\n')
+  if (text === '') return rendered
+
+  const decided = dispatchModEngineSync<{ text: string | null }>(
+    'prompt.attachment',
+    {
+      type: attachment.type,
+      text,
+      // opencc has no settings-hook or plugin-context attachment origins: every
+      // attachment it builds is its own prose. Upstream pins this, so no hook
+      // can re-attribute one.
+      origin: { kind: 'engine' },
+    },
+    // `PromptAttachmentResult` (d.ts:6629) is `{text: string | null}` and null
+    // "leaves the attachment out of the request" — so the core answers null for
+    // anything that is not a string. Coercing a null back to the original text
+    // is what made `{text: null}` a silent no-op: the hook ran, answered, and
+    // the attachment went out anyway.
+    e => ({ text: typeof e.text === 'string' ? e.text : null }),
+  )
+  if (decided.text === null) return []
+  if (decided.text === text) return rendered
+
+  // Rebuilt as one message: a hook that joins or splits has already had its
+  // chance to shape the text, and the caller's wrapper adds the framing.
+  return [createUserMessage({ content: decided.text, isMeta: true })]
+}
+
+function normalizeAttachmentForAPIInner(
   attachment: Attachment,
 ): UserMessage[] {
   if (isAgentSwarmsEnabled()) {
@@ -2876,13 +2945,18 @@ You have exited auto mode. The user may now want to interact more directly. You 
         if (attachment.deltaSummary) {
           parts.push(`Progress: ${attachment.deltaSummary}`)
         }
+        const canSendMessage = isAgentSwarmsEnabled()
         if (attachment.outputFilePath) {
           parts.push(
-            `Do NOT spawn a duplicate. You will be notified when it completes. You can read partial output at ${attachment.outputFilePath} or send it a message with ${SEND_MESSAGE_TOOL_NAME}.`,
+            canSendMessage
+              ? `Do NOT spawn a duplicate. You will be notified when it completes. You can read partial output at ${attachment.outputFilePath} or send it a message with ${SEND_MESSAGE_TOOL_NAME}.`
+              : `Do NOT spawn a duplicate. You will be notified when it completes. You can read partial output at ${attachment.outputFilePath}.`,
           )
         } else {
           parts.push(
-            `Do NOT spawn a duplicate. You will be notified when it completes. You can check its progress with the ${TASK_OUTPUT_TOOL_NAME} tool or send it a message with ${SEND_MESSAGE_TOOL_NAME}.`,
+            canSendMessage
+              ? `Do NOT spawn a duplicate. You will be notified when it completes. Send it a message with ${SEND_MESSAGE_TOOL_NAME} to check on it.`
+              : `Do NOT spawn a duplicate. You will be notified when it completes.`,
           )
         }
         return [
@@ -2911,7 +2985,7 @@ You have exited auto mode. The user may now want to interact more directly. You 
         )
       } else {
         messageParts.push(
-          `You can check its output using the ${TASK_OUTPUT_TOOL_NAME} tool.`,
+          `You will be notified when it completes.`,
         )
       }
 

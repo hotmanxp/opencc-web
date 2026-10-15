@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { homedir } from 'os';
 import { basename, join, sep } from 'path';
 import React, { type ReactNode } from 'react';

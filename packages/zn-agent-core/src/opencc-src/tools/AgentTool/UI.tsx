@@ -14,6 +14,7 @@ import { Markdown } from '../../components/Markdown.js';
 import { Message as MessageComponent } from '../../components/Message.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { ToolUseLoader } from '../../components/ToolUseLoader.js';
+import { ToolUseCountOverflowMessage } from '../../components/ToolUseCountOverflowMessage.js';
 import { Box, Text } from '../../ink.js';
 import { getDumpPromptsPath } from '../../services/api/dumpPrompts.js';
 import { findToolByName, type Tools } from '../../Tool.js';
@@ -420,19 +421,30 @@ export function renderToolUseMessage({
   if (!description || !prompt) {
     return null;
   }
-  return description;
+  return description.replace(/\s+/g, ' ').trim();
 }
 export function renderToolUseTag(input: Partial<{
   description: string;
   prompt: string;
   subagent_type: string;
   model?: ModelAlias;
-}>): React.ReactNode {
+}>, context?: {
+  toolUseResult?: unknown;
+  progressMessages?: ProgressMessage<Progress>[];
+}): React.ReactNode {
   const tags: React.ReactNode[] = [];
-  if (input.model) {
-    const mainModel = getMainLoopModel();
+  const models = resolveAgentModelChain(input, context);
+  if (models.length > 1) {
+    tags.push(<Box key="model" flexWrap="nowrap" marginLeft={1}>
+        <Text dimColor>{models.map(renderModelName).join(' → ')}</Text>
+      </Box>);
+  } else if (models.length === 1 && models[0] !== parseUserSpecifiedModel(getMainLoopModel())) {
+    tags.push(<Box key="model" flexWrap="nowrap" marginLeft={1}>
+        <Text dimColor>{renderModelName(models[0])}</Text>
+      </Box>);
+  } else if (input.model) {
     const agentModel = parseUserSpecifiedModel(input.model);
-    if (agentModel !== mainModel) {
+    if (agentModel !== getMainLoopModel()) {
       tags.push(<Box key="model" flexWrap="nowrap" marginLeft={1}>
           <Text dimColor>{renderModelName(agentModel)}</Text>
         </Box>);
@@ -442,6 +454,47 @@ export function renderToolUseTag(input: Partial<{
     return null;
   }
   return <>{tags}</>;
+}
+
+/**
+ * Resolve the ordered list of models an AgentTool run touched, falling back to
+ * `input.model` if neither the result nor the progress messages carry one.
+ */
+function resolveAgentModelChain(
+  input: Partial<{ model?: ModelAlias }>,
+  context?: { toolUseResult?: unknown; progressMessages?: ProgressMessage<Progress>[] },
+): ModelAlias[] {
+  const fromResult = (() => {
+    const r = context?.toolUseResult as Partial<{
+      modelsUsed?: unknown;
+      resolvedModel?: unknown;
+      model?: unknown;
+    }> | null;
+    if (!r) return [];
+    if (Array.isArray(r.modelsUsed) && r.modelsUsed.length > 0) {
+      return r.modelsUsed.filter((m: unknown): m is string => typeof m === 'string');
+    }
+    if (typeof r.resolvedModel === 'string') return [r.resolvedModel];
+    if (typeof r.model === 'string') return [r.model];
+    return [];
+  })();
+  if (fromResult.length > 0) {
+    return fromResult.map(m => parseUserSpecifiedModel(m));
+  }
+  const fromProgress = (context?.progressMessages ?? [])
+    .map(pm => {
+      const data = pm.data as Partial<{ modelsUsed?: unknown }> | undefined;
+      return Array.isArray(data?.modelsUsed) ? data!.modelsUsed! : [];
+    })
+    .flat()
+    .filter((m): m is string => typeof m === 'string');
+  if (fromProgress.length > 0) {
+    return fromProgress.map(m => parseUserSpecifiedModel(m));
+  }
+  if (input.model) {
+    return [parseUserSpecifiedModel(input.model)];
+  }
+  return [];
 }
 const INITIALIZING_TEXT = 'Initializing…';
 export function renderToolUseProgressMessage(progressMessages: ProgressMessage<Progress>[], {
@@ -563,10 +616,13 @@ export function renderToolUseProgressMessage(progressMessages: ProgressMessage<P
           return <MessageComponent key={processed.message.uuid} message={processed.message.data.message} lookups={subagentLookups} addMargin={false} tools={tools} commands={[]} verbose={verbose} inProgressToolUseIDs={collapsedInProgressIDs} progressMessagesForMessage={[]} shouldAnimate={false} shouldShowDot={false} style="condensed" isTranscriptMode={false} isStatic={true} />;
         })}
         </SubAgentProvider>
-        {hiddenToolUseCount > 0 && <Text dimColor>
-            +{hiddenToolUseCount} more tool{' '}
-            {hiddenToolUseCount === 1 ? 'use' : 'uses'} <CtrlOToExpand />
-          </Text>}
+        {hiddenToolUseCount > 0 && (
+          <ToolUseCountOverflowMessage
+            count={hiddenToolUseCount}
+            unit="tool use"
+            expandable
+          />
+        )}
       </Box>
     </MessageResponse>;
 }
@@ -829,42 +885,52 @@ export function extractLastToolInfo(progressMessages: ProgressMessage<Progress>[
     return getSearchReadSummaryText(searchCount, readCount, true);
   }
 
-  // Find the last tool_result message
+  // Find the last tool_result message (excluding REPL tool uses, which would
+  // pollute the summary line with self-referential "play noise")
   const lastToolResult = progressMessages.findLast((msg): msg is ProgressMessage<AgentToolProgress> => {
     if (!hasProgressMessage(msg.data)) {
       return false;
     }
     const message = msg.data.message;
-    return message.type === 'user' && message.message.content.some(c => c.type === 'tool_result');
+    return message.type === 'user' && message.message.content.some(c => {
+      if (c.type !== 'tool_result') return false;
+      const use = toolUseByID.get(c.tool_use_id);
+      return !!use && getSearchOrReadFromContent(use, tools)?.isREPL !== true;
+    });
   });
-  if (lastToolResult?.data.message.type === 'user') {
-    const toolResultBlock = lastToolResult.data.message.message.content.find(c => c.type === 'tool_result');
-    if (toolResultBlock?.type === 'tool_result') {
-      // Look up the corresponding tool_use — already indexed above
-      const toolUseBlock = toolUseByID.get(toolResultBlock.tool_use_id);
-      if (toolUseBlock) {
-        const tool = findToolByName(tools, toolUseBlock.name);
-        if (!tool) {
-          return toolUseBlock.name; // Fallback to raw name
-        }
-        const input = toolUseBlock.input as Record<string, unknown>;
-        const parsedInput = tool.inputSchema.safeParse(input);
-
-        // Get user-facing tool name
-        const userFacingToolName = tool.userFacingName(parsedInput.success ? parsedInput.data : undefined);
-
-        // Try to get summary from the tool itself
-        if (tool.getToolUseSummary) {
-          const summary = tool.getToolUseSummary(parsedInput.success ? parsedInput.data : undefined);
-          if (summary) {
-            return `${userFacingToolName}: ${summary}`;
+  try {
+    if (lastToolResult?.data.message.type === 'user') {
+      const toolResultBlock = lastToolResult.data.message.message.content.find(c => c.type === 'tool_result');
+      if (toolResultBlock?.type === 'tool_result') {
+        // Look up the corresponding tool_use — already indexed above
+        const toolUseBlock = toolUseByID.get(toolResultBlock.tool_use_id);
+        if (toolUseBlock) {
+          const tool = findToolByName(tools, toolUseBlock.name);
+          if (!tool) {
+            return toolUseBlock.name; // Fallback to raw name
           }
-        }
+          const input = toolUseBlock.input as Record<string, unknown>;
+          const parsedInput = tool.inputSchema.safeParse(input);
 
-        // Default: just show user-facing tool name
-        return userFacingToolName;
+          // Get user-facing tool name
+          const userFacingToolName = tool.userFacingName(parsedInput.success ? parsedInput.data : undefined);
+
+          // Try to get summary from the tool itself
+          const summary = tool.getToolUseSummary?.(parsedInput.success ? parsedInput.data : undefined);
+          return summary ? `${userFacingToolName}: ${summary}` : userFacingToolName;
+        }
       }
     }
+  } catch {
+    // Any throw from userFacingName/getToolUseSummary/schema parse — fall
+    // back gracefully rather than crashing the whole AgentTool frame.
+    const toolResultBlock = lastToolResult?.data.message.type === 'user'
+      ? lastToolResult.data.message.message.content.find(c => c.type === 'tool_result')
+      : undefined;
+    const toolUseBlock = toolResultBlock?.type === 'tool_result'
+      ? toolUseByID.get(toolResultBlock.tool_use_id)
+      : undefined;
+    return toolUseBlock?.name ?? null;
   }
   return null;
 }

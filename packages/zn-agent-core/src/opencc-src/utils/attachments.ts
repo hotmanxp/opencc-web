@@ -52,6 +52,7 @@ import { getViewedTeammateTask } from '../state/selectors.js'
 import { logError } from './log.js'
 import { logAntError } from './debug.js'
 import { isENOENT, toError } from './errors.js'
+import { dispatchModEngine, hasModHandlersFor } from '../mods/dispatch.js'
 import type { DiagnosticFile } from '../services/diagnosticTracking.js'
 import { diagnosticTracker } from '../services/diagnosticTracking.js'
 import type {
@@ -102,9 +103,6 @@ const skillSearchModules = false
         require('../services/skillSearch/prefetch.js') as typeof import('../services/skillSearch/prefetch.js'),
     }
   : null
-const autoModeStateModule = true
-  ? (require('./permissions/autoModeState.js') as typeof import('./permissions/autoModeState.js'))
-  : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 import {
   MAX_LINES_TO_READ,
@@ -130,6 +128,7 @@ import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js'
 import { filterAgentsByMcpRequirements } from '../tools/AgentTool/loadAgentsDir.js'
 import { AGENT_TOOL_NAME } from '../tools/AgentTool/constants.js'
 import {
+  filterOfferedAgents,
   formatAgentLine,
   shouldInjectAgentListInMessages,
 } from '../tools/AgentTool/prompt.js'
@@ -261,6 +260,7 @@ import { removeTeammateFromTeamFile } from './swarm/teamHelpers.js'
 import { unassignTeammateTasks } from './tasks.js'
 import { getCompanionIntroAttachment } from '../buddy/prompt.js'
 import { isBuddyEnabled } from '../buddy/feature.js'
+import * as autoModeStateModule from './permissions/autoModeState.js'
 
 export const TODO_REMINDER_CONFIG = {
   TURNS_SINCE_WRITE: 10,
@@ -1613,6 +1613,11 @@ export function getAgentListingDeltaAttachment(
   if (allowedAgentTypes) {
     filtered = filtered.filter(a => allowedAgentTypes.includes(a.agentType))
   }
+  // The same `agent.offer` veto the inline description applies — see
+  // `filterOfferedAgents`. Leaving it out here would let a mod withhold an
+  // agent from the tool description and have it announced in a
+  // system-reminder anyway, which is the one outcome the veto exists to stop.
+  filtered = filterOfferedAgents(filtered)
 
   // Reconstruct announced set from prior deltas in the transcript.
   const announced = new Set<string>()
@@ -2057,9 +2062,27 @@ async function processAtMentionedFilesWithDependencies(
   const files = extractAtMentionedFiles(input)
   if (files.length === 0) return []
 
+  // Upstream `prompt.mention` — the chain a mention's path runs before anything
+  // is attached. It sits ahead of the read so a hook can DENY a path, and so it
+  // sees the path as written rather than a finished attachment it could only
+  // inspect.
+  const mentionPaths = hasModHandlersFor('prompt.mention')
+    ? await Promise.all(
+        files.map(file =>
+          dispatchModEngine<{ allow: boolean }>(
+            'prompt.mention',
+            { path: file },
+            e => ({ allow: e.allow !== false }),
+          ).then(d => (d.allow ? file : null)),
+        ),
+      )
+    : files
+  const allowed = mentionPaths.filter((f): f is string => f !== null)
+  if (allowed.length === 0) return []
+
   const appState = toolUseContext.getAppState()
   const results = await mapWithConcurrency(
-    files,
+    allowed,
     ATTACHMENT_FILE_IO_CONCURRENCY,
     async file => {
       try {
@@ -2293,7 +2316,14 @@ const defaultChangedFileDeps: ChangedFileDeps = {
   getFileModificationTime: getFileModificationTimeAsync,
   validateFileReadInput: (input, context) =>
     FileReadTool.validateInput(input, context),
-  readFile: (input, context) => FileReadTool.call(input, context),
+  // `internal: true` — this read only feeds the changed-file diff shown to the
+  // model; the model never asked for it and never sees its output. Without the
+  // flag the call would write a normal `offset: 1` readFileState entry,
+  // promoting a Write-seeded entry (offset: undefined) into Read shape. The
+  // next model Read would then dedup against that entry and return
+  // `file_unchanged` for a file that had genuinely changed on disk.
+  readFile: (input, context) =>
+    FileReadTool.call({ ...input, internal: true }, context),
   readEditedImageAttachment: tryReadEditedImageAttachment,
 }
 
@@ -3319,12 +3349,12 @@ export async function tryGetPDFReference(
       getPDFPageCount(filename),
     ])
     // Use page count if available, otherwise fall back to size heuristic (~100KB per page)
-    const effectivePageCount = pageCount ?? Math.ceil(stats.size / (100 * 1024))
+    const effectivePageCount = pageCount.pageCount ?? Math.ceil(stats.size / (100 * 1024))
     if (effectivePageCount > PDF_AT_MENTION_INLINE_THRESHOLD) {
       logEvent('tengu_pdf_reference_attachment', {
         pageCount: effectivePageCount,
         fileSize: stats.size,
-        hadPdfinfo: pageCount !== null,
+        hadPdfinfo: pageCount.pageCount !== null,
       } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
       return {
         type: 'pdf_reference',

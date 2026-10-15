@@ -32,15 +32,17 @@ export function resolveAskBridgeCtx(): AskUserQuestionBridgeContext & {
  * Wrap zai-native AskUserQuestion as an opencc-compatible Tool.
  *
  * Critically, `transformCtx` reads `__zaiBridgeCtx` at CALL time, not at
- * wrapper-construction time. The wrapper itself is module-cached inside
- * `getOpenccBuiltinTools()`; capturing `ctx` in a closure (the prior
- * implementation) pinned sessionId / askRegistry / onYield to whichever
- * session called `getOpenccBuiltinTools()` first, so a SECOND session's
- * AskUserQuestion call would hit `askUserQuestionCall`'s
+ * wrapper-construction time. The wrapper itself is module-cached; capturing
+ * `ctx` in a closure (the prior implementation) pinned sessionId /
+ * askRegistry / onYield to whichever session built the wrapper first, so a
+ * SECOND session's AskUserQuestion call would hit `askUserQuestionCall`'s
  * `ctx.askRegistry || !ctx.onYield` stub branch and silently no-op instead
  * of yielding `tool_use:ask_pending`. Reading the global on each call
- * (matching SkillTool.ts's pattern) keeps the cached wrapper correct
+ * (matching CliAgentTool.ts's pattern) keeps the cached wrapper correct
  * across concurrent sessions.
+ *
+ * Registration: `opencc-src/server/createHeadlessContext-impl.ts:290`
+ * swaps this wrapper into the tool array returned by `getTools()`.
  */
 // opencc's `toolToAPISchema` (utils/api.ts:210) converts a tool's
 // inputSchema with `zodToJsonSchema` (utils/zodToJsonSchema.ts), which

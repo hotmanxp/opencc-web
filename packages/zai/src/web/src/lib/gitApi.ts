@@ -160,8 +160,14 @@ export const gitApi = {
     cwd: string,
     path: string,
     options?: { staged?: boolean },
-  ): Promise<{ ok: boolean; diff?: string; isUntracked?: boolean; error?: string }> => {
-    const res = await post<{ diff: string; isUntracked: boolean }>({
+  ): Promise<{
+    ok: boolean;
+    diff?: string;
+    isUntracked?: boolean;
+    isBinary?: boolean;
+    error?: string;
+  }> => {
+    const res = await post<{ diff: string; isUntracked: boolean; isBinary: boolean }>({
       action: 'diff',
       cwd,
       path,
@@ -172,6 +178,7 @@ export const gitApi = {
       ok: true,
       diff: res.data?.diff ?? '',
       isUntracked: res.data?.isUntracked ?? false,
+      isBinary: res.data?.isBinary ?? false,
     };
   },
 

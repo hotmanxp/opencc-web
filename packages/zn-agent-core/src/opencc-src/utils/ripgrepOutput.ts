@@ -1,0 +1,250 @@
+/**
+ * Parsers for ripgrep's machine-readable output modes.
+ *
+ * Mirrors upstream Claude Code 2.1.287's `L5n` (bundle @5474651, NUL-separated
+ * output) and `XVn` (bundle @8862951, `--json` event stream). Upstream Grep
+ * and Glob both switched to these modes; opencc previously consumed raw
+ * newline-delimited stdout, which cannot express:
+ *
+ *   - paths containing newlines (NUL-delimited, one entry per record)
+ *   - `[Omitted long matching line]` — rg's real line truncation, with the
+ *     match/context distinction preserved (`--max-columns` alone just clips)
+ *   - `--` separators between non-contiguous context blocks, so the model can
+ *     tell "gap in the file" from "end of file"
+ *   - binary-file matches (rg reports a `binary_offset`, it does not print)
+ *   - correct line numbers for `-o` when a match itself spans newlines
+ */
+
+/** Result of splitting rg's `--null` stdout into logical entries. */
+export type NullSeparatedMode =
+  | 'files_with_matches'
+  | 'count'
+  | 'files'
+
+/**
+ * Parse NUL-delimited ripgrep output back into one entry per line.
+ *
+ * rg's `--null` writes `path\0` for `--files` / `-l`, and `path:\ncount\0` for
+ * `-c` (the count lands on its own line, which is why the regex spans a
+ * newline). Entries are NUL-separated but individually newline-terminated, so
+ * the first field of each record can carry a leading `\n` that must be
+ * stripped.
+ *
+ * Count entries whose count is `0` are dropped: rg emits them when a file
+ * matched only through a context window, and showing `file:0` would read as
+ * "searched, found nothing" for a file that is in the result set.
+ *
+ * Mirrors upstream `L5n`.
+ */
+export function parseNullSeparated(
+  rawLines: string[],
+  mode: NullSeparatedMode,
+): string[] {
+  const joined = rawLines.join('\n')
+  if (!joined.includes('\0')) return rawLines
+
+  if (mode === 'count') {
+    // `path\0` then `\ncount\0` — the count is on the line after the NUL.
+    const out: string[] = []
+    const re = /([^\x00]*)\0:?(\d+)(?:\n|$)/gy
+    let match: RegExpExecArray | null
+    while ((match = re.exec(joined)) !== null) {
+      if (match[2] !== '0') out.push(`${match[1]}:${match[2]}`)
+    }
+    return out
+  }
+
+  const fields = joined.split('\0')
+  // The final field is the empty string after the last NUL.
+  fields.pop()
+  const out: string[] = []
+  for (let i = 0; i < fields.length; i++) {
+    // Only records after the first carry the newline that separated them from
+    // the previous record. Record 0's leading newline is part of the path and
+    // must survive — upstream makes the same distinction (bundle @5474651:
+    // `b === 0 ? g[b] : g[b].replace(/^\n/, "")`).
+    const cleaned = i === 0 ? fields[i] : fields[i].replace(/^\n/, '')
+    if (cleaned !== '') out.push(cleaned)
+  }
+  return out
+}
+
+/** A single `--json` event from ripgrep. */
+type RgJsonEvent = {
+  type: 'begin' | 'end' | 'match' | 'context'
+  data?: {
+    path?: { text?: string; bytes?: string }
+    lines?: { text?: string; bytes?: string }
+    line_number?: number
+    binary_offset?: number
+    submatches?: { start: number; end: number; match: { text?: string; bytes?: string } }[]
+  }
+}
+
+/** `path\0line:content` — NUL separates the path so paths may contain colons. */
+const NUL = '\0'
+
+export type JsonContentOptions = {
+  /**
+   * True when any of `-A`/`-B`/`-C`/`context` is > 0, i.e. the output can
+   * contain non-contiguous blocks that need a `--` separator between them.
+   */
+  contextBreaks: boolean
+  /** True when `-o` was requested: emit only the matched substrings. */
+  onlyMatching: boolean
+}
+
+/**
+ * Parse ripgrep's `--json` event stream into `path\0line:content` entries.
+ *
+ * Upstream returns this shape (not plain `path:line:content`) precisely so the
+ * caller can split path from content without parsing — a path may contain `:`,
+ * a line number may contain `-`, and content may contain anything.
+ *
+ * A line longer than 500 chars is replaced with a marker. This is rg's real
+ * truncation boundary (`--max-columns 500` already prevents the bytes from
+ * being emitted); the marker tells the model *why* the line looks short
+ * instead of leaving it to guess that the content was cut off.
+ *
+ * Binary files never produce match lines from rg, so we synthesize one entry
+ * from the `end` event's `binary_offset` — otherwise a binary match looks
+ * exactly like a file with no matches.
+ *
+ * Mirrors upstream `XVn`.
+ */
+export function parseJsonContent(
+  rawLines: string[],
+  { contextBreaks, onlyMatching }: JsonContentOptions,
+): string[] {
+  const readText = (v?: { text?: string; bytes?: string }): string =>
+    v?.text ?? Buffer.from(v?.bytes ?? '', 'base64').toString('utf8')
+
+  const clip = (line: string, kind: 'match' | 'context'): string =>
+    line.length > 500
+      ? kind === 'match'
+        ? '[Omitted long matching line]'
+        : '[Omitted long context line]'
+      : line
+
+  // Blocks accumulate between `begin` and `end` so we can tell, at `end`,
+  // whether the file is binary (rg omits the match lines entirely).
+  const out: string[] = []
+  let block: string[] = []
+  // Last (path, line) written, for context-break detection.
+  let lastPath: string | null = null
+  let lastLine = -1
+
+  for (const raw of rawLines) {
+    if (!raw.startsWith('{')) continue
+
+    let event: RgJsonEvent
+    try {
+      event = JSON.parse(raw) as RgJsonEvent
+    } catch {
+      continue
+    }
+    if (event === null || typeof event !== 'object') continue
+
+    const data = event.data ?? {}
+
+    if (event.type === 'begin') {
+      block = []
+      continue
+    }
+
+    if (event.type === 'end') {
+      const binaryOffset = data.binary_offset
+      const hasBinaryOffset = typeof binaryOffset === 'number'
+      // A real binary file yields no match lines; anything we collected that
+      // contains a NUL is a line rg truncated at the binary byte.
+      for (const entry of block) {
+        if (
+          !hasBinaryOffset ||
+          !entry.slice(entry.indexOf(NUL) + 1).includes(NUL)
+        ) {
+          out.push(entry)
+        }
+      }
+      if (hasBinaryOffset && block.length > 0) {
+        out.push(
+          `${readText(data.path)}${NUL}binary file matches (found "\\0" byte around offset ${binaryOffset})`,
+        )
+      }
+      block = []
+      continue
+    }
+
+    if (event.type !== 'match' && event.type !== 'context') continue
+
+    const path = readText(data.path)
+    const lineNumber = data.line_number ?? 0
+    const lineText = readText(data.lines).replace(/\r?\n$/, '')
+
+    // A jump to another file, or a gap of more than one line, means the
+    // reader lost content — mark it so the model does not read the two blocks
+    // as adjacent.
+    if (
+      contextBreaks &&
+      lastPath !== null &&
+      (path !== lastPath || lineNumber > lastLine + 1)
+    ) {
+      block.push('--')
+    }
+
+    if (event.type === 'match' && onlyMatching) {
+      // rg reports a match's byte offset within the single line it was found
+      // on. A match containing its own newlines therefore spans several output
+      // lines, and each needs its own line number: count the newlines already
+      // emitted to advance.
+      let emitted = lineNumber
+      for (const sub of data.submatches ?? []) {
+        const startLine =
+          lineNumber + countNewlinesBefore(Buffer.from(lineText), sub.start ?? 0)
+        const text = readText(sub.match)
+        text.split('\n').forEach((part, i) => {
+          block.push(
+            `${path}${NUL}${startLine + i}:${clip(part.replace(/\r$/, ''), 'match')}`,
+          )
+          emitted = startLine + i
+        })
+      }
+      lastPath = path
+      lastLine = emitted
+      continue
+    }
+
+    const kind = event.type === 'match' ? 'match' : 'context'
+    // `:` for a match row, `-` for a context row — the same convention rg
+    // itself uses, so the marker is self-explanatory.
+    const separator = kind === 'match' ? ':' : '-'
+    const parts = lineText.split('\n').map(part => part.replace(/\r$/, ''))
+    parts.forEach((part, i) => {
+      block.push(
+        `${path}${NUL}${lineNumber + i}${separator}${clip(part, kind)}`,
+      )
+    })
+    lastPath = path
+    lastLine = lineNumber + parts.length - 1
+  }
+
+  for (const entry of block) out.push(entry)
+  return out
+}
+
+/** Count `\n` bytes in `buf` strictly before `offset`. */
+function countNewlinesBefore(buf: Buffer, offset: number): number {
+  let count = 0
+  for (let i = Math.min(offset, buf.length) - 1; i >= 0; i--) {
+    if (buf[i] === 10) count++
+  }
+  return count
+}
+
+/**
+ * Split a `path\0rest` entry. Returns `[path, rest]`; `rest` is the whole
+ * string when there is no NUL, which happens for `-c`/`-l` output.
+ */
+export function splitNulEntry(entry: string): [string, string] {
+  const i = entry.indexOf(NUL)
+  return i < 0 ? [entry, ''] : [entry.slice(0, i), entry.slice(i + 1)]
+}

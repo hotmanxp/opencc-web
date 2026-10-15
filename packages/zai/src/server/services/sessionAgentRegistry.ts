@@ -70,6 +70,15 @@ export function disposeSessionAgents(sessionId: string): void {
 }
 
 /**
+ * Drop every session's agent bindings. Used by the process-shutdown path
+ * (`runtimeLifecycle.closeServer`) — otherwise the map outlives the process
+ * for the lifetime of a long-running dev instance.
+ */
+export function disposeAllSessionAgents(): void {
+  sessionAgents.clear()
+}
+
+/**
  * Test seam — clear all registrations.
  */
 export function __resetSessionAgentsForTests(): void {

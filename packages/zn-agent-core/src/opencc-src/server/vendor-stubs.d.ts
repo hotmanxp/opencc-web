@@ -3,6 +3,9 @@
  *
  * tsconfig.server.json only includes the 6 server/* files, but tsc
  * still typechecks their transitive imports across `src/opencc-src/**`.
+ * tsconfig.typecheck.json widens that further: it puts the whole vendor
+ * tree in the root file set, so dead CLI / gRPC / LSP paths are checked
+ * too (and need their own stubs).
  * The vendor tree was copied verbatim from upstream opencc and expects
  * a handful of npm packages that we either don't ship (Ant-only stubs)
  * or never wired up in our narrower type surface.
@@ -17,7 +20,8 @@
  * have proper type definitions that just need to be installed as
  * direct dependencies (@types/lodash, @types/react, etc.).
  *
- * Last reviewed: 2026-08-16 (zai patch).
+ * Last reviewed: 2026-10-04 (zai patch — 覆盖 tsconfig.typecheck.json
+ * 把整个 vendor 树纳入 root file set 后的新增 TS2307)。
  */
 
 // ── npm deps without published types (truly untyped) ──
@@ -151,4 +155,108 @@ declare module '@mendable/firecrawl-js' {
 declare module 'google-auth-library' {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export const GoogleAuth: any
+}
+
+// ── zai 裁剪掉的 opencc 入口路径(zai patch 2026-10-04)───────────────
+// 以下 4 个包 zai 既没安装、也不在 esbuild 产物里(已核 `grep -c` 于
+// dist/opencc-core.mjs 全部为 0),它们只被 opencc 的 CLI / gRPC server /
+// LSP 集成路径引用 —— 这三条路径 zai 整个砍掉了(headless runtime 只走
+// createOpenccRuntime)。tsconfig.typecheck.json 把整个 src/opencc-src 纳入
+// root file set 后,这些静态 import 会以 TS2307 暴露出来。
+//
+// 为什么用 ambient 声明而不是装包:装进来等于为 zai 从不执行的代码路径
+// 引入 4 棵依赖树(opencc CLI 的 commander 扩展、gRPC 的 2 个包、LSP 的
+// protocol 包),而它们的运行时入口在 bundle 里根本不存在。声明为 `any`
+// 与本文件其余条目的处理一致。
+
+declare module '@commander-js/extra-typings' {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type OptionValues = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type Command = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const Command: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type Argument = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const Argument: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type Option = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const Option: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export class InvalidArgumentError extends Error {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type OptionValueSource = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type ArgumentValueSource = any
+}
+
+declare module '@grpc/grpc-js' {
+  // 声明成 class 而不是 const:`grpc.Server` 在 grpc/server.ts:87 既当值
+  // (new grpc.Server()) 又当类型 (`typeof grpc.Server` / `grpc.ServerDuplexStream`),
+  // `export const Server: any` 会让类型位置报 TS2749。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export class Server {
+    constructor(...args: any[])
+    addService(...args: any[]): void
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    bindAsync(...args: any[]): any
+    start(...args: any[]): void
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    forceShutdown(...args: any[]): any
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export interface ServerDuplexStream<Req = any, Res = any> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    on(event: string, cb: (...args: any[]) => void): this
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    write(chunk: any): any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    end(...args: any[]): any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    metadata: any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    sendMetadata(...args: any[]): any
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const ServerCredentials: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const status: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const Metadata: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const loadPackageDefinition: any
+}
+
+declare module '@grpc/proto-loader' {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const loadSync: any
+}
+
+declare module 'vscode-languageserver-protocol' {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type InitializeParams = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type InitializeResult = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type ServerCapabilities = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type TextDocumentPositionParams = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type DefinitionParams = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type ReferenceParams = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type HoverParams = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type PublishDiagnosticsParams = any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const TextDocumentSyncKind: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const DiagnosticSeverity: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const CompletionItemKind: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export const SymbolKind: any
 }

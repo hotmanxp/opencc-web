@@ -1,5 +1,11 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import { toolMatchesName, type Tool, type Tools } from './Tool.js'
+
+// zai patch (2026-10-04):Tools 定义在 Tool.ts(已 export),本文件 import 了
+// 但没再导出;`server/createHeadlessContext-impl.ts` 从 `../tools.js` 取它,
+// 在 @ts-nocheck 掩盖下一直是悬空引用。同上,纯类型层。
+export type { Tools }
+import { getModTools } from './mods/engine.js'
 import { AgentTool } from './tools/AgentTool/AgentTool.js'
 import { BackgroundAgentTool } from './tools/BackgroundAgentTool/index.js'
 import { BackgroundAgentResultTool } from './tools/BackgroundAgentResultTool/index.js'
@@ -12,6 +18,10 @@ import { GlobTool } from './tools/GlobTool/GlobTool.js'
 // import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js' // zai web 场景无需 Jupyter notebook 编辑,保留 vendor 文件仅作类型兼容
 import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
+import { CronCreateTool } from './tools/ScheduleCronTool/CronCreateTool.js'
+import { CronDeleteTool } from './tools/ScheduleCronTool/CronDeleteTool.js'
+import { CronListTool } from './tools/ScheduleCronTool/CronListTool.js'
+import { MonitorTool as MonitorToolImpl } from './tools/MonitorTool/MonitorTool.js'
 import { BriefTool } from './tools/BriefTool/BriefTool.js'
 import { SnipTool } from './tools/SnipTool/SnipTool.js'
 // zai patch (2026-08-31, plan cliagent-register): CliAgent — external
@@ -20,6 +30,11 @@ import { SnipTool } from './tools/SnipTool/SnipTool.js'
 // Kept as a function import so the wrapper reads the registry at call-time
 // (initAgentRuntime registers providers after zai-server boots).
 import { wrapCliAgentToolAsOpencc } from '../compat/tools/opencc/CliAgentTool.js'
+// zai patch: subagent_control — 父 agent 发送指令到后台子 agent
+// (send_message) / 中止 (interrupt_agent) / 列举 (list_agents)。
+// 走 globalThis bridge 拿 BackgroundRuntime,注册在 base tools 里,
+// 因此所有走全量池的 main agent(default / task-factory)都能看到。
+import { wrapSubagentControlAsOpencc } from '../compat/tools/opencc/subagentControl.js'
 // Dead code elimination: conditional import for internal-only tools
 /* eslint-disable @typescript-eslint/no-require-imports */
 const REPLTool = null
@@ -28,16 +43,34 @@ const SleepTool =
   false || false
     ? require('./tools/SleepTool/SleepTool.js').SleepTool
     : null
+// zai patch (2026-10-12, mods 同步):下面 4 处 require 是本文件里**模块加载期
+// 真正执行**的(其余带 `false ?` 的死代码分支、以及 `getTeamCreateTool` 这类
+// 函数内的 lazy require 都不会在 import 时跑)。
+//
+// opencc 跑在 Bun 上,Bun 的 require 能把 `./X.js` 解析到磁盘上的 `X.ts`;
+// vitest 下同一个 require 落到 Node 原生 CJS resolver —— 既不做 `.js`→`.ts`
+// 替换,也看不见 Vite 的 alias —— 于是任何 import 图走到 tools.ts 的测试都会以
+// `Cannot find module './tools/ScheduleCronTool/CronCreateTool.js'` 整文件挂掉。
+//
+// 这 4 处本来就没有任何 gate,改成静态 import **不改变求值时机**,只是换了谁
+// 来解析它(以及由 esbuild 编译,而不是 Node 逐字读)。文件里其余 30 余个工具
+// 本来就是静态 import,这个形状是一致的。
+//
+// **不要**顺手动下面这些:
+//   - `getTeamCreateTool` / `getTeamDeleteTool` / `getSendMessageTool` ——
+//     注释写明是「Lazy require to break circular dependency」,改成静态 import
+//     会引入真实的循环依赖(见 mods/builtin.ts 里同一形状的告警);
+//   - `getPowerShellTool` —— 同为 lazy 且带 feature gate;
+//   - 各 `false ?` 分支 —— 永不执行,留着即可。
 const cronTools = [
-  require('./tools/ScheduleCronTool/CronCreateTool.js').CronCreateTool,
-  require('./tools/ScheduleCronTool/CronDeleteTool.js').CronDeleteTool,
-  require('./tools/ScheduleCronTool/CronListTool.js').CronListTool,
+  CronCreateTool,
+  CronDeleteTool,
+  CronListTool,
 ]
 const RemoteTriggerTool = false
   ? require('./tools/RemoteTriggerTool/RemoteTriggerTool.js').RemoteTriggerTool
   : null
-const MonitorTool =
-  require('./tools/MonitorTool/MonitorTool.js').MonitorTool
+const MonitorTool = MonitorToolImpl
 const SendUserFileTool = false
   ? require('./tools/SendUserFileTool/SendUserFileTool.js').SendUserFileTool
   : null
@@ -50,7 +83,6 @@ const SubscribePRTool = false
   ? require('./tools/SubscribePRTool/SubscribePRTool.js').SubscribePRTool
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-import { TaskOutputTool } from './tools/TaskOutputTool/TaskOutputTool.js'
 import { WebSearchTool } from './tools/WebSearchTool/WebSearchTool.js'
 import { TodoWriteTool } from './tools/TodoWriteTool/TodoWriteTool.js'
 import { ExitPlanModeV2Tool } from './tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
@@ -199,8 +231,11 @@ export function getAllBaseTools(): Tools {
     // plain object spread with no external side effects; lazy is unnecessary
     // because getAllBaseTools is invoked per-query (re-reads registry state).
     wrapCliAgentToolAsOpencc() as Tool,
+    // zai patch: subagent_control — 主 agent 侧的后端子 agent 控制面。
+    // 与 BackgroundAgentTool(启动端)配对:后者派活,前者投递后续指令 /
+    // 中止 / 列举。读 globalThis bridge,所以无需每 query 重建状态。
+    wrapSubagentControlAsOpencc() as Tool,
     ...bgTools,
-    TaskOutputTool,
     BashTool,
     // Ant-native builds have bfs/ugrep embedded in the bun binary (same ARGV0
     // trick as ripgrep). When available, find/grep in OpenCC's shell are aliased
@@ -300,6 +335,8 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
       // in the simple-mode REPL tool pool too so the model can route
       // external CLI subagents via subagent_type='opencc'|'dsh'.
       replSimple.push(wrapCliAgentToolAsOpencc() as Tool)
+      // zai patch: subagent_control mirrors the same treatment.
+      replSimple.push(wrapSubagentControlAsOpencc() as Tool)
       return filterToolsByDenyRules(replSimple, permissionContext)
     }
     const simpleTools: Tool[] = [BashTool, FileReadTool, FileEditTool]
@@ -315,6 +352,9 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
     // available in simple-mode even outside coordinator mode so worker
     // shells can spawn external CLI subagents when given a prompt.
     simpleTools.push(wrapCliAgentToolAsOpencc() as Tool)
+    // zai patch: subagent_control follows the same rule — a worker shell
+    // that can spawn a CLI subagent also needs to message / cancel it.
+    simpleTools.push(wrapSubagentControlAsOpencc() as Tool)
     return filterToolsByDenyRules(simpleTools, permissionContext)
   }
 
@@ -370,6 +410,12 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
 export function assembleToolPool(
   permissionContext: ToolPermissionContext,
   mcpTools: Tools,
+  /**
+   * zai patch (2026-10-06, mods 同步):会话 id。用于 mainAgent `mods` 槽
+   * 的 per-session mod 门禁 —— 决定哪些 mod 贡献的工具进入本会话工具池。
+   * 省略时全部 mod 工具可见(= opencc 原始行为)。
+   */
+  sessionId?: string,
 ): Tools {
   const builtInTools = getTools(permissionContext)
 
@@ -386,8 +432,14 @@ export function assembleToolPool(
   // Avoid Array.toSorted (Node 20+) — we support Node 18. builtInTools is
   // readonly so copy-then-sort; allowedMcpTools is a fresh .filter() result.
   const byName = (a: Tool, b: Tool) => a.name.localeCompare(b.name)
+  // zai patch (2026-10-06, mods 同步):mod 工具并入 MCP 分区(内置前缀之后),
+  // 分区内排序 —— prompt-cache 不变式(内置连续)因此保持。名字前缀
+  // mods_<mod>_<tool>,所以 uniqBy 撞名时内置永远赢。
+  const modTools = getModTools(sessionId)
   return uniqBy(
-    [...builtInTools].sort(byName).concat(allowedMcpTools.sort(byName)),
+    [...builtInTools]
+      .sort(byName)
+      .concat(allowedMcpTools.sort(byName), modTools),
     'name',
   )
 }

@@ -28,7 +28,6 @@ import type { CliStatus } from './types.js'
 export type CommandResponse =
   | { type: 'cleared'; payload: null }
   | { type: 'compacted'; payload: { removedMessages: number; summary: string } }
-  | { type: 'status'; payload: Record<string, unknown> }
   | { type: 'message'; payload: { text: string } }
   | { type: 'prompt'; payload: { rendered: string } }
   | { type: 'error'; payload: { message: string } }

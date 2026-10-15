@@ -1,6 +1,6 @@
 import { createCombinedAbortSignal } from '../../../utils/combinedAbortSignal.js'
 
-export const DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS = 15
+export const DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS = 60
 const MAX_WEB_SEARCH_TIMEOUT_SECONDS = 300
 const WEB_SEARCH_TIMEOUT_CODE = 'WEB_SEARCH_TIMEOUT'
 

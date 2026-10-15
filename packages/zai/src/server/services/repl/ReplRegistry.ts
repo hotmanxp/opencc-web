@@ -31,6 +31,30 @@ export class ReplRegistry {
       this.map.delete(sessionId)
     }
   }
+
+  /**
+   * 释放全部 session。进程退出路径(`runtimeLifecycle.closeServer`)调用 ——
+   * 否则 `sh -c` 起的子进程会以孤儿身份被 init 收养并继续存活。
+   *
+   * 注意 PTY 路径不需要它:`node-pty` 走 forkpty,PTY shell 是 session leader
+   * 且以 slave 为控制终端,master 关闭时内核自动发 SIGHUP 回收。这里回收的是
+   * piped stdio 的普通子进程,父进程干净 `process.exit(0)` 时收不到任何信号。
+   */
+  disposeAll(): void {
+    for (const s of this.map.values()) {
+      try {
+        s.dispose()
+      } catch {
+        /* 单个 session 释放失败不阻断其余回收 */
+      }
+    }
+    this.map.clear()
+  }
+
+  /** 测试用 */
+  size(): number {
+    return this.map.size
+  }
 }
 
 let _singleton: ReplRegistry | null = null

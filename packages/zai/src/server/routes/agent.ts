@@ -54,6 +54,7 @@ import {
   listSessionInboxIds,
   type InboxMessage,
 } from "../services/sessionInbox.js";
+import { disposeSessionAgents } from "../services/sessionAgentRegistry.js";
 import { drainInboxReminder } from "../services/inboxReminder.js"; // (no longer used here — see agentRuntime.ts registerExtraReminderProvider for the per-API-call hook)
 // zai patch (2026-09-13, weixin-bot): 微信会话默认派专用主 agent 'weixin-bot'
 // (指派型调度助手,见 zn-agent-core mainAgents-weixin.ts)。
@@ -709,23 +710,54 @@ export async function* translateRuntimeEvents(
         yield errEvent;
         break;
       }
-      case "compaction.completed": {
-        // 阶段 1 翻译层: queryLoop (Task 16) 会在 autocompact 触发时 yield
-        // 这个内部事件, 翻译层把它翻成 SSE `runtime.compacted` 给前端 reducer.
-        // trigger='manual' 的 /compact 命令仍走原 kind:'compacted' 路径, 不
-        // 经过这里 — 这里只对应 auto 路径.
-        // 字段严格匹配 shared/events.ts schema: 没有 spread Base (无 eventId/ts),
-        // 显式 timestamp 字段 (zod discriminatedUnion 不要求成员字段一致).
-        const trigger = (ev.trigger as "auto" | "manual") ?? "auto";
-        const preTokens = typeof ev.preTokens === "number" ? ev.preTokens : 0;
-        const postTokens = typeof ev.postTokens === "number" ? ev.postTokens : 0;
+      case "system": {
+        // zai patch (2026-10-12, compact 事件接线): vendor 的压缩边界是以
+        // `system` + `subtype:'compact_boundary'` 的 Message 形式 yield 出来的
+        // (opencc-src/query.ts 的 `for (const message of postCompactMessages)
+        // yield message`), compat/runtime/sdkEventAdapter.ts:109 明确放行、
+        // :251 直通成 RuntimeEvent —— 但这里一直没有 case 'system', 事件落到
+        // 末尾的 `default: break` 被静默丢弃. 这是"压缩时 UI 毫无反应"的根因.
+        //
+        // 一次产出两个事件, 职责不同:
+        //   ① compact_boundary  → 落进前端 messages, 是 transcript 里常驻的
+        //      分界线(刷新后仍在, 形态与 loadTranscriptMessages 历史回放一致);
+        //   ② runtime.compacted → 5s 自动消失的一次性 toast 提示.
+        //
+        // auto / manual 两条路径的 boundary 形状相同(system + subtype +
+        // compactMetadata), 所以这里不区分触发来源 —— 真正的 auto 边界由
+        // query loop 产出, 手动 /compact 走 POST /agent/command 不经过本函数.
+        //
+        // 其他 system subtype(init / task_started / status 等)一律 break,
+        // 不引入新行为 —— 它们要么已被 adapter 消费, 要么本就不该渲染.
+        if (ev.subtype !== "compact_boundary") break;
+        // compactMetadata 的实际字段见 opencc-src/utils/messages/
+        // systemFactories.ts:204: {trigger, preTokens, userContext?,
+        // messagesSummarized?, preCompactDiscoveredTools?}. 注意**没有**
+        // postCompact token 数 —— 那个值只存在于 CompactionResult 里, 从没
+        // 进过 boundary message, 所以 runtime.compacted 只带 preTokens,
+        // 由前端分叉文案(不显示"节省 0 tokens"这种谎话).
+        const meta = (ev.compactMetadata ?? {}) as {
+          trigger?: "auto" | "manual";
+          preTokens?: number;
+          messagesSummarized?: number;
+        };
+        const trigger: "auto" | "manual" = meta.trigger ?? "auto";
+        const preTokens =
+          typeof meta.preTokens === "number" ? meta.preTokens : 0;
+        yield {
+          type: "compact_boundary",
+          sessionId,
+          trigger,
+          preTokens,
+          ...(typeof meta.messagesSummarized === "number"
+            ? { messagesSummarized: meta.messagesSummarized }
+            : {}),
+        };
         yield {
           type: "runtime.compacted",
           sessionId,
           trigger,
           preTokens,
-          postTokens,
-          savedTokens: preTokens - postTokens,
           timestamp: Date.now(),
         };
         break;
@@ -988,7 +1020,13 @@ async function runNextInQueue(sid: string): Promise<void> {
   if (sessionRunning.has(sid)) return
 
   const httpCmd = nextHttpPrompt(sid)
-  const inboxMsg = getSessionInbox(sid).consumeNextTurn(sid)
+  // zai patch (2026-10-02, subagent-notification-loss): 原来是无条件
+  // consumeNextTurn() 把消息 shift 出 nextTurn 车道, 再让 httpCmd 优先 ——
+  // httpCmd 胜出时 inboxMsg 无人使用, 子 agent 的 <task-notification> 被静默
+  // 丢弃 (既不落盘也不送达, 永久丢失)。真实触发: turn 结束的
+  // promoteNextStepToNextTurn 刚把通知搬进 nextTurn, 同一 tick 用户消息也在
+  // HTTP 队列里。改成只在真的要消费时才 shift, HTTP 优先级语义不变。
+  const inboxMsg = httpCmd ? null : getSessionInbox(sid).consumeNextTurn(sid)
 
   let cmd: PendingPrompt | null
   if (httpCmd) {
@@ -1262,6 +1300,11 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // modelCaller via resolveModel + OpenccQueryInput.providerId so the
     // matcher routes the model to the exact provider the user chose.
     let sessionProviderId: string | null = null;
+    // zai patch (2026-09-28): 会话级推理强度。AA 的推理强度选择落在
+    // transcript.meta.effort,经 createOpenccRuntime input → req.options →
+    // modelCaller 合并成请求体的 reasoning.effort。'off'/空 表示不下发该
+    // 字段(MiniMax 的 adaptive thinking 模型拒收 reasoning.effort=none)。
+    let sessionEffort: string | null = null;
     // zai patch (2026-08-20): 会话当时选的主 Agent(per-session 落盘)。
     // 有记录 → 本会话固定用该 agent;无记录(新会话/旧会话)→ 首次 query
     // 用全局设置并落盘,之后固定。
@@ -1283,6 +1326,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       const metaProviderId = (existing.meta as { providerId?: string }).providerId;
       if (typeof metaProviderId === 'string' && metaProviderId.length > 0) {
         sessionProviderId = metaProviderId;
+      }
+      const metaEffort = (existing.meta as { effort?: string }).effort;
+      if (typeof metaEffort === 'string' && metaEffort.length > 0) {
+        sessionEffort = metaEffort;
       }
       const metaMainAgent = (existing.meta as { mainAgent?: string }).mainAgent;
       if (typeof metaMainAgent === 'string' && metaMainAgent.length > 0) {
@@ -1469,6 +1516,11 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
           // zai's createAnthropicModelCaller instead of vendor's
           // openai-shim. See plan §阶段 2 vendor 透传 chain.
           ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
+          // zai patch (2026-09-28): 会话级推理强度,与 providerId 同一条
+          // 通道。'off' 原样透传:modelCaller 要区分「用户显式选了 off」
+          // (不下发字段) 与「从未设置」(兜底 ZAI_DEFAULT_EFFORT_LEVEL),
+          // 在这里提前丢掉 'off' 会让两者无法分辨。
+          ...(sessionEffort ? { effort: sessionEffort } : {}),
           // zai patch (2026-08-20): 会话恢复的主 Agent。首次 query 用全局设置
           // (并已落盘),后续从 transcript meta 恢复 → 会话级固定。
           ...(sessionMainAgent ? { mainAgent: sessionMainAgent } : {}),
@@ -1931,6 +1983,58 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   const cwd = ctx.cwd
   const sessionId = existingSessionId ?? newSessionId()
 
+  // ★ 注册时机:必须在下面第一个 await 之前。
+  // 'close' 是一次性事件 —— 客户端在这个 await 窗口里断开,响应随后 emit
+  // 'close' 时我们还没挂上监听,就永远收不到,那段时间挂起的 pending 提问
+  // 会一直 leak 到 HARD_TIMEOUT。routes/event.ts 的注释早就写了这条规矩
+  // ("close 监听必须在第一个 await 之前注册"),这里得守同样的规矩。
+  // sessionId 在上面是同步算出来的,所以现在就能拿到。
+  //
+  // 客户端真的断开时才释放 pending 提问 / 审批 / 权限确认。
+  //
+  // 2026-10-05, bug `prompt-close-aborts-all-sessions`(合并
+  // `prompt-close-aborts-all-approvals--by-zai`)。原来的 `req.on("close")`
+  // 有两个独立缺陷:
+  //  1. **正常 200 响应也会触发 close。** fire-and-forget 设计下本路由立即
+  //     res.json() 返回,响应正常完成时 req 也发出 close —— close ≠ 客户端
+  //     异常断开。于是每一次正常发 prompt 都会走进下面的三个 abortAll。
+  //  2. **abortAll 是进程级的。** 三个 registry 都是单例,abortAll 无条件遍历
+  //     全表且不带 sessionId 过滤 → 任意一个会话的正常 prompt 结束,会把
+  //     **其它所有会话**正挂着的 AskUserQuestion / 审批 / 权限确认一起 reject
+  //     掉,表现为别处的卡片凭空消失、turn 报 aborted。
+  //
+  // 修法两步都在这里:① 改听 `res.on("close")` 并用 `res.writableFinished`
+  // 判别 —— 正常响应完成时它为 true,提前中断时为 false(探针实测
+  // `close fired=1 writableEnded=true socket.destroyed=false`);
+  // ② 三个 abortAll 都传 sessionId,即便真的断开也只释放本会话的 pending。
+  // 缺 ① 会漏掉「同会话内 pending ask 被正常响应误杀」,缺 ② 会误杀别的会话 ——
+  // 两个都要。
+  res.on("close", () => {
+    // 正常响应完成:writableFinished=true。这是绝大多数 close 的成因,
+    // 此时一切照常,不要碰任何 registry。
+    if (res.writableFinished) {
+      if (process.env.ZAI_DEBUG === "1") {
+        console.error("[zai.agent.prompt] res.close (response finished, no abort)", { sessionId });
+      }
+      return;
+    }
+    if (process.env.ZAI_DEBUG === "1") {
+      console.error("[zai.agent.prompt] res.close (client aborted → release pendings)", { sessionId });
+    }
+    // ★ 仍然不要 abort turn: abort 会让 queryEngine 立即 yield
+    // runtime.aborted 提前 return, 永远走不到 appendAssistantMessage ——
+    // LLM 回复写不进 transcript, 刷新页面看不到。真正兜底是 runQueryLoop
+    // 内的 HARD_TIMEOUT (现 2h, 见顶部常量)。
+    // 但 pending 的提问 / 审批 / 权限确认必须释放 —— client 真断开后没人能
+    // 再回答它们, 只能挂到 HARD_TIMEOUT。
+    getAskRegistry().abortAll("client_disconnect", sessionId);
+    // ApproveRegistry 同样要释放: 阻止 /api/agent/approve 路由对一个已经
+    // 死掉的 client 永久挂起. spec §4.4.
+    getApproveRegistry().abortAll("client_disconnect", sessionId);
+    // PermissionRegistry（behavior:'ask' 确认）同样释放。
+    getPermissionRegistry().abortAll("client_disconnect", sessionId);
+  });
+
   // Prompt 携带已有 sessionId 时，必须在响应成功和启动 runtime 之前完成 cwd 校验
   if (existingSessionId) {
     try {
@@ -1943,28 +2047,6 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Session not found' })
     }
   }
-
-  req.on("close", () => {
-    if (process.env.ZAI_DEBUG === "1") {
-      console.error(
-        "[zai.agent.prompt] req.close (no abort — fire-and-forget)",
-        { sessionId },
-      );
-    }
-    // ★ 不要 abort: fire-and-forget 设计下, /agent/prompt 立即写完响应,
-    // HTTP/1.1 默认会 close res, client 关 body 是正常 lifecycle. abort 会让
-    // queryEngine 立即 yield runtime.aborted 提前 return, 永远走不到
-    // appendAssistantMessage — LLM 回复写不进 transcript, 刷新页面看不到.
-    // 真正兜底是 runQueryLoop 内的 HARD_TIMEOUT (现 2h, 见顶部常量).
-    // 但 askRegistry 仍要 abort — client 关掉页面时正在 ask 的 tool 必须释放.
-    getAskRegistry().abortAll("client_disconnect");
-    // ApproveRegistry 同样要在 client 断开时释放: 阻止 /api/agent/approve
-    // 路由对一个已经死掉的 client 永久挂起. spec §4.4.
-    getApproveRegistry().abortAll("client_disconnect");
-    // PermissionRegistry（behavior:'ask' 确认）同样释放，否则 pending 权限
-    // 会挂到 HARD_TIMEOUT。
-    getPermissionRegistry().abortAll("client_disconnect");
-  });
 
   // ★ 立即响应，事件通过 eventBus → /api/event SSE。
   // per-session 串行队列: 当前轮在跑或队列非空 → 本条 prompt 入队等待
@@ -2020,12 +2102,21 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     // 可选 model: 前端在 createNewSession 时会把"用户最近手动选过的模型"
     // 传过来, 让新建会话默认继承. 缺省/'unknown'/空串都视为不指定, 维持
     // 旧行为 (useConversationInfo 看到 'unknown' 就会回退到 runtime.defaultModel).
-    const body = req.body as { model?: unknown; providerId?: unknown; mainAgent?: unknown; cwd?: unknown } | undefined
+    const body = req.body as { model?: unknown; providerId?: unknown; mainAgent?: unknown; cwd?: unknown; sessionId?: unknown; effort?: unknown } | undefined
     const requested = body?.model
     const model =
       typeof requested === 'string' && requested.length > 0 && requested !== 'unknown'
         ? requested
         : 'unknown'
+    // zai patch (2026-09-27, AA integration): accept a client-provided
+    // sessionId so AA's session.create (which allocates the id client-side
+    // and passes it to the connector) maps to the same id in zai. AA expects
+    // an externalSessionId-style binding; reusing zai's sessionId for the AA
+    // sessionId is the simplest bridge. If omitted, fall back to generating
+    // a fresh id as before.
+    const requestedSessionId = typeof body?.sessionId === 'string' && body.sessionId.length > 0
+      ? body.sessionId
+      : null
     // zai patch: also accept the providerId the user picked for the
     // most recent model. Same sanity rules as `model` — empty / unknown
     // / non-string fall back to "not specified" so old clients without
@@ -2034,6 +2125,12 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     const providerId =
       typeof requestedProviderId === 'string' && requestedProviderId.length > 0
         ? requestedProviderId
+        : undefined
+    // zai patch (2026-09-28): 会话级推理强度,随创建一起冻结,首轮就能用。
+    const effort =
+      typeof body?.effort === 'string'
+      && ['off', 'low', 'medium', 'high', 'xhigh', 'max'].includes(body.effort)
+        ? body.effort
         : undefined
     // zai patch (2026-09-02, task-intake): 可选 mainAgent —— 建会话时直接
     // 冻结该会话的主 Agent(任务工厂调度器引导用 'task-factory'、新建任务
@@ -2068,7 +2165,11 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
       // loose about this new optional field (OpenccTranscriptMeta is
       // vendor-owned and only widened in serverTypes.ts).
       ...(providerId ? { providerId } : {}),
+      ...(effort ? { effort } : {}),
       permissionMode: getDefaultMode(),
+      // zai patch (2026-09-27, AA integration): accept a client-provided
+      // sessionId so AA's session.create RPC maps to the same id in zai.
+      ...(requestedSessionId ? { sessionId: requestedSessionId } : {}),
     } as Parameters<typeof store.create>[0], { cwd: ctx.cwd })
     if (mainAgent) {
       // create 已落盘 transcript,patch 写 meta.mainAgent(await —— 首条
@@ -2078,8 +2179,18 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     if (requestedCwd) {
       CwdStore.set(sessionId, requestedCwd)
     }
+    // zai patch (2026-09-27, AA integration): emit session.created so
+    // downstream consumers (e.g. AA event adapter) can react to new
+    // sessions. Harmless if no consumer subscribes.
+    eventBus.emit({
+      type: 'session.created',
+      sessionId,
+      title: '',
+      cwd: ctx.cwd,
+    });
     res.json({ sessionId })
   } catch (err) {
+    console.error('[agent.sessions POST] error:', (err as Error).message, (err as Error).stack);
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -2123,12 +2234,20 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
     if (resolved !== path.resolve(ctx.cwd)) {
       return res.status(404).json({ error: 'Session not found' })
     }
+    // 先中断在跑的 turn,再删文件。反序会让运行中的 turn 继续 append ——
+    // vendor 的 sessionStorage.appendDirectlyToFile 直接 mkdir + append,
+    // 把刚 rm 掉的 transcript 重新写回来,被删的会话自己复活。
+    abortSessionController(req.params.id, 'session_deleted')
+    disposeSessionInbox(req.params.id)
     await store.remove(req.params.id, { cwd: ctx.cwd })
     // 同时清掉 per-session cwd map(防内存泄漏 + 防止 stale data)
     CwdStore.delete(req.params.id)
     // zai patch (2026-08-29, plan §3.5): unregistryAgent 释放
     // AgentRegistry.sessionBindings 该 sid 条目,避免内存泄漏。
     getAgentRegistry().unregistryAgent(req.params.id)
+    // per-session agent 绑定表(Zai patch):该 sid 名下的 agentIds 一起释放,
+    // 否则 DELETE 之后条目永久滞留。
+    disposeSessionAgents(req.params.id)
     // 会话被删除 → 它名下的持久 PTY 终端也一并回收(否则会留下没人认领的
     // shell 进程)。失败不影响删除本身:进程已在关闭路径上,只记日志。
     try {
@@ -2137,6 +2256,12 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
     } catch (termErr) {
       console.warn('[agent] dispose terminal sessions failed:', termErr)
     }
+    // zai patch (2026-09-27, AA integration): notify consumers (AA session
+    // mapping cleanup) that this session is gone.
+    eventBus.emit({
+      type: 'session.deleted',
+      sessionId: req.params.id,
+    });
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -2154,6 +2279,11 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
 const PatchSessionRequest = z.object({
   model: z.string().min(1).max(256).optional(),
   providerId: z.string().min(1).max(256).optional(),
+  // zai patch (2026-09-28): 会话级推理强度。'off' 是合法取值,表示
+  // 不下发 reasoning 字段(adaptive thinking 模型拒收显式 none)。
+  // 这五个是 wire 档位的全集 — 单个模型支持哪几档由 core 的
+  // getReasoningEffortLevelsForModel 决定,这里只做语法校验。
+  effort: z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
   permissionMode: z.enum(EXTERNAL_PERMISSION_MODES as readonly [UserFacingPermissionMode, ...UserFacingPermissionMode[]]).optional(),
 });
 
@@ -2184,6 +2314,17 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
       const found = await store.patch(
         sid,
         { providerId: parsed.data.providerId } as { providerId: string },
+        { cwd: ctx.cwd },
+      );
+
+      if (found === null) return res.status(404).json({ error: "session not found" });
+    }
+    // zai patch (2026-09-28): 会话级推理强度落盘。'off' 也要写,它是
+    // 「不下发 reasoning 字段」的显式选择,读侧据此不加 effort。
+    if (parsed.data.effort) {
+      const found = await store.patch(
+        sid,
+        { effort: parsed.data.effort } as { effort: string },
         { cwd: ctx.cwd },
       );
       if (found === null) return res.status(404).json({ error: "session not found" });
@@ -2220,13 +2361,18 @@ router.post("/agent/abort", async (req: Request, res: Response) => {
   // 兼容旧客户端.
   const headerSid = (req.headers["x-session-id"] as string | undefined) ?? undefined
   const sid = headerSid ?? getCurrentSessionId()
+  // 2026-10-05, bug `abort-uses-global-session-id--by-zai`: 之前这里先按
+  // header 精确 abort 了 sid, 紧接着又无参调 abortAgentSession —— 而后者读
+  // 模块级 currentSessionId, 把「只停当前会话」的精度整个废掉, 在另一个 tab
+  // 点了停止会把那边的 turn 一起杀掉。前端特意发这个 header 就是为了避免
+  // 误杀(见 useAgentStore.ts:1453 的注释)。现在把 sid 传进去。
+  // sid 为 null 时传 undefined, abortAgentSession 内部回落到 currentSessionId,
+  // 保留"没带 header 的旧前端"的行为。
   const aborted = sid ? abortSessionController(sid, "user_abort") : false
-  // 仍然调 askRegistry.abortAll 以解锁任何 pending AskUserQuestion.
-  // 注意: abortAgentSession 内部还会触发一次 currentSessionId 对应的
-  // abortSessionController, 但此时 sid 已 abort 完毕 (idempotent 返回
-  // false), 重复调用不会引入副作用. 保留是为了让"没带 header 的旧前端"
-  // 走 currentSessionId 兜底时仍然能 abort.
-  await abortAgentSession("user_abort")
+  // abortAgentSession 内部同样会 abortSessionController(sid) —— 此时已 abort
+  // 完毕 (idempotent 返回 false), 重复调用无副作用; 它额外负责解锁本会话
+  // pending 的 AskUserQuestion / 审批 / 权限确认。
+  await abortAgentSession("user_abort", sid)
   res.json({ ok: true, sessionId: sid, aborted })
 });
 

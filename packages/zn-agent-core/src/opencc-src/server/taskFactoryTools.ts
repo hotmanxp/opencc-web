@@ -57,7 +57,7 @@ const MOVE_DESC = 'Move a Task Factory task between lifecycle buckets (queue-tas
   '  - taskId / from / to / status / inPlace: structured fields for tool-result parsing. ' +
   '  - executorTaskId / verifierTaskId: present ONLY when a backfill was applied. ' +
   'Typical flows: ' +
-  '(a) SuperTasksMove(id, "queue-tasks", "processing-tasks") on dispatch — move the folder FIRST, capture taskDir from the return value, THEN CliAgent the executor with `<task_dir>/docs/spec.md` paths interpolated from taskDir. After CliAgent returns the subagent id, backfill via an in-place move (a2): ' +
+  '(a) SuperTasksMove(id, "queue-tasks", "processing-tasks") on dispatch — move the folder FIRST, capture taskDir from the return value, THEN spawn the executor with `<task_dir>/docs/spec.md` paths interpolated from taskDir. After CliAgent returns the subagent id, backfill via an in-place move (a2): ' +
   '(a2) SuperTasksMove(id, "processing-tasks", "processing-tasks", executorTaskId=<subTaskId>) — in-place backfill so the UI keeps the live event stream; taskDir is unchanged (still processing-tasks). ' +
   '(b) SuperTasksMove(id, "processing-tasks", "verifying-tasks") after the executor appends "## [DONE]" to process.md; ' +
   '(b2) SuperTasksMove(id, "verifying-tasks", "verifying-tasks", verifierTaskId=<verifierSubagentId>) — in-place backfill right after CliAgent returns the verifier task id (from == to means: no folder move, only patch the field; status stays verifying); ' +
@@ -75,8 +75,8 @@ const RESET_DESC = 'Reset a Task Factory task back to the runnable state for ret
   '(a) task in verifying-tasks → folder moves back to processing-tasks AND status is forced to "processing" with executorTaskId AND verifierTaskId cleared; ' +
   '(b) task in processing-tasks with status="paused" → folder stays in processing-tasks, status forced back to "processing" with executorTaskId AND verifierTaskId cleared (no bucket move); ' +
   '(c) task in queue-tasks / finished-tasks / processing-tasks with status!="paused" / not found anywhere → throws "task <id> cannot be reset (current state: bucket=..., status=...)". ' +
-  'Use this after a verifier FAIL on round N < 3 to put the task back into the runnable lane so the supervisor can re-CliAgent the executor with the verifier feedback path included in the prompt. ' +
-  'After Reset, the supervisor must re-CliAgent the executor — Reset does NOT cancel or pause any existing subagent; if the previous executor subagent is still alive, the supervisor should BackgroundRuntime.cancel it first.'
+  'Use this after a verifier FAIL on round N < 3 to put the task back into the runnable lane so the supervisor can re-spawn the executor with the verifier feedback path included in the prompt. ' +
+  'After Reset, the supervisor must re-spawn the executor — Reset does NOT cancel or pause any existing subagent; if the previous executor subagent is still alive, the supervisor should BackgroundRuntime.cancel it first.'
 
 const PAUSE_DESC = 'Pause a Task Factory task in place without moving it between buckets. ' +
   'Auto-detects the current bucket (no `from` argument needed): ' +
@@ -123,13 +123,19 @@ export const superTasksCreateTool = buildTool({
       // verification_scope 是枚举,非法值 fail loud;changed_files 是字符串数组,
       // 不做单元素校验(filter 非字符串由 createPoolTask 兜底)。
       changeType: z.enum(['docs', 'copy', 'style', 'logic', 'core', 'api', 'security']).optional()
-        .describe('Kind of change the executor will make (zhozh1 project-agnostic). One of docs|copy|style|logic|core|api|security. The supervisor writes this BEFORE CliAgent the executor; the executor reads it from TaskSummary and never re-decides. Optional — legacy tasks have no changeType.'),
+        .describe('Kind of change the executor will make (zhozh1 project-agnostic). One of docs|copy|style|logic|core|api|security. The supervisor writes this BEFORE spawning the executor; the executor reads it from TaskSummary and never re-decides. Optional — legacy tasks have no changeType.'),
       verificationScope: z.enum(['ts_files', 'test_files', 'visual', 'none', 'build_artifact']).optional()
         .describe('Which category of validation is appropriate for this change (project-agnostic). One of ts_files|test_files|visual|none|build_artifact. The verifier reads this and picks the right validation matrix entry. Optional.'),
       changedFiles: z.array(z.string().min(1)).optional()
         .describe('File paths (relative to executor cwd) the task is expected to touch. Optional — the verifier uses this for the targeted-test scope and the executor uses it for the change-set bound check. Strings only; non-string elements are filtered at write time.'),
     })
   },
+  // zai patch 2026-10-04:ToolDef 要求每个工具显式给 maxResultSizeChars
+  // (它不在 buildTool 的 DefaultableToolKeys 里)。以前这 7 个任务工厂工具
+  // 全都漏了,运行时是 undefined —— 于是 query.ts:822 的
+  // `!Number.isFinite(t.maxResultSizeChars)` 把它们误判成 FileRead 那种
+  // 「结果永不持久化」的工具,toolResultStorage 的阈值也算错。
+  maxResultSizeChars: 20_000,
   async call(input: {
     title: string; cwd: string; description?: string; agent?: string; verifierAgent?: string; spec?: string; plan?: string
     priority?: 'P0' | 'P1' | 'P2' | 'P3'; dependsOn?: string[]; mode?: 'quick' | 'full'
@@ -185,6 +191,7 @@ export const superTasksMoveTool = buildTool({
       verifierTaskId: z.string().optional().describe('Optional verifier subagent task id to backfill into task.yaml (use with from == to == "verifying-tasks" right after CliAgent returns the verifier id)'),
     })
   },
+  maxResultSizeChars: 20_000,
   async call(input: { id: string; from: 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'; to: 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'; executorTaskId?: string; verifierTaskId?: string }) {
     const summary = await getTaskSummary(input.id, input.from)
     if (!summary) {
@@ -270,6 +277,7 @@ export const superTasksResetTool = buildTool({
   get inputSchema() {
     return z.object({ id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4') })
   },
+  maxResultSizeChars: 20_000,
   async call(input: { id: string }) {
     const [inQueue, inProcessing, inVerifying, inFinished] = await Promise.all([
       getTaskSummary(input.id, 'queue-tasks'),
@@ -318,6 +326,7 @@ export const superTasksPauseTool = buildTool({
   get inputSchema() {
     return z.object({ id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4') })
   },
+  maxResultSizeChars: 20_000,
   async call(input: { id: string }) {
     const [inQueue, inProcessing, inVerifying, inFinished] = await Promise.all([
       getTaskSummary(input.id, 'queue-tasks'),
@@ -384,6 +393,8 @@ export const superTasksGetTool = buildTool({
       id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4'),
     })
   },
+  // 比其余工具大:SuperTasksGet 返回 spec.md / plan.md / process.md 全文。
+  maxResultSizeChars: 50_000,
   async call(input: { id: string }) {
     const details = await getTaskDetails(input.id)
     if (!details) throw new Error(`task ${input.id} not found`)
@@ -424,6 +435,7 @@ export const superTasksListTool = buildTool({
     // 故意设为空对象 —— list 任务没有任何入参(bucket 过滤由调用方读完四个数组自行筛选,避免实现泄漏)。
     return z.object({})
   },
+  maxResultSizeChars: 20_000,
   async call() {
     const buckets = await listTasks()
     // 输出 JSON 字符串方便 model 解析;同时给一个简短的人读摘要(各桶计数)帮助回看。
@@ -467,7 +479,7 @@ const CREATE_WORKTREE_DESC =
   '(1) TASK mode (defaults): branch=task-<taskId>, path=~/.zai/task-factory/worktrees/<taskId>/ — one executor workspace per conflicting task; deterministic path — safe to re-call after a supervisor restart, and an existing worktree is returned as-is (FAIL-retry reuse). ' +
   '(2) INTEGRATION mode (verification lane): branch="integration-main" (create from the repo main branch via baseRef on first use), slot="integration-<repoDirName>" — one shared worktree per repo where accepted task branches are merged for verification. ' +
   'Task branches NEVER merge into the repo base branch from here — feature/bugfix branches land via PR review created by the user. ' +
-  'Use BEFORE CliAgent when the dispatch batch contains two or more tasks sharing the same repo cwd: dispatch those executors with cwd=<worktreePath> instead of the original repo path. ' +
+  'Use BEFORE dispatching when the batch contains two or more tasks sharing the same repo cwd: dispatch those executors with cwd=<worktreePath> instead of the original repo path. ' +
   'On task FAIL the supervisor reverts the integration lane (git reset --hard to the pre-merge sha recorded in process.md) so a broken branch never persists in integration-main; on PASS the branch stays in integration-main and keeps the task worktree/branch for PR.'
 
 export const createWorktreeTool = buildTool({
@@ -486,6 +498,7 @@ export const createWorktreeTool = buildTool({
       slot: z.string().optional().describe('Worktree path segment under ~/.zai/task-factory/worktrees/ (default <taskId>). Integration verification uses a per-repo segment like "integration-<repoDirName>" so multiple repos keep separate integration worktrees.'),
     })
   },
+  maxResultSizeChars: 20_000,
   async call(input: { taskId: string; repoPath: string; baseRef?: string; branch?: string; slot?: string }) {
     const { taskId, repoPath } = input
     const branch = input.branch && input.branch.length > 0 ? input.branch : `task-${taskId}`
@@ -500,9 +513,14 @@ export const createWorktreeTool = buildTool({
       }
     }
     await mkdir(join(taskFactoryRoot(), 'worktrees'), { recursive: true })
-    const gitErr = (err: unknown) => err instanceof Error
-      ? `${err.message}${(err as { stderr?: string }).stderr ? `\n${(err as { stderr: string }).stderr}` : ''}`
-      : String(err)
+    // execFile 的 reject 值带 stderr(execa 风格),Error 自身没有这个字段,
+    // 所以要窄化一次。原来两处 as 用了不同形状({stderr?} vs {stderr}),
+    // 第二处触发 TS2352 —— Error 与 {stderr: string} 毫无重叠。
+    const gitErr = (err: unknown) => {
+      if (!(err instanceof Error)) return String(err)
+      const stderr = (err as { stderr?: string }).stderr
+      return `${err.message}${stderr ? `\n${stderr}` : ''}`
+    }
     try {
       try {
         const args = ['worktree', 'add', worktreePath, '-b', branch]

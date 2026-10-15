@@ -200,6 +200,7 @@ export default function QuickCommandPopover({
           onChange={(e) => setSearch(e.target.value)}
           placeholder="搜索命令/技能"
           data-testid="quick-command-search"
+          id="quick-command-search-input"
           style={{ flex: 1 }}
           allowClear
         />

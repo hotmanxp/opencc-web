@@ -54,7 +54,12 @@ export function PluginRow({ plugin, writing, onToggle, onUpdate, onUninstall }: 
   return (
     <div
       data-testid="plugin-row"
-      className="flex gap-3 py-2.5 px-3 items-start"
+      // 停用的整行压暗。只改状态点不够 —— 点和文字的对比太弱,用户扫列表
+      // 时看不出哪几个是关掉的。注意 mod 停用后仍要显示名称/版本/描述:
+      // 用户得认出这是哪个 mod 才可能再打开它(关掉即消失就无法回开了)。
+      className={`flex gap-3 py-2.5 px-3 items-start transition-opacity ${
+        plugin.enabled ? '' : 'opacity-55'
+      }`}
       style={{ borderBottom: '1px solid var(--border-subtle)' }}
     >
       <span
@@ -73,6 +78,11 @@ export function PluginRow({ plugin, writing, onToggle, onUpdate, onUninstall }: 
           <Tag color={plugin.scope === 'builtin' ? 'blue' : 'default'} style={{ margin: 0 }}>
             {SCOPE_LABEL[plugin.scope] ?? plugin.scope}
           </Tag>
+          {plugin.mod && (
+            <Tag color="purple" style={{ margin: 0 }}>
+              mod
+            </Tag>
+          )}
           {plugin.hasUpdate && (
             <Tag color="warning" style={{ margin: 0 }}>
               待更新
@@ -98,7 +108,7 @@ export function PluginRow({ plugin, writing, onToggle, onUpdate, onUninstall }: 
             <span>{switchEl}</span>
           </Tooltip>
         )}
-        {plugin.writable && (
+        {plugin.writable && !plugin.mod && (
           <Dropdown
             menu={{
               items: [
@@ -109,6 +119,23 @@ export function PluginRow({ plugin, writing, onToggle, onUpdate, onUninstall }: 
           >
             <ChevronDownIcon style={{ cursor: 'pointer', color: 'var(--text-secondary)' }} />
           </Dropdown>
+        )}
+        {plugin.mod && (
+          <Tooltip
+            title={
+              plugin.mod.builtin
+                ? '内置 mod，随应用发布，不可从市场安装或卸载'
+                : 'mod 来自本机目录，由你手动增删文件；这里只能开关'
+            }
+            aria-label="mod 说明"
+          >
+            <Typography.Text type="secondary" className="text-xs">
+              {/* 只显示真实路径。回退成 mod 名会在「路径」位置重复一遍名字,
+                  读起来像 bug —— 内置 mod 显示「内置」,磁盘 mod 显示绝对路径,
+                  都拿不到就不显示。 */}
+              {plugin.mod.builtin ? '内置' : plugin.mod.root}
+            </Typography.Text>
+          </Tooltip>
         )}
       </div>
     </div>

@@ -6,7 +6,7 @@
 //   - 分屏开启 (STORAGE_KEYS.open 写入 true)
 //
 // 桌面端无分屏时仍保留 70% maxWidth, 让短消息右对齐保持视觉呼吸.
-// 该逻辑同时被 MessageBubble (expanded 视图) 与 CollapsedMessageBubble
+// 该逻辑被 MessageBubble 的 user 气泡分支消费
 // (collapsed 视图) 引用, 共享同一份判断源, 行为完全一致.
 //
 // splitPaneOpen 走 localStorage 监听而不是 store, 是因为它在 SplitPane 与

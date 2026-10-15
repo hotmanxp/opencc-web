@@ -64,12 +64,18 @@ export function modelSupportsEffort(model: string): boolean {
 
 // @[MODEL LAUNCH]: Add the new model to the allowlist if it supports 'max' effort.
 // Per API docs, 'max' is Opus 4.6 only for public models — other models return an error.
+// The MiniMax M3 family (incl. MiniMax-M3.1-Flash-Preview) is the one 3P
+// exception: its docs advertise low/medium/high/xhigh/max with `max` as the
+// default tier, so `max` is a first-class level there, not an error.
 export function modelSupportsMaxEffort(model: string): boolean {
   const supported3P = get3PModelCapabilityOverride(model, 'max_effort')
   if (supported3P !== undefined) {
     return supported3P
   }
   if (model.toLowerCase().includes('opus-4-6')) {
+    return true
+  }
+  if (model.toLowerCase().includes('minimax-m3')) {
     return true
   }
   if (process.env.USER_TYPE === 'ant' && resolveAntModel(model)) {
@@ -375,7 +381,7 @@ export function getEffortLevelDescription(level: EffortLevel | OpenAIEffortLevel
     case 'high':
       return 'Comprehensive implementation with extensive testing and documentation'
     case 'max':
-      return 'Maximum capability with deepest reasoning (Opus 4.6 only)'
+      return 'Maximum capability with deepest reasoning (Opus 4.6, MiniMax M3 family)'
     case 'xhigh':
       return 'Extra high reasoning effort for complex tasks (OpenAI/Codex)'
     case 'ultracode':
@@ -452,6 +458,17 @@ export function getDefaultEffortForModel(
   // IMPORTANT: Do not change the default effort level without notifying
   // the model launch DRI and research. Default effort is a sensitive setting
   // that can greatly affect model quality and bashing.
+
+  // MiniMax M3.1 Flash Preview ships with `max` as its default reasoning
+  // depth (per the vendor's launch notes: low/medium/high/xhigh/max, default
+  // max). Without this the model falls through to `undefined` and the API
+  // applies its own `high` default, which under-reasons relative to the
+  // shipped default. Ordered before the opus-4-6 branch since neither
+  // overlaps. Deliberately scoped to the M3.1 Flash Preview apiName: plain
+  // MiniMax-M3 keeps the previous undefined (API-default) behaviour.
+  if (normalizedBaseModel(model) === 'minimax-m3.1-flash-preview') {
+    return 'max'
+  }
 
   // Default effort on Opus 4.6 to medium for Pro.
   // Max/Team also get medium when the tengu_grey_step2 config is enabled.

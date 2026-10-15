@@ -1,6 +1,5 @@
 import { mkdir, writeFile } from 'fs/promises'
 import { basename, relative } from 'path'
-import {  } from '../../constants/product.js'
 import { BRAND_NAME } from '../../constants.js'
 import { getWikiPaths } from './paths.js'
 import type { WikiInitResult } from './types.js'

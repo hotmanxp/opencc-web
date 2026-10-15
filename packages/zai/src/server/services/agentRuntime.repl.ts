@@ -465,6 +465,11 @@ function createPluginStub(): OpenccRuntime['plugins'] {
     ): Promise<OpenccMarketplaceActionResult> {
       return Promise.resolve({ success: false, message: UNSUPPORTED })
     },
+    updateMarketplace(
+      _name: string,
+    ): Promise<OpenccMarketplaceActionResult> {
+      return Promise.resolve({ success: false, message: UNSUPPORTED })
+    },
   }
 }
 

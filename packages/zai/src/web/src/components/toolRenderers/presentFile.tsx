@@ -347,7 +347,7 @@ function PresentedFileBody({
 }
 
 export const presentFileRenderer: ToolRenderer = {
-  // 自包含展示类工具:collapsed 视图下不进 ToolGroupCard 外壳
+  // 自包含展示类工具:不进 ToolRunGroup 外壳
   // (MessageListView 的 splitToolGroupEntries 据此摘出)。
   skipOuterGroup: true,
   preview(input) {

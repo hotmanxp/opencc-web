@@ -7,7 +7,9 @@ import {
 } from './permissions/filesystem.js'
 import { getPlatform } from './platform.js'
 import { getGlobExclusionsForPluginCache } from './plugins/orphanedPluginFilter.js'
+import { parseNullSeparated } from './ripgrepOutput.js'
 import { ripGrep } from './ripgrep.js'
+import { type SearchSession, toLexicalPath } from './searchSession.js'
 import { getInitialSettings } from './settings/settings.js'
 
 /**
@@ -83,7 +85,13 @@ export async function glob(
   { limit, offset }: { limit: number; offset: number },
   abortSignal: AbortSignal,
   toolPermissionContext: ToolPermissionContext,
-): Promise<{ files: string[]; truncated: boolean }> {
+  session?: SearchSession,
+): Promise<{
+  files: string[]
+  truncated: boolean
+  totalMatches: number
+  countIsComplete: boolean
+}> {
   let searchDir = cwd
   let searchPattern = filePattern
 
@@ -102,6 +110,11 @@ export async function glob(
     searchDir,
   )
 
+  // With a session, ripgrep runs pinned to the descriptor and reports paths
+  // relative to it — the session owns spawnCwd/target and the symlink recheck.
+  const spawnDir = session?.spawnCwd ?? searchDir
+  const rgTarget = session?.target ?? searchDir
+
   // Read glob settings: respectGitIgnore defaults to true (ripgrep respects
   // .gitignore natively when --no-ignore is not passed), and user may add
   // extra exclude patterns on top of the built-in defaults.
@@ -111,6 +124,8 @@ export async function glob(
 
   // Use ripgrep for better memory performance
   // --files: list files instead of searching content
+  // --null: NUL-separate records. A filename may legally contain a newline;
+  //   without --null the newline splits one path into two bogus results.
   // --glob: filter by pattern
   // --sort=modified: sort by modification time (oldest first)
   // --no-ignore: don't respect .gitignore. Defaults from settings
@@ -125,6 +140,7 @@ export async function glob(
   const hidden = isEnvTruthy(process.env.CLAUDE_CODE_GLOB_HIDDEN || 'true')
   const args = [
     '--files',
+    '--null',
     '--glob',
     searchPattern,
     '--sort=modified',
@@ -144,9 +160,11 @@ export async function glob(
     args.push('--glob', `!${pattern}`)
   }
 
-  // Add ignore patterns from permission system deny rules
+  // Add ignore patterns from permission system deny rules.
+  // --iglob, not --glob: deny rules must match case-insensitively, otherwise
+  // a rule for `secret` fails to exclude a directory named `Secret`.
   for (const pattern of ignorePatterns) {
-    args.push('--glob', `!${pattern}`)
+    args.push('--iglob', `!${pattern}`)
   }
 
   // Exclude orphaned plugin version directories
@@ -154,15 +172,29 @@ export async function glob(
     args.push('--glob', exclusion)
   }
 
-  const allPaths = await ripGrep(args, searchDir, abortSignal)
+  const rawOutput = await ripGrep(args, rgTarget, abortSignal, {
+    rawLines: true,
+    rejectOnInputError: true,
+    cwd: session?.spawnCwd,
+    beforeSpawn: session?.recheckBeforeSpawn,
+  })
 
-  // ripgrep returns relative paths, convert to absolute
-  const absolutePaths = allPaths.map(p =>
-    isAbsolute(p) ? p : join(searchDir, p),
-  )
+  const allPaths = parseNullSeparated(rawOutput, 'files')
+
+  // ripgrep returns paths relative to its cwd; map them back onto the spelling
+  // the user asked about, then make them absolute.
+  const absolutePaths = allPaths.map(p => {
+    const lexical = session ? toLexicalPath(p, session) : p
+    return isAbsolute(lexical) ? lexical : join(spawnDir, lexical)
+  })
 
   const truncated = absolutePaths.length > offset + limit
   const files = absolutePaths.slice(offset, offset + limit)
 
-  return { files, truncated }
+  return {
+    files,
+    truncated,
+    totalMatches: absolutePaths.length,
+    countIsComplete: true,
+  }
 }

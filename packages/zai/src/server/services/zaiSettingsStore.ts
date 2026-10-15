@@ -1,8 +1,9 @@
-import { writeFile, rename, mkdir } from 'node:fs/promises'
+import { readFile, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
+import { atomicWriteFile } from '../utils/atomicWrite.js'
 // Re-export the cache API so existing `zaiSettingsStore` importers can reach
 // it without a second import path.
 export {
@@ -11,6 +12,24 @@ export {
   initZaiSettingsCache,
   __resetCacheForTests,
 } from './zaiSettingsCache.js'
+
+/**
+ * Read ~/.zai/settings.json straight from disk (bypassing the process-local
+ * cache). Used by `updateZaiSettings` to merge against truth, not against
+ * this process's possibly-stale snapshot.
+ */
+async function readFreshSettingsFromDisk(): Promise<ZaiSettings> {
+  try {
+    const raw = await readFile(zaiSettingsPath(), 'utf-8')
+    return JSON.parse(raw) as ZaiSettings
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    // 损坏 JSON 当空对象处理 —— updateZaiSettings 会用 patch 覆盖顶层字段,
+    // 下次启动 tier chain 的 permissions backfill 会重新落到磁盘。
+    if (err instanceof SyntaxError) return {}
+    throw err
+  }
+}
 
 /** Path to ~/.zai/settings.json — the on-disk persistence layer. */
 export function zaiSettingsPath(): string {
@@ -31,13 +50,16 @@ export async function readZaiSettings(): Promise<ZaiSettings> {
 /**
  * In-process serialisation chain for every settings.json mutation.
  *
- * Why: `writeZaiSettings` is tmp+rename, and the tmp path is a fixed
+ * Why: `writeZaiSettings` is tmp+rename, and the tmp path used to be a fixed
  * `${path}.tmp`. Concurrent PUTs (e.g. SettingsDrawer's work-mode effect
  * firing `work-mode` + `main-agent` back-to-back, or Desktop.tsx's office
  * auto-switch racing a manual theme change) used to interleave
  * writeFile/rename on the same tmp file — the first rename consumes it and
  * the second rename fails with `ENOENT ... settings.json.tmp -> settings.json`
- * (500 to the client, and the loser's update dropped).
+ * (500 to the client, and the loser's update dropped). The tmp name now also
+ * carries a per-process counter (`atomicWriteFile`), so writers outside this
+ * chain — notably `fileStore.writeConfig`, which maps the `zai` tool onto the
+ * same `~/.zai/settings.json` — can no longer collide even without the queue.
  *
  * The chain makes each mutation atomic w.r.t. the others: only one task
  * touches disk (and the cache) at a time. A rejected task must not break
@@ -64,9 +86,7 @@ function enqueueMutation<T>(task: () => Promise<T>): Promise<T> {
 async function writeZaiSettingsUnlocked(settings: ZaiSettings): Promise<void> {
   const path = zaiSettingsPath()
   await mkdir(dirname(path), { recursive: true })
-  const tmpPath = `${path}.tmp`
-  await writeFile(tmpPath, JSON.stringify(settings, null, 2), 'utf-8')
-  await rename(tmpPath, path)
+  await atomicWriteFile(path, JSON.stringify(settings, null, 2))
   refreshCache(settings)
 }
 
@@ -81,11 +101,22 @@ export function writeZaiSettings(settings: ZaiSettings): Promise<void> {
 
 /**
  * Read-merge-write a partial patch against the current settings, with the
- * whole critical section (cached read → merge → tmp+rename write) running
- * inside the mutation queue. This is the race-free path for routes that
- * only change one field: the read always sees the result of every
- * previously-queued write, so concurrent patches to different keys both
- * land (no lost update, no fixed-tmp ENOENT).
+ * whole critical section (fresh read from disk → merge → tmp+rename write)
+ * running inside the mutation queue.
+ *
+ * **Critical: must read from disk, not the process cache.** zai runs as
+ * multiple processes sharing ~/.zai/settings.json (root + supervisor-managed
+ * children — e.g. the weixin dedicated instance). Each process boots with
+ * its own cache snapshot. If a child writes its own fields, it would
+ * `mergeFromCache()` and clobber anything the root had updated in between
+ * (concrete case: root stores `weixinBot.model`, child writes
+ * `theme='dark'` later, child's cached `weixinBot` is still empty from
+ * boot → the model gets erased). Reading disk every time makes every
+ * writer see truth.
+ *
+ * fs.watch (zaiSettingsCache.ts:88) handles the inverse: this process's
+ * cache still gets refreshed when *other* processes write, so non-write
+ * reads (hundreds of call sites) stay zero-IO.
  *
  * Returns the merged object that was persisted, so the caller can echo
  * canonical values back to the client.
@@ -93,15 +124,25 @@ export function writeZaiSettings(settings: ZaiSettings): Promise<void> {
 export async function updateZaiSettings(
   patch: Partial<ZaiSettings>,
 ): Promise<ZaiSettings> {
-  // Warm the boot-time cache BEFORE taking the queue. First-touch cache
-  // init runs the tier chain, whose permissions backfill itself awaits
-  // `writeZaiSettings` — if that happened from inside a queued task the
-  // task would enqueue behind itself and deadlock.
-  await getCachedZaiSettings()
+  return mutateZaiSettings((settings) => ({ ...settings, ...patch }))
+}
+
+/**
+ * Read-modify-write 的通用形态:把「怎么从磁盘现值算出下一个值」交给调用方,
+ * **整个 read → 算 → 写**在 mutation 队列内完成。
+ *
+ * Why 需要这个而不是先读再调 updateZaiSettings:调用方拿到的是**编辑器的
+ * 陈旧缓冲**(配置页打开时读的内容),而磁盘可能已经被设置抽屉 / 另一个进程
+ * 改过。`updateZaiSettings(patch)` 的浅合并对「patch 里带着、但值已过时」的
+ * 字段仍然会回滚 —— 只有让 recipe 拿到**队列内的最新磁盘值**做三方比对,
+ * 才能不吞掉别人写的东西。见 fileStore.writeConfig 的三路合并。
+ */
+export function mutateZaiSettings(
+  recipe: (disk: ZaiSettings) => ZaiSettings,
+): Promise<ZaiSettings> {
   return enqueueMutation(async () => {
-    // Cache is initialised now, so this resolves without re-entering init.
-    const settings = await getCachedZaiSettings()
-    const next: ZaiSettings = { ...settings, ...patch }
+    const settings = await readFreshSettingsFromDisk()
+    const next = recipe(settings)
     await writeZaiSettingsUnlocked(next)
     return next
   })

@@ -241,13 +241,22 @@ function getSimpleSystemSection(): string {
     `All text you output outside of tool use is displayed to the user. Output text to communicate with the user. You can use Github-flavored markdown for formatting, and will be rendered in a monospace font using the CommonMark specification.`,
     // zai patch (2026-09-14): Z.AI renders ```mermaid fences inline, so steer
     // the model away from ASCII art / prose whenever something is
-    // diagram-shaped. The supported-type list mirrors the UI gate
-    // (packages/zai src/web/src/components/markdown/mermaidRenderer.ts
-    // SUPPORTED_HEADER_RE = what beautiful-mermaid can actually parse);
-    // recommending a type outside it just yields a raw-source error block.
+    // diagram-shaped.
+    // zai patch (2026-10-05): 渲染器从 beautiful-mermaid(只认 6 类图)换成官方
+    // mermaid.js 全量运行时,类型门已删除 —— 旧文案里"只有这 6 种能渲染,其他
+    // 会降级成报错块"已经不成立,留着会让模型白白回避 mindmap/gantt/pie 等
+    // 本来能画的类型。
+    // zai patch (2026-10-06): 清单按 mermaid 12.1.0 的 detector 注册表补齐
+    // (kanban / radar-beta / treemap / packet-beta / block-beta + C4 三兄弟,
+    // zenuml 是唯一例外 —— 独立包,没进 bundle)。同时补上两条模型猜不到的约束:
+    // ① radar-beta / sankey-beta 的类型头必须带 -beta,去掉就没有 diagram 被识别;
+    // ② sankey-beta 节点名、xychart-beta 的 x 轴标签、radar-beta 的 axis/curve 名
+    // 都是 ASCII-only token,中文只能放 [""] label 里。两条都由 mermaid.parse()
+    // 实测坐实(见 scripts/probe-mermaid-parse.mjs 的判据),不写模型必踩。
     [
-      `When a flow, sequence, state machine, ER/class relationship, or simple chart would explain something better than prose, prefer a \`\`\`mermaid fenced code block — Z.AI renders it inline in the conversation.`,
-      `Only these mermaid types render: \`flowchart\` (or \`graph\`), \`sequenceDiagram\`, \`classDiagram\`, \`stateDiagram-v2\`, \`erDiagram\`, \`xychart-beta\`. Other types (mindmap, gantt, pie, timeline, gitGraph, journey, quadrantChart, block-beta, ...) are not supported and fall back to a raw-source error block — do not use them.`,
+      `When a flow, sequence, state machine, ER/class relationship, schedule, hierarchy, or simple chart would explain something better than prose, prefer a \`\`\`mermaid fenced code block — Z.AI renders it inline in the conversation.`,
+      `Any standard mermaid diagram type renders: \`flowchart\`/\`graph\`, \`sequenceDiagram\`, \`classDiagram\`, \`stateDiagram-v2\`, \`erDiagram\`, \`gantt\`, \`pie\`, \`mindmap\`, \`timeline\`, \`gitGraph\`, \`journey\`, \`quadrantChart\`, \`kanban\`, \`radar-beta\`, \`treemap\`, \`sankey-beta\`, \`xychart-beta\`, \`packet-beta\`, \`block-beta\`, and the \`C4Context\`/\`C4Container\`/\`C4Component\` variants. Pick whichever type actually fits the content — a schedule is a \`gantt\`, a proportion comparison is a \`pie\`, a hierarchy is a \`mindmap\`, a board of work items is a \`kanban\`. (\`zenuml\` is the one exception: it is not bundled and will not render.)`,
+      `Keep the type header exactly as listed above — \`radar-beta\`, \`sankey-beta\`, and \`xychart-beta\` need their \`-beta\` suffix, and without it the block is not recognized as a diagram at all. A few types also parse their identifier positions as ASCII-only tokens: \`sankey-beta\` node names, \`xychart-beta\` x-axis labels, and \`radar-beta\` axis/curve names. Give those an ASCII id and put the display text in a quoted label — \`axis s1["结构类"]\`, never \`axis 结构["结构类"]\` — while ordinary node labels, titles, and section names take Chinese without any quoting rule.`,
       `Keep the diagram plain and self-contained: no \`%%{init}%%\` directives, no HTML labels or \`click\` handlers, and short node labels (quote any label containing punctuation).`,
     ],
     `Tools are executed in a user-selected permission mode. When you attempt to call a tool that is not automatically allowed by the user's permission mode or permission settings, the user will be prompted so that they can approve or deny the execution. If the user denies a tool you call, do not re-attempt the exact same tool call. Instead, think about why the user has denied the tool call and adjust your approach.`,
@@ -699,8 +708,20 @@ Before running a command that changes system state (such as restarts, deletes, o
     // the cache.
   ]
 
-  const resolvedDynamicSections =
+  // zai patch (2026-10-12, mods 同步):`resolveSystemPromptSections` 上游改成了
+  // 返回 `{name, text}[]`(为了 `prompt.compose` 能按 section 名定位),这里取回
+  // `.text`,保持本函数 `string[]` 的返回类型与既有行为不变。
+  //
+  // **`prompt.compose` 在 zai 侧尚未接线**,已进 `UNAVAILABLE_EVENTS` —— 按协议
+  // 自己定的规矩,不接就拒,不留「注册成功但永不触发」那第三种状态。
+  //
+  // 要接的话是上游那 134 行:把 static/dynamic 两组 section 都建成
+  // `{id, text, scope}`,再交给 `composePromptSections` + `placeComposeBoundary`。
+  // 注意它会动 `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` 的位置,也就是动 prompt cache
+  // 边界 —— 那不是一个能顺手带过来的改动,单开一次做。
+  const resolvedDynamicSections = (
     await resolveSystemPromptSections(dynamicSections)
+  ).map(s => s.text)
 
   // Upstream 2.1.280 `KE()`: when the model resolves to a lean prompt, the six
   // static sections collapse into the single `# Harness` section. Dynamic

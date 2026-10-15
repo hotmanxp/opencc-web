@@ -109,6 +109,8 @@ export default function Layout() {
         // 任务工厂 profile",TaskFactoryRedirect 据此判定是否把 / 与 /agent
         // 重定向到 /super-tasks。
         app?: string | null;
+        // 本次进程是否带 `--aa` 启动 —— AA 配置入口的总开关。
+        aaEnabled?: boolean;
       }>('/system')
       .then((data) => {
         setVersion(data.version);
@@ -126,6 +128,12 @@ export default function Layout() {
           // 直接落 undefined 会让 TaskFactoryRedirect 的 `=== 'task-factory'`
           // 判定拿不到真值信号,统一归一更稳。
           app: typeof data.app === 'string' ? data.app : null,
+          // fail-open:旧版后端(`/api/system` 没有 aaEnabled 字段)正在滚动时,
+          // undefined 与显式 false 必须区别对待 —— undefined 表示「后端老,
+          // 不知道」,按启用处理,避免把 AA 实例上的入口误藏。显式 false
+          // 是新后端的真信号,照藏。等所有 zai 实例都升级完、关闭这台机器上
+          // 的旧版 dist 之后,可以收紧回 `=== true`,见 useAppStore 注释。
+          aaEnabled: data.aaEnabled !== false,
         });
         document.title = `${data.cwdName}-Z.AI`;
       })

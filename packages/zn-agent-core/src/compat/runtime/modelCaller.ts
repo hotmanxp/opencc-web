@@ -22,18 +22,15 @@ export interface Tool {
    */
   description: string | Function
   /**
-   * zod input schema. Phase 4 buildDefaultTools() returns zod schemas
-   * directly; modelCaller calls zodToJsonSchema() on this before sending
-   * to the Anthropic SDK. The compat/runtime/types.ts `Tool` type keeps
-   * `input_schema?: unknown` (snake-case) for back-compat with the
-   * upstream-verbatim port — see compatToolsToModelCallerTools() in
-   * compat/tools/index.ts for the cross-shape transform.
+   * zod input schema. zai-native tools (see compat/tools/index.ts) return
+   * zod schemas directly; modelCaller calls zodToJsonSchema() on this
+   * before sending to the Anthropic SDK. The compat/runtime/types.ts `Tool`
+   * type keeps `input_schema?: unknown` (snake-case) for back-compat with
+   * the upstream-verbatim port.
    */
   inputSchema?: unknown
   /**
-   * Tool execution. Optional — Phase 4 buildDefaultTools() wires a stub
-   * `call` for each registered tool; Phase 5 replaces stubs with real
-   * Bash/Read/Write/Edit/AskUserQuestion implementations. The opencc
+   * Tool execution. Optional — the opencc
    * query bridge's tool-use loop invokes this when the model emits a
    * `content_block_start { type: 'tool_use' }` block.
    *

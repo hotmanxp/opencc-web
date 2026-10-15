@@ -14,12 +14,13 @@
  *    让任务调度器在 spawn verifier 时走 build + lint + code review 轻量路径。
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { eventBus } from './eventBus.js'
 import { getSessionInbox } from './sessionInbox.js'
 import { taskFactoryRoot } from '@zn-ai/zn-agent-core'
+import { atomicWriteFile } from '../utils/atomicWrite.js'
 
 export type TaskFactoryState = {
   managedEnabled: boolean
@@ -86,7 +87,7 @@ export async function setTaskFactoryState(patch: Partial<TaskFactoryState>): Pro
   const next = { ...cachedState, ...patch }
   cachedState = next
   await mkdir(taskFactoryRoot(), { recursive: true })
-  await writeFile(stateFile(), JSON.stringify(next, null, 2), 'utf-8')
+  await atomicWriteFile(stateFile(), JSON.stringify(next, null, 2))
   eventBus.emit({
     type: 'task_factory',
     action: 'state.changed',

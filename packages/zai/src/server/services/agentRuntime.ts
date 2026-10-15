@@ -11,19 +11,29 @@ import {
   TranscriptStore,
 } from '@zn-ai/zn-agent-core'
 
-// `TranscriptStore` is now imported from `@zn-ai/zn-agent-core` (the
-// compat shim at compat/runtime/legacyTranscriptStore.ts) — Task 6
-// deleted the synthetic compat store. The shim is a no-op facade:
-// the real session/transcript data is owned by the new
-// `OpenccRuntime` (see opencc-src/server/sessionFacade.ts). Route
-// handlers in `routes/agent.ts` / `routes/transcript.ts` /
-// builtin commands `clear` / `compact` continue to call
-// `getTranscriptStore().read/patch/remove/replace` against this
-// instance; the shim satisfies the call shape and the runtime
-// materializes real transcripts on first `query()`. Pre-existing
-// zai test files (transcript-repair-2013.test.ts,
-// builtin.compact.test.ts) were already broken in this worktree
-// per the 5/189 pre-existing baseline.
+// `TranscriptStore` comes from `@zn-ai/zn-agent-core`
+// (compat/runtime/legacyTranscriptStore.ts). Despite the filename it is
+// NOT dead code and NOT a stub — it is the authoritative transcript
+// accessor for zai, with ~30 live call sites across routes/agent.ts,
+// routes/transcript.ts, routes/internal/pushAction.ts, and the builtin
+// `clear` / `compact` commands.
+//
+// The JSONL file is written by two parties, verified empirically against
+// on-disk transcripts (2026-10-08):
+//   - vendor 环: user / assistant / tool_use / tool_result rows, including
+//     auto-compact's postCompactMessages (~96% of rows)
+//   - zai 侧: session-meta / custom-title / last-prompt, visible slash
+//     command rows (appendMessageEntry), and the whole-file rewrite that
+//     /compact + /clear perform (replace)
+// This class is the ONLY read path back (read/list), and owns the zai-side
+// writes. `append()` alone is a no-op by design — message rows belong to
+// the vendor loop. See index.ts for the same map in export context.
+//
+// `opencc-src/server/sessionFacade.ts` implements an alternative session
+// API but has zero call sites on the zai side; do not assume `sessionFacade`
+// owns transcript data. (An earlier revision of this comment claimed it
+// did — that was wrong.)
+//
 // The server module exports two `OpenccRuntime` shapes (one from
 // `serverTypes.ts` describing the brief's 8-method contract, one from
 // `createOpenccRuntime.ts` describing the impl). The factory's runtime
@@ -124,6 +134,25 @@ const permissionRegistry = new PermissionRegistry()
   getSessionInbox(sid).followup(sid, msg as InboxMessage)
 }
 
+// zai patch: durable cron 任务的投递目标解析。setupCronScheduler 的
+// routeFire 按 task.sessionId > opts.sessionId > __zaiCurrentSessionId
+// 三级 fallback 取 sessionId,全空时 prompt 被静默丢弃而 scheduler 照写
+// lastFiredAt(用户侧表现为「定时任务到点没反应」)。durable 任务必然踩中:
+// writeCronTasks 把 sessionId 当 runtime-only strip 掉,进程重启后又没有
+// 活跃 session 可回落。此 seam 兜底为本实例 cwd 下最近更新的会话。
+// 读侧复用 TranscriptStore.list() —— 它已按 mtime 倒序,且与侧边栏
+// 会话列表同源,不会出现「cron 投到了 UI 看不到的会话」。
+;(globalThis as any).__zaiResolveCronSession = async (): Promise<string | null> => {
+  if (!transcriptStore || !serverCwd) return null
+  try {
+    const sessions = await transcriptStore.list({ cwd: serverCwd })
+    return sessions[0]?.sessionId ?? null
+  } catch (err) {
+    console.warn('[cron] __zaiResolveCronSession failed:', err)
+    return null
+  }
+}
+
 // zai patch (2026-09-06): register zai's per-session SessionInbox drain as
 // a vendor pre-API-call reminder provider. The vendor query loop calls
 // `runExtraReminderProviders(getSessionId())` before each LLM API call
@@ -136,6 +165,7 @@ const permissionRegistry = new PermissionRegistry()
 import {
   enqueue as _vendorEnqueue,
   enqueuePendingNotification as _vendorEnqueuePendingNotification,
+  getSessionStartContexts,
   installMessageQueueAdapterBridges,
   registerExtraReminderProvider,
 } from '@zn-ai/zn-agent-core'
@@ -143,6 +173,28 @@ import { drainInboxReminder } from './inboxReminder.js'
 let inboxReminderProviderRegistered = false
 registerExtraReminderProvider((sid: string) => drainInboxReminder(sid))
 inboxReminderProviderRegistered = true
+
+// zai patch (2026-10-11, SessionStart 接线):把 SessionStart hook 产出的附加
+// 上下文作为 pre-API-call reminder 注入。
+//
+// 背景:headless 路径原先从不派发 SessionStart(`processSessionStartHooks` 的
+// 唯一调用方是 vendor 的 main.tsx,即交互式 REPL 入口),于是 mod 注册了
+// SessionStart handler 却一次都收不到事件。现在由 createHeadlessContextImpl
+// 在启动时派发一次,产出存进 vendor 的 sessionStartBridge;这里把它接上注入
+// 通道 —— 与上面的 inbox reminder 同一个机制(`registerExtraReminderProvider`),
+// query loop 每次 LLM API call 前调用,结果作为 <system-reminder> prepend。
+//
+// SessionStart 的产出按定义就是「会话启动时给模型看的上下文」,每次调用前注入
+// 正是它该去的位置;hook 自己产出的 message 属于 REPL 的消息流,headless 侧没有
+// 对应位置,故只取 hook_additional_context 一类(见 sessionStartBridge.ts)。
+//
+// 必须按 sid 取:provider 是进程级注册的,不分会话的话先启动的会话会把上下文
+// 泄漏给后启动的会话(与上面 drainInboxReminder(sid) 同一纪律)。
+registerExtraReminderProvider((sid: string) => {
+  const contexts = getSessionStartContexts(sid)
+  if (contexts.length === 0) return null
+  return contexts.join('\n')
+})
 
 // zai patch (2026-09-07, plan P0-1.1, worktree-dsh, fix-area: vendor-enqueue-imports):
 // 入口层 install 一次 vendor enqueue 桥, 让 compat 层 zaiEnqueue*
@@ -840,11 +892,15 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // 同时注册 serverCwd provider:入站桥据此把微信会话绑定到本实例的
   // project cwd,Web UI 里才能在该 project 的会话列表看到它。
   try {
-    const [{ setWeixinServerCwdProvider }, { maybeAutoStartWeixinBot }] = await Promise.all([
+    const [{ setWeixinServerCwdProvider }, { maybeAutoStartWeixinBot }, { setWeixinTranscriptStoreProvider }] = await Promise.all([
       import('./weixinBot/weixinInboundBridge.js'),
       import('./weixinBot/weixinRuntimeBoot.js'),
+      import('./weixinBot/sessionModel.js'),
     ])
     setWeixinServerCwdProvider(() => getServerCwd())
+    // 渠道模型配置靠这个注册点落地:入站桥不能静态 import agentRuntime
+    // (上面那条链路已成环),只能由 agentRuntime 反向把 store 递过去。
+    setWeixinTranscriptStoreProvider(() => getTranscriptStore())
     await maybeAutoStartWeixinBot()
   } catch (err) {
     console.warn('[initAgentRuntime] weixin boot failed:', err)
@@ -894,12 +950,38 @@ export function getServerCwd(): string {
   return serverCwd
 }
 
-export async function abortAgentSession(reason?: string): Promise<void> {
-  askRegistry.abortAll(reason ?? 'session_aborted')
-  approveRegistry.abortAll(reason ?? 'session_aborted')
-  permissionRegistry.abortAll(reason ?? 'session_aborted')
-  if (currentSessionId) {
-    abortSessionController(currentSessionId, reason)
+/**
+ * Abort one session's turn + every pending AskUserQuestion / RequestApprove /
+ * `behavior:'ask'` decision belonging to it.
+ *
+ * `sessionId` (2026-10-05, bug `abort-uses-global-session-id--by-zai`): the
+ * function used to read the module-global `currentSessionId`, so aborting
+ * session A also killed whatever turn `currentSessionId` happened to point at.
+ * `/agent/abort` was the worst offender — it correctly resolved the sid from the
+ * `x-session-id` header, then immediately called this function, which undid that
+ * precision. The front end sends that header precisely to avoid cross-session
+ * kills. Pass the session id; omitting it falls back to `currentSessionId` for
+ * the legacy callers that have no sid of their own (e.g. the `/clear` builtin).
+ *
+ * No session resolved → abort **nothing**. It must not fall through to an
+ * unscoped `abortAll`, which would reject every session's pendings — the very
+ * cross-session kill this function exists to stop. `/agent/abort` reaches that
+ * state whenever neither `x-session-id` nor `currentSessionId` is set.
+ * (Process-wide aborts stay available and intentional via `abortAllAgentPrompts`,
+ * the restart-drain path.)
+ */
+export async function abortAgentSession(
+  reason?: string,
+  sessionId?: string | null,
+): Promise<void> {
+  // Resolve once and use the resolved value everywhere below — reading the
+  // global at three separate points could observe three different sessions.
+  const sid = sessionId ?? currentSessionId
+  if (sid) {
+    askRegistry.abortAll(reason ?? 'session_aborted', sid)
+    approveRegistry.abortAll(reason ?? 'session_aborted', sid)
+    permissionRegistry.abortAll(reason ?? 'session_aborted', sid)
+    abortSessionController(sid, reason)
     // 覆盖"turn 已结束但后台任务还在跑"的场景:此时 sessionControllers 里
     // 可能没有该 sid 的 controller(abortSessionController 会直接 return
     // false),但后台任务仍应被终止,否则会继续向共享 API key 发请求。
@@ -908,7 +990,7 @@ export async function abortAgentSession(reason?: string): Promise<void> {
         './backgroundRuntime.js'
       )
       await cancelBackgroundTasksByParentSession(
-        currentSessionId,
+        sid,
         reason ?? 'session_aborted',
       )
     } catch (err) {
@@ -920,7 +1002,7 @@ export async function abortAgentSession(reason?: string): Promise<void> {
     const r = runtime
     if (r) {
       try {
-        await r.abort(currentSessionId, reason ?? 'session_aborted')
+        await r.abort(sid, reason ?? 'session_aborted')
       } catch (err) {
         console.warn('[abortAgentSession] runtime.abort failed:', err)
       }

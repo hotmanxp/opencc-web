@@ -30,9 +30,6 @@ import { applyPermissionRulesToPermissionContext } from './permissions.js'
 import { loadAllPermissionRulesFromDisk } from './permissionsLoader.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const autoModeStateModule = true
-  ? (require('./autoModeState.js') as typeof import('./autoModeState.js'))
-  : null
 
 import { resolve } from 'path'
 import {
@@ -81,6 +78,7 @@ import {
   permissionRuleValueFromString,
   permissionRuleValueToString,
 } from './permissionRuleParser.js'
+import * as autoModeStateModule from './autoModeState.js'
 
 /**
  * Checks if a Bash permission rule is dangerous for auto mode.

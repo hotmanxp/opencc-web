@@ -24,6 +24,9 @@
  *     etc.) which has pre-existing vitest ESM breakages. The wrap
  *     contract under test is the cwd flow, not bash execution.
  */
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CwdStore } from '../../../src/compat/cwdStore.js'
 
@@ -268,5 +271,84 @@ describe('wrapBashToolWithCwdSync', () => {
     const lateOverride = vi.fn(async () => ({ behavior: 'allow' as const }))
     ;(tool as { checkPermissions: unknown }).checkPermissions = lateOverride
     expect(wrapped.checkPermissions).toBe(lateOverride)
+  })
+
+  // Regression guard (2026-10-04): the wrap used to set
+  // `originalCwd: beforeCwd`, i.e. the same path as `cwd`. When the
+  // session's directory was deleted out from under a running session
+  // (`rm -rf`, `mv`, `git worktree remove`), vendor's recovery branch
+  // in opencc-src/utils/Shell.ts:247-260 falls back to
+  // `getOriginalCwd()` — which was equally dead, so the branch could
+  // never fire and every Bash call failed with `Working directory
+  // "..." is no longer a valid directory`. Nothing ever rewrote
+  // CwdStore, so the session stayed bricked for its whole lifetime,
+  // while Read/Write/Grep/Glob kept working (they resolve paths
+  // against cwd without stat-ing it). `cd` could not rescue it: the
+  // check runs before spawn.
+  it('anchors originalCwd on a live dir when the session cwd was deleted', async () => {
+    mockSessionId = 'sid-dead'
+    const dead = join(tmpdir(), 'zn-bashcwdwrap-must-not-exist')
+    expect(existsSync(dead)).toBe(false)
+    CwdStore.set('sid-dead', dead)
+
+    let seen: { cwd?: string; originalCwd?: string } = {}
+    const tool = mkBashTool({
+      onCall: (_input, ctx) => {
+        seen = { cwd: ctx?.cwd, originalCwd: ctx?.originalCwd }
+      },
+    })
+    const wrapped = wrapBashToolWithCwdSync(tool)
+    await wrapped.call({ command: 'pwd' }, {} as never)
+
+    // The dead path stays on ctx.cwd — vendor's Shell.exec is what
+    // detects it and rewrites it. Our job is only to make the
+    // fallback anchor usable.
+    expect(seen.cwd).toBe(dead)
+    expect(seen.originalCwd).not.toBe(dead)
+    expect(statSync(seen.originalCwd as string).isDirectory()).toBe(true)
+  })
+
+  it('leaves originalCwd === cwd untouched when the session cwd is alive', async () => {
+    // Normal-path behaviour must not shift: getOriginalCwd() feeds
+    // project-identity consumers (transcript dir, project instruction
+    // files, MCP uri, plugin scope), so they must keep seeing the
+    // session cwd, not some anchor directory.
+    mockSessionId = 'sid-alive'
+    const alive = mkdtempSync(join(tmpdir(), 'zn-bashcwdwrap-alive-'))
+    CwdStore.set('sid-alive', alive)
+
+    let seen: { cwd?: string; originalCwd?: string } = {}
+    const tool = mkBashTool({
+      onCall: (_input, ctx) => {
+        seen = { cwd: ctx?.cwd, originalCwd: ctx?.originalCwd }
+      },
+    })
+    const wrapped = wrapBashToolWithCwdSync(tool)
+    await wrapped.call({ command: 'pwd' }, {} as never)
+
+    expect(seen.cwd).toBe(alive)
+    expect(seen.originalCwd).toBe(alive)
+    rmSync(alive, { recursive: true, force: true })
+  })
+
+  it('heals CwdStore when vendor recovers the dead cwd on the same call', async () => {
+    // Simulates the full recovery: Shell.exec's fallback calls
+    // setCwdState(live) on the same ctx, then the wrap's write-back
+    // persists it — so the session is un-bricked without a restart.
+    mockSessionId = 'sid-heal'
+    const dead = join(tmpdir(), 'zn-bashcwdwrap-heal-must-not-exist')
+    CwdStore.set('sid-heal', dead)
+    const alive = mkdtempSync(join(tmpdir(), 'zn-bashcwdwrap-heal-'))
+
+    const tool = mkBashTool({
+      onCall: (_input, ctx) => {
+        if (ctx) ctx.cwd = alive
+      },
+    })
+    const wrapped = wrapBashToolWithCwdSync(tool)
+    await wrapped.call({ command: 'pwd' }, {} as never)
+
+    expect(CwdStore.get('sid-heal')).toBe(alive)
+    rmSync(alive, { recursive: true, force: true })
   })
 })

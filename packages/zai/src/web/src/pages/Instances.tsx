@@ -33,6 +33,7 @@ import {
   RocketIcon,
 } from 'lucide-react';
 import { useInstanceStore } from '../store/useInstanceStore.js'
+import { useAppStore } from '../store/useAppStore.js'
 import type { InstanceSnapshot, InstanceState } from '../../../shared/instances.js'
 import DirectoryPicker from '../components/common/DirectoryPicker.js'
 
@@ -90,6 +91,17 @@ export function effectiveState(s: InstanceSnapshot): InstanceState {
 }
 
 /**
+ * 实例子服务的打开地址:host 沿用当前页面所在的 host,只换端口。
+ * 写死 `localhost` 会让从局域网 IP 进来的人(手机 / 另一台电脑)点开
+ * 子实例时落到「他自己机器」的 127.0.0.1,表现为打不开。
+ * 协议固定 http:子实例本身就是明文端口,跟随外层协议反而会在
+ * https 反代下触发混合内容拦截。
+ */
+function instanceUrl(port: number): string {
+  return `http://${window.location.hostname}:${port}`
+}
+
+/**
  * 轮询 GET /api/instances/:id,直到实例进入 running(且端口已知)才 resolve;
  * 进入 down 立即 reject(带 lastError.message,供 message.error 展示);
  * 超时兜底 reject。每轮把最新 snapshot 经 `apply` 写进 store,让卡片状态
@@ -129,9 +141,18 @@ async function waitForRunningInstance(
 
 export default function Instances(): JSX.Element {
   const { instances, loading, loadInstances, applyInstanceSnapshot } = useInstanceStore()
+  // 进程级 `--aa` 总开关(Layout 从 GET /api/system hydrate)。关掉时每行的
+  // AA 开关不渲染,见 renderAaToggle。fail-open:见 useAppStore 注释,
+  // undefined(老后端)按启用处理,只有显式 false 才藏。
+  const aaEnabled = useAppStore((s) => s.instanceContext?.aaEnabled !== false)
   const [open, setOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [lanBusyId, setLanBusyId] = useState<string | null>(null)
+  // Per-row AA toggle busy tracking: same shape as `lanBusyId`, separate
+  // state so the two Switches don't share a disabled window. `null` means
+  // no AA toggle is in flight; otherwise the id of the instance whose
+  // PATCH is currently being awaited.
+  const [aaBusyId, setAaBusyId] = useState<string | null>(null)
   // Instance whose pinned port is currently being edited in the per-row
   // modal. `null` means the modal is closed. We open the modal with the
   // snapshot we already have so the form can pre-fill from `def.port`
@@ -141,6 +162,15 @@ export default function Instances(): JSX.Element {
     name: string
     cwd: string
     lan?: boolean
+    /**
+     * Per-instance AA override on creation. UI v1 exposes 2 states only:
+     *   - `false` / undefined → `auto`(跟随 root);后端走 `parseBoolField` 收窄,
+     *     `undefined` 直接透传成 `def.aa = undefined`。
+     *   - `true` → `force-on`:supervisor 给 child spawn 时无条件加 `--aa`,
+     *     若 root 没启 AA 则打 warn + child 端 AA 启用但无 parent 可转发
+     *     (safe no-op)。详见 `instanceSupervisor.ts::doStart` 的 AA 决策段。
+     */
+    aa?: boolean
     /**
      * 实例类型:标准实例(`'standard'`,默认)或任务工厂实例(`'task-factory'`)。
      * 任务工厂实例创建后由 supervisor spawn `--app task-factory` 传给子进程,
@@ -184,6 +214,8 @@ export default function Instances(): JSX.Element {
   // re-render 但视觉上肉眼无差异。一个 1 小时的实例跑 60s 后才多 1 分钟,
   // tick 频率足够。
   const [now, setNow] = useState(() => Date.now())
+  // 正在飞行的 start/stop/restart 请求的实例 id —— 期间禁用该行的生命周期按钮。
+  const [pendingIds, setPendingIds] = useState<string[]>([])
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(id)
@@ -210,13 +242,30 @@ export default function Instances(): JSX.Element {
   }, [portEditRow?.id, instances, portForm])
 
   async function act(method: 'POST' | 'DELETE', id: string, action?: 'start' | 'stop' | 'restart'): Promise<void> {
-    const url = action ? `/api/instances/${id}/${action}` : `/api/instances/${id}`
-    const res = await fetch(url, { method })
-    if (!res.ok && res.status !== 204) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string }
-      message.error(data.error ?? '操作失败')
+    // Per-row in-flight 守卫(fix-plan-10-05 H3):`loadInstances()` 只在整条请求
+    // 完成后才刷新,所以整个重启/停止期间 `effectiveState` 仍是旧值 ——
+    // 按钮全程可点,用户连点两下就把两个请求都发到服务端。服务端已有
+    // per-instance 串行闸兜底,这里再加一层,让 UI 立即反映出「正在处理」。
+    if (action) {
+      if (pendingIds.includes(id)) return
+      setPendingIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
     }
-    void loadInstances()
+    const url = action ? `/api/instances/${id}/${action}` : `/api/instances/${id}`
+    try {
+      const res = await fetch(url, { method })
+      if (!res.ok && res.status !== 204) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        message.error(data.error ?? '操作失败')
+      }
+    } finally {
+      if (action) {
+        setPendingIds((prev) => {
+          const next = prev.filter((x) => x !== id)
+          return next.length ? next : []
+        })
+      }
+      void loadInstances()
+    }
   }
 
   // Toggle the persisted `lan` flag on a definition. Optimistic update
@@ -249,6 +298,52 @@ export default function Instances(): JSX.Element {
       message.error(err instanceof Error ? err.message : '切换 LAN 失败')
     } finally {
       setLanBusyId(null)
+    }
+  }
+
+  // Patch the persisted `aa` flag on a definition. Same optimistic
+  // pattern as `setLan`: flip the local snapshot first so the Switch
+  // animates without waiting for the round trip, PATCH, then roll back
+  // on failure. Turning the Switch OFF sends `aa: false` (force-off),
+  // ON sends `aa: true` (force-on).
+  async function setAa(id: string, aa: boolean): Promise<void> {
+    const before = instances.find((s) => s.id === id)
+    if (!before) return
+    // Optimistically write the exact value we're about to PATCH so the
+    // Switch, the roll-back path and the server response all agree —
+    // the row renders `aa === true` as ON, so `false` and `undefined`
+    // look the same either way, but keeping them distinct avoids a
+    // flicker if the request is slow.
+    const optimistic: InstanceSnapshot = { ...before, aa }
+    applyInstanceSnapshot(optimistic)
+    setAaBusyId(id)
+    try {
+      // `false` is the off-switch: force-off — even if the root runs with
+      // `--aa`, this instance is spawned without it. It used to be `{}` on
+      // disable, which the server rejected as an empty patch (400
+      // `no patchable fields supplied`) — the AA switch could never be
+      // turned off. `null` would instead clear the override back to auto
+      // (follow root), which is NOT what "this instance must not be seen
+      // by AA Cloud" means; that remains reachable from the API only.
+      const body: { aa: boolean } = { aa }
+      const res = await fetch(`/api/instances/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        applyInstanceSnapshot(before)
+        message.error(data.error ?? '切换 AA 失败')
+      } else {
+        const data = (await res.json()) as { instance: InstanceSnapshot }
+        applyInstanceSnapshot(data.instance)
+      }
+    } catch (err) {
+      applyInstanceSnapshot(before)
+      message.error(err instanceof Error ? err.message : '切换 AA 失败')
+    } finally {
+      setAaBusyId(null)
     }
   }
 
@@ -298,10 +393,17 @@ export default function Instances(): JSX.Element {
       // InstanceDefinition.app = 'task-factory';`undefined`(Radio 默认值
       // `'standard'` 或表单未填)走标准实例,服务端不写 app 字段。
       const app = values.app === 'task-factory' ? ('task-factory' as const) : undefined
+      // AA per-instance override(创建路径):Checkbox 勾上才发 `aa: true`,
+      // 未勾完全省略字段(后端 `parseBoolField` 拿到 undefined → 落
+      // `def.aa = undefined` → 后续 start 走 auto,跟随 root)。
+      // 创建**不**发 `false`:新建实例本来就没有 per-instance 偏好可言,
+      // force-off 只能通过之后 PATCH 显式设置(见 setAa),写在创建表单上
+      // 只会让用户误以为"未勾 = 永久禁用"。
+      const aa = values.aa === true ? true : undefined
       const res = await fetch('/api/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: values.name, cwd: values.cwd, lan: values.lan === true, port, app }),
+        body: JSON.stringify({ name: values.name, cwd: values.cwd, lan: values.lan === true, port, app, aa }),
       })
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -316,12 +418,12 @@ export default function Instances(): JSX.Element {
       // waitForRunningInstance 只在 state==='running' && port!==null 时返回,
       // 这里再做一次防御性检查以满足 TS 收窄 + 兜底(避免假设实现细节)。
       if (started.port == null) throw new Error('实例已启动但端口未知')
-      // LAN 实例绑 0.0.0.0 同时含 127.0.0.1,浏览器端 localhost:<port>
-      // 总可达。仅在实例确认 running 且端口可用之后才打开新标签页,
+      // LAN 实例绑 0.0.0.0 同时含 127.0.0.1,沿用当前页面的 host 总可达。
+      // 仅在实例确认 running 且端口可用之后才打开新标签页,
       // 避免用户在 supervisor ready IPC 等待期间看到一个 about:blank
       // 空白标签 — 这就是用户报告的"创建后默认弹出 about:blank 空白页"
       // bug 的真正来源。
-      window.open(`http://localhost:${started.port}`, '_blank', 'noopener,noreferrer')
+      window.open(instanceUrl(started.port), '_blank', 'noopener,noreferrer')
     } catch (err) {
       message.error(err instanceof Error ? err.message : '创建失败')
     }
@@ -332,15 +434,17 @@ export default function Instances(): JSX.Element {
     // "启动"按钮可点,让用户能重新拉起。"停止"/"重启"对死了 3 分钟的实例
     // 都没意义(进程已经没了),disable。
     const es = effectiveState(row)
-    const canStart = !row.isCurrent && (es === 'stopped' || es === 'down')
-    const canStop = !row.isCurrent && (es === 'running' || es === 'starting')
-    const canRestart = !row.isCurrent && es === 'running'
+    const busy = pendingIds.includes(row.id)
+    const canStart = !busy && !row.isCurrent && (es === 'stopped' || es === 'down')
+    const canStop = !busy && !row.isCurrent && (es === 'running' || es === 'starting')
+    const canRestart = !busy && !row.isCurrent && es === 'running'
     const canDelete = !row.isCurrent
     return (
       <Space wrap>
         <Button
           size="small"
           icon={<CirclePlayIcon />}
+          loading={busy}
           disabled={!canStart}
           onClick={() => void act('POST', row.id, 'start')}
         >
@@ -349,6 +453,7 @@ export default function Instances(): JSX.Element {
         <Button
           size="small"
           icon={<SquareIcon />}
+          loading={busy}
           disabled={!canStop}
           onClick={() => void act('POST', row.id, 'stop')}
         >
@@ -357,6 +462,7 @@ export default function Instances(): JSX.Element {
         <Button
           size="small"
           icon={<RotateCwIcon />}
+          loading={busy}
           disabled={!canRestart}
           onClick={() => void act('POST', row.id, 'restart')}
         >
@@ -375,7 +481,7 @@ export default function Instances(): JSX.Element {
           <Button
             size="small"
             icon={<ExternalLinkIcon />}
-            href={`http://localhost:${row.port}`}
+            href={instanceUrl(row.port)}
             target="_blank"
             rel="noreferrer"
           >
@@ -406,6 +512,49 @@ export default function Instances(): JSX.Element {
             onChange={(next) => void setLan(row.id, next)}
           />
           {lan ? <Tag color="cyan" className="mr-0">--lan</Tag> : null}
+        </Space>
+      </Tooltip>
+    )
+  }
+
+  function renderAaToggle(row: InstanceSnapshot): JSX.Element | null {
+    if (row.isCurrent) return null
+    // 本次进程没带 `--aa` 启动(后端 GET /api/system 的 aaEnabled)时,子实例的
+    // AA 开关一律没有意义 —— supervisor 不会给它们传 `--aa`。连开关带说明
+    // 一起藏掉,免得用户在这里勾了以为生效了(实际要重启 root 加 flag)。
+    if (!aaEnabled) return null
+    // 三态(见 shared/instances.ts 的 `InstanceDefinition.aa`):
+    //   `true`  = 请求启用(仅 root 带 --aa 时才真正生效)
+    //   `false` = 强制禁用 —— 即便 root 带 --aa 也不给它。**UI 的关态落在这里**,
+    //            表达「这个实例别被 AA Cloud 看到」,不是「放弃偏好」;
+    //   缺省    = auto(跟随 root),只有新建实例 / API 显式清空才是这个值。
+    // 关态发 `false` 而不是省略字段:省略等于不改,下次 start 又会带上 --aa。
+    const on = row.aa === true
+    const busy = aaBusyId === row.id
+    const tip = on
+      ? '已请求启用 AA:下次启动时,若 root 启了 --aa,该实例会带 --aa 并把事件转发给 AA Cloud'
+      : row.aa === false
+        ? '已强制禁用 AA:即便 root 带 --aa 启动,该实例也不会带 --aa(不会把事件转发给 AA Cloud)'
+        : 'AA 跟随 root(默认):root 启 --aa 时该实例自动带上,root 没启则一定不带'
+    const tag = on
+      ? <Tag color="purple" className="mr-0" data-testid={`aa-tag-${row.id}`}>--aa</Tag>
+      : row.aa === false
+        ? <Tag color="default" className="mr-0" data-testid={`aa-tag-${row.id}`}>已禁用</Tag>
+        : <Tag color="default" className="mr-0" data-testid={`aa-tag-${row.id}`}>auto</Tag>
+    return (
+      <Tooltip title={tip}>
+        <Space size={8}>
+          <span className="text-xs text-[var(--text-dim-65)]">AA</span>
+          <Switch
+            size="small"
+            checked={on}
+            disabled={busy}
+            loading={busy}
+            aria-label="AA 启动"
+            data-testid={`aa-switch-${row.id}`}
+            onChange={(next) => void setAa(row.id, next)}
+          />
+          {tag}
         </Space>
       </Tooltip>
     )
@@ -457,6 +606,7 @@ export default function Instances(): JSX.Element {
               extra={
                 <Space size={8} align="center">
                   {renderLanToggle(inst)}
+                  {renderAaToggle(inst)}
                   <Tag color={STATE_TAG_COLOR[effectiveState(inst)]}>{stateLabel(effectiveState(inst))}</Tag>
                 </Space>
               }
@@ -517,7 +667,7 @@ export default function Instances(): JSX.Element {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ cwd: currentCwd, lan: false, portEnabled: false, app: 'standard' }}
+          initialValues={{ cwd: currentCwd, lan: false, aa: false, portEnabled: false, app: 'standard' }}
         >
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="例如 demo" />
@@ -583,6 +733,20 @@ export default function Instances(): JSX.Element {
             data-testid="lan-checkbox"
           >
             <Checkbox>LAN 模式启动 (--lan)</Checkbox>
+          </Form.Item>
+          {/*
+            AA per-instance 开关 — 2 态,与 per-row Switch 语义一致:
+            不勾 = auto(跟随 root,后端落 def.aa=undefined);
+            勾上 = 请求启用(后端落 def.aa=true,root 启 --aa 时下次启动生效)。
+            注意 root 是硬门禁:root 没启 --aa 时即便勾了也不会带 --aa(会打 warn)。
+          */}
+          <Form.Item
+            name="aa"
+            valuePropName="checked"
+            tooltip="勾选后请求为该实例启用 AA 桥。下次启动时,若 root 以 --aa 运行,该实例会带 --aa 并把事件转发给 AA Cloud;root 没启则不会生效(会打 warn)。不勾选 = 跟随 root"
+            data-testid="aa-checkbox"
+          >
+            <Checkbox>请求启用 AA (--aa)</Checkbox>
           </Form.Item>
           {/*
             端口配置:Switch 切 auto / 手动;手动时 InputNumber 必填。

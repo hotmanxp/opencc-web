@@ -40,14 +40,6 @@ export async function runDev(options: DevOptions) {
   console.log(`[zai] cwd: ${cwd}`);
   if (options.lan) {
     console.log(`[zai] LAN mode — binding to 0.0.0.0`);
-    // 反向代理(`/proxy/<port>/*` → 127.0.0.1:<port>)会把同 LAN 内任意
-    // 访客对本机端口的访问面暴露到 zai 外网端口上。这是按用户决策
-    // ("任意本机端口"+"警告提示")做的,提示信息保留在控制台供 owner
-    // 自查。`runtimeLifecycle.closeServer` 会随 apiServer 一起关掉。
-    console.log(
-      `[zai] WARNING: --lan enables reverse proxy at /proxy/<port>/* → 127.0.0.1:<port>.` +
-        `\n[zai]          Anyone on your LAN can reach any local port you have running.`,
-    );
   }
   if (options.sdk) console.log(`[zai] SDK mode — runtime treated as non-interactive (headless)`);
   else console.log(`[zai] Interactive mode — runtime treated as interactive OpenCC CLI`);

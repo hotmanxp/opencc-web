@@ -23,13 +23,58 @@ function isDebugSse(): boolean {
 }
 const DEBUG_SSE = isDebugSse()
 
+// 无活跃会话时订阅的 topic 白名单 (传给 /api/event?topics=...)。
+//
+// 收录标准 = 服务端 isGlobalEvent() === true,即「与具体 session 解耦,任何
+// 订阅者都该收到」。eventBus-topics.test.ts 有一条漂移守护断言双向锁死这个
+// 列表:新增全局事件忘了加进来会红, 误收非全局事件也会红。
+//
+//   - system      → server.connected / server.error / toast / branch.changed
+//                   / system.restarting|stopping|restart.canceled
+//   - instance    → instance.changed      (实例管理页的核心)
+//   - task_factory→ task_factory         (任务工厂看板)
+//   - skills      → skills.changed       (skill 目录热更新)
+//   - app_update  → app.update.*         (版本升级通知)
+//   - command     → command.run|done     (命令生命周期)
+//   - session     → session.created|deleted|renamed (侧边栏)
+//   - job         → job.started|progress|done|failed (后台任务 dock;
+//                   applyJobEvent 按 jobId 存, 客户端再按 sessionId 切分)
+//
+// 刻意**不**收录的:
+//   - runtime / prompt — 这些 reducer 不按 sid 过滤(applyPromptAsk 直接覆盖
+//     pendingAsk, applyQueueChanged 直接 set queuedPrompts), 收全量会把
+//     别的会话的流式输出和待确认卡片串到当前页。
+//   - queue / agent_task / state.* — 虽然 reducer 大多按 sid 存取, 但它们
+//     在 isGlobalEvent 里是 false(有明确 sessionId 归属), 收进来等于让
+//     无会话页面持有别的会话的状态。
+const GLOBAL_ONLY_TOPICS = [
+  'system',
+  'instance',
+  'task_factory',
+  'skills',
+  'app_update',
+  'command',
+  'session',
+  'job',
+] as const
+
 // 订阅 useAgentStore.sessionId 变化 — sessionId 改变时 React 会重跑 effect,
 // 关掉旧 EventSource + 拿新 sid 开新连接. 新连接走 ?sid=xxx 让后端按 sid
 // filter 事件流, 旧 sid 的 runtime.* / job.* / prompt.ask 不再穿透到当前 tab.
 //
-// 设计: 不在 sessionId=null 时主动 unsubscribe, 让 useAgentStore 的初始化
-// 流程 (createNewSession → setSessionId) 自然触发重建. 仅当 sid 已经从
-// "非空" 切到 "非空" 时重建, sid=null 时维持旧连接, 给冷启动留一个缓冲.
+// **sid 为 null 时也要连**(2026-09-30 修复): 此前是 `if (!sessionId) return`,
+// 于是「没有活跃会话」的页面一条事件都收不到。/instances 只在 mount 时拉一次
+// /api/instances (Instances.tsx), 之后完全依赖 instance.changed 推进 —— 机器
+// 上一个会话都没有时 (loadSessions 见 sessions.length === 0 就留 null, 只有
+// Agent / MobileAgent / Desktop / SuperTasks 才会建会话), 实例管理页就永久卡在
+// 首次拉取的快照上, 别的 tab 启停实例这边纹丝不动。
+//
+// 无 sid 时**不能**退回「全量流」(subscribeServerEvents(sid=null) 不带 topics):
+// runtime.* / prompt.* 的 reducer 并不按 sid 过滤 —— applyPromptAsk 直接覆盖
+// pendingAsk (useAgentStore.ts:1971), applyQueueChanged 直接 set queuedPrompts
+// (同文件 1041) —— 全量流会把别的会话的待确认卡片 / 队列串到当前页。
+// 正确姿势是走 GLOBAL_ONLY_TOPICS 白名单: 这些 topic 展开后全是 isGlobalEvent
+// 里为 true 的 type, 与具体会话解耦, 收下来安全。
 //
 // 为什么不挂 url?/X-Session-Id header 给 EventSource:
 // - EventSource 不支持自定义 header (HTML 规范), 只能走 URL. 这就是为什么
@@ -40,13 +85,17 @@ const DEBUG_SSE = isDebugSse()
 export function useEventStream(): void {
   const sessionId = useAgentStore((s) => s.sessionId)
   useEffect(() => {
-    if (!sessionId) return
-    const handle = subscribeServerEvents(sessionId, enqueue, (state, attempt) => {
-      // 连接状态机 → useAppStore, UI 顶栏据此显示连接指示。
-      // server.connected 事件到达时 applyBatch 还会再次置 connected (覆盖
-      // EventSource onopen 的时序差 — 见 applyBatch 顶部特殊处理)。
-      useAppStore.getState().setStreamState(state, attempt)
-    })
+    const handle = subscribeServerEvents(
+      sessionId,
+      enqueue,
+      (state, attempt) => {
+        // 连接状态机 → useAppStore, UI 顶栏据此显示连接指示。
+        // server.connected 事件到达时 applyBatch 还会再次置 connected (覆盖
+        // EventSource onopen 的时序差 — 见 applyBatch 顶部特殊处理)。
+        useAppStore.getState().setStreamState(state, attempt)
+      },
+      sessionId ? undefined : GLOBAL_ONLY_TOPICS,
+    )
     return () => {
       handle.close()
     }
@@ -101,6 +150,7 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
   // 详见 docs/superpowers/specs/2026-07-23-session-cold-state-design.md §5.1。
   const connected = ordered.find((e) => e.type === 'server.connected')
   if (connected) {
+    store.getState().noteServerBootId((connected as { bootId?: string }).bootId)
     useAppStore.getState().setConnected(true)
     useAppStore.getState().setStreamState('connected', 0)
     const _connectedSid = store.getState().sessionId
@@ -118,8 +168,30 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     case 'runtime.aborted':
     case 'runtime.error':
     case 'runtime.compacted':
+    // runtime.compacting — 压缩过程态「正在压缩…」(zai patch 2026-10-12)。
+    // 与 runtime.compacted 走同一条路(applyRuntimeEvent 内部按 type 分流到
+    // applyCompactionEvent / applyCompactingEvent), 但两者语义相反:前者是
+    // 压缩**结束**后的 5s toast, 本者是压缩**过程中**常驻的状态条。
+    case 'runtime.compacting':
       store.getState().applyRuntimeEvent(event)
       break
+    // compact_boundary — 压缩分界线(zai patch 2026-10-12)。落进 messages
+    // (常驻,刷新后仍在),与 runtime.compacted 的 5s toast 是两件事。
+    // 漏这个 case 的症状:toast 照弹,但对话流里的分隔线永远不出现。
+    case 'compact_boundary':
+      store.getState().applyRuntimeEvent(event)
+      break
+    // command.* 刻意**不**在这里驱动压缩过程态 (2026-10-12 返工)。
+    //
+    // 此前曾用 `name === 'compact'` 过滤 command.run/done 来近似"正在压缩",
+    // 现在撤掉了 —— 那是错的: command.* 是 command 层的通用生命周期埋点,
+    // 不反映 vendor 的压缩语义。两条后果:
+    //   1. 自动压缩根本不经过 command 层, 它的埋点不发 → 同一种 UI 状态
+    //      两条路径来路不同, 手动/自动不同源;
+    //   2. 过程态的起止由 vendor compactConversation 的 compact_start /
+    //      compact_end 决定 (core 侧 createCompactProgressEmitter 统一转换,
+    //      经 stateChangeBus → stateBridge → SSE), 语义归属清晰。
+    // 现在手动与自动同源, 都收敛到上面的 `case 'runtime.compacting'`。
     case 'session.created':
     case 'session.deleted':
     case 'session.renamed':
@@ -157,6 +229,7 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     case 'server.error':
     case 'toast':
     case 'system.restarting':
+    case 'system.stopping':
     case 'system.restart.canceled':
       useAppStore.getState().applySystemEvent(event)
       break
@@ -191,11 +264,30 @@ export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
     // appUpdate 状态显示 Modal / notification。统一走 useAppStore,
     // 不进 useAgentStore(这是 system 级,不是会话级)。
     case 'app.update.checking':
+    case 'app.update.idle':
     case 'app.update.installing':
     case 'app.update.complete':
     case 'app.update.failed':
       useAppStore.getState().applyAppUpdate(event)
       break
+    default: {
+      // 穷尽性守卫 (zi patch 2026-10-12): shared/events.ts 的 ServerEvent
+      // union 加新成员时, 漏加 case 会在类型检查时报 "not assignable to
+      // never", 而不是运行时静默丢帧。
+      //
+      // ⚠️ 同 eventSource.ts 的断言一样受限于 packages/zai/tsconfig.json
+      // **排除了 src/web** —— 目前 `tsc --noEmit` 检查不到本文件, 所以这道
+      // default 是给 IDE 与将来 web 纳入 typecheck 后的护栏。真正在 CI 上
+      // 生效的是 useEventStream.test.ts 里对 compact_boundary 的路由断言。
+      //
+      // 为什么值得加: 这个 switch 原本既无 default 也无断言, 漏 case 完全
+      // 无感 —— compact_boundary 就是这么漏的(2026-10-12), 表现是"toast 会弹
+      // 但分隔线不出现"。同一类坑在 eventSource.ts 的 NAMED_EVENT_TYPES
+      // 已经踩过 4 次。
+      const _exhaustive: never = event
+      void _exhaustive
+      break
+    }
   }
   }
 }

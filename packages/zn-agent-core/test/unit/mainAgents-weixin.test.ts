@@ -27,6 +27,7 @@ function fakeTools(): { name: string }[] {
     { name: 'TaskGet' },
     { name: 'TaskUpdate' },
     { name: 'TaskList' },
+    { name: 'TaskStop' },
     // Web UI / 界面向 / banned — 剔除
     { name: 'PresentFile' },
     { name: 'WebFetch' },
@@ -69,7 +70,10 @@ describe('weixin main agent (zai patch 2026-09-13)', () => {
     expect(names).not.toContain('AskUserQuestion')
     // 保留
     expect(names).toContain('Agent')
-    expect(names).toContain('TaskOutput')
+    // TaskStop(终止失控子 agent)。TaskOutput 已随 f40c015a 移除 ——
+    // 子 agent 结果经 task-notification 送达,故不在白名单里
+    expect(names).toContain('TaskStop')
+    expect(names).not.toContain('TaskOutput')
     expect(names).toContain('CliAgent')
     expect(names).toContain('CronCreate')
     expect(names).toContain('CronDelete')

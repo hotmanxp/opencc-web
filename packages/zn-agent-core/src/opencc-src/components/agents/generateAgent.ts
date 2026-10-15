@@ -140,8 +140,11 @@ export async function generateAgent(
   const userContext = await getUserContext()
 
   // Prepend user context to messages and append system context to system prompt
-  // @ts-expect-error type mismatch between UserMessage and Message
-  const messagesWithContext = prependUserContext([userMessage], userContext)
+  const messagesWithContext = await prependUserContext(
+    // @ts-expect-error type mismatch between UserMessage and Message
+    [userMessage],
+    userContext,
+  )
 
   // Include memory instructions when the feature is enabled
   const systemPrompt = isAutoMemoryEnabled()

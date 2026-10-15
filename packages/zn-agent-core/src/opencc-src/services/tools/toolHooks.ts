@@ -545,7 +545,7 @@ export async function* runPreToolUseHooks(
   // dialog (see AGENTS.md), so plugin-driven PreToolUse prompts are
   // unusable anyway — they assume an interactive TTY. Skipping every
   // PreToolUse hook lets the existing always-allow tool.checkPermissions
-  // (forceAllowCheckPermissions in compat/tools/opencc/builtin.ts)
+  // (mutated onto the live vendor tool objects by zai's compat layer)
   // make the allow decision.
   if ((globalThis as any).__zaiSkipPreToolUseHooks === true) {
     return

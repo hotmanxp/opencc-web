@@ -27,6 +27,22 @@ export type PDFResult<T> =
   | { success: false; error: PDFError }
 
 /**
+ * Why `pdfinfo` failed to determine the page count. Used by the Read tool to
+ * decide whether a PDF with unknown page count is safe to read whole — a
+ * `nonzero_exit`/`no_exit_status` failure usually means a small / unusual PDF,
+ * while other failures correlate with large / unscannable files.
+ */
+export type PDFPageCountFailure = {
+  reason: 'nonzero_exit' | 'no_exit_status' | 'unknown'
+  exitCode?: number
+}
+
+export type PDFPageCountResult = {
+  pageCount: number | null
+  pdfinfoFailure?: PDFPageCountFailure
+}
+
+/**
  * Read a PDF file and return it as base64-encoded data.
  * @param filePath Path to the PDF file
  * @returns Result containing PDF data or a structured error
@@ -114,24 +130,36 @@ export async function readPDF(filePath: string): Promise<
 
 /**
  * Get the number of pages in a PDF file using `pdfinfo` (from poppler-utils).
- * Returns `null` if pdfinfo is not available or if the page count cannot be determined.
+ * Returns `{pageCount: null, pdfinfoFailure}` when pdfinfo fails so callers can
+ * distinguish "exit nonzero (small PDF)" from "crashed (probably large)".
  */
 export async function getPDFPageCount(
   filePath: string,
-): Promise<number | null> {
-  const { code, stdout } = await execFileNoThrow('pdfinfo', [filePath], {
+): Promise<PDFPageCountResult> {
+  const { code, stdout, stderr } = await execFileNoThrow('pdfinfo', [filePath], {
     timeout: 10_000,
     useCwd: false,
   })
   if (code !== 0) {
-    return null
+    // no_exit_status = pdfinfo died via signal (segfault, OOM). nonzero_exit
+    // is its normal "I can't parse this" failure (e.g. PDF doesn't have the
+    // Pages metadata). Both are distinct from `unknown` runtime errors.
+    const reason: PDFPageCountFailure['reason'] =
+      code === null
+        ? 'no_exit_status'
+        : stderr && /Segmentation|memory|cannot allocate/i.test(stderr)
+          ? 'no_exit_status'
+          : 'nonzero_exit'
+    return { pageCount: null, pdfinfoFailure: { reason, exitCode: code ?? undefined } }
   }
   const match = /^Pages:\s+(\d+)/m.exec(stdout)
   if (!match) {
-    return null
+    return { pageCount: null, pdfinfoFailure: { reason: 'unknown' } }
   }
   const count = parseInt(match[1]!, 10)
-  return isNaN(count) ? null : count
+  return isNaN(count)
+    ? { pageCount: null, pdfinfoFailure: { reason: 'unknown' } }
+    : { pageCount: count }
 }
 
 export type PDFExtractPagesResult = {

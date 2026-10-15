@@ -66,6 +66,33 @@ describe('stateBridge', () => {
     })
   })
 
+  // zai patch (2026-10-12): 压缩过程态的桥接。手动 /compact 与自动压缩
+  // **同源** —— 两边都从 vendor compactConversation 的过程信号出发, 经 core
+  // 的 createCompactProgressEmitter 转成 compact.changed, 由这一个订阅
+  // 统一翻成 ServerEvent。
+  it('bridges compact.changed to runtime.compacting', () => {
+    initStateBridge()
+    stateChangeBus.emit('compact.changed', { sessionId: 's1', compacting: true })
+    expect(eventBus.emit).toHaveBeenCalledWith({
+      type: 'runtime.compacting',
+      sessionId: 's1',
+      compacting: true,
+    })
+    stateChangeBus.emit('compact.changed', { sessionId: 's1', compacting: false })
+    expect(eventBus.emit).toHaveBeenLastCalledWith({
+      type: 'runtime.compacting',
+      sessionId: 's1',
+      compacting: false,
+    })
+  })
+
+  it('compact.changed 也不受 dispose 影响地停止转发', () => {
+    const dispose = initStateBridge()
+    dispose()
+    stateChangeBus.emit('compact.changed', { sessionId: 's1', compacting: true })
+    expect(eventBus.emit).not.toHaveBeenCalled()
+  })
+
   it('dispose stops forwarding', () => {
     const dispose = initStateBridge()
     dispose()

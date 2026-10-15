@@ -133,7 +133,25 @@ export type TranscriptFile = {
 export type TranscriptMessage = {
   uuid: string
   parentUuid: string | null
+  // zai patch (2026-10-08, P1.5): 压缩边界改用 vendor 形状
+  // `type:'system' + subtype:'compact_boundary'` —— vendor 的
+  // sessionStoragePortable.ts:499 要求这两个字段同时匹配才认这是边界,
+  // 旧的 `type:'compact_boundary'` 会被判为非边界导致 preservedSegment
+  // 分支失效。`'compact_boundary'` 保留在 union 里是为了能读回 P1.5 之前
+  // 落盘的历史会话(只读兼容,新写入不再产生该值)。
   type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result' | 'attachment' | 'compact_boundary'
+  subtype?: string
+  /** vendor 压缩边界元数据;preservedSegment 供 relink 重连保留段链。 */
+  compactMetadata?: {
+    trigger: string
+    preTokens: number
+    messagesSummarized: number
+    preservedSegment?: {
+      headUuid: string
+      anchorUuid: string
+      tailUuid: string
+    }
+  }
   timestamp: number
   raw: unknown
   runtime?: {
@@ -203,6 +221,24 @@ export const TranscriptMessageSchema = z
       'attachment',
       'compact_boundary',
     ]),
+    // zai patch (2026-10-08, P1.5): 放行 vendor 压缩边界的 subtype 与
+    // compactMetadata。不放行的话 zod 会把这两个字段 strip 掉,读回时
+    // preservedSegment 锚点丢失,vendor 的 relink 无从重连保留段链。
+    subtype: z.string().optional(),
+    compactMetadata: z
+      .object({
+        trigger: z.string(),
+        preTokens: z.number(),
+        messagesSummarized: z.number(),
+        preservedSegment: z
+          .object({
+            headUuid: z.string(),
+            anchorUuid: z.string(),
+            tailUuid: z.string(),
+          })
+          .optional(),
+      })
+      .optional(),
     timestamp: z.number(),
     raw: z.unknown().optional(),
     runtime: z

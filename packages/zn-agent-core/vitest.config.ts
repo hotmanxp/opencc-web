@@ -1,9 +1,27 @@
 import { defineConfig } from 'vitest/config'
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ABSOLUTE_RE, RELATIVE_RE } from './src/compat/runtime/stripped-dirs.mjs'
 import type { Plugin } from 'vite'
 
 const OPENCC_SRC_DIR = resolve(__dirname, 'src/opencc-src')
+
+/**
+ * opencc spells every project-relative import with a `.js` suffix
+ * (`from 'src/tools/BashTool/BashTool.js'`) regardless of what is on disk.
+ *
+ * This used to be a plain alias to `<OPENCC_SRC_DIR>/<path>.ts` — `.ts` only.
+ * That covers most of the tree, but a number of vendored modules are `.tsx`
+ * (`tools/BashTool/BashTool.tsx` among them), and for those the alias resolved
+ * to a path that does not exist, so the import was reported as a missing
+ * *package*.
+ *
+ * It lives in a plugin rather than the alias table because Vite's built-in alias
+ * plugin runs ahead of `enforce: 'pre'` user plugins and would win the match.
+ * The stripped-directory entries stay in the alias table, which is what routes
+ * `src/<stripped>/...` to its dangling shim.
+ */
+const OPENCC_SRC_RE = /^src\/(.+)$/
 
 /**
  * Vite plugin that intercepts module resolution at the deepest level.
@@ -21,6 +39,18 @@ const forceResolvePlugin: Plugin = {
     // names opencc vendor imports.
     if (source === '@orama/orama' || source === '@orama/plugin-data-persistence') {
       return resolve(__dirname, 'src/compat/dangling-shims/orama.ts')
+    }
+    const match = OPENCC_SRC_RE.exec(source)
+    if (match) {
+      const base = match[1].endsWith('.js') ? match[1].slice(0, -3) : match[1]
+      // A specifier that already carries a real extension is taken as-is first.
+      for (const candidate of [
+        resolve(OPENCC_SRC_DIR, match[1]),
+        resolve(OPENCC_SRC_DIR, `${base}.ts`),
+        resolve(OPENCC_SRC_DIR, `${base}.tsx`),
+      ]) {
+        if (existsSync(candidate)) return candidate
+      }
     }
     return null
   },
@@ -51,19 +81,13 @@ export default defineConfig({
       // opencc's vendored source uses project-relative `src/...` specifiers
       // (e.g. `from 'src/utils/abortReasons.js'`) which Node's ESM resolver
       // can't handle — non-relative specifiers are looked up in node_modules.
-      // Strip the prefix and map to <OPENCC_SRC_DIR>/... (Vite's bundler
-      // resolves `.js` → `.ts` automatically per moduleResolution:"bundler").
-      // The `.mjs` and other-extension variants fall through to default
-      // resolution below; we only own the `.js` and no-ext forms here.
-      // (Stripped dirs are already handled by ABSOLUTE_RE above.)
-      {
-        find: /^src\/(.+)\.js$/,
-        replacement: resolve(OPENCC_SRC_DIR, '$1.ts'),
-      },
-      {
-        find: /^src\/(.+)$/,
-        replacement: resolve(OPENCC_SRC_DIR, '$1'),
-      },
+      //
+      // These live in `forceResolvePlugin` rather than here: Vite's built-in
+      // alias plugin runs ahead of `enforce: 'pre'` user plugins, so an alias
+      // would win the match and could only ever map to `.ts` — while a fair
+      // number of vendored modules are `.tsx`. The plugin tries `.ts` then
+      // `.tsx`. (Stripped dirs are already handled by ABSOLUTE_RE above.)
+
       // Relative-path stripped dirs (`../../state/store.js` etc.).
       // Same routing — to dangling-shims/opencc-stripped.ts.
       {
@@ -143,11 +167,11 @@ export default defineConfig({
     // (vitest globals, bun:test imports, etc.) that fail under Node.
     include: ['test/**/*.test.ts', 'test/**/*.test.mjs', 'src/compat/repl/__tests__/**/*.test.ts'],
     setupFiles: [
+      // First: optional-feature gates must come from the test, not from the
+      // developer's shell. See the file header for why an inherited gate makes
+      // a whole test file fail to load.
+      './src/compat/runtime/test-feature-gates.mjs',
       './src/compat/runtime/bun-protocol.mjs',
-      // 兜底:vitest 2.1.9 在 src/compat/repl/__tests__/ 下的 27 个 test
-      // 没用 globals:true 自动注入 afterAll/beforeAll,这里手动挂到 globalThis
-      // 让这批 test 不必每个都 `import { afterAll } from 'vitest'`。
-      './src/compat/runtime/vitest-globals-fix.mjs',
     ],
     exclude: ['**/node_modules/**', '**/dist/**', 'src/opencc-src/**'],
     // 默认 vitest 5s testTimeout 在 zn-agent-core 太紧:

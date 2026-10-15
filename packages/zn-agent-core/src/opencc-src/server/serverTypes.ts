@@ -231,6 +231,14 @@ export type OpenccQueryInput = {
    * user chose when several profiles share the same model name.
    */
   providerId?: string
+  /**
+   * zai patch (2026-09-28): per-query reasoning effort level
+   * ('low' | 'medium' | 'high'). Merged into the request body as
+   * `reasoning.effort` by zai's anthropic-side model caller. Omitted when
+   * the session's effort is "off" — endpoints that require adaptive
+   * thinking (e.g. MiniMax-M3.1-Flash-Preview) reject an explicit `none`.
+   */
+  effort?: string
 }
 
 /**
@@ -423,6 +431,19 @@ export type OpenccPluginDto = {
   hasUpdate: boolean
   components: OpenccPluginComponentCounts
   errors: string[]
+  /**
+   * zai patch (2026-10-10, mods 同步):当这一行其实是 mod 的投影时携带的
+   * mod 元信息(见 mods/pluginView.ts)。真插件不带此字段,前端据此决定
+   * 显示哪些 mod 专属的信息(订阅事件 / 工具 / 命令)。
+   */
+  mod?: {
+    modName: string
+    root: string
+    builtin: boolean
+    handlerEvents: string[]
+    toolNames: string[]
+    commandNames: string[]
+  }
 }
 
 export type OpenccMarketplacePluginDto = {
@@ -499,6 +520,8 @@ export type OpenccPluginApi = {
   listMarketplaces(): Promise<OpenccMarketplaceDto[]>
   /** `source` is raw user input — `owner/repo`, an https/git URL, or a local path. */
   addMarketplace(source: string): Promise<OpenccMarketplaceActionResult>
+  /** Re-pull a marketplace's upstream manifest. `name` is the marketplace name. */
+  updateMarketplace(name: string): Promise<OpenccMarketplaceActionResult>
 }
 
 // zai patch (2026-08-30, plan P0): export ReplSession types from server barrel.

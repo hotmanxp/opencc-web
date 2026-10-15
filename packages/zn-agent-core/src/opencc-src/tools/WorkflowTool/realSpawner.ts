@@ -24,6 +24,9 @@ export type RunAgentFn = (opts: {
   querySource: unknown
   model?: unknown
   transcriptSubdir?: string
+  // Module 1551: workflow-attributed subagents
+  spawnedByWorkflowRunId?: string
+  workflowPhase?: string
   /**
    * Required by runAgent (it destructures this and crashes with
    * `Cannot read properties of undefined (reading 'filter')` if
@@ -257,6 +260,11 @@ export async function buildRealSpawner(
           querySource: 'workflow_subagent',
           model: opts?.model,
           transcriptSubdir: `workflows/${taskId}`,
+          // Module 1551: tag the spawn with the workflow run id + phase so
+          // resume + downstream consumers can attribute this agent back to
+          // the workflow lifecycle.
+          spawnedByWorkflowRunId: taskId,
+          ...(opts?.phase ? { workflowPhase: opts.phase } : {}),
           // runAgent() destructures `availableTools` (required) and
           // crashes with `Cannot read properties of undefined (reading
           // 'filter')` if it's missing. Fall back to the parent's

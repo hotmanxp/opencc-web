@@ -24,6 +24,17 @@ import {
   getModelMaxOutputTokens,
   getThinkingBudgetTokens,
 } from './modelCapabilities.js'
+import { ZAI_DEFAULT_EFFORT_LEVEL } from '../../shared/types.js'
+
+// zai patch (2026-09-28): effort levels we forward as `reasoning.effort`.
+// The five wire levels — `xhigh` and `max` included, both of which
+// MiniMax-M3.1-Flash-Preview advertises (zn-nova catalog entry; see
+// `compat/model/reasoningEffortLevels.ts` in @zn-ai/zn-agent-core).
+// `off` / `none` are deliberately absent: endpoints that require adaptive
+// thinking reject an explicit `none` (MiniMax returns 2013 for both
+// `thinking.type=disabled` and `reasoning.effort=none`). "Off" is expressed
+// by omitting the field entirely.
+const ZAI_REQUEST_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
 // 流式事件类型 — Anthropic SDK 返回的 RawMessageStreamEvent 本身就是 snake_case,
 // 这里只用作 yield 的最小契约, 实际结构由 queryEngine 的 streamAdapter 识别.
@@ -53,7 +64,7 @@ function buildAnthropicInputSchema(zodSchema: Parameters<typeof zodToJsonSchema>
 export interface ClaudeProviderProfile {
   id: string
   name: string
-  provider: 'anthropic' | 'openai' | string
+  provider: 'anthropic' | 'openai' | 'workbuddy' | string
   baseUrl: string
   model: string
   apiKey?: string
@@ -69,6 +80,15 @@ export interface ClaudeProviderProfile {
    * routed through this profile. Optional.
    */
   extraParams?: Record<string, unknown>
+  /**
+   * zai patch: per-model capability flags as authored in `~/.zai.json`,
+   * keyed by the same model string that appears in `model` (comma- or
+   * semicolon-separated). Declared here because the effort fallback needs
+   * `supportsReasoning` to decide whether sending `reasoning.effort` at all
+   * is safe; the same field drives the picker's control via
+   * `shared/profileProjection.ts`.
+   */
+  capabilities?: Record<string, { supportsReasoning?: boolean }>
 }
 
 /** Read ~/.zai.json and return providerProfiles (or empty). */
@@ -144,6 +164,55 @@ function credentialFingerprint(value: string): string {
     h = (h * 31 + value.charCodeAt(i)) | 0
   }
   return h.toString(36)
+}
+
+/**
+ * zai patch: WorkBuddy credential shape (mirrors routes/voice.ts:
+ * WorkBuddyAsrCredential). Returned by fetchWorkBuddyCredential().
+ */
+interface WorkBuddyCredential {
+  accessToken: string
+  uid: string
+  nickname: string
+  expiresAt: number | null
+}
+
+/**
+ * zai patch: read WorkBuddy access token + uid from the local desktop
+ * app's auth file via our own `/api/voice/getASRToken` endpoint.
+ *
+ * The WorkBuddy access token is short-lived (3 days) and rotates on
+ * refresh — the desktop app keeps the auth file fresh, so we always
+ * re-read instead of caching. Network is loopback (unix socket or
+ * localhost:7715); failure means WorkBuddy isn't logged in.
+ */
+async function fetchWorkBuddyCredential(): Promise<WorkBuddyCredential | null> {
+  const port = Number(process.env.ZAI_PORT ?? 7715)
+  const host = process.env.ZAI_HOST ?? '127.0.0.1'
+  try {
+    const res = await fetch(`http://${host}:${port}/api/voice/getASRToken`, {
+      signal: AbortSignal.timeout(2000),
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as {
+      ok?: boolean
+      accessToken?: unknown
+      uid?: unknown
+      nickname?: unknown
+      expiresAt?: unknown
+    }
+    if (!data.ok || typeof data.accessToken !== 'string' || typeof data.uid !== 'string') {
+      return null
+    }
+    return {
+      accessToken: data.accessToken,
+      uid: data.uid,
+      nickname: typeof data.nickname === 'string' ? data.nickname : '',
+      expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : null,
+    }
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -234,7 +303,7 @@ async function getAnthropicClientForModel(
   // Anthropic SDK. Cast to `Anthropic` is safe because the OpenAI client
   // duck-types the surface area modelCaller's for-await loop touches
   // (messages.create(...) → async iterable of RawMessageStreamEvent shape).
-  if (profile?.provider === 'openai') {
+  if (profile?.provider === 'openai' || profile?.provider === 'workbuddy') {
     // Lazy dynamic import keeps openaiClient out of the Anthropic-only
     // default load path. vitest's vi.mock('.../openaiClient.js') intercepts
     // dynamic imports too, so this is mockable in tests.
@@ -249,17 +318,53 @@ async function getAnthropicClientForModel(
       transport: 'fetch → POST {baseURL}/chat/completions (NOT Anthropic SDK)',
     })
     const mod = await import('./openaiClient.js')
+
+    // zai patch: WorkBuddy's copilot.tencent.com gateway requires Bearer
+    // (accessToken) + X-User-Id + X-Source. The token rotates on a 3-day
+    // cadence (refresh-token one-shot) so we re-fetch it each call instead
+    // of caching. The cached-client shortcut below is skipped by stamping
+    // a unique cache key.
+    let wbExtra: { apiKey: string; customHeaders: Record<string, string> } | null = null
+    if (profile.provider === 'workbuddy') {
+      const cred = await fetchWorkBuddyCredential()
+      if (!cred) {
+        throw new Error(
+          'WorkBuddy provider requires a local WorkBuddy desktop login. ' +
+          'No readable credential at /api/voice/getASRToken.',
+        )
+      }
+      wbExtra = {
+        apiKey: cred.accessToken,
+        customHeaders: {
+          'X-User-Id': cred.uid,
+          'X-Source': 'workbuddy-desktop',
+        },
+      }
+      logHttp(
+        `[zai.modelCaller] client.workbuddy uid=${cred.uid} baseURL=${profile.baseUrl} model=${model ?? ''}`,
+        'debug',
+      )
+    }
+
+    // WorkBuddy's copilot.tencent.com gateway is case-sensitive on model
+    // names ("GLM-5.3-Flash" → 404, "glm-5.3-flash" → 200). Mobile UI shows
+    // CapitalCase labels; force lowercase before forwarding for workbuddy.
+    const effectiveModel = wbExtra ? (model ?? '').toLowerCase() : (model ?? '')
+
     logHttp(
-      `[zai.modelCaller] client.openai profile=${profile.id} baseURL=${profile.baseUrl} model=${model ?? ''}`,
+      `[zai.modelCaller] client.openai profile=${profile.id} baseURL=${profile.baseUrl} model=${effectiveModel}`,
       'debug',
     )
     _client = new mod.OpenAIClient({
       baseURL,
-      apiKey,
-      model: model ?? '',
+      apiKey: wbExtra?.apiKey ?? apiKey,
+      model: effectiveModel,
       extraParams: profile.extraParams,
+      customHeaders: wbExtra?.customHeaders,
     }) as unknown as Anthropic
-    _clientKey = cacheKey
+    // WorkBuddy tokens rotate; bypass the cached-client shortcut by keying
+    // off the current epoch millisecond so each call rebuilds.
+    _clientKey = wbExtra ? `workbuddy::${Date.now()}` : cacheKey
     return { client: _client, profile }
   }
 
@@ -363,6 +468,8 @@ export function createAnthropicModelCaller(): ModelCaller {
     const zaiSettings = getCachedZaiSettingsSync()
     const env = zaiSettings.env ?? {}
 
+    // zai patch (2026-09-28): per-query reasoning effort, same channel as
+    // providerId. Resolved further down, after the provider profile is known.
     const rawModel =
       model && model !== 'default'
         ? model
@@ -390,12 +497,38 @@ export function createAnthropicModelCaller(): ModelCaller {
     // openaiClient.ts; anthropic SDK has no equivalent hook).
     const { client, profile: resolvedProfile } = await getAnthropicClientForModel(resolvedModel, providerId)
 
+    // zai patch (2026-09-28): per-query reasoning effort, same channel as
+    // providerId. Whitelisted rather than forwarded verbatim: the value ends
+    // up in the request body, and an unexpected string from a stale client
+    // should be dropped, not sent upstream.
+    //
+    // Resolved here rather than earlier so the "never picked" fallback can be
+    // gated on the profile the request is actually going to. Sending
+    // `reasoning.effort` to a model that rejects it is a guaranteed 400
+    // (MiniMax answers 2013), so an unrecognised profile gets nothing — the
+    // same fail-safe the picker relies on to decide whether to draw the
+    // control at all.
+    const effortLevel = (() => {
+      const raw = (req as { options?: { effort?: unknown } })?.options?.effort
+      if (typeof raw === 'string') {
+        const level = raw.trim().toLowerCase()
+        // 'off' is zai's explicit "send no field" choice, not a level.
+        if (level === 'off') return null
+        return (ZAI_REQUEST_EFFORT_LEVELS as readonly string[]).includes(level) ? level : null
+      }
+      if (resolvedProfile?.capabilities?.[resolvedModel]?.supportsReasoning !== true) {
+        return null
+      }
+      return ZAI_DEFAULT_EFFORT_LEVEL
+    })()
+
     // 诊断: 记录本轮实际匹配到的 provider/profile — 用户选了 openai
     // provider 却看不到 openaiClient 请求日志时, 这一行直接告诉我们是
     // 匹配到了别的 profile 还是 providerId 没透传进来。
     logHttp(
       `[zai.modelCaller] call model=${resolvedModel} providerId=${providerId ?? '(none)'}` +
-        ` profile=${resolvedProfile?.id ?? '(none)'} kind=${resolvedProfile?.provider ?? '(default anthropic)'}`,
+        ` profile=${resolvedProfile?.id ?? '(none)'} kind=${resolvedProfile?.provider ?? '(default anthropic)'}` +
+        ` reasoningEffort=${effortLevel ?? '(unset)'}`,
       'debug',
     )
 
@@ -503,6 +636,24 @@ export function createAnthropicModelCaller(): ModelCaller {
         // fields here since OpenAIClient's body builder reads from
         // `this.extraParams`, not from messages.create params).
         ...(resolvedProfile?.extraParams ?? {}),
+        // zai patch (2026-09-28): 会话级推理强度 → `reasoning.effort`。
+        // AA 的推理强度选择(threaded through transcript.meta.effort →
+        // createOpenccRuntime input → req.options) lands here.
+        //
+        // Deliberately NOT the vendor's effort path: that writes
+        // `output_config.effort` plus a beta header, which is Anthropic's
+        // first-party shape. Third-party Anthropic-compatible endpoints use
+        // a flat `reasoning.effort` — verified live against
+        // https://api.minimaxi.com/anthropic/v1/messages, which names the
+        // field in its own error text:
+        //   "model \"MiniMax-M3.1-Flash-Preview\" requires adaptive thinking;
+        //    thinking.type=\"disabled\" (including reasoning.effort=none) is
+        //    not allowed (2013)"
+        //
+        // 'off' / 'none' must NOT be sent — the same message shows the
+        // endpoint refuses an explicit `none`. The caller omits `effort`
+        // entirely for that level, so nothing is merged here.
+        ...(effortLevel ? { reasoning: { effort: effortLevel } } : {}),
         // Cast to the streaming variant (not the wide MessageCreateParams
         // union) so TS resolves the create() overload that returns a
         // Stream<RawMessageStreamEvent>; the union would make `for await`

@@ -119,12 +119,45 @@ function ptyEnv(): Record<string, string> {
   return env
 }
 
+/** 原始 PTY 字节流的一帧（AA relay 协议的 `output` / `replay` 用）。 */
+export interface PtyRawChunk {
+  seq: number;
+  dataBase64: string;
+}
+
+/** 原始字节流快照。`baseSeq` 之前的字节已被环形缓冲丢弃,客户端必须整屏重放。 */
+export interface PtyRawSnapshot {
+  /** 缓冲里最老一帧的 seq;缓冲为空时等于 `seq`。 */
+  baseSeq: number;
+  /** 已产出的最大 seq。 */
+  seq: number;
+  /** 缓冲里当前保留的原始字节数(AA view 的 `scrollbackBytes`)。 */
+  scrollbackBytes: number;
+  /** `seq > fromSeq` 的增量帧。 */
+  outputs: PtyRawChunk[];
+  /** 全量 scrollback 的 base64;仅在发生缺口(整屏重放)时非空。 */
+  dataBase64: string;
+}
+
+/**
+ * AA relay 的 scrollback 上限,对齐官方 connector 的
+ * `TERMINAL_SCROLLBACK_MAX_BYTES`(connector/local/terminal.py:23)。
+ * 比 zai 自己的 headless 屏幕回滚(1000 行)大 —— 这里存的是**原始字节**,
+ * 供远端 xterm 重放,不参与屏幕状态机。
+ */
+const RAW_SCROLLBACK_MAX_BYTES = 512 * 1024;
+
 export class PtySession {
   info: WebTerminalInfo
   private readonly pty: IPty
   private readonly screen: HeadlessTerminal
   private readonly serializer: Serializer
   private readonly followers = new Set<TerminalFollower>()
+  /** 原始字节流环形缓冲,供 AA relay 做 seq 增量推送与断线补发。 */
+  private readonly rawChunks: PtyRawChunk[] = []
+  private rawChunkBytes = 0
+  private rawSeq = 0
+  private rawStreamEnabled = false
   /** 串行化屏幕写入 / 尺寸变更 / 收尾，保证 output 与 state 帧的先后顺序。 */
   private operations: Promise<unknown> = Promise.resolve()
   private closing: Promise<void> | undefined
@@ -175,6 +208,68 @@ export class PtySession {
 
   get running(): boolean {
     return this.info.state === 'running'
+  }
+
+  /** shell 进程 pid。AA 的 terminal view 与 relay `ready` 帧都要这个值。 */
+  get pid(): number | undefined {
+    return this.pty.pid
+  }
+
+  /**
+   * 原始字节流快照，供 AA relay 做 seq 增量推送与断线补发。
+   *
+   * 与 `follow()` 的整屏 ANSI 快照是两回事：AA 客户端（xterm.js）按 `seq` 去重，
+   * 丢弃 `seq <= lastSeq` 的帧，所以必须给原始字节单调编号，否则每次 resize
+   * 重发整屏都会被当成新内容重复渲染。
+   *
+   * @param fromSeq - 客户端已收到的最大 seq；0 表示从缓冲最早处开始。
+   * @param includeScrollback - 是否附带全量 base64。增量读取传 false，免得每个
+   *   PTY chunk 都重新编码整个 512KB 缓冲（对齐官方 connector 的同名参数）。
+   */
+  rawSnapshot(fromSeq = 0, includeScrollback = true): PtyRawSnapshot {
+    const baseSeq = this.rawChunks.length > 0 ? this.rawChunks[0].seq - 1 : this.rawSeq
+    // 缺口检测：客户端要的起点已被环形缓冲丢弃，只能整屏重放。baseSeq 取
+    // `最老帧 - 1`,与官方 append_scrollback 的 scrollbackBaseSeq 同义
+    // (terminal_records.py:41)——「seq > baseSeq 的都还在」,所以恰好追平
+    // 最老一帧的客户端**不算**缺口。
+    const hasGap = fromSeq < baseSeq
+    return {
+      baseSeq,
+      seq: this.rawSeq,
+      scrollbackBytes: this.rawChunkBytes,
+      outputs: this.rawChunks.filter((chunk) => chunk.seq > fromSeq),
+      dataBase64: includeScrollback || hasGap ? this.rawScrollbackBase64() : '',
+    }
+  }
+
+  /**
+   * 打开原始字节流记录。
+   *
+   * 默认**关闭**:只有 AA 远程终端需要(relay 推 `output`/`replay` 帧),而
+   * 普通分屏 Bash tab 用的是 `follow()` 的屏幕帧。不开的话每个终端白白多留
+   * 最多 512KB 的 base64。AA 注册表在 create 之后立刻打开 —— shell 还没吐出
+   * 提示符,所以不会漏掉首屏。
+   */
+  enableRawStream(): void {
+    this.rawStreamEnabled = true;
+  }
+
+  private rawScrollbackBase64(): string {
+    if (this.rawChunks.length === 0) return ''
+    const parts = this.rawChunks.map((chunk) => Buffer.from(chunk.dataBase64, 'base64'))
+    return (parts.length === 1 ? parts[0] : Buffer.concat(parts)).toString('base64')
+  }
+
+  private appendRawChunk(data: string): void {
+    if (!this.rawStreamEnabled) return;
+    const buf = Buffer.from(data, 'utf8')
+    this.rawSeq += 1
+    this.rawChunks.push({ seq: this.rawSeq, dataBase64: buf.toString('base64') })
+    this.rawChunkBytes += buf.byteLength
+    while (this.rawChunkBytes > RAW_SCROLLBACK_MAX_BYTES && this.rawChunks.length > 1) {
+      this.rawChunkBytes -= Buffer.from(this.rawChunks[0].dataBase64, 'base64').byteLength
+      this.rawChunks.shift()
+    }
   }
 
   /**
@@ -285,6 +380,9 @@ export class PtySession {
 
   private output(data: string): void {
     if (data.length === 0) return
+    // 原始字节流**同步**入环形缓冲：AA relay 的 pump 可能在下一帧 screen.write
+    // 落地前就来读 seq，异步入队会漏帧。
+    this.appendRawChunk(data)
     void this.enqueue(() => {
       // 屏幕写入是异步的；等它落地再广播，保证 follower 拿到的字节与屏幕状态一致。
       return new Promise<void>((resolve) => {

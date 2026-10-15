@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from 'express'
 import type { ServerEvent } from '../../shared/events.js'
-import { eventBus, ServerEventBus } from '../services/eventBus.js'
+import { eventBus, ServerEventBus, SERVER_BOOT_ID } from '../services/eventBus.js'
 import { writeSse, SSE_HEADERS } from '../services/sse.js'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 
@@ -49,8 +49,22 @@ router.get('/event', async (req: Request, res: Response) => {
 
   let unsubscribe: (() => void) | undefined
   let heartbeat: ReturnType<typeof setInterval> | undefined
+  let markClosed: () => void = () => {}
 
   try {
+    // close 监听必须在第一个 await **之前**注册。Node 的 'close' 是一次性事件:
+    // 客户端已经断开之后再注册监听器,它永远不会触发。原先注册在
+    // `await bg.list()` 之后,客户端在那段窗口里断开时:
+    //   - `closed` promise 永久挂起 → `finally` 永不执行
+    //   - → unsubscribe() 不调用(订阅泄漏在 eventBus.subs 里)
+    //   - → 心跳 setInterval 不 clearInterval(定时器泄漏)
+    // 心跳写失败也救不了:已 destroy 的 response 上 res.write 返回 false
+    // 而不抛异常,`:150` 的 catch 永不触发。
+    const closed = new Promise<void>((resolve) => {
+      markClosed = resolve
+    })
+    req.on('close', markClosed)
+
     for (const [k, v] of Object.entries(SSE_HEADERS)) res.setHeader(k, v)
     res.flushHeaders()
 
@@ -113,11 +127,30 @@ router.get('/event', async (req: Request, res: Response) => {
     //    bg runtime 当前 task 列表,把每条 task 当作「合成的
     //    agent_task.changed」事件通过本连接的 writeEvent 单独 push 给
     //    新客户端 (不走 eventBus,不被淘汰)。wantedSid 有值时按
-    //    task.parentSessionId 过滤;wantedSid 为 null 时推全部 task
-    //    (旧 fallback 行为,非 agent 页面也用得到)。
+    //    task.parentSessionId 过滤。
     //    seq 字段取自 eventBus 的下一个 seqCounter (走完 getHistoryAfter
     //    之后此值最大),保证客户端 reorder 时合成的 state 排在 replay 之后。
-    const bg = safeGetBackgroundRuntime()
+    //
+    //    **topic 闸门 (2026-10-07)**:本段此前完全不过滤 topics,与上面 replay
+    //    分支的 `topicMatches` 判定不一致。后果是无 sid + topics 白名单的连接
+    //    (即 useEventStream 在 sessionId===null 时发的 GLOBAL_ONLY_TOPICS,
+    //    覆盖 /instances 等不建会话的页面)照样收下**全机** bg task:该白名单
+    //    刻意不含 `agent_task`(useEventStream 注释明说不要让无会话页面持有
+    //    别的会话状态),但 §2.5 绕过了它。线上实测该页面首屏收到 2071 条
+    //    合成帧 / 9MB,覆盖 352 个 session,每条带完整 `input.prompt` 与
+    //    `resultText` —— 既是几十秒的加载卡顿,也是实打实的跨会话内容泄露。
+    //
+    //    修法:与 replay 用同一条判据(`topicMatches`),无 topics 参数 = 全量
+    //    订阅 = 维持旧行为(推全部 task)。这样:
+    //      - `?sid=A`(Agent 页,不带 topics)→ 不过滤,仍按 sid 推,原
+    //        CliAgent 刷新丢 task 的修复完全不受影响;
+    //      - 无 sid + topics=/instances 那套白名单 → `agent_task` 不在其中,
+    //        整段跳过;
+    //      - 无 sid + 无 topics(老式全量连接)→ 维持推全部,既有语义不变。
+    const wantsAgentTasks =
+      wantedTopics.length === 0 ||
+      ServerEventBus.topicMatches('agent_task.changed', wantedTopics)
+    const bg = wantsAgentTasks ? safeGetBackgroundRuntime() : null
     if (bg) {
       let synthSeq = eventBus.getNextSeq()
       for (const task of await bg.list()) {
@@ -135,16 +168,14 @@ router.get('/event', async (req: Request, res: Response) => {
     }
 
     // 3. 立即发 server.connected (最后发, 这样它只进入 live subscriber, 不在 replay 切片中)
-    eventBus.emit({ type: 'server.connected', sessionId: null })
+    eventBus.emit({ type: 'server.connected', sessionId: null, bootId: SERVER_BOOT_ID })
 
     // 4. 心跳 + 挂起直到连接结束.
     //    timer 回调里不再自己 clearInterval — 写失败只负责 settle `closed`,
     //    真正的释放统一由 finally 做 (定时器回调抛出的异常无法被 finally 捕获,
     //    所以这里仍需就地 catch, 但不再承担清理职责).
-    let markClosed: () => void = () => {}
-    const closed = new Promise<void>((resolve) => {
-      markClosed = resolve
-    })
+    //    `markClosed` / `closed` 已在第一个 await 之前建好(见 try 开头),这里
+    //    只挂心跳,不再重复注册 close 监听。
     heartbeat = setInterval(() => {
       try {
         res.write(': heartbeat\n\n')
@@ -152,7 +183,6 @@ router.get('/event', async (req: Request, res: Response) => {
         markClosed()
       }
     }, HEARTBEAT_MS)
-    req.on('close', markClosed)
 
     await closed
   } catch {

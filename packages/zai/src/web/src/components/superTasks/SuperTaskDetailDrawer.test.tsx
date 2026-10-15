@@ -2,8 +2,20 @@
 import { describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import SuperTaskDetailDrawer from './SuperTaskDetailDrawer'
+import SuperTaskDetailDrawer, { eventMarkdownComponents } from './SuperTaskDetailDrawer'
+import { remarkPlugins, rehypePlugins } from '../markdown/markdownPlugins'
+import ReactMarkdown from 'react-markdown'
 import { useAppStore } from '../../store/useAppStore'
+
+// mermaid.js 靠 getBBox 做文本度量,happy-dom 里是返回 0 的桩 → 真库静默
+// 产出空 SVG。这里只验「事件流里的 mermaid 块有没有路由到 MermaidBlock」,
+// 不验画面,所以 mock 掉库(真库效果由浏览器验收兜底)。
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: () => {},
+    render: async () => ({ svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g><text>A</text></g></svg>' }),
+  },
+}))
 
 /** 构造 /api/super-tasks/:id 的 TaskDetails mock。 */
 function taskDetailsMock(over: Record<string, unknown> = {}) {
@@ -77,6 +89,44 @@ describe('SuperTaskDetailDrawer', () => {
     expect(errSpy).not.toHaveBeenCalledWith(expect.stringContaining('same key'))
     errSpy.mockRestore()
     vi.unstubAllGlobals()
+  })
+
+  it('eventMarkdownComponents 把 ```mermaid 路由到 MermaidBlock(裸 ReactMarkdown 链路)', async () => {
+    // 事件流走的是裸 ReactMarkdown + eventMarkdownComponents(不走主
+    // MarkdownText),此前只注册了 math-block —— executor 画的架构图在
+    // 这里只会显示成一坨源码。
+    //
+    // 直接测这张表,不从 SSE 灌帧:要触发一条 assistant 事件得先拼对
+    // processEventRenderer 的 wire 格式(raw.message.content[]),那是另一层
+    // 的职责,已有 processEventRenderer 自己的测试覆盖。这里要守的只是
+    // 「mermaid 块有没有被路由」。
+    const { container } = render(
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={eventMarkdownComponents}
+      >
+        {'```mermaid\nflowchart LR\n  A --> B\n```'}
+      </ReactMarkdown>,
+    )
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mermaid-block"]')).toBeTruthy()
+    })
+  })
+
+  it('eventMarkdownComponents 不影响普通行内 code / 其它语言围栏块', () => {
+    const { container } = render(
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={eventMarkdownComponents}
+      >
+        {'行内 `useMemo` 和 ```python\nprint(1)\n```'}
+      </ReactMarkdown>,
+    )
+    expect(container.querySelector('[data-testid="mermaid-block"]')).toBeNull()
+    expect(container.querySelector('p code')?.textContent).toBe('useMemo')
+    expect(container.textContent).toContain('print(1)')
   })
 
   it('verifying 桶 + verifierTaskId → 事件流切到验证 Agent,并渲染 verification.md', async () => {

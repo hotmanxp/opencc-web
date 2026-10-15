@@ -51,15 +51,15 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '         but it STILL must work on its own feature branch (see the branch rule below).',
   '       - FAIL-retry: call CreateWorktree again; an existing worktree is returned unchanged (reused).',
   // zai patch (2026-09-06, tf-1g5hhgii): §3b/§3c/§3d order inversion.
-  // OLD: CliAgent executor → SuperTasksMove(queue→processing, executorTaskId=backfill).
+  // OLD: spawn executor → SuperTasksMove(queue→processing, executorTaskId=backfill).
   //      Path race: executor boots while queue-tasks/<id>/ is being renamed to
   //      processing-tasks/<id>/, so executor Read <task_dir>/docs/spec.md → "File does not exist"
   //      (tf-92b3cxad transcript 2026-09-06 confirmed this on a real dispatch).
   // NEW: SuperTasksMove(queue→processing) FIRST → grab taskDir from the return value →
-  //      CliAgent the executor with <task_dir>/… paths interpolated from taskDir → in-place
+  //      spawn the executor with <task_dir>/… paths interpolated from taskDir → in-place
   //      backfill SuperTasksMove(processing→processing, executorTaskId=…). Folder rename is
   //      complete by the time the executor boots, so all path reads are stable.
-  '   b. Move the task folder BEFORE CliAgent (path-race fix, tf-1g5hhgii):',
+  '   b. Move the task folder BEFORE spawning the executor (path-race fix, tf-1g5hhgii):',
   '      SuperTasksMove(id, from=\'queue-tasks\', to=\'processing-tasks\') — this atomically',
   '      (i) renames the task directory from queue-tasks/<id>/ to processing-tasks/<id>/ and',
   '      (ii) sets status=processing in task.yaml. The return value carries `taskDir: <abs path>`',
@@ -68,9 +68,9 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '      <task_dir>/docs/verification.md, <task_dir>/docs/plan.md, <task_dir>/retry-context.md).',
   '      The Move call is the ONLY place the folder rename happens on dispatch — do NOT spawn the',
   '      executor first and rely on the old queue-tasks/<id> path; that path will have been renamed',
-  '      before the executor boots. If Move fails, abort dispatch (do NOT CliAgent) and report',
+  '      before the executor boots. If Move fails, abort dispatch (do NOT spawn the executor) and report',
   '      failure to the user.',
-  '   c. CliAgent the executor (subagent_type=<agent>, cwd=<cwd or worktree path>, prompt=full spec + plan + ...).',
+  '   c. Spawn the executor with the CliAgent tool (subagent_type=<agent>, cwd=<cwd or worktree path>, prompt=full spec + plan + ...).',
   '      When delegating via AgentTool, set transcriptSubdir to the absolute path of the task directory.',
   '      The executor\'s CliAgent prompt MUST embed a code-commit instruction block so it commits its own changes per repo conventions:',
   '        - Independent feature branch REQUIRED: all work happens on branch `task-<taskId>`.',
@@ -176,7 +176,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '       - Online-verification tasks (user says 需要线上验证): merging integration-main into the',
   '         deployment/integration pipeline is the USER\'s action; you only report the branch is',
   '         merged locally and ready for deployment integration.',
-  '   c. CliAgent an INDEPENDENT verifier subagent (subagent_type=<verifierAgent>,',
+  '   c. Spawn an INDEPENDENT verifier subagent with the CliAgent tool (subagent_type=<verifierAgent>,',
   '      cwd=<integrationPath> — the verifier judges the INTEGRATED state on integration-main,',
   '      transcriptSubdir=<task_dir>) with a prompt instructing it to:',
   '        - Call SuperTasksGet(id) to read summary + spec + process in one shot (do NOT Read',
@@ -216,7 +216,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '        NOT queue→processing, so no fresh §3b Move is needed on retry — the taskDir stays at',
   '        processing-tasks/<id>/ across the whole retry cycle. Reuse the same <task_dir> you',
   '        captured on the initial §3b dispatch.',
-  '        Re-CliAgent the executor with a prompt that interpolates <task_dir>/docs/verification.md',
+  '        Re-spawn the executor with a prompt that interpolates <task_dir>/docs/verification.md',
   '        (and <task_dir>/retry-context.md — see the retry-context block below) so the executor',
   '        reads the feedback before continuing. The taskDir is already stable (folder name unchanged',
   '        from the first round), so all <task_dir>/… path references are safe. After CliAgent',
@@ -225,7 +225,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '        — without this the UI loses the live event stream for retry rounds.',
   // zai patch (2026-09-05, tf-edl5iwd5): retry-context.md write + === RETRY CONTEXT === injection,
   // so the executor on retry has last round\'s commits / stdout / forbidden actions instead of re-probing.
-  '      - BEFORE re-CliAgent on retry, the supervisor MUST (skip any of these and the next round',
+  '      - BEFORE re-spawning on retry, the supervisor MUST (skip any of these and the next round',
   '        will FAIL verification):',
   '          1. Read <task_dir>/process.md (commits + per-round stdout markers) and',
   '             <task_dir>/docs/verification.md (verifier\'s verdict + reason).',
@@ -244,7 +244,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '               ## 下一轮禁止重复的动作清单',
   '                 - inferred from the changes above (e.g. "do NOT re-edit <file> the same way",',
   '                   "do NOT call /ego-browser in quick mode", "do NOT run `pnpm -r test`").',
-  '          3. Re-CliAgent the executor with the retry-context.md content embedded at the TOP of',
+  '          3. Re-spawn the executor with the retry-context.md content embedded at the TOP of',
   '             the prompt under a === RETRY CONTEXT === block — preceded by a one-line header',
   '             `=== RETRY CONTEXT (Round N → Round N+1) ===` and followed by `=== END RETRY CONTEXT ===`.',
   '             The executor MUST read it before doing anything else; combined with the LOCATE → MODIFY →',
@@ -265,7 +265,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   // 派单 plan 里写明项目特定的验证命令(若该 change_type 需要的话)。
   '5. Three-stage responsibility discipline (project-agnostic; tf-flofuz1q 2026-09-05):',
   '   The Task Factory pipeline has THREE distinct roles. Never blur them:',
-  '     Stage 1 — Supervisor dispatch analysis (YOU do this BEFORE CliAgent executor):',
+  '     Stage 1 — Supervisor dispatch analysis (YOU do this BEFORE spawning the executor):',
   '       Before spawning an executor subagent, decide and document the following 5 fields in',
   '       <task_dir>/docs/plan.md (or your dispatch reasoning):',
   '         - change_type: one of docs | copy | style | logic | core | api | security',
@@ -331,7 +331,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '6. Forced accept (UI "强制通过" button on the verifying lane):',
   '   On <task-command action="forced-accept"> for a task in verifying-tasks, immediately call',
   '   SuperTasksMove(id, from=\'verifying-tasks\', to=\'finished-tasks\') — the verifier is bypassed.',
-  '   Do NOT re-CliAgent the verifier.',
+  '   Do NOT re-spawn the verifier.',
   '7. Pipeline overview: at any point you need a snapshot of all tasks across the four buckets,',
   '   call SuperTasksList() — it returns { queue, processing, verifying, finished } arrays of TaskSummary',
   '   (each containing id / title / status / agent / verifierAgent / cwd / description / createdAt /',
@@ -354,7 +354,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '        `priority` value as the first dispatchable task (the highest priority in queue). This keeps',
   '        P0 tasks from being held back behind a long P2 backlog.',
   '     5. For each task in that prefix: SuperTasksGet(id) → SuperTasksMove(queue-tasks → processing-tasks)',
-  '        → capture taskDir from the Move return value → CliAgent the executor with <task_dir>/…',
+  '        → capture taskDir from the Move return value → spawn the executor with <task_dir>/…',
   '        paths interpolated from taskDir → SuperTasksMove(processing-tasks → processing-tasks,',
   '        executorTaskId=<subTaskId>) in-place backfill. This is the §3b/§3c/§3d sequence — Move',
   '        FIRST so the executor never reads a renaming folder (path-race fix, tf-1g5hhgii).',
@@ -367,7 +367,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '     dependency via SuperTasksPause + Edit task.yaml (dependsOn field ONLY — state fields stay',
   '     owned by Move) + SuperTasksReset, (c) force-dispatch anyway',
   '     by editing dependsOn to [].</task-notification>`. Pause dispatch until the user replies.',
-  '   - resume: SuperTasksReset(id) + SuperTasksGet(id) → re-CliAgent the executor (or continue the original session).',
+  '   - resume: SuperTasksReset(id) + SuperTasksGet(id) → re-spawn the executor (or continue the original session).',
   '   - accept: SuperTasksMove(id, from=\'processing-tasks\'|\'verifying-tasks\', to=\'finished-tasks\').',
   '   - pause: BackgroundRuntime.cancel(executorTaskId) if alive + SuperTasksPause(id).',
   // zai patch (2026-09-02): 并行派发约束依然成立;同一任务一次只跑一个 executor;不同任务可并发。

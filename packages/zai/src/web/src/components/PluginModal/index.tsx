@@ -27,8 +27,10 @@ export function PluginModal() {
     status,
     writing,
     addingMarketplace,
+    updatingMarketplace,
     write,
     addMarketplace,
+    updateMarketplace,
     setInstalled,
   } = usePlugins(open)
 
@@ -103,6 +105,23 @@ export function PluginModal() {
     [addMarketplace],
   )
 
+  // 只刷新上游清单,不动已安装的插件 — 装不装新版由「已安装」Tab 决定.
+  const handleUpdateMarketplace = useCallback(
+    async (name: string) => {
+      try {
+        const r = await updateMarketplace(name)
+        if (r.success) {
+          message.success(r.message)
+        } else {
+          message.error(r.message)
+        }
+      } catch (e) {
+        message.error(`更新市场失败: ${String(e)}`)
+      }
+    },
+    [updateMarketplace],
+  )
+
   return (
     <Modal
       open={open}
@@ -151,7 +170,9 @@ export function PluginModal() {
                 marketplaces={marketplaces}
                 status={status}
                 adding={addingMarketplace}
+                updating={updatingMarketplace}
                 onAdd={handleAddMarketplace}
+                onUpdate={handleUpdateMarketplace}
               />
             ),
           },

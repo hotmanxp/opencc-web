@@ -37,6 +37,38 @@ export function normalizeQuotes(str: string): string {
 }
 
 /**
+ * Normalizes curly quotes to straight ones and folds CRLF/CR to LF, returning
+ * the rewritten text plus a map from each normalized offset back to the offset
+ * it came from.
+ *
+ * The map has one extra trailing entry so `indexMap[text.length]` is the end
+ * boundary of the match — needed because collapsing a CRLF means a normalized
+ * match can be shorter than the span it covers in the original.
+ */
+function normalizeQuotesAndLineEndings(str: string): {
+  text: string
+  indexMap: number[]
+} {
+  // Quote swaps are 1:1, so offsets from the original still apply afterwards.
+  const quoted = normalizeQuotes(str)
+  let text = ''
+  const indexMap: number[] = []
+  for (let i = 0; i < quoted.length; ) {
+    if (quoted[i] === '\r') {
+      text += '\n'
+      indexMap.push(i)
+      i += quoted[i + 1] === '\n' ? 2 : 1
+      continue
+    }
+    text += quoted[i]!
+    indexMap.push(i)
+    i += 1
+  }
+  indexMap.push(quoted.length)
+  return { text, indexMap }
+}
+
+/**
  * Strips trailing whitespace from each line in a string while preserving line endings
  * @param str The string to process
  * @returns The string with trailing whitespace removed from each line
@@ -79,123 +111,56 @@ export function findActualString(
     return searchString
   }
 
-  // Try with normalized quotes
-  const normalizedSearch = normalizeQuotes(searchString)
-  const normalizedFile = normalizeQuotes(fileContent)
+  // Try with normalized quotes AND line endings.
+  //
+  // Quote normalization is length-preserving, so a plain indexOf can slice the
+  // original directly. Collapsing CRLF/CR to LF is not — it folds two
+  // characters into one — so a normalized offset has to be mapped back before
+  // slicing or we cut the wrong span out of the file.
+  //
+  // The line-ending half matters on its own: Read hands the model
+  // LF-normalized text, so a model copying an old_string out of a CRLF file
+  // sends LF and an exact match against the stored CRLF bytes fails. Slicing
+  // through the map returns the file's real bytes, so the edit applies and
+  // the surrounding CRLF endings survive.
+  const { text: normalizedFile, indexMap } = normalizeQuotesAndLineEndings(
+    fileContent,
+  )
+  const normalizedSearch = normalizeQuotesAndLineEndings(searchString).text
 
   const searchIndex = normalizedFile.indexOf(normalizedSearch)
   if (searchIndex !== -1) {
     // Find the actual string in the file that matches
-    return fileContent.substring(searchIndex, searchIndex + searchString.length)
+    return fileContent.substring(
+      indexMap[searchIndex]!,
+      indexMap[searchIndex + normalizedSearch.length]!,
+    )
   }
 
   return null
 }
 
 /**
- * When old_string matched via quote normalization (curly quotes in file,
- * straight quotes from model), apply the same curly quote style to new_string
- * so the edit preserves the file's typography.
+ * Quote normalization in `findActualString` lets a straight-quoted
+ * `old_string` match text the file stores with curly quotes. This used to
+ * push the file's typography onto `new_string` as well, rewriting every
+ * straight quote the model wrote.
  *
- * Uses a simple open/close heuristic: a quote character preceded by whitespace,
- * start of string, or opening punctuation is treated as an opening quote;
- * otherwise it's a closing quote.
+ * That rewrite fired exactly when the model authored straight quotes, and it
+ * cannot tell prose from code: editing `d = {'k': "v"}` in a file that
+ * mentioned a curly quote anywhere nearby landed a string literal with curly
+ * quotes on disk — a corrupted literal. When the model *did* reproduce the
+ * curly quotes this was already a no-op, so it bought nothing in prose either.
+ *
+ * Typography survives for free in the regions the model did not touch, so the
+ * model's bytes are written verbatim and authored text equals on-disk text.
  */
 export function preserveQuoteStyle(
-  oldString: string,
-  actualOldString: string,
+  _oldString: string,
+  _actualOldString: string,
   newString: string,
 ): string {
-  // If they're the same, no normalization happened
-  if (oldString === actualOldString) {
-    return newString
-  }
-
-  // Detect which curly quote types were in the file
-  const hasDoubleQuotes =
-    actualOldString.includes(LEFT_DOUBLE_CURLY_QUOTE) ||
-    actualOldString.includes(RIGHT_DOUBLE_CURLY_QUOTE)
-  const hasSingleQuotes =
-    actualOldString.includes(LEFT_SINGLE_CURLY_QUOTE) ||
-    actualOldString.includes(RIGHT_SINGLE_CURLY_QUOTE)
-
-  if (!hasDoubleQuotes && !hasSingleQuotes) {
-    return newString
-  }
-
-  let result = newString
-
-  if (hasDoubleQuotes) {
-    result = applyCurlyDoubleQuotes(result)
-  }
-  if (hasSingleQuotes) {
-    result = applyCurlySingleQuotes(result)
-  }
-
-  return result
-}
-
-function isOpeningContext(chars: string[], index: number): boolean {
-  if (index === 0) {
-    return true
-  }
-  const prev = chars[index - 1]
-  return (
-    prev === ' ' ||
-    prev === '\t' ||
-    prev === '\n' ||
-    prev === '\r' ||
-    prev === '(' ||
-    prev === '[' ||
-    prev === '{' ||
-    prev === '\u2014' || // em dash
-    prev === '\u2013' // en dash
-  )
-}
-
-function applyCurlyDoubleQuotes(str: string): string {
-  const chars = [...str]
-  const result: string[] = []
-  for (let i = 0; i < chars.length; i++) {
-    if (chars[i] === '"') {
-      result.push(
-        isOpeningContext(chars, i)
-          ? LEFT_DOUBLE_CURLY_QUOTE
-          : RIGHT_DOUBLE_CURLY_QUOTE,
-      )
-    } else {
-      result.push(chars[i]!)
-    }
-  }
-  return result.join('')
-}
-
-function applyCurlySingleQuotes(str: string): string {
-  const chars = [...str]
-  const result: string[] = []
-  for (let i = 0; i < chars.length; i++) {
-    if (chars[i] === "'") {
-      // Don't convert apostrophes in contractions (e.g., "don't", "it's")
-      // An apostrophe between two letters is a contraction, not a quote
-      const prev = i > 0 ? chars[i - 1] : undefined
-      const next = i < chars.length - 1 ? chars[i + 1] : undefined
-      const prevIsLetter = prev !== undefined && /\p{L}/u.test(prev)
-      const nextIsLetter = next !== undefined && /\p{L}/u.test(next)
-      if (prevIsLetter && nextIsLetter) {
-        // Apostrophe in a contraction — use right single curly quote
-        result.push(RIGHT_SINGLE_CURLY_QUOTE)
-      } else {
-        result.push(
-          isOpeningContext(chars, i)
-            ? LEFT_SINGLE_CURLY_QUOTE
-            : RIGHT_SINGLE_CURLY_QUOTE,
-        )
-      }
-    } else {
-      result.push(chars[i]!)
-    }
-  }
-  return result.join('')
+  return newString
 }
 
 /**

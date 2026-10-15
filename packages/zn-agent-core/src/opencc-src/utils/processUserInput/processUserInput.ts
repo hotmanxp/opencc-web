@@ -39,6 +39,10 @@ import type { PastedContent } from '../config.js'
 import type { EffortValue } from '../effort.js'
 import { toArray } from '../generators.js'
 import {
+  dispatchModEngine,
+  hasModHandlersFor,
+} from '../../mods/dispatch.js'
+import {
   executeUserPromptSubmitHooks,
   getUserPromptSubmitHookBlockingMessage,
 } from '../hooks.js'
@@ -178,6 +182,39 @@ export async function processUserInput({
   // Execute UserPromptSubmit hooks and handle blocking
   queryCheckpoint('query_hooks_start')
   const inputMessage = getContentText(input) || ''
+
+  // Upstream `prompt.submit` — a mod attaches what the model reads beside the
+  // prompt and the user never sees, as `e.context`.
+  //
+  // Run before the settings.json hooks and outside `executeUserPromptSubmitHooks`,
+  // because this is upstream's event shape (`{text, context}`) rather than the
+  // host hook's (`hookSpecificOutput.additionalContext`). Bridging it through
+  // the hook system would have kept the old shape working but left a mod
+  // writing one dialect while reading another.
+  if (hasModHandlersFor('prompt.submit')) {
+    const submitted = await dispatchModEngine<{
+      text: string
+      context: string[]
+    }>(
+      'prompt.submit',
+      { text: inputMessage, context: [], wait: true, origin: 'user' },
+      async e => ({
+        text: typeof e.text === 'string' ? e.text : inputMessage,
+        context: Array.isArray(e.context) ? (e.context as string[]) : [],
+      }),
+    )
+    if (submitted.context.length > 0) {
+      result.messages.push(
+        createAttachmentMessage({
+          type: 'hook_additional_context',
+          content: submitted.context.map(applyTruncation),
+          hookName: 'mod:prompt.submit',
+          toolUseID: `hook-${randomUUID()}`,
+          hookEvent: 'prompt.submit',
+        }),
+      )
+    }
+  }
 
   for await (const hookResult of executeUserPromptSubmitHooks(
     inputMessage,

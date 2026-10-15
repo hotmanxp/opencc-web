@@ -1,12 +1,12 @@
 /**
  * 入站消息去重缓存(TTL 5 分钟)。
  *
- * 两类指纹(key):
- *   - message_id:iLink 给每条消息分配唯一 ID,正常情况下唯一。
- *   - content:<sender>:<md5(text)>:内容指纹,捕捉 iLink 偶发重复 + 文本 debounce
- *     合并前的同文本多次入站。
+ * key 空间只有一种:iLink 的 `message_id`(每条消息唯一)。曾有过第二层
+ * `content:<sender>:<md5(text)>` 内容指纹,已删除 —— 它把 message_id 不同、
+ * 文本相同的合法重复消息判成重复并静默丢弃,命中续期还让它永久锁死。
  *
- * 命中即续期(返回 true 并刷新 expiresAt),避免短时间内反复击中。
+ * 命中即续期(返回 true 并刷新 expiresAt)。对 message_id 而言续期无害:
+ * 服务端重投同一条消息时 id 不变,单层已经够用。
  */
 export interface MessageDeduplicatorOptions {
   ttlSeconds?: number

@@ -24,4 +24,3 @@ export {
 } from './skills-substitute.js'
 export { loadSkillsFromDirs } from './skills-loader.js'
 export type { LoadSkillsOptions, ConditionalSkill } from './skills-loader.js'
-export { buildSkillsSystemPrompt } from './skills-promptBuilder.js'

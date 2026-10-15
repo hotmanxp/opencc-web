@@ -18,13 +18,30 @@ function mockMatchMedia(matches: boolean) {
   vi.spyOn(window, 'matchMedia').mockImplementation(() => mql)
 }
 
+// App 渲染整棵树,useEventStream 的 effect 会走 subscribeServerEvents →
+// `new EventSource(url)`。happy-dom 不提供 EventSource global,缺了它 4 条
+// 主题用例全挂在 "EventSource is not defined",还会在 react-dom 的
+// flushPassiveEffects 里连环抛 "Should not already be working"。
+// 本文件只断言主题,不需要真的 SSE 连接 —— 空壳够用(同 lib/eventSource.test.ts
+// 的 MockEventSource 思路,那边才需要 addEventListener 派发事件)。
+class NoopEventSource {
+  close = vi.fn()
+  onmessage: unknown = null
+  onopen: unknown = null
+  onerror: unknown = null
+  addEventListener() {}
+  removeEventListener() {}
+}
+
 describe('App theme wiring', () => {
   beforeEach(() => {
+    vi.stubGlobal('EventSource', NoopEventSource)
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise(() => {}))
     useAppStore.setState({ settingsTheme: 'auto' })
     document.documentElement.dataset.theme = ''
   })
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
     document.documentElement.dataset.theme = ''
   })

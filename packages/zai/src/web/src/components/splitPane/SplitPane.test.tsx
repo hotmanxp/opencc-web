@@ -21,6 +21,14 @@ vi.mock('./useFsList.js', () => ({
 vi.mock('./useFsFile.js', () => ({
   useFsFile: () => ({ data: null, loading: false, error: null }),
 }));
+// MonacoCodeView 静态 import 了 monaco-editor + 23 个 language contribution,
+// vite 在测试环境下解析不到(模块只在浏览器构建时经 worker 加载),整个
+// SplitPane suite 会以 "Failed to resolve import monaco-editor" 挂掉。
+// SplitPane 只断言 tab 结构,不测编辑器内部,这里 stub 掉。
+vi.mock('./MonacoCodeView.js', () => ({
+  LazyMonacoCodeView: () => null,
+  MonacoCodeView: () => null,
+}));
 
 import { render, screen } from '@testing-library/react';
 import { SplitPane } from './SplitPane.js';

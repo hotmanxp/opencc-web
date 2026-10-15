@@ -246,7 +246,7 @@ function CodeBlock({
     );
   }
   const text = String(children).replace(/\n$/, "");
-  // Mermaid 路由:```mermaid``` 块走独立渲染器(beautiful-mermaid + 自写正则
+  // Mermaid 路由:```mermaid``` 块走独立渲染器(mermaid.js + 自写正则
   // sanitize),见 mermaidRenderer.ts。其它语言继续走 syntax highlighter。
   if (lang === "mermaid") {
     return <MermaidBlock code={text} />;

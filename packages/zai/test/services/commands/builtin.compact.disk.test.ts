@@ -26,12 +26,21 @@ const queryMock = vi.hoisted(() => ({
   ] as unknown[],
 }))
 
+// zai patch (2026-10-08, P2): 本文件锁定**自建**摘要路径的磁盘行为
+// (mock 的是 queryModelWithStreaming)。vendor 路径由
+// builtin.compact.vendor.test.ts 单独覆盖。默认实现已切到 vendor,
+// 这里显式退回,否则 mock 不命中、测试会打真实 vendor 链路。
+const VENDOR_ENV_KEY = 'ZAI_COMPACT_VENDOR'
+let priorVendorFlag: string | undefined
+
 let tmpDir: string
 let realStore: TranscriptStore
 let jsonlPath: string
 
 beforeEach(async () => {
   vi.resetModules()
+  priorVendorFlag = process.env[VENDOR_ENV_KEY]
+  process.env[VENDOR_ENV_KEY] = '0'
   queryMock.events = [
     {
       type: 'stream_event',
@@ -47,6 +56,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  if (priorVendorFlag === undefined) delete process.env[VENDOR_ENV_KEY]
+  else process.env[VENDOR_ENV_KEY] = priorVendorFlag
   await rm(tmpDir, { recursive: true, force: true })
 })
 
@@ -138,16 +149,43 @@ describe('compactCommand — real disk integration', () => {
     expect(lines).toHaveLength(4)
 
     // 顺序: [boundary, summary, a2, u3]
-    const parsed = lines.map((l) => JSON.parse(l) as { type: string; uuid?: string; message?: { content?: unknown } })
+    // zai patch (2026-10-08, P1.5): boundary 改成 vendor 形状
+    // type:'system' + subtype:'compact_boundary' —— vendor 的
+    // sessionStoragePortable.ts:499 要求两者同时匹配才认这是边界。
+    const parsed = lines.map((l) => JSON.parse(l) as {
+      type: string
+      subtype?: string
+      uuid?: string
+      parentUuid?: string
+      compactMetadata?: {
+        trigger: string
+        preTokens: number
+        messagesSummarized: number
+        preservedSegment?: { headUuid: string; anchorUuid: string; tailUuid: string }
+      }
+      message?: { content?: unknown }
+    })
     expect(parsed.map((m) => m.type)).toEqual([
-      'compact_boundary',
+      'system',    // boundary — vendor 形状
       'assistant', // summary
       'assistant', // a2 — 倒数第二条 user/assistant
       'user',      // u3 — 最后一条 user/assistant
     ])
+    expect(parsed[0]!.subtype).toBe('compact_boundary')
     expect(parsed[0]!.uuid).toBeTruthy() // boundary 有 uuid
     // boundary.parentUuid 必须指向压缩后真正最后一条 = keptRecent 最后一条 = u3
     expect(parsed[0]!.parentUuid).toBe(parsed[3]!.uuid)
+
+    // preservedSegment 锚点三元: head=保留段首条, tail=保留段末条,
+    // anchor=紧邻保留段之前的 summary(vendor relink 的挂载点)。
+    // 少了这组锚点,vendor 读盘时走「截断」分支,保留段链断不开。
+    const seg = parsed[0]!.compactMetadata?.preservedSegment
+    expect(seg).toBeDefined()
+    expect(seg!.headUuid).toBe(parsed[2]!.uuid)   // a2 = 保留段第一条
+    expect(seg!.tailUuid).toBe(parsed[3]!.uuid)   // u3 = 保留段最后一条
+    expect(seg!.anchorUuid).toBe(parsed[1]!.uuid) // summary
+    expect(parsed[0]!.compactMetadata?.trigger).toBe('manual')
+
     // summary 文本真的来自 queryModel mock
     expect(JSON.stringify(parsed[1]!.message?.content)).toContain('REAL DISK SUMMARY')
     // 保留段必须含原始 user/assistant 文本(不是空字符串)
@@ -181,8 +219,9 @@ describe('compactCommand — real disk integration', () => {
     const after2 = await readFile(jsonlPath, 'utf8')
     const lines2 = after2.split('\n').filter(Boolean)
     expect(lines2).toHaveLength(4)
-    const parsed2 = lines2.map((l) => JSON.parse(l) as { type: string })
-    expect(parsed2[0]!.type).toBe('compact_boundary')
+    const parsed2 = lines2.map((l) => JSON.parse(l) as { type: string; subtype?: string })
+    expect(parsed2[0]!.type).toBe('system')
+    expect(parsed2[0]!.subtype).toBe('compact_boundary')
     expect(parsed2[1]!.type).toBe('assistant')
   })
 })

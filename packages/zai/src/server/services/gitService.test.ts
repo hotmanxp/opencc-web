@@ -301,8 +301,49 @@ describe('gitService end-to-end (real git binary)', () => {
 
   test('diff returns a unified diff for a modified file', async () => {
     writeFileSync(join(repo, 'a.txt'), 'one\ntwo\n');
-    const text = await diff(repo, 'a.txt');
+    const { diff: text } = await diff(repo, 'a.txt');
     expect(text).toMatch(/two/);
+  });
+
+  test('diff synthesizes a whole-file addition for an untracked file', async () => {
+    writeFileSync(join(repo, 'new.ts'), 'const a = 1;\n');
+    const res = await diff(repo, 'new.ts');
+    expect(res.isUntracked).toBe(true);
+    expect(res.isBinary).toBe(false);
+    // Same shape `git add` would produce: new-file header + a single hunk
+    // whose every line is an addition.
+    expect(res.diff).toMatch(/new file mode/);
+    expect(res.diff).toMatch(/@@ -0,0 \+1(,1)? @@/);
+    expect(res.diff).toMatch(/^\+const a = 1;$/m);
+  });
+
+  test('diff reports an untracked binary file instead of dumping its bytes', async () => {
+    writeFileSync(join(repo, 'blob.bin'), Buffer.from([0x00, 0x01, 0x02, 0x00]));
+    const res = await diff(repo, 'blob.bin');
+    expect(res.isUntracked).toBe(true);
+    expect(res.isBinary).toBe(true);
+    expect(res.diff).toMatch(/Binary file/);
+    // No hunk header - none of the payload reaches the UI.
+    expect(res.diff).not.toMatch(/@@/);
+  });
+
+  test('diff reads the index side for a staged new file', async () => {
+    writeFileSync(join(repo, 'staged.ts'), 'export const b = 2;\n');
+    git(repo, ['add', 'staged.ts']);
+    // Worktree side is empty (index == worktree) — the panel must ask for the
+    // staged side or the right pane renders blank for every freshly added file.
+    expect((await diff(repo, 'staged.ts')).diff).toBe('');
+    const res = await diff(repo, 'staged.ts', true);
+    expect(res.diff).toMatch(/\+export const b = 2;/);
+  });
+
+  test('diff still renders a staged deletion after the file leaves the worktree', async () => {
+    git(repo, ['rm', '-q', 'a.txt']);
+    const res = await diff(repo, 'a.txt', true);
+    // `git rm` drops the path from the index, so it looks untracked — the
+    // existence check must keep it on the normal (staged) diff path.
+    expect(res.isUntracked).toBe(false);
+    expect(res.diff).toMatch(/-one/);
   });
 
   test('log returns the commit history', async () => {

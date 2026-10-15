@@ -70,29 +70,83 @@ const RuntimeEvent = z.discriminatedUnion('type', [
              error: z.object({ category: z.string(), message: z.string(),
                                recoverable: z.boolean() }),
              toolUseId: z.string().optional() }),
-  // 阶段 1 只有 trigger='auto'; manual 走原 kind:'compacted'(不变).
+  // zai patch (2026-10-12, compact 事件接线): postTokens / savedTokens 改
+  // optional —— vendor 的 compact boundary 消息 (systemFactories.ts:204
+  // createCompactBoundaryMessage) 的 compactMetadata 里**没有** post-compact
+  // token 数: `postCompactTokenCount` 只存在于 CompactionResult
+  // (services/compact/compact.ts:317),从没进过 boundary message. auto 路径
+  // (compact.ts:638) 只传 3 个实参, 连 messagesSummarized 都是 undefined.
+  // 之前这里写死必填, 接线时只能填 0 → UI 会显示「节省 0 tokens」说谎.
+  // 现在省略这两个字段, 由前端 applyCompactionEvent 分叉文案.
+  //
   // 同时 spread Base (拿到 eventId / ts) 与显式 timestamp: 前者是
   // ServerEvent union 共有, eventBus.history 续读 (Last-Event-ID 比对)
-  // 与 SSE id: line 推送都依赖; 后者是压缩事件的"语义时间" (brief
-  // Step 2 原文), 前端 applyCompactionEvent 用 timestamp + 5000ms 计算
-  // toast expiresAt. Base.ts 与 timestamp 同时存在 → emit 时两条都填,
+  // 与 SSE id: line 推送都依赖; 后者是压缩事件的"语义时间"
+  // (brief Step 2 原文), 前端 applyCompactionEvent 用 timestamp + 5000ms
+  // 计算 toast expiresAt. Base.ts 与 timestamp 同时存在 → emit 时两条都填,
   // 客户端可任选. zod discriminatedUnion 允许成员字段冗余, 字段全集
   // (spread 后的 Base + 显式 timestamp) 完全合法.
   z.object({ ...Base.shape, type: z.literal('runtime.compacted'),
              sessionId: z.string(),
              trigger: z.enum(['auto', 'manual']),
              preTokens: z.number(),
-             postTokens: z.number(),
-             savedTokens: z.number(),
+             postTokens: z.number().optional(),
+             savedTokens: z.number().optional(),
              timestamp: z.number() }),
-  // runtime.retrying: emitted when the model caller retries after a recoverable
-  // error (e.g. 529 overload). Frontend uses this to show a retrying toast.
-  z.object({ ...Base.shape, type: z.literal('runtime.retrying'),
-             sessionId: z.string(), turnIndex: z.number(),
-             attempt: z.number(),
-             delayMs: z.number(),
-             nextAttemptAtMs: z.number(),
-             category: z.enum(['llm_provider_overloaded', 'llm_provider_server', 'llm_provider_rate_limit']) }),
+  // zai patch (2026-10-12): compact_boundary —— 会话被压缩的分界线, 落进
+  // 前端 messages 而非 toasts, 是 transcript 里**常驻**的那一条(刷新后
+  // 仍在); runtime.compacted 是 5s 就消失的一次性提示. 两者配套.
+  //
+  // 为什么需要独立事件: vendor 的压缩边界是以 `system` + `subtype:
+  // 'compact_boundary'` 的 Message 形式 yield 出来的
+  // (opencc-src/query.ts 的 `for (const message of postCompactMessages)
+  // yield message`), compat/runtime/sdkEventAdapter.ts:109 明确放行、:251
+  // 直通成 RuntimeEvent —— 但 translator 一直没有 case 'system', 落到
+  // `default: break` 被静默丢弃. 这是"压缩时 UI 毫无反应"的根因之一.
+  //
+  // 形态与 loadTranscriptMessages 的历史回放**共用一个 type**, 所以实时流与
+  // 刷新回放走同一套渲染分支, 不必写两份。
+  //
+  // 但两条路径的**内容完整度不同**, 别按"完全一致"理解: 回放路径会额外把
+  // auto 摘要正文挂到 summary 字段(attachSummaryToBoundary), 实时路径拿不到
+  // —— vendor 的摘要是 user 消息带 isCompactSummary, 而 adapter 对 user 消息
+  // 只在含 tool_result 块时才产出事件(sdkEventAdapter.ts 的 tool_result
+  // 分支), 纯文本摘要走空循环直接 return, 事件流里根本没有它。
+  // 后果: 实时分界线没有展开箭头(CompactBoundaryDivider 对无 summary 的情况
+  // 渲染静态线), 刷新后才出现 ▼。这是已知取舍, 不是 bug —— 要消掉得让
+  // adapter 为 isCompactSummary 单独产出一条事件, 属于跨 core 的改动。
+  z.object({ ...Base.shape, type: z.literal('compact_boundary'),
+             sessionId: z.string(),
+             trigger: z.enum(['auto', 'manual']),
+             preTokens: z.number(),
+             messagesSummarized: z.number().optional() }),
+  // zai patch (2026-10-12): runtime.compacting —— 压缩**过程中**的状态翻转,
+  // 前端据此渲染「正在压缩…」。与同组的两个事件分工:
+  //   runtime.compacting  → 过程态,开始时 true、结束时 false(不落 messages)
+  //   runtime.compacted   → 事后 toast(5s 自动消失)
+  //   compact_boundary    → transcript 里常驻的分界线(刷新后仍在)
+  //
+  // 为什么需要独立事件:压缩常耗时数十秒,此前这段时间 UI 完全无反馈,用户
+  // 不知道发生了什么,容易重复点击。vendor 的 `compact_start`/`compact_end`
+  // 信号原先无人接 —— compat/repl/buildReplToolUseContext 刻意不提供
+  // onCompactProgress / setSDKStatus(见该文件模块注释),vendor 全部用
+  // optional call,键缺失即静默 no-op。现已在 core 侧透出并接到 REPL 事件流
+  // (compat/repl/createReplSession.ts 的 onCompactProgress 回调)。
+  //
+  // 单个布尔而非 start/end 两个 type:重复事件在消费端幂等(见
+  // useAgentStore.applyCompactingEvent 的 ref 语义),合并成一个可翻转状态后
+  // 乱序/重放都不会产生「关不掉」的中间态。
+  z.object({ ...Base.shape, type: z.literal('runtime.compacting'),
+             sessionId: z.string(),
+             compacting: z.boolean() }),
+  // zai patch 2026-10-12: 删掉 runtime.retrying。
+  // 它此前有 schema + useAgentStore 的 case + 单测, 但**全仓没有任何生产者**
+  // —— 后台重试循环(DefaultBackgroundRuntime.runOne 的 catch 分支)只
+  // classifyRetryableError + retrySleep, 不 emit 任何事件。于是它是一条
+  // 永远跑不到的死路径, 且因为没进 eventSource 的 NAMED_EVENT_TYPES,
+  // 连"事件发了被丢"都不会发生。
+  // 真要做重试提示, 该在重试循环 emit 并经 stateChangeBus → stateBridge
+  // → SSE 打通, 而不是留一个孤立的 schema。
 ])
 
 const SessionEvent = z.discriminatedUnion('type', [
@@ -168,7 +222,11 @@ const PromptEvent = z.discriminatedUnion('type', [
 
 const SystemEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('server.connected'),
-             sessionId: z.string().nullable() }),
+             sessionId: z.string().nullable(),
+             // 本进程启动标识。seq 是进程内计数器,重启后从 0 重数;客户端
+             // 拿它判断「seq 高水位是否已失效」并重置 lastSeqBySession
+             // (见 useAgentStore.noteServerBootId)。可选,兼容老服务端。
+             bootId: z.string().optional() }),
   z.object({ ...Base.shape, type: z.literal('server.error'),
              message: z.string() }),
   z.object({ ...Base.shape, type: z.literal('toast'),
@@ -192,7 +250,13 @@ const SystemEvent = z.discriminatedUnion('type', [
   // 比较 → 必要时 `npm install -g`,全程异步,通过这些事件把阶段
   // 同步给前端。payload 故意不带 sessionId(纯 system 级事件),
   // eventBus.isGlobalEvent() 必须显式登记才能跨 sid 广播。
+  //
+  // checking 与 idle 互为收尾:前端「正在检查」通知 duration:0(不自动
+  // 消失),只能靠终态事件销毁。没有 idle 就没有终态,「已是最新」时
+  // 通知会永久悬挂。
   z.object({ ...Base.shape, type: z.literal('app.update.checking') }),
+  z.object({ ...Base.shape, type: z.literal('app.update.idle'),
+             reason: z.enum(['up-to-date','no-version','no-status','check-failed']) }),
   z.object({ ...Base.shape, type: z.literal('app.update.installing'),
              from: z.string(), to: z.string() }),
   z.object({ ...Base.shape, type: z.literal('app.update.complete'),
@@ -299,14 +363,13 @@ const CommandEvent = z.discriminatedUnion('type', [
     sessionId: z.string(),
     commandId: z.string(),
     name: z.string(),
-    // 出口类型: 'cleared' / 'compacted' / 'status' / 'message' / 'prompt' /
+    // 出口类型: 'cleared' / 'compacted' / 'message' / 'prompt' /
     // 'error' / 'unknown'。union 与 routes/command.ts 的 res.json 类型严格
     // 对齐,新增 kind 时必须同步这里(以及 routes/command.ts 的 res.json),
     // zod 编译期拦截飘移。
     result: z.enum([
       'cleared',
       'compacted',
-      'status',
       'message',
       'prompt',
       'error',

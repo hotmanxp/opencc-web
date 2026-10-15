@@ -28,6 +28,7 @@ export function usePlugins(enabled: boolean) {
   const [status, setStatus] = useState<FetchStatus>('idle')
   const [writing, setWriting] = useState<WriteState>({})
   const [addingMarketplace, setAddingMarketplace] = useState(false)
+  const [updatingMarketplace, setUpdatingMarketplace] = useState<string | undefined>()
 
   const refresh = useCallback(async () => {
     if (!enabled) return
@@ -83,6 +84,23 @@ export function usePlugins(enabled: boolean) {
     }
   }, [])
 
+  /**
+   * 刷新单个市场来源的上游清单 — 同 `addMarketplace`,网络操作可能较慢,
+   * 用 `updatingMarketplace` 存市场名(而非按 id 索引的 `writing`,那个是
+   * 插件维度的),这样行内 loading 与「其余行禁用」都能精确到单个来源.
+   */
+  const updateMarketplace = useCallback(async (name: string): Promise<MarketplaceActionResult> => {
+    setUpdatingMarketplace(name)
+    try {
+      const r = await api.post<MarketplaceActionResult>('/plugins/marketplaces/update', { name })
+      if (r.marketplaces) setMarketplaces(r.marketplaces)
+      if (r.available) setAvailable(r.available)
+      return r
+    } finally {
+      setUpdatingMarketplace(undefined)
+    }
+  }, [])
+
   return {
     installed,
     available,
@@ -90,9 +108,11 @@ export function usePlugins(enabled: boolean) {
     status,
     writing,
     addingMarketplace,
+    updatingMarketplace,
     refresh,
     write,
     addMarketplace,
+    updateMarketplace,
     setInstalled,
   }
 }

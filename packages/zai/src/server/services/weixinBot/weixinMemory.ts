@@ -27,6 +27,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { weixinDataDir } from '../paths.js'
+// cwd → 目录名的唯一权威实现(与 transcript 写方共用,见下方注释)。
+import { sanitizePath } from '@zn-ai/zn-agent-core'
 
 const FILE_MODE = 0o600
 /** 注入 prompt 的长期记忆最大字节数(超限截断并提示)。 */
@@ -67,17 +69,25 @@ export function weixinRotationsDir(conversationKey: string): string {
 // ─── 摘要输入:旧 transcript 读取 ─────────────────────────────────────
 
 /**
- * 与 zn-agent-core compat/transcript/paths.ts 的 sanitizePath 同算法
- * (非字母数字 → '-',>80 截断加 djb2 后缀)。这里复制实现避免跨包
- * 导出私有 util。
+ * cwd → 目录名的算法**必须**与写方一致,否则读到的永远是空。
+ *
+ * 写方是 `zn-agent-core` 的 TranscriptStore / sessionFacade:
+ *   `${dataDir}/projects/${sanitizePath(cwd)}/${sessionId}.jsonl`
+ * (`compat/runtime/legacyTranscriptStore.ts` + `opencc-src/server/sessionFacade-impl.ts:72-78`,
+ * 200 字符阈值 + djb2 减法哈希)。因此这里**直接从主入口 import**,
+ * 不要在本文件内联第 N+1 份副本 —— 本仓库历史上已有 4 份阈值/哈希各不相同的
+ * `sanitizePath`(compat/transcript/paths.ts 是 80 + 加法哈希,
+ * opencc-src/utils/sessionStoragePortable.ts 优先用 Bun.hash),错配哪一份都是
+ * 静默空转。
+ *
+ * 旧实现在这里内联了一份 `(h << 5) + h` / 80 字符的变体,又去读
+ * `${dataDir}/transcripts/projects/<..>.json`(平铺 JSON 而非 projects 下的
+ * JSONL),四重不匹配(目录 / 扩展名 / 格式 / 阈值),于是
+ * `readTranscriptExcerpt` 恒返回 [] → 跨会话记忆整条链路静默空转
+ * (docs/bugs/fix-plan-10-05.md H4)。磁盘上残留的 `{version, transcriptId,
+ * meta, messages}` 形状的老 `.json` 正是读取方解析器期待的形状 —— 读取方是照着
+ * 更早一版的写入方写的,写入方后来搬走了,读取方从未跟进。
  */
-function sanitizePath(cwd: string): string {
-  const sanitized = cwd.replace(/[^a-zA-Z0-9]/g, '-')
-  if (sanitized.length <= 80) return sanitized
-  let h = 5381
-  for (let i = 0; i < cwd.length; i++) h = ((h << 5) + h + cwd.charCodeAt(i)) | 0
-  return `${sanitized.slice(0, 80)}-${Math.abs(h).toString(36)}`
-}
 
 /** 提取一条 transcript 记录的可读文本(角色 + 文本块),失败返回 null。 */
 function extractReadable(entry: unknown): { role: string; text: string } | null {
@@ -104,27 +114,35 @@ function extractReadable(entry: unknown): { role: string; text: string } | null 
   return { role, text }
 }
 
-/** 读旧 session 的 transcript,返回最近 N 条可读消息(时间正序)。 */
+/**
+ * 读旧 session 的 transcript(JSONL),返回最近 N 条可读消息(时间正序)。
+ *
+ * JSONL 里每行一条记录,会话元信息与部分工具结果混在消息条目之间
+ * (`session-meta` / `custom-title` / tool_result 等),`extractReadable` 对没有
+ * role 的行返回 null,自然过滤掉。单行损坏跳过,不拖垮整份 transcript。
+ */
 export function readTranscriptExcerpt(dataDir: string, sessionId: string, cwd: string): Array<{ role: string; text: string }> {
-  const base = join(dataDir, 'transcripts')
   const candidates = cwd
-    ? [join(base, 'projects', sanitizePath(cwd), `${sessionId}.json`), join(base, `${sessionId}.json`)]
-    : [join(base, `${sessionId}.json`)]
+    ? [join(dataDir, 'projects', sanitizePath(cwd), `${sessionId}.jsonl`)]
+    : []
   for (const path of candidates) {
     if (!existsSync(path)) continue
     try {
-      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown
-      const list = Array.isArray(parsed)
-        ? parsed
-        : typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { messages?: unknown[] }).messages)
-          ? (parsed as { messages: unknown[] }).messages
-          : []
-      const readable = list
-        .map(extractReadable)
+      const raw = readFileSync(path, 'utf-8')
+      const readable = raw
+        .split('\n')
+        .filter((line) => line.trim().length > 0)
+        .map((line) => {
+          try {
+            return extractReadable(JSON.parse(line))
+          } catch {
+            return null // 单行损坏 → 跳过
+          }
+        })
         .filter((x): x is { role: string; text: string } => x !== null)
       return readable.slice(-SUMMARY_MAX_MESSAGES)
     } catch {
-      // 损坏文件 → 尝试下一个候选
+      // 读失败(权限 / 编码)→ 尝试下一个候选
     }
   }
   return []

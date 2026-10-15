@@ -25,13 +25,14 @@ import {
 } from '../../../shared/weixin.js'
 import { ensureWeixinDirs } from '../paths.js'
 import { registerBuiltinWeixinCommands } from './weixinCommands.js'
-import { writeFile, mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import QRCode from 'qrcode'
 import { isManagedChild } from '../../../cli/managedChild.js'
 import { isWeixinChannelHost, DEFAULT_WEIXIN_INSTANCE_PORT } from './channelProfile.js'
 import { getCachedZaiSettingsSync } from '../zaiSettingsStore.js'
+import { atomicWriteFile } from '../../utils/atomicWrite.js'
 import {
   WeixinOwnerLock,
   buildSelfOwnerInfo,
@@ -463,6 +464,26 @@ export class WeixinBotManager {
       return
     }
 
+    // 入站媒体只增不删(实测 ~/.zai/weixin/media/ 已 79MB),启动时按 30 天
+    // 保留期清扫。失败不阻断启动 —— 回收是 housekeeping,不是启动前提。
+    //
+    // 必须把会话 cwd 传进去:镜像目录 `<cwd>/.zai/weixin-media/` 才是
+    // transcript 实际引用的那一份,清主目录清不到它们(那也是占空间的一半)。
+    try {
+      const { sweepAllMedia } = await import('./stores/MediaRetention.js')
+      const bindings = await this.listSessionBindings()
+      const cwds = [...new Set(bindings.map((b) => b.cwd).filter((c): c is string => !!c))]
+      const swept = await sweepAllMedia(cwds)
+      if (swept.removed > 0) {
+        weixinDiag(
+          `[weixin] media retention: removed ${swept.removed}/${swept.scanned} file(s) ` +
+          `across ${cwds.length} session cwd(s), ${(swept.freedBytes / 1024 / 1024).toFixed(1)}MB freed`,
+        )
+      }
+    } catch (err) {
+      console.warn('[weixin] media retention sweep failed:', err)
+    }
+
     this.setState('connecting')
 
     // ── P5:机器级全局单实例锁 ───────────────────────────────────────
@@ -609,7 +630,9 @@ export class WeixinBotManager {
       ilinkUserId,
       createdAt: new Date().toISOString(),
     }
-    await writeFile(path, JSON.stringify(payload, null, 2), { mode: 0o600 })
+    // tmp+rename;`mode` 落在 tmp inode 上并被 rename 带过去,所以凭据文件
+    // 仍然是 0600(既不会短暂 world-readable,也不会在写崩时变成 0 字节)。
+    await atomicWriteFile(path, JSON.stringify(payload, null, 2), { mode: 0o600 })
   }
 
   async loadAccount(accountId: string): Promise<{ token: string; baseUrl?: string; ilinkUserId?: string } | null> {
@@ -674,7 +697,7 @@ export class WeixinBotManager {
 
   // ─── 内部:入站派发 ──────────────────────────────────────────
 
-  private _onInbound(msg: InternalWeixinMessage): void {
+  private _onInbound(msg: InternalWeixinMessage): void | Promise<void> {
     if (!this.adapter) return
     // 面板「最近入站消息」数据源(环形缓冲,最多 50 条)。放在最前面:
     // 即使后面 deliver 抛错,用户也能在面板看到「消息到了」。
@@ -714,8 +737,10 @@ export class WeixinBotManager {
       this.lastError = `eventBus.emit weixin.inbound failed: ${(err as Error).message}`
     }
     // P0:注入 agent 运行时。deliver 内部自带幂等 + 异常兜底,
-    // 绝不向上抛打挂 poll loop。
-    void this.bridge.deliver(msg)
+    // 绝不向上抛打挂 poll loop。返回它的 promise —— adapter 靠这个返回值
+    // 作为「本条消息已落 pending」的屏障,落盘完成前不推进持久化游标
+    // (见 WeixinAdapter._advanceCursor)。
+    return this.bridge.deliver(msg)
   }
 
   // ─── 出站镜像:订阅 runtime.* ─────────────────────────────────

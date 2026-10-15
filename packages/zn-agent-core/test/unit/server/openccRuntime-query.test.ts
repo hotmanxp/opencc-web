@@ -115,13 +115,28 @@ describe('createOpenccRuntime', { timeout: 30_000 }, () => {
   })
 
   it('query() returns an AsyncIterable that can be cancelled mid-stream', async () => {
-    // The actual streaming event flow requires a real modelCaller
-    // (vendor's `buildSystemInitMessage` + `recordTranscript` read
-    // message.content/stop_reason that the SDK-shape model only
-    // provides). This test verifies the *surface*: query() returns
-    // an AsyncIterable, and abort() mid-stream tears down the
-    // generator without throwing.
-    const r = await runtime()
+    // Must inject a custom `query` so vendor's defaultQuery (which would
+    // dial the real Anthropic API) never runs. Without it the inner
+    // `while (true) { await stream.next() }` loop waits on a model stream
+    // that abort never closes, and the drain below hangs until the suite
+    // timeout — which is what this test did before the mock was added.
+    // (The beforeAll comment above claims a custom query is passed; until
+    // now runtime() never forwarded one.)
+    let resolveStream: (() => void) | undefined
+    const streamGate = new Promise<void>(resolve => {
+      resolveStream = resolve
+    })
+    const r = await runtime({
+      query: async function* () {
+        // Yield one message, then park forever so the test controls when
+        // (and whether) the stream ends.
+        yield {
+          type: 'assistant',
+          message: { id: 'msg-1', type: 'message', role: 'assistant', model: 'test', content: [], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } },
+        }
+        await streamGate
+      },
+    })
     const input = {
       sessionId: 'session-1',
       prompt: 'hello',
@@ -130,23 +145,28 @@ describe('createOpenccRuntime', { timeout: 30_000 }, () => {
     const stream = r.query(input)
     // AsyncIterable contract: must have Symbol.asyncIterator.
     expect(typeof stream[Symbol.asyncIterator]).toBe('function')
-    // Calling abort before the stream is fully consumed must not
-    // throw — the runtime should signal cancellation cleanly.
-    const abortPromise = r.abort()
+    const iterator = stream[Symbol.asyncIterator]()
+    // Prime the generator BEFORE aborting. `query` is an async generator,
+    // so its body (which creates queryAbortController and registers it in
+    // queryAbortControllers) does not run until the first next(). Calling
+    // abort() any earlier finds an empty map, misses, and leaves the drain
+    // loop waiting on a cancellation that can never arrive.
+    const first = await iterator.next()
+    expect(first.done).toBe(false)
+    // Stream is now parked inside the mock — abort it and release the gate.
+    const abortPromise = r.abort('session-1')
     expect(abortPromise).toBeInstanceOf(Promise)
-    // Drain whatever the stream produced (may be empty or one
-    // system-init event) — just verify the loop terminates.
-    const drained: unknown[] = []
-    try {
-      for await (const event of stream) drained.push(event)
-    } catch {
-      // Abort during streaming may surface as a throw on the
-      // pending yield — that's acceptable per the brief
-      // ("abort 会同时取消 model/tool signal").
-    }
     await abortPromise
+    resolveStream?.()
+    // The drain loop must terminate now that the source stream has ended.
+    const drained: unknown[] = [first.value]
+    while (true) {
+      const next = await iterator.next()
+      if (next.done) break
+      drained.push(next.value)
+    }
     await r.shutdown()
-    void drained
+    expect(drained.length).toBeGreaterThan(0)
   })
 
   it('delegates session CRUD to the session facade and makes shutdown idempotent', async () => {

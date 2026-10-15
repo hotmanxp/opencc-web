@@ -55,12 +55,6 @@ import {
 } from './permissionsLoader.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const classifierDecisionModule = true
-  ? (require('./classifierDecision.js') as typeof import('./classifierDecision.js'))
-  : null
-const autoModeStateModule = true
-  ? (require('./autoModeState.js') as typeof import('./autoModeState.js'))
-  : null
 
 import {
   addToTurnClassifierDuration,
@@ -102,6 +96,8 @@ import {
   classifyYoloAction,
   formatActionForClassifier,
 } from './yoloClassifier.js'
+import * as classifierDecisionModule from './classifierDecision.js'
+import * as autoModeStateModule from './autoModeState.js'
 
 const CLASSIFIER_FAIL_CLOSED_REFRESH_MS = 30 * 60 * 1000 // 30 minutes
 

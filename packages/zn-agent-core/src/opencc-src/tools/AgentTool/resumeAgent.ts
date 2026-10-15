@@ -1,4 +1,5 @@
 import { promises as fsp } from 'fs'
+import type { UUID } from 'crypto'
 import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
 import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js'
@@ -269,6 +270,14 @@ export async function resumeAgentBackground({
               abortController: agentBackgroundTask.abortController!,
             },
             onCacheSafeParams,
+            // Module 1551: thread the UUIDs already on disk so runAgent
+            // can skip re-recording them. Build the set lazily from the
+            // resumed messages we just loaded.
+            recordedUuids: new Set<UUID>(
+              resumedMessages
+                .map(m => (m as { uuid?: UUID }).uuid)
+                .filter((u): u is UUID => typeof u === 'string'),
+            ),
           }),
         metadata,
         description: uiDescription,

@@ -1,11 +1,12 @@
 import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, Popconfirm, Select, Space, Modal, Tooltip, Tag, List } from 'antd';
 import IconButton from "../components/IconButton.js";
 import { PlusIcon, Trash2Icon, PencilIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ConfigTool, ProviderProfile, SystemInfo, ModelCapabilities, AgentsMdFile } from '@shared/types';
 import { BUILTIN_PROVIDERS } from '@shared/builtinProviders';
 import { api } from '../lib/api';
+import { LazyMonacoCodeView, type MonacoCodeViewApi } from '../components/splitPane/MonacoCodeView.js';
 
 const { Text } = Typography;
 
@@ -523,6 +524,12 @@ function JsonFileEditor({
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  // 编辑器打开时的磁盘快照 —— 保存时回传给服务端做三路合并(见 openEditor 注释)
+  const [mergeBase, setMergeBase] = useState<Record<string, unknown> | undefined>(undefined);
+  // 2026-09-27:与 FsTab 同样的 editorRef 模式,MonacoCodeView onReady 注入 api;
+  // handleSave 优先从 editorRef 取最新内容(JSON 编辑器可能实时改但 state 还没
+  // commit),fallback 到 draft state。
+  const editorRef = useRef<MonacoCodeViewApi | null>(null);
 
   const fetchContent = async () => {
     setLoading(true);
@@ -547,17 +554,28 @@ function JsonFileEditor({
     // When the file is missing, seed the editor with `defaultContent` (or {})
     // so the user can adjust before clicking save to create the file.
     const seed = missing ? (defaultContent ?? {}) : (content ?? {});
+    // Remember what the editor was seeded with. On save we send it back as
+    // `base` so the server can do a THREE-WAY merge (see
+    // docs/bugs/fix-plan-10-05.md H1): the editor buffer goes stale while the
+    // user edits it — the settings drawer or another zai process may write the
+    // same file meanwhile. A plain two-way merge would silently roll those
+    // writes back; with `base` the server knows which keys the user actually
+    // touched and leaves the rest at the on-disk value.
+    setMergeBase(seed as Record<string, unknown>);
     setDraft(JSON.stringify(seed, null, 2));
     setModalOpen(true);
   };
 
   const handleSave = async () => {
+    // 2026-09-27:从 MonacoCodeView api 取最新值(实时改但 state 还没 commit
+    // 的场景),fallback 到 draft state;对齐 FsTab 的 editorRef 模式。
+    const currentDraft = editorRef.current?.getValue() ?? draft;
     // Validate JSON before sending — the server is the source of truth but a
     // client-side check gives instant feedback and avoids round-trip on
     // obviously bad input.
     let parsed: unknown;
     try {
-      parsed = JSON.parse(draft);
+      parsed = JSON.parse(currentDraft);
     } catch (err) {
       message.error(`JSON 解析失败: ${(err as Error).message}`);
       return;
@@ -568,7 +586,11 @@ function JsonFileEditor({
     }
     setSaving(true);
     try {
-      await api.put(endpoint, parsed as Record<string, unknown>);
+      await api.put(endpoint, {
+        __editorMerge: true,
+        content: parsed as Record<string, unknown>,
+        base: mergeBase,
+      });
       message.success('配置已保存');
       setModalOpen(false);
       await fetchContent();
@@ -620,16 +642,23 @@ function JsonFileEditor({
         width={760}
         destroyOnClose
       >
-        <Input.TextArea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          autoSize={{ minRows: 16, maxRows: 30 }}
-          spellCheck={false}
-          className="text-xs"
-          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
-        />
+        {/* 2026-09-27:从 <Input.TextArea> 切到 LazyMonacoCodeView(JSON 语言)。
+            收益:括号配对/语法高亮/自动缩进/折叠,远超裸 textarea 的可读性。
+            documentKey=endpoint 让 Modal 重建时换 doc key → Monaco 切换 model
+            (避免旧内容残留)。Modal 760 宽对应 16-30 行,height: 460 固定。 */}
+        <div style={{ height: 460 }}>
+          <LazyMonacoCodeView
+            content={draft}
+            documentKey={`${endpoint}|${modalOpen}`}
+            fileName={title}
+            language="json"
+            editable={true}
+            onReady={(api) => { editorRef.current = api }}
+            onChange={(value) => setDraft(value)}
+          />
+        </div>
         <Text type="secondary" className="text-xs block mt-2">
-          必须是合法 JSON 对象。保存时自动校验。
+          必须是合法 JSON 对象。保存时自动校验。Cmd/Ctrl+F 查找。
         </Text>
       </Modal>
     </Card>
@@ -665,6 +694,9 @@ function AgentsMdEditor({
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  // 2026-09-27:Monaco editor ref,handleSave 优先从 api 取最新值(markdown
+  // 编辑器实时改但 state 还没 commit 的场景),fallback 到 draft state。
+  const editorRef = useRef<MonacoCodeViewApi | null>(null);
 
   const endpoint = `/config/${tool}/agents-md`;
 
@@ -695,10 +727,13 @@ function AgentsMdEditor({
   };
 
   const handleSave = async () => {
+    // 2026-09-27:从 editorRef 取最新 markdown 内容(Monaco 编辑器实时改但
+    // React state 还没 commit 的场景),fallback 到 draft state。
+    const currentDraft = editorRef.current?.getValue() ?? draft;
     setSaving(true);
     try {
       // 纯文本:不做 JSON/语法校验,服务端只校验 content 字段是 string。
-      await api.put(endpoint, { content: draft });
+      await api.put(endpoint, { content: currentDraft });
       message.success(missing ? 'AGENTS.md 已创建' : 'AGENTS.md 已保存');
       setModalOpen(false);
       await fetchContent();
@@ -750,17 +785,23 @@ function AgentsMdEditor({
         width={760}
         destroyOnClose
       >
-        <Input.TextArea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          autoSize={{ minRows: 16, maxRows: 30 }}
-          spellCheck={false}
-          placeholder={missing ? '# AGENTS.md\n\n在此编写工具说明...' : undefined}
-          className="text-xs"
-          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
-        />
+        {/* 2026-09-27:从 <Input.TextArea> 切到 LazyMonacoCodeView(markdown 语言)。
+            收益:标题/列表/代码块语法高亮、自动列表续行、Cmd/Ctrl+F 查找,
+            远超裸 textarea。modalOpen 进 documentKey,关掉 Modal 触发 model
+            切换,避免下次打开时残留旧内容。 */}
+        <div style={{ height: 460 }}>
+          <LazyMonacoCodeView
+            content={draft}
+            documentKey={`${endpoint}|${modalOpen}`}
+            fileName={`${label} AGENTS.md`}
+            language="markdown"
+            editable={true}
+            onReady={(api) => { editorRef.current = api }}
+            onChange={(value) => setDraft(value)}
+          />
+        </div>
         <Text type="secondary" className="text-xs block mt-2">
-          纯文本 (Markdown)。保存时使用原子写 (tmp + rename)。
+          纯文本 (Markdown)。保存时使用原子写 (tmp + rename)。Cmd/Ctrl+F 查找。
         </Text>
       </Modal>
     </Card>

@@ -11,10 +11,12 @@ import {
   message,
 } from 'antd';
 import {
-  CheckIcon,
-  GitBranchIcon,
+  FolderGit2Icon,
   GitCommitIcon,
+  GitForkIcon,
   LayersIcon,
+  MinusIcon,
+  PlusIcon,
   RotateCwIcon,
   Undo2Icon,
 } from 'lucide-react';
@@ -80,6 +82,7 @@ export function GitReviewPanel({ cwd }: { cwd: string | null }) {
         {showWorktreeSelector && (
           <Select
             size="small"
+            variant="borderless"
             style={{ minWidth: 180 }}
             value={selectedWorktree ?? review.worktrees.find((w) => w.current)?.path}
             onChange={(value) => {
@@ -103,9 +106,15 @@ export function GitReviewPanel({ cwd }: { cwd: string | null }) {
           options={[
             { label: '变更', value: 'changes', icon: <LayersIcon size={12} /> },
             { label: '提交', value: 'commits', icon: <GitCommitIcon size={12} /> },
-            { label: '分支', value: 'branches', icon: <GitBranchIcon size={12} /> },
+            { label: '分支', value: 'branches', icon: <GitForkIcon size={12} /> },
             ...(showWorktreeSelector
-              ? [{ label: 'Worktree', value: 'worktrees' as GitMode }]
+              ? [
+                  {
+                    label: 'Worktree',
+                    value: 'worktrees' as GitMode,
+                    icon: <FolderGit2Icon size={12} />,
+                  },
+                ]
               : []),
           ]}
         />
@@ -118,6 +127,7 @@ export function GitReviewPanel({ cwd }: { cwd: string | null }) {
         </span>
         <Button
           size="small"
+          type="text"
           icon={<RotateCwIcon />}
           loading={review.loading}
           onClick={review.refetch}
@@ -233,7 +243,19 @@ export function GitReviewPanel({ cwd }: { cwd: string | null }) {
           ) : review.diff.error ? (
             <Empty description={review.diff.error} />
           ) : review.diff.text ? (
-            <DiffViewByFile diff={review.diff.text} />
+            <>
+              {(review.diff.isUntracked || review.diff.isBinary) && (
+                <div
+                  data-testid="git-diff-hint"
+                  className="mb-2 shrink-0 text-[11px] text-[var(--text-dim-55)]"
+                >
+                  {review.diff.isBinary
+                    ? '二进制文件 — 无文本内容,不显示行级差异'
+                    : '未跟踪文件 — 下方为整份新增内容(暂存后仍是全量新增)'}
+                </div>
+              )}
+              <DiffViewByFile diff={review.diff.text} />
+            </>
           ) : (
             <Empty
               description={
@@ -320,7 +342,7 @@ function ChangesList(props: ChangesListProps) {
                     <Button
                       size="small"
                       type="text"
-                      icon={<Undo2Icon size={12} />}
+                      icon={<MinusIcon size={12} />}
                       onClick={(e) => {
                         e.stopPropagation();
                         void onUnstage(entry.path);
@@ -344,31 +366,18 @@ function ChangesList(props: ChangesListProps) {
               selected={selectedPath === entry.path}
               onClick={() => onSelect(entry.path)}
               actions={
-                entry.xy === '??' ? (
+                <Tooltip title="暂存">
                   <Button
                     size="small"
                     type="text"
-                    icon={<CheckIcon size={12} />}
+                    icon={<PlusIcon size={12} />}
                     onClick={(e) => {
                       e.stopPropagation();
                       void onStage(entry.path);
                     }}
                     data-testid={`git-stage-${entry.path}`}
                   />
-                ) : (
-                  <>
-                    <Button
-                      size="small"
-                      type="text"
-                      icon={<CheckIcon size={12} />}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void onStage(entry.path);
-                      }}
-                      data-testid={`git-stage-${entry.path}`}
-                    />
-                  </>
-                )
+                </Tooltip>
               }
               onRevert={() => onRevert(entry.path)}
             />

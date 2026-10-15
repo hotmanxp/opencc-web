@@ -24,6 +24,9 @@
  *   - `preventCwdChanges` (subagent path): vendor's `Shell.ts:425`
  *     guard skips `setCwdState`, so ctx.cwd stays at beforeCwd and
  *     we don't write — correct.
+ *   - **deleted cwd**: when the session's cwd no longer exists on disk
+ *     (`rm -rf`, `mv`, `git worktree remove`), `originalCwd` must not
+ *     point at the same dead path — see `isLiveDir` in `call()`.
  *   - `cwdOverrideStorage` ALS (vendor subagent isolation): takes
  *     priority over ctx.cwd in vendor's `pwd()` — wrap still writes
  *     CwdStore with the absolute path, but vendor's subagent
@@ -54,6 +57,8 @@
  * Exported for unit testing — see
  * test/unit/compat/bashCwdWrap.test.ts.
  */
+import { statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { CwdStore } from '../../cwdStore.js'
 import {
   runWithSdkContext,
@@ -64,6 +69,32 @@ import { getCurrentSessionId } from '../../runWithSessionId.js'
 type BashLikeTool = {
   call: (...args: unknown[]) => Promise<unknown>
   [k: string]: unknown
+}
+
+function isLiveDir(path: string): boolean {
+  try {
+    // statSync, not existsSync: existsSync also succeeds for a regular
+    // file at the same path, which would fail later with ENOTDIR.
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A directory that is still on disk, to anchor recovery when the
+ * session's own cwd has been deleted. `process.cwd()` throws ENOENT
+ * when the *server's* cwd was removed (the `git worktree remove` case),
+ * so fall back to the home directory, which always exists.
+ */
+function liveFallbackDir(): string {
+  try {
+    const p = process.cwd()
+    if (isLiveDir(p)) return p
+  } catch {
+    // process.cwd() itself threw — server cwd was deleted.
+  }
+  return homedir()
 }
 
 export function wrapBashToolWithCwdSync(tool: BashLikeTool): BashLikeTool {
@@ -91,11 +122,22 @@ export function wrapBashToolWithCwdSync(tool: BashLikeTool): BashLikeTool {
         return originalCall(input as never, toolUseContext as never, ...rest)
       }
       const beforeCwd = CwdStore.get(sid) ?? process.cwd()
+      // originalCwd must differ from cwd when the cwd is gone.
+      // vendor's recovery branch (opencc-src/utils/Shell.ts:247-260)
+      // stats cwd, and on failure falls back to `getOriginalCwd()`.
+      // When both hold the same deleted path, that branch can never
+      // fire and every Bash call in the session fails with
+      // `Working directory "..." is no longer a valid directory` —
+      // permanently, since nothing ever rewrites CwdStore. `cd` in a
+      // command doesn't help either: the check runs before spawn.
+      // Anchoring originalCwd on a live dir lets vendor's own
+      // self-heal run; ctx.cwd then gets rewritten to the fallback and
+      // the write-back below heals CwdStore on the same call.
       const ctx: SdkContext = {
         sessionId: sid as never, // SessionId is branded string
         sessionProjectDir: null,
         cwd: beforeCwd,
-        originalCwd: beforeCwd,
+        originalCwd: isLiveDir(beforeCwd) ? beforeCwd : liveFallbackDir(),
       }
       // CRITICAL: the tool result MUST be returned. vendor's caller
       // (opencc-src/services/tools/toolExecution.ts:1481) does

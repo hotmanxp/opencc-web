@@ -193,7 +193,7 @@ export default function McpServersSection({ drawerOpen }: { drawerOpen: boolean 
           </div>
         )}
 
-        {status && status.commands.length > 0 && (
+        {status?.commands && status.commands.length > 0 && (
           <div className="mt-3 text-xs text-[var(--text-dim-45)]">
             已注册 {status.commands.length} 个 MCP 命令(在输入框敲 <code>/</code> 可搜索)
           </div>

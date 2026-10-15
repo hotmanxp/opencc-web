@@ -6,6 +6,8 @@ const IdBody = z.object({ id: z.string().min(1) })
 
 const MarketplaceAddBody = z.object({ source: z.string().min(1) })
 
+const MarketplaceUpdateBody = z.object({ name: z.string().min(1) })
+
 function runtimeOr503(res: Response) {
   try {
     const r = getRuntime()
@@ -113,6 +115,18 @@ pluginsRouter.post('/marketplaces/add', async (req, res) => {
   const body = parseBody(MarketplaceAddBody, req, res)
   if (!body) return
   const result = await r.plugins.addMarketplace(body.source)
+  res.json(result)
+})
+
+// Like add, this hits the network (git pull / re-download) so it can be slow.
+// Same convention: failures come back as 200 + `{ success: false, message }`
+// so the UI can surface the vendor's error text verbatim.
+pluginsRouter.post('/marketplaces/update', async (req, res) => {
+  const r = runtimeOr503(res)
+  if (!r) return
+  const body = parseBody(MarketplaceUpdateBody, req, res)
+  if (!body) return
+  const result = await r.plugins.updateMarketplace(body.name)
   res.json(result)
 })
 

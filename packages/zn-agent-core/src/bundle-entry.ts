@@ -57,6 +57,64 @@ export { takePresentFileOutput } from './opencc-src/server/presentFileOpencc.js'
 // 共享 module 实例(STATE / commandQueue / bashTracker)。
 export { createHeadlessContext } from './opencc-src/server/createHeadlessContext.js'
 export { createSessionFacade } from './opencc-src/server/sessionFacade.js'
+// zai patch (2026-10-06, mods 同步): 用户 JS 扩展系统(src/mods/)的公共面。
+//
+// 加载本身已由 createHeadlessContext 内部触发(见
+// createHeadlessContext-impl.ts step 10b),这里导出的是 zai-server 可能
+// 要直接用的三块:
+//   - reloadMods / unloadMod / getModsDirectory —— 管理面(热重载、按需摘除)
+//   - buildModCommands                          —— 把 mod 命令并进 zai 的 slash 列表
+//   - getModTools / getModToolsVersion          —— 工具池变更信号(zai 侧要重算时)
+export {
+  unloadMod,
+  reloadMods,
+  loadMods,
+  getModsDirectory,
+  OPENCC_MODS_DIR_ENV,
+} from './opencc-src/mods/hooks.js'
+export type { ModLoadResult } from './opencc-src/mods/hooks.js'
+export { buildModCommands, getModTools } from './opencc-src/mods/engine.js'
+export {
+  getModToolsVersion,
+  subscribeModTools,
+  getLoadedMods,
+  unregisterMod,
+  getModFailureCount,
+  // zai patch (2026-10-06):per-session mod 门禁(mainAgent 第四槽)。
+  // zai-server 侧若要自己管门禁(如测试或多实例),用这四个。
+  setSessionModGate,
+  clearSessionModGate,
+  resetSessionModGatesForTesting,
+  isModVisibleForSession,
+  hasSessionModGate,
+} from './opencc-src/mods/registry.js'
+export type {
+  LoadedMod,
+  ModCommandSpec,
+  ModToolSpec,
+  ModHandler,
+} from './opencc-src/mods/registry.js'
+export type {
+  ModContext,
+  ModFsApi,
+  ModNotice,
+  // zai patch (2026-10-06):ModPaneSpec 已随 TUI 能力面删除(见
+  // opencc-src/mods/engine.ts 文件头)。Web UI 要做 mod 面板时,应在
+  // zai-web 侧新建组件 + 订阅 subscribeModNotices 那类通道。
+} from './opencc-src/mods/engine.js'
+export {
+  subscribeModNotices,
+  // zai patch (2026-10-06):ui.status 是 mod → 宿主单向数据推送,不绑定
+  // 渲染技术,故保留(给未来的 Web 状态栏/侧栏用)。pane 相关的
+  // getModPanesSnapshot / subscribeModPanes 已随 TUI 能力面删除。
+  subscribeModStatus,
+  getModStatusSnapshot,
+  emitModsSystemNotice,
+} from './opencc-src/mods/engine.js'
+export { registerBuiltinMod, loadBuiltinMods } from './opencc-src/mods/builtin.js'
+export type { BuiltinModSpec } from './opencc-src/mods/builtin.js'
+export { MOD_MANIFEST_FILE, ModManifestSchema } from './opencc-src/mods/manifest.js'
+export type { ModManifest } from './opencc-src/mods/manifest.js'
 // zai patch (2026-09-06): pre-API-call reminder provider registry — zai-server
 // registers a provider that drains its per-session SessionInbox on every
 // vendor query-loop iteration (mirrors vendor bg-daemon inbox pattern).
@@ -64,6 +122,13 @@ export {
   registerExtraReminderProvider,
   clearExtraReminderProviders,
 } from './opencc-src/utils/daemon/preApiCallReminders.js'
+// zai patch (2026-10-11, SessionStart 接线):headless 侧 SessionStart hook
+// 产出的附加上下文存储。createHeadlessContextImpl 写入,agentRuntime 注册
+// reminder provider 读出注入。见 server/sessionStartBridge.ts 的说明。
+export {
+  getSessionStartContexts,
+  clearSessionStartContexts,
+} from './opencc-src/server/sessionStartBridge.js'
 // zai patch (2026-09-23): skill 目录热更新 —— vendor 的 chokidar watcher。
 //
 // vendor 只在交互式入口 `opencc-src/main.tsx:463` 初始化它(`!isBareMode()`),
@@ -89,11 +154,14 @@ export * from './index.js'
 // 导出的是 opencc-src/query.ts 的真实 query)
 //
 // zai patch (2026-08-09): 暴露 vendor 的 queryModelWithStreaming 给 zai 直接复用。
-// zai 之前的 compat/runtime/compactService 通过显式注入 ModelCaller 调用 LLM,
-// 但 commit da5956c3 已经移除了 zai 自建 modelCaller 路径——模型调用全部走
-// vendor 的 query/deps.ts productionDeps().callModel = queryModelWithStreaming
-// (读 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL)。让 compat/compactSession 也
-// 内部直接走这条路径,统一调用语义,消除"modelCaller 未配置" 错误。
+// 模型调用统一走 vendor 的 query/deps.ts productionDeps().callModel =
+// queryModelWithStreaming(读 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL)。
+//
+// 2026-10-08 更新:曾提到「让 compat/compactSession 也内部走这条路径」——
+// 那条 shim 已随 P3-1 删除(恒依赖已被移除的 modelCaller,零生产调用方)。
+// 手动 /compact 现在走 vendor compactViaVendor(见下方 compactBridge 导出),
+// queryModelWithStreaming 的剩余消费者是 /compact 的自建回退路径
+// (ZAI_COMPACT_VENDOR=0 时)。
 export { queryModelWithStreaming } from './opencc-src/services/api/claude.js'
 export { asSystemPrompt } from './opencc-src/utils/systemPromptType.js'
 // zai patch (2026-08-20): buildTool + z 供外置主 agent JS(~/.zai/main-agents/*.js)
@@ -210,7 +278,12 @@ export {
   getTaskListStore,
   setTaskListStore,
 } from './compat/taskListStore.js'
-export type { TaskItem, TaskStatus } from './compat/taskListStore.js'
+// 这里的 `TaskStatus` 是 vendored TaskUpdateTool 的那套
+// ('pending' | 'in_progress' | 'completed' | 'deleted'),与下面 taskFactoryFiles
+// 导出的那套 ('queued' | 'processing' | ... ) 是**同名不同义**的两个类型。
+// 主入口只能承载一个 `TaskStatus`,故把 taskFactoryFiles 的(语义更全,覆盖
+// paused/verifying)留在 `TaskStatus`,本套改用 `TaskListStatus` 出口。
+export type { TaskItem, TaskStatus as TaskListStatus } from './compat/taskListStore.js'
 
 // ./compat/vendor/ripgrep
 export {
@@ -230,6 +303,47 @@ export { hasExternalIncludes } from './compat/memory/loader.js'
 // ./opencc-src/services/api/sessionApiCounter(zai routes/agent.ts 用量统计)
 export * from './opencc-src/services/api/sessionApiCounter.js'
 
+// 压缩后缓存清理(zai 手动 /compact 调用)。
+//
+// 自动压缩走 vendor `autoCompact.ts`,内部已经调 runPostCompactCleanup +
+// markPostCompaction;但 zai 手动 /compact 是自建实现
+// (packages/zai/src/server/services/commands/builtin/compact.ts),绕开了整条
+// vendor 链路,于是 manual compact 后残留:microcompact 追踪状态、
+// getUserContext / getMemoryFiles memo、systemPromptSections、分类器审批、
+// Bash 权限推测、beta tracing、sessionMessages cache。`suppressCompactWarning`
+// 同理 —— vendor 参考实现(commands/compact/compact.ts:128)在成功压缩后调用,
+// 缺它会让「距下次 auto-compact 还剩多少」的提示继续按压缩前的 token 数显示。
+//
+// 这两个是 vendor 命令**层**的职责,`compactConversation` 自己不做,故必须由
+// 调用方显式补 —— 漏了就是上面那串残留。
+export { runPostCompactCleanup } from './opencc-src/services/compact/postCompactCleanup.js'
+export { suppressCompactWarning } from './opencc-src/services/compact/compactWarningState.js'
+
+// 手动 /compact 接 vendor 压缩链路的桥(P1/P2)。
+//
+// 导出 wrapper 而非 `compactConversation` 本体:后者有 6 个位置参数,其中
+// cacheSafeParams 依赖 getSystemPrompt / getUserContext / getSystemContext
+// 三个异步源,裸导出等于把易错细节推给每个调用方。bridge 内部照搬 vendor
+// 参考实现(opencc-src/commands/compact/compact.ts)的调用序列。
+// 落盘不在 bridge 职责内 —— compactConversation 自己不写盘,zai 侧仍用
+// store.replace()。详见 compat/compact/compactBridge.ts 模块注释。
+export { compactViaVendor } from './compat/compact/compactBridge.js'
+export type {
+  CompactViaVendorOptions,
+  CompactViaVendorResult,
+} from './compat/compact/compactBridge.js'
+// buildReplToolUseContext 供 zai 侧构造 vendor compactConversation 需要的
+// ToolUseContext;与 createReplSession 共用同一份形状(P1-1 抽出)。
+export { buildReplToolUseContext } from './compat/repl/buildReplToolUseContext.js'
+// zai patch (2026-10-12): 手动 /compact 与自动压缩共用的 vendor 压缩过程
+// 信号转换器(→ stateChangeBus)。两边同源: 都从 compactConversation 的
+// compact_start/compact_end 出发, 去重语义只有一份实现。
+export { createCompactProgressEmitter } from './compat/compact/compactProgress.js'
+export type {
+  CompactProgressEmitter,
+  VendorCompactProgressEvent,
+} from './compat/compact/compactProgress.js'
+
 // ./opencc-src/utils/model/genericModelCapabilities(zai profileProjection)
 export * from './opencc-src/utils/model/genericModelCapabilities.js'
 
@@ -248,7 +362,10 @@ export type * from './opencc-src/server/index.js'
 // 中"在主入口 graph 内未被引用"的符号砍掉;taskFactoryFiles.ts 内部只有
 // createPoolTask/getTaskSummary/deleteTasks/getTaskDetails 互相调用,
 // moveTask/markTaskStatus/emitTaskFactoryEvent/taskFactoryRoot/taskDir/
-// generateTaskId/bodyAfterFrontmatter 仅做出口,会被 tree-shake 掉。
+// generateTaskId 仅做出口,会被 tree-shake 掉。
+// (原注释还列了 `bodyAfterFrontmatter` —— 它在 taskFactoryFiles.ts 里根本
+//  不存在,是个幽灵导出:类型侧因为 bundle-entry.ts 被 typecheck exclude
+//  一直没人发现,运行时取到 undefined。已删除。)
 // 显式 export 把它们钉成活的。
 //
 // listTasks 与 vendor `utils/tasks.ts:listTasks(taskListId)` 同名重载冲突
@@ -273,7 +390,6 @@ export {
   taskFactoryRoot,
   taskDir,
   generateTaskId,
-  bodyAfterFrontmatter,
   // zai patch (2026-09-03, intake 文档强校验):新建任务弹窗关闭前校验用。
   checkTaskIntakeDocs,
 } from './opencc-src/server/taskFactoryFiles.js'
@@ -343,6 +459,12 @@ export type {
 // then sees no CliAgent tool.
 export { wrapCliAgentToolAsOpencc } from './compat/tools/opencc/CliAgentTool.js'
 
+// Same story as CliAgent above: subagent_control is only referenced inside
+// getAllBaseTools' array literal, so without a main-entry export esbuild
+// tree-shakes the module and the wrap function is undefined at runtime —
+// the model then sees no subagent_control tool at all.
+export { wrapSubagentControlAsOpencc } from './compat/tools/opencc/subagentControl.js'
+
 // zai patch (2026-09-10, tf-mynh1twy): plugin command channel — zai's registry
 // fill site (services/commands/registry.ts) registers vendor-loaded plugin
 // commands (source === 'plugin') into the compat command registry so slashList
@@ -352,3 +474,29 @@ export { wrapCliAgentToolAsOpencc } from './compat/tools/opencc/CliAgentTool.js'
 // dist/compat/commands/pluginCommands.d.ts, so the generated bundle-entry.d.ts
 // re-export target resolves without a DTS_PATH_REWRITE entry.
 export { getLoadedPluginCommands } from './compat/commands/pluginCommands.js'
+
+// zai patch (2026-09-28): per-model reasoning effort levels. zai's model
+// picker needs the *wire* vocabulary (low/medium/high/xhigh/max) declared per
+// integration catalog entry, which `utils/effort.ts::getAvailableEffortLevels`
+// does not expose — that returns opencc's internal EffortLevel and collapses
+// xhigh into max. MiniMax-M3.1-Flash-Preview ships five levels with max as the
+// default, so the four-level view silently both under-offers and mislabels.
+// Leaf export with no internal callers, so pin it explicitly (same tree-shaking
+// invariant as the pluginCommands block above).
+export {
+  getReasoningEffortLevelsForModel,
+  getDefaultReasoningEffortLevelForModel,
+} from './compat/model/reasoningEffortLevels.js'
+export type { ReasoningEffortLevel } from './compat/model/reasoningEffortLevels.js'
+
+// zai patch (2026-10-05): background-bash notification output path. zai's
+// BashNotifier builds its own <task-notification> (it cannot rely on vendor
+// commandQueue drain — see packages/zai/src/server/services/bashNotifier.ts
+// header), and after the 2026-10-05 revert it points the model at the task
+// output file instead of inlining stdout/stderr into a <result> block. It
+// needs the same path opencc's enqueueShellNotification computes, so expose
+// that helper rather than letting zai reach across the package boundary with
+// a relative import (which drags opencc-src/utils into zai's tsc program and
+// breaks its rootDir). Leaf export with no internal callers, so pin it
+// explicitly (same tree-shaking invariant as the blocks above).
+export { getTaskOutputPath } from './opencc-src/utils/task/diskOutput.js'

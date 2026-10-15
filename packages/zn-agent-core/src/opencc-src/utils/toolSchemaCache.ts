@@ -23,6 +23,49 @@ export function getToolSchemaCache(): Map<string, CachedSchema> {
 
 export function clearToolSchemaCache(): void {
   TOOL_SCHEMA_CACHE.clear()
+  TOOL_DESCRIBE.clear()
+}
+
+/**
+ * Drop one tool's memoized schema, leaving every other tool's alone.
+ *
+ * Used by `tool.describe`: a hook that changes a tool's description has to
+ * reach the wire on this request, and the cached schema — locked at first
+ * render precisely so mid-session churn cannot bust the prompt cache — is what
+ * would otherwise keep serving the old text until the session ends.
+ */
+export function invalidateToolSchema(toolName: string): void {
+  for (const key of TOOL_SCHEMA_CACHE.keys()) {
+    // Cache key format: either "toolName" or "toolName:{...schemaJSON...}"
+    if ((key.includes(':') ? key.split(':')[0] : key) === toolName) {
+      TOOL_SCHEMA_CACHE.delete(key)
+    }
+  }
+}
+
+/**
+ * What a `tool.describe` chain last answered, and the text it answered from.
+ *
+ * Session-scoped for the same reason the schema cache is: the chain runs on
+ * every request (upstream's `isDeferred` half is per-request state in this
+ * host), but a hook that returns the same text every time must not re-render
+ * `tool.prompt()` or invalidate the schema on every turn.
+ */
+type ToolDescribeAnswer = { base: string; answer: string }
+
+const TOOL_DESCRIBE = new Map<string, ToolDescribeAnswer>()
+
+export function getToolDescribeAnswer(
+  toolName: string,
+): ToolDescribeAnswer | undefined {
+  return TOOL_DESCRIBE.get(toolName)
+}
+
+export function setToolDescribeAnswer(
+  toolName: string,
+  entry: ToolDescribeAnswer,
+): void {
+  TOOL_DESCRIBE.set(toolName, entry)
 }
 
 /**

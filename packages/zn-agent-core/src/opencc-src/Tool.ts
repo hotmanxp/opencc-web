@@ -9,10 +9,18 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js'
 import type { UUID } from 'crypto'
 import type { z } from 'zod/v4'
-import { AGENT_INSTRUCTIONS_FILE } from './constants/product.js'
 import type { Command } from './commands.js'
 import type { CanUseToolFn } from './hooks/useCanUseTool.js'
 import type { ThinkingConfig } from './utils/thinking.js'
+
+// zai patch (2026-10-04):再导出这 3 个类型。Tool.ts 顶部 import 了它们
+// (Command / CanUseToolFn / MCPServerConnection)并在内部类型里使用,但没有
+// re-export;`server/createHeadlessContext-impl.ts` 是从 `../Tool.js` 取的
+// —— 该文件长期挂着 @ts-nocheck,所以 TS2459「declares locally but not
+// exported」一直没暴露。纯类型层改动,编译后完全擦除。
+export type { Command }
+export type { CanUseToolFn }
+export type { MCPServerConnection }
 
 export type ToolInputJSONSchema = {
   [x: string]: unknown
@@ -275,6 +283,22 @@ export type ToolUseContext = {
   setConversationId?: (id: UUID) => void
   agentId?: AgentId // Only set for subagents; use getSessionId() for session ID. Hooks use this to distinguish subagent calls.
   agentType?: string // Subagent type name. For the main thread's --agent type, hooks fall back to getMainThreadAgentType().
+  /**
+   * True when the subagent running this tool was started with
+   * run_in_background (or otherwise forced async). Only meaningful when
+   * `agentId` is set. A synchronous subagent is torn down when it produces its
+   * final response, so background commands it owns cannot outlive it.
+   */
+  parentAgentIsAsync?: boolean
+  /**
+   * Registers a callback invoked when the current turn is about to end —
+   * either because the turn is being aborted or because the agent is about to
+   * emit its final response. Long-running foreground commands can use this to
+   * hand themselves to the background instead of being killed.
+   *
+   * Mirrors upstream's turn-abort backgrounding.
+   */
+  onTurnEnd?: (onTurnEnding: () => void) => void
   /** When true, canUseTool must always be called even when hooks auto-approve.
    *  Used by speculation for overlay file path rewriting. */
   requireCanUseTool?: boolean
@@ -459,6 +483,29 @@ export type Tool<
    * Defaults to `'block'` when not implemented.
    */
   interruptBehavior?(): 'cancel' | 'block'
+  /**
+   * Which input field permission rules should match against.
+   *
+   * Upstream: `"path"` for tools that mutate a file (Edit / Write / NotebookEdit),
+   * absent for tools that take input but do not expose a clearly authoritative
+   * field for permissions (Bash, Agent, etc.). Mirrors upstream `ruleContentField`.
+   */
+  ruleContentField?: string
+  /**
+   * When true, the user's decision on the tool's permission prompt must not
+   * produce a generalized permission update. Edit and Write set this to true
+   * when the user asks for a one-off change; the rule check treats that as a
+   * non-rule.
+   */
+  suppressesAllPermissionUpdates?(input: z.infer<Input>): boolean
+  /**
+   * Whether this tool may detach to the background.
+   *
+   * `bash`/`bashOutput` use this for long-running commands; read-only search
+   * tools set `'never'` so the runtime never tries to background them.
+   * Mirrors upstream `backgrounding`.
+   */
+  backgrounding?: 'never' | 'self'
   /**
    * Returns information about whether this tool use is a search or read operation
    * that should be collapsed into a condensed display in the UI. Examples include
@@ -662,8 +709,18 @@ export type Tool<
    * Renders an optional tag to display after the tool use message.
    * Used for additional metadata like timeout, model, resume ID, etc.
    * Returns null to not display anything.
+   *
+   * The optional `context` carries the tool's result and progress messages
+   * so the tag can reflect runtime data (e.g. the actual model chain
+   * AgentTool swapped to mid-flight).
    */
-  renderToolUseTag?(input: Partial<z.infer<Input>>): React.ReactNode
+  renderToolUseTag?(
+    input: Partial<z.infer<Input>>,
+    context?: {
+      toolUseResult?: unknown
+      progressMessages?: unknown[]
+    },
+  ): React.ReactNode
   /**
    * Optional. When omitted, no progress UI is shown while the tool runs.
    */

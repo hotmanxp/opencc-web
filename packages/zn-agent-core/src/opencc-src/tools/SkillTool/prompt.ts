@@ -1,4 +1,5 @@
 import { memoize } from 'lodash-es'
+import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
 import type { Command } from 'src/commands.js'
 import {
   getCommandName,
@@ -170,30 +171,43 @@ export function formatCommandsWithinBudget(
     .join('\n')
 }
 
-export const getPrompt = memoize(async (_cwd: string): Promise<string> => {
-  return `Execute a skill within the main conversation
+/**
+ * Mode-independent body of the skill prompt.
+ *
+ * Memoized on cwd alone — deliberately, because this is the half that never
+ * changes. Anything mode-dependent must be appended by `getPrompt` below, or
+ * the first caller's mode would be pinned for the whole session.
+ */
+const getBasePrompt = memoize(async (_cwd: string): Promise<string> => {
+  return `Invoke a skill.
 
-When users ask you to perform tasks, check if any of the available skills match. Skills provide specialized capabilities and domain knowledge.
+A skill is a packaged set of instructions the user or project has set up for a particular kind of task (deploy steps, a review checklist, a repo-specific workflow). Available skills appear in a system-reminder listing with one-line descriptions. When the task at hand is one a listed skill covers, call this tool first — the skill's instructions load into the turn for you to follow in place of your default approach; some skills instead run in a subagent and return the finished result, and a skill marked to run in the background returns only the agent's name — its result arrives later as a task notification, so don't wait on it or invoke it again in the meantime. Users may also ask for one by name (\`/<name>\`, or "slash command"); that's a request to invoke it.
 
-When users reference a "slash command" or "/<something>" (e.g., "/commit", "/review-pr"), they are referring to a skill. Use this tool to invoke it.
+- \`skill\`: exact name from the listing, no leading slash. Plugin skills use \`plugin:skill\`. Directory-scoped skills are listed with a path prefix (\`apps/web:deploy\`); when both scoped and unscoped variants of a name exist, pick the one whose directory contains the files you're working on (most specific wins; unscoped otherwise).
+- \`args\`: optional arguments to pass through.
 
-How to invoke:
-- Use this tool with the skill name and optional arguments
-- Examples:
-  - \`skill: "pdf"\` - invoke the pdf skill
-  - \`skill: "commit", args: "-m 'Fix bug'"\` - invoke with arguments
-  - \`skill: "review-pr", args: "123"\` - invoke with arguments
-  - \`skill: "ms-office-suite:pdf"\` - invoke using fully qualified name
-
-Important:
-- Available skills are listed in system-reminder messages in the conversation
-- When a skill matches the user's request, this is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task
-- NEVER mention a skill without actually calling this tool
-- Do not invoke a skill that is already running
-- Do not use this tool for built-in CLI commands (like /help, /clear, etc.)
-- If you see a <${COMMAND_NAME_TAG}> tag in the current conversation turn, the skill has ALREADY been loaded - follow the instructions directly instead of calling this tool again
+Only names from the listing (or that the user typed explicitly) are valid. Built-in CLI commands (\`/help\`, \`/clear\`, …) aren't skills. If a <${COMMAND_NAME_TAG}> block is already present this turn, the skill is loaded — follow it directly rather than calling again.
 `
 })
+
+export async function getPrompt(cwd: string): Promise<string> {
+  const base = await getBasePrompt(cwd)
+  if (!isCoordinatorMode()) return base
+
+  // A coordinator only reads a skill to decide who should run it. Spell that
+  // out here, because otherwise the model reads "instructions load into the
+  // turn for you to follow" and executes on the coordinator's own behalf.
+  return (
+    base +
+    `
+In a coordinator session, your own use of this tool is read-only: it loads the skill's instructions to inform replies, triage, and coordination but does not run the skill — no fork, no permission grants, no preamble shell commands. Execution happens in workers: hand the skill to one worker, or when its recipe is orchestration, spawn workers per that recipe and synthesize their results. Worker skill invocations execute normally. A \`<${COMMAND_NAME_TAG}>\` block that arrived with only a delegation summary (no skill content) does not mean the skill is loaded — calling this tool to load it is still appropriate then.
+`
+  )
+}
+
+export function clearPromptCache(): void {
+  getBasePrompt.cache?.clear?.()
+}
 
 export async function getSkillToolInfo(cwd: string): Promise<{
   totalCommands: number
@@ -212,10 +226,6 @@ export async function getSkillToolInfo(cwd: string): Promise<{
 // Used by analyzeContext to count skill tokens.
 export function getLimitedSkillToolCommands(cwd: string): Promise<Command[]> {
   return getSkillToolCommands(cwd)
-}
-
-export function clearPromptCache(): void {
-  getPrompt.cache?.clear?.()
 }
 
 export async function getSkillInfo(cwd: string): Promise<{

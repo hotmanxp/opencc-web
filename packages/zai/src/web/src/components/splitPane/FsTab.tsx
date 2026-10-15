@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Empty, Input, Segmented, Spin, Switch, Tree, message } from 'antd';
-import { XIcon, FolderOpenIcon, RotateCwIcon } from 'lucide-react';
+import { Button, Dropdown, Empty, Input, Segmented, Spin, Switch, Tag, Tree, message } from 'antd';
+import { XIcon, FolderOpenIcon, RotateCwIcon, FilePlusIcon } from 'lucide-react';
 import { FileIcon, DirIcon } from './fileIcon.js';
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
@@ -16,78 +16,12 @@ import { DocumentPreview } from '../documentPreview/index.js';
 import { useAgentStore } from '../../store/useAgentStore.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
-import { FsContextMenu } from './FsContextMenu.js';
+import { FsContextMenu, FsCreateDialog, parentDirOf } from './FsContextMenu.js';
 import { useFsWrite } from './useFsWrite.js';
 import { useCodeThemeMode } from '../../hooks/useCodeThemeMode.js';
-
-// TextEditor: dynamic-imported CodeMirror; we keep a module-scoped
-// cache rather than React.lazy + Suspense so FsTab tests don't need
-// to wait on a chunk that happy-dom never resolves. After the first
-// import resolves, subsequent mounts reuse the cached reference.
-type TextEditorComponent = React.ComponentType<{
-  initialContent: string;
-  language: string | null;
-  saving?: boolean;
-  onSave: (newContent: string) => void | Promise<void>;
-  onCancel: () => void;
-}>;
-let cachedTextEditor: TextEditorComponent | null = null;
-function loadTextEditor(): Promise<TextEditorComponent> {
-  if (cachedTextEditor) return Promise.resolve(cachedTextEditor);
-  return import('./TextEditor.js').then((m) => {
-    cachedTextEditor = m.TextEditor;
-    return cachedTextEditor;
-  });
-}
+import { LazyMonacoCodeView, type MonacoCodeViewApi } from './MonacoCodeView.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
-
-// Wrapper that resolves TextEditor via module-scoped cache (loadTextEditor)
-// before mounting it. Avoids the Suspense-and-React.lazy pattern, which
-// (a) happy-dom never resolves and (b) would couple FsTab to a Suspense
-// boundary for a chunk that rarely matters. Edit mode is the only entry
-// point — most users never trigger this lazy path.
-function LazyTextEditor(props: {
-  initialContent: string;
-  language: string | null;
-  saving?: boolean;
-  onSave: (newContent: string) => void | Promise<void>;
-  onCancel: () => void;
-}) {
-  const [Editor, setEditor] = useState<TextEditorComponent | null>(cachedTextEditor);
-  useEffect(() => {
-    if (Editor) return;
-    let cancelled = false;
-    loadTextEditor().then((m) => {
-      if (!cancelled) setEditor(() => m);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [Editor]);
-  if (!Editor) {
-    // Loading state — the editor needs ~540 KB chunk; show the same
-    // padding/typography the editor will use so layout doesn't jump.
-    return (
-      <div
-        data-testid="fs-editor-loading"
-        className="flex-1 min-h-0 p-3 text-[color:var(--text-dim-45)] text-xs"
-      >
-        正在加载编辑器…
-      </div>
-    );
-  }
-  const TextEditor = Editor;
-  return (
-    <TextEditor
-      initialContent={props.initialContent}
-      language={props.language}
-      saving={props.saving}
-      onSave={props.onSave}
-      onCancel={props.onCancel}
-    />
-  );
-}
 
 // We track loaded children in a map keyed by parent path.
 type Entry = { name: string; path: string; type: 'dir' | 'file'; size: number | null };
@@ -603,6 +537,17 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const selected = activeKey === FILES_TAB ? null : activeKey;
   const file = useFsFile(cwd, selected);
   const [contextMenu, setContextMenu] = useState<{ path: string; absPath: string; x: number; y: number; kind?: 'file' | 'dir' } | null>(null);
+  // 新建弹窗的目标。**必须活在 FsTab**,不能放在 FsContextMenu 里 ——
+  // 菜单关闭时那个组件被整体卸载,state 跟着消失,弹窗永不渲染。
+  const [createTarget, setCreateTarget] = useState<{ type: 'file' | 'dir'; dir: string } | null>(null);
+  // 树里最后点击的目录(相对 cwd;'' = 项目根,null = 还没点过)。
+  // 工具栏「新建」按它建,而不是永远建在项目根 —— 点开 examples 再新建,
+  // 就该落在 examples/ 而不是根目录。点文件则记它的父目录(同右键菜单口径)。
+  // 仅在切换 cwd 时重置(见下面的 reset effect):刷新 / 展开折叠不该把用户
+  // 的落脚点打回根目录。
+  const [lastPickedDir, setLastPickedDir] = useState<string | null>(null);
+  // 工具栏「新建」的实际目标目录:没点过任何节点才回退项目根。
+  const createBaseDir = lastPickedDir ?? '';
   // Search-mode toggle. When non-empty after trim, the left pane renders
   // <FsSearchList> instead of the directory tree. Right-side preview
   // (selected/file) is unchanged — search results reuse setSelected().
@@ -626,25 +571,39 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     submittedQuery,
     { enabled: mode === 'content' },
   );
-  // HTML preview view mode: 'preview' shows the rendered iframe,
-  // 'source' shows the markup. Driven by a Segmented control rendered
-  // only when the active file is HTML (see below).
-  const [htmlMode, setHtmlMode] = useState<HtmlMode>('preview');
+  // 3-state view mode for .md / .html files(预览 / 源码 / 编辑)。
+  // 2026-09-27:扩展原 htmlMode 仅为 HTML 服务的 2-state 模式,把 markdown
+  // 也拉进来;非 .md/.html 文本文件(viewMode 字段无效)走默认「编辑」路径。
+  // 切到不同文件时由下面的 useEffect 把 viewMode 重置为合适的初值。
+  const [viewMode, setViewMode] = useState<'preview' | 'source' | 'edit'>('preview');
   // 系统拖入的悬浮高亮标记(拖入预览走 FilePreviewDrawer,见 handleFsDrop)
   const [dropHover, setDropHover] = useState(false);
-  // True only when the currently-selected file is an HTML preview.
-  // Used to gate the Segmented control in the header so it doesn't
-  // appear for unrelated file types.
-  const showHtmlToggle =
-    !!file.data && file.data.kind === 'html' && !!file.data.dataUrl;
+  // True only when the currently-selected file is .md or .html — gates the
+  // Segmented control in the header so it doesn't appear for unrelated types.
+  const isMd = !!file.data && file.data.kind === 'text' && /\.(md|markdown)$/i.test(file.data.name ?? '');
+  const isHtml = !!file.data && file.data.kind === 'html' && !!file.data.dataUrl;
+  const showViewModeToggle = isMd || isHtml;
   // 当前文件是否文档类(docx/sheet/ppt/pdf/legacy-office)—— 决定预览区
   // 是否套用文本预览的 p-3 + 等宽字体外框。
   const activeIsDocument = !!file.data && isDocumentPreviewKind(file.data.kind);
 
-  // Edit-mode state.
+  // Edit-mode state. 2026-09-27:与 AA file-preview-page.tsx 的 UX 状态机同步:
+  //   - saveState:   'idle' | 'saving' | 'saved' | 'conflict'
+  //   - savedFlashAt:显示「已保存」徽章 1.5s 后自动清空
+  //   - editSha256:  GET 响应里的 sha256,PUT 时回传 ifMatch 做乐观并发
+  //   - editorRef:   MonacoCodeView onReady 注入的 api(getValue/openSearch/...)
+  //   - initialContentRef: 进入编辑时锁定 baseline,onChange 用它判 dirty
+  //   - dirtyPaths:  从「最近保存过」改为「用户动过文件」(详见 renderTree)
   const { save: saveFile, saving } = useFsWrite();
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(new Set());
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'conflict'>('idle');
+  const [savedFlashAt, setSavedFlashAt] = useState<number | null>(null);
+  const [editSha256, setEditSha256] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const editorRef = useRef<MonacoCodeViewApi | null>(null);
+  const initialContentRef = useRef<string>('');
+  const lastSavedContentRef = useRef<string>('');
 
   // 打开(或聚焦)一个文件 tab. 已打开则只切过去, 不重复入栈.
   // line 非空时同时设置 pendingLine, 让 FilePreview 跳转到该行 (内容搜索
@@ -668,24 +627,102 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     }
   };
 
-  // Save handler — marks dirty by tree path key so renderTree lookup matches.
-  const handleSave = async (path: string, content: string) => {
-    const r = await saveFile(path, content);
+  // Save handler — 2026-09-27:与 AA 同步,加 ifMatch + saveState/savedFlashAt
+  // 状态机;CONFLICT 不退出编辑模式(用户需主动「重新加载」或重新编辑)。
+  const handleSave = async (path: string, content: string, ifMatch: string | null) => {
+    setSaveState('saving');
+    setSaveError(null);
+    const r = await saveFile(path, content, ifMatch);
     if (r.ok) {
+      // 成功:更新 sha256 + dirty 标记 + saved flash;不退出编辑模式(AA 风格,
+      // 用户可继续修改)。
+      setEditSha256(r.sha256 ?? null);
+      lastSavedContentRef.current = content;
       setDirtyPaths((prev) => {
         const next = new Set(prev);
-        next.add(path);
+        next.delete(path);
         return next;
       });
-      setEditingPath(null);
+      setSaveState('saved');
+      setSavedFlashAt(Date.now());
+      window.setTimeout(() => setSavedFlashAt(null), 1500);
       void message.success('已保存');
+    } else if (r.code === 'CONFLICT') {
+      // 冲突:不覆盖 sha256(保留原值供「保存覆盖」按钮用),让 UI 显示
+      // 重新加载按钮。dirty 仍标记(用户的本地编辑 ≠ diskSha256 对应内容)。
+      setSaveState('conflict');
+      setSaveError(r.error ?? '文件已被修改,请重新加载');
     } else {
+      setSaveState('idle');
+      setSaveError(r.error ?? '保存失败');
       void message.error(r.error ?? '保存失败');
     }
   };
   const handleCancel = () => {
     setEditingPath(null);
+    setSaveState('idle');
+    setSaveError(null);
   };
+  // 冲突后:丢弃本地编辑,重新拉服务端版本。
+  // useFsFile 的 effect 只在 path/cwd 变化时拉取;同 path 不变,所以用一个
+  // toggleKey 让 useFsFile 跳一下空再回来,触发重新 GET /fs/file。
+  const reloadToggleRef = useRef(0);
+  const handleReloadAfterConflict = () => {
+    setSaveState('idle');
+    setSaveError(null);
+    // 关掉当前 file tab → 选中「文件」tab,再把同一路径加回去 → useFsFile 重拉。
+    if (selected) {
+      const path = selected;
+      reloadToggleRef.current += 1;
+      setOpenTabs((cur) => cur.filter((p) => p !== path));
+      setActiveKey(FILES_TAB);
+      // 用 setTimeout 推一帧,确保 React 已 commit 完 null path,再切回。
+      window.setTimeout(() => {
+        setOpenTabs((cur) => (cur.includes(path) ? cur : [...cur, path]));
+        setActiveKey(path);
+        setEditingPath(null);
+      }, 0);
+    }
+  };
+  // onChange:从 MonacoCodeView 同步当前内容到 baseline 比对 → dirty 标记。
+  const handleEditorChange = (value: string) => {
+    if (selected && value !== initialContentRef.current) {
+      setDirtyPaths((prev) => {
+        const next = new Set(prev);
+        next.add(selected);
+        return next;
+      });
+    } else if (selected) {
+      setDirtyPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(selected);
+        return next;
+      });
+    }
+  };
+  // onReady:MonacoCodeView api 注入到 editorRef;同时把 baseline 锁定。
+  const handleEditorReady = (api: typeof editorRef.current) => {
+    editorRef.current = api;
+    setEditorReady(true);
+  };
+
+  // 内容搜索点行 → 让 Monaco 跳到该行。
+  //
+  // a64c8ac4 把代码预览从 FilePreview(SyntaxHighlighter)换成 Monaco 时,
+  // pendingLine 只接到了 FilePreview 的 data-line 锚点跳转(见上方
+  // FilePreview 内的 useEffect),代码文件这条主路径没有任何消费者 ——
+  // MonacoCodeView 明明暴露了 revealPosition,却一次都没被调用,跳转功能
+  // 静默失效。这里补上:editorRef 由 onReady 注入,effect 依赖 pendingLine
+  // + editorReady,保证 api 就绪(晚于挂载)后仍会补跳一次。
+  //
+  // 消费后清空 pendingLine:同一文件在多次检索里被点中同一行时,setPendingLine(2)
+  // 因值未变不会触发 effect 重跑,保留旧值会让后续点击静默无反应。
+  const [editorReady, setEditorReady] = useState(false);
+  useEffect(() => {
+    if (pendingLine == null || !editorReady) return;
+    editorRef.current?.revealPosition({ lineNumber: pendingLine, column: 1 });
+    setPendingLine(null);
+  }, [pendingLine, editorReady]);
 
   // 目录树 / 两个搜索列表共用的右键菜单打开器。path 为相对 cwd 的路径,
   // 与「复制相对路径」同值;absPath 由 buildAbsPath 还原绝对路径;kind 供
@@ -725,7 +762,82 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setEditingPath(null);
     setDirtyPaths(new Set());
     setDropHover(false);
+    setSaveState('idle');
+    setSavedFlashAt(null);
+    setEditSha256(null);
+    setSaveError(null);
+    setViewMode('preview');
+    // 「新建」落脚点是相对**旧** cwd 的路径,换项目后不再有效。
+    setLastPickedDir(null);
+    initialContentRef.current = '';
+    lastSavedContentRef.current = '';
   }, [cwd]);
+
+  // 切到不同文件时:重置 viewMode 为 'preview'(让用户从渲染视图开始浏览),
+  // 并同步 editingPath —— 当 viewMode === 'edit' 时进入编辑会话,否则退出。
+  useEffect(() => {
+    if (file.data?.path) {
+      setViewMode('preview');
+    }
+  }, [file.data?.path]);
+
+  // viewMode 切到 'edit' 时初始化编辑会话(锁定 baseline + sha256);
+  // 切到 'preview'/'source' 时退出编辑。
+  useEffect(() => {
+    if (viewMode === 'edit' && file.data && file.data.kind === 'text') {
+      setEditingPath(file.data.path);
+      initialContentRef.current = file.data.content ?? '';
+      lastSavedContentRef.current = file.data.content ?? '';
+      setEditSha256(file.data.sha256 ?? null);
+      setSaveState('idle');
+      setSaveError(null);
+    } else {
+      setEditingPath(null);
+      // 退出编辑时清掉 save 状态(用户切到 'source'/'preview' 后再回来需要重置)
+      setSaveState('idle');
+      setSaveError(null);
+      setSavedFlashAt(null);
+    }
+  }, [viewMode, file.data?.path]);
+
+  // 2026-09-27:全局 Cmd/Ctrl+F + Cmd/Ctrl+S(capture phase),仅在当前 tab 进入
+  // 编辑模式时拦截。对齐 AA file-preview-page.tsx:485-501。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const activeIsEditing =
+        !!editingPath && editingPath === activeKey && file.data?.kind === 'text';
+      if (!activeIsEditing) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === 's') {
+        event.preventDefault();
+        if (saveState === 'saving') return;
+        const content = editorRef.current?.getValue() ?? file.data?.content ?? '';
+        void handleSave(editingPath, content, editSha256);
+        return;
+      }
+      if (key === 'f') {
+        if (!editorRef.current) return;
+        event.preventDefault();
+        editorRef.current.openSearch();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [activeKey, editingPath, editSha256, file.data, saveState]);
+
+  // 2026-09-27:beforeunload 警告(dirty=true 时)。注意:Chrome 不允许自
+  // 定义提示语,只能 returnValue="" 触发原生确认框。
+  const activeIsDirty = !!activeKey && activeKey !== 'files' && dirtyPaths.has(activeKey);
+  useEffect(() => {
+    if (!activeIsDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [activeIsDirty]);
 
   if (!cwd) {
     return (
@@ -835,6 +947,24 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     </Button>
   );
 
+  // 「新建」入口。树里没有任何节点代表「根」,右键菜单没法在根目录触发,
+  // 所以根目录的新建走工具栏按钮。
+  const createBtn = (
+    <Dropdown
+      trigger={['click']}
+      menu={{
+        items: [
+          { key: 'file', label: '新建文件', 'data-testid': 'fs-create-menu-file', onClick: () => setCreateTarget({ type: 'file', dir: createBaseDir }) },
+          { key: 'dir', label: '新建文件夹', 'data-testid': 'fs-create-menu-dir', onClick: () => setCreateTarget({ type: 'dir', dir: createBaseDir }) },
+        ],
+      }}
+    >
+      <Button size="small" icon={<FilePlusIcon />} title={`在 ${createBaseDir || '项目根目录'} 新建`} data-testid="fs-create-btn">
+        新建
+      </Button>
+    </Dropdown>
+  );
+
   const treeData = root.data?.ok && root.data.entries ? renderTree(root.data.entries) : [];
 
   const isFilesTab = activeKey === FILES_TAB;
@@ -895,10 +1025,17 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       >
         {/* 当前 tab 的路径: 「文件」tab 显示 cwd, 文件 tab 显示该文件的绝对
             路径. 搜索框只在「文件」tab 出现 —— 在文件 tab 上输入搜索词会把
-            树的结果换掉, 而那时树并不在视野里. */}
+            树的结果换掉, 而那时树并不在视野里.
+            「文件」tab 时把路径 span 设 hidden —— 路径信息仍写在 DOM 里
+            (testid fs-path, FsTab.test 仍能读到 textContent),只是不让它
+            占据 flex 空间,搜索 Input 才能 flex-1 占满宽度. */}
         <span
           data-testid="fs-path"
-          className="flex-1 min-w-0 font-mono text-xs truncate"
+          className={
+            isFilesTab
+              ? 'hidden'
+              : 'flex-1 min-w-0 font-mono text-xs truncate'
+          }
           style={{ color: 'var(--text-dim-55)' }}
           title={activePathLabel}
         >
@@ -922,7 +1059,9 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 if (v === '') setSubmittedQuery('');
               }}
               onPressEnter={() => setSubmittedQuery(draft.trim())}
-              className="w-44 shrink-0"
+              // 占满头部行剩余空间:「文件」tab 时 cwd 路径已 hidden,
+              // 搜索框用 flex-1 撑满,Switch 与清空按钮贴右.
+              className="flex-1 min-w-0"
             />
             <Switch
               size="small"
@@ -935,44 +1074,72 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             />
           </>
         )}
-        {showHtmlToggle && (
+        {showViewModeToggle && (
           <Segmented
-            data-testid="fs-html-mode"
+            data-testid="fs-view-mode"
             size="small"
-            value={htmlMode}
-            onChange={(v) => setHtmlMode(v as HtmlMode)}
+            value={viewMode}
+            onChange={(v) => setViewMode(v as 'preview' | 'source' | 'edit')}
             options={[
               { label: '预览', value: 'preview' },
               { label: '源码', value: 'source' },
+              { label: '编辑', value: 'edit' },
             ]}
           />
         )}
-        {file.data && file.data.kind === 'text' && file.data.path && editingPath !== file.data.path && (
+        {file.data && file.data.kind === 'text' && file.data.path && editingPath !== file.data.path && !isMd && (
+          // 只在非 .md 文件显示「编辑」按钮:.md 用 Segmented 切 3 状态,
+          // .html 走 html kind(也用 Segmented)。其他代码文件(.ts/.py/...)
+          // 保留单击进入编辑的快捷方式,Monaco 一直可写(readOnly 翻转)。
           <Button
             size="small"
             data-testid="fs-edit-btn"
-            onClick={() => setEditingPath(file.data!.path!)}
+            onClick={() => {
+              setViewMode('edit');
+              // 锁定 baseline = 当前 server 拉到的内容;同时记 sha256。
+              // viewMode 改 'edit' 会触发上面的 useEffect 自动 init。
+            }}
           >
             编辑
           </Button>
+        )}
+        {/* 编辑模式徽章(2026-09-27,与 AA PreviewBadges 同步):
+            - saving     → <Tag>保存中…</Tag>
+            - saved      → <Tag color="success">已保存</Tag>(1.5s 自动消失)
+            - conflict   → <Tag color="error">文件已被修改</Tag>(带「重新加载」)
+            - 其他错误   → <Tag color="error">{saveError}</Tag>
+            - truncated  → <Tag>文件已截断显示</Tag>(>=2MB)
+        */}
+        {editingPath && file.data && file.data.path === editingPath && file.data.kind === 'text' && saveState === 'saving' && (
+          <Tag data-testid="fs-saving-badge">保存中…</Tag>
+        )}
+        {editingPath && saveState === 'saved' && savedFlashAt !== null && (
+          <Tag color="success" data-testid="fs-saved-badge">已保存</Tag>
+        )}
+        {editingPath && saveState === 'conflict' && (
+          <span className="flex items-center gap-1">
+            <Tag color="error" data-testid="fs-conflict-badge">文件已被修改,请重新加载</Tag>
+            <Button size="small" data-testid="fs-conflict-reload-btn" onClick={handleReloadAfterConflict}>
+              重新加载
+            </Button>
+          </span>
+        )}
+        {editingPath && saveState === 'idle' && saveError && (
+          <Tag color="error" data-testid="fs-save-error-badge">{saveError}</Tag>
+        )}
+        {file.data && file.data.kind === 'text' && (file.data.truncated || (file.data.content !== undefined && file.data.content.length >= 2 * 1024 * 1024)) && (
+          <Tag data-testid="fs-truncated-badge">文件已截断显示</Tag>
         )}
         {editingPath && file.data && file.data.path === editingPath && file.data.kind === 'text' && (
           <>
             <Button
               size="small"
               data-testid="fs-save-btn"
-              loading={saving}
+              loading={saveState === 'saving'}
+              disabled={saveState === 'saving'}
               onClick={() => {
-                const ev = new CustomEvent('fs-editor-get-doc');
-                const editor = document.querySelector('[data-testid="fs-editor"]');
-                let newContent: string | null = null;
-                const handler = (e: Event) => {
-                  newContent = (e as CustomEvent<string>).detail;
-                };
-                window.addEventListener('fs-editor-doc', handler);
-                editor?.dispatchEvent(ev);
-                window.removeEventListener('fs-editor-doc', handler);
-                void handleSave(selected!, newContent ?? file.data!.content ?? '');
+                const content = editorRef.current?.getValue() ?? file.data!.content ?? '';
+                void handleSave(editingPath, content, editSha256);
               }}
             >
               保存
@@ -982,6 +1149,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             </Button>
           </>
         )}
+        {isFilesTab && createBtn}
         {isFilesTab && refreshBtn}
       </div>
       {/* 面板区: 高度链路走 flex (SplitPane 的 Tabs 被 .zai-pane-fill 拉满),
@@ -1039,6 +1207,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                   // adding an unloaded dir to expandedKeys triggers loadData
                   // since renderTree leaves `children` undefined until loaded.
                   const key = String(info.node.key);
+                  // 记住落脚点,工具栏「新建」据此建(点文件→它的父目录)。
+                  setLastPickedDir(parentDirOf(key, info.node.isLeaf ? 'file' : 'dir'));
                   if (info.node.isLeaf) {
                     openFile(key);
                   } else {
@@ -1071,16 +1241,49 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               </div>
             ) : file.error ? (
               <Empty description={file.error} />
-            ) : file.data && editingPath && file.data.path === editingPath && file.data.kind === 'text' && file.data.content !== undefined ? (
-              <LazyTextEditor
-                initialContent={file.data.content}
-                language={file.data.name ? extToLanguage(file.data.name) : null}
-                saving={saving}
-                onSave={(newContent) => void handleSave(editingPath, newContent)}
-                onCancel={handleCancel}
+            ) : file.data && file.data.kind === 'text' && file.data.content !== undefined && isMd && viewMode === 'preview' ? (
+              // .md 预览:走 MarkdownText(对齐原 FilePreview 的 MD 分支);
+              // Monaco 此时 hidden 仍 mounted,切回源码/编辑保留滚动位置与未保存编辑。
+              <div data-testid="fs-md-preview" className="flex-1 min-h-0 overflow-auto rounded-md p-3">
+                <MarkdownText text={file.data.content} />
+              </div>
+            ) : file.data && file.data.kind === 'html' && isHtml && viewMode === 'preview' ? (
+              // .html 预览:FilePreview 现有 iframe 路径不变。
+              <FilePreviewMemo file={file.data} htmlMode="preview" pendingLine={pendingLine} />
+            ) : file.data && file.data.kind === 'text' && file.data.content !== undefined ? (
+              // 其它 text(.md source/edit, 其它代码文件):统一走 Monaco,
+              // editable 由 viewMode 决定(.md 'source' → readOnly, 'edit' → 可写)。
+              <LazyMonacoCodeView
+                content={file.data.content}
+                documentKey={file.data.path}
+                fileName={file.data.name ?? undefined}
+                language={
+                  isMd
+                    ? 'markdown'
+                    : file.data.name
+                      ? extToLanguage(file.data.name) ?? undefined
+                      : undefined
+                }
+                editable={editingPath === file.data.path}
+                onReady={handleEditorReady}
+                onChange={handleEditorChange}
               />
-            ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html' || isDocumentPreviewKind(file.data.kind)) ? (
-              <FilePreviewMemo file={file.data} htmlMode={htmlMode} pendingLine={pendingLine} />
+            ) : file.data && file.data.kind === 'html' && (viewMode === 'source' || viewMode === 'edit') ? (
+              // .html 源码/编辑:与 .md 一样走 Monaco,language='html',
+              // viewMode 决定 editable;切到 'preview' 才回 iframe。
+              <LazyMonacoCodeView
+                content={file.data.content}
+                documentKey={file.data.path}
+                fileName={file.data.name ?? undefined}
+                language="html"
+                editable={viewMode === 'edit'}
+                onReady={handleEditorReady}
+                onChange={handleEditorChange}
+              />
+            ) : file.data && file.data.kind === 'html' ? (
+              <FilePreviewMemo file={file.data} htmlMode="preview" pendingLine={pendingLine} />
+            ) : file.data && (file.data.kind === 'image' || isDocumentPreviewKind(file.data.kind)) ? (
+              <FilePreviewMemo file={file.data} htmlMode="preview" pendingLine={pendingLine} />
             ) : (
               <Empty description="没有内容" />
             )}
@@ -1102,8 +1305,22 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             closeTab(contextMenu.path);
             refreshAll();
           }}
+          onRequestCreate={setCreateTarget}
         />
       )}
+      {/* 新建弹窗挂在 FsTab 而非 FsContextMenu:菜单被 antd Dropdown 关闭
+          时 FsContextMenu 会被整体卸载(createTarget 若存在它内部就跟着
+          消失,弹窗一帧都渲染不出来)。这里与菜单生命周期解耦。 */}
+      <FsCreateDialog
+        target={createTarget}
+        onClose={() => setCreateTarget(null)}
+        onCreated={(created) => {
+          refreshAll();
+          // 新建文件直接打开:「新建 → 看内容 → 敲字 → 保存」是一条链,
+          // 中间还要手动去树里点一次才能开始写。
+          if (created.type === 'file') openFile(created.path);
+        }}
+      />
     </div>
   );
 }

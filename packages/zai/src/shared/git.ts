@@ -29,6 +29,9 @@ export interface GitDiff {
   error?: string;
   diff?: string;
   isUntracked?: boolean;
+  /** True when the file has no text representation (image/zip/…), so the diff
+   *  carries a placeholder line instead of a line-level patch. */
+  isBinary?: boolean;
 }
 
 export interface GitRevertResult {
@@ -164,7 +167,7 @@ export type ApiEnvelope<T> = { ok: true; data: T } | { ok: false; error: string 
 export type GitActionData =
   | { kind: 'is-repo'; value: boolean }
   | { kind: 'status'; value: GitStatusResult }
-  | { kind: 'diff'; value: { diff: string; isUntracked: boolean } }
+  | { kind: 'diff'; value: { diff: string; isUntracked: boolean; isBinary: boolean } }
   | { kind: 'stage' }
   | { kind: 'unstage' }
   | { kind: 'revert'; value: { isUntracked: boolean } }

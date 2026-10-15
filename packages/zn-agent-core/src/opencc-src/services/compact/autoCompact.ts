@@ -24,7 +24,15 @@ import {
   type RecompactionInfo,
 } from './compact.js'
 import { runPostCompactCleanup } from './postCompactCleanup.js'
+import { gateSessionCompact } from '../../mods/sessionCompact.js'
 import { trySessionMemoryCompaction } from './sessionMemoryCompact.js'
+import {
+  AUTOCOMPACT_BUFFER_TOKENS,
+  computeAutoCompactThreshold,
+} from './autoCompactThreshold.js'
+
+// Re-exported: several callers import the buffer from this module.
+export { AUTOCOMPACT_BUFFER_TOKENS }
 
 // Reserve this many tokens for output during compaction
 // Based on p99.99 of compact summary output being 17,387 tokens.
@@ -49,7 +57,7 @@ export function getEffectiveContextWindowSize(model: string): number {
   // Floor: effective context must be at least the summary reservation plus a
   // usable buffer. If it goes lower, the auto-compact threshold becomes
   // negative and fires on every message (issue #635).
-  const autocompactBuffer = 13_000 // must match AUTOCOMPACT_BUFFER_TOKENS
+  const autocompactBuffer = AUTOCOMPACT_BUFFER_TOKENS
   const effectiveContext = contextWindow - reservedTokensForSummary
   return Math.max(effectiveContext, reservedTokensForSummary + autocompactBuffer)
 }
@@ -73,7 +81,6 @@ export type AutoCompactTrackingState = {
   forceReason?: 'memory-pressure' | 'message-count'
 }
 
-export const AUTOCOMPACT_BUFFER_TOKENS = 13_000
 export const WARNING_THRESHOLD_BUFFER_TOKENS = 20_000
 export const ERROR_THRESHOLD_BUFFER_TOKENS = 20_000
 export const MANUAL_COMPACT_BUFFER_TOKENS = 3_000
@@ -166,25 +173,21 @@ export function resolveAutoCompactCircuitBreakerState(args: {
   }
 }
 
+// zai patch (2026-10-08): 阈值策略抽到 autoCompactThreshold.ts 这个叶子模块。
+// 上游对所有模型统一用「窗口 - 13k buffer」，隐含假设是窗口小到「塞满前就该压」。
+// 但 zai 常用 1M 窗口的三方模型（MiniMax-M3 / M3.1-Flash-Preview、zhiniao-glm-5.1 等），
+// 阈值因此高达 987k，实践中永远够不到 —— 而 microcompact 的两条路径在 external build
+// 里被上游用 `if (false)` / 硬 stub 关掉了（cachedMicrocompact.ts 的
+// isCachedMicrocompactEnabled、isModelSupportedForCacheEditing 均 return false），
+// legacy 路径已删除。也就是说 60%→98% 这段完全裸奔，没有任何机制在管。
+//
+// 复现：sess-1791423013771-u8o0uxod 涨到 534k 未压缩即终止，其中 54.7% 是 Write
+// 工具入参（每个文件在 tool_use.input 与 tool_result 里各存一遍）。
 export function getAutoCompactThreshold(model: string): number {
-  const effectiveContextWindow = getEffectiveContextWindowSize(model)
-
-  const autocompactThreshold =
-    effectiveContextWindow - AUTOCOMPACT_BUFFER_TOKENS
-
-  // Override for easier testing of autocompact
-  const envPercent = process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
-  if (envPercent) {
-    const parsed = parseFloat(envPercent)
-    if (!isNaN(parsed) && parsed > 0 && parsed <= 100) {
-      const percentageThreshold = Math.floor(
-        effectiveContextWindow * (parsed / 100),
-      )
-      return Math.min(percentageThreshold, autocompactThreshold)
-    }
-  }
-
-  return autocompactThreshold
+  return computeAutoCompactThreshold(
+    getEffectiveContextWindowSize(model),
+    process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE,
+  )
 }
 
 export function calculateTokenWarningState(
@@ -470,54 +473,50 @@ export async function autoCompactIfNeeded(
     querySource,
   }
 
-  // EXPERIMENT: Try session memory compaction first
-  const sessionMemoryResult = await trySessionMemoryCompaction(
-    messages,
-    toolUseContext.agentId,
-    recompactionInfo.autoCompactThreshold,
-  )
-  if (sessionMemoryResult) {
-    // Reset lastSummarizedMessageId since session memory compaction prunes messages
-    // and the old message UUID will no longer exist after the REPL replaces messages
-    setLastSummarizedMessageId(undefined)
-    runPostCompactCleanup(querySource)
-    // Reset cache read baseline so the post-compact drop isn't flagged as a
-    // break. compactConversation does this internally; SM-compact doesn't.
-    // BQ 2026-03-01: missing this made 20% of tengu_prompt_cache_break events
-    // false positives (systemPromptChanged=true, timeSinceLastAssistantMsg=-1).
-    if (true) {
-      notifyCompaction(querySource ?? 'compact', toolUseContext.agentId)
-    }
-    markPostCompaction()
-    return {
-      wasCompacted: true,
-      compactionResult: sessionMemoryResult,
-      consecutiveFailures: 0,
-    }
-  }
-
+  // Upstream `session.compact` with `trigger: 'auto'`. The gate wraps both
+  // compaction paths — session memory and the summariser — because a veto that
+  // only guarded one would let the other compact anyway, and upstream documents
+  // the event as "when the conversation is ABOUT TO be compacted".
+  //
+  // Inside the try, because both paths can fail and the catch is where the
+  // circuit breaker's failure accounting lives. A gate outside it would let a
+  // `compactConversation` throw escape uncounted, and autocompact would retry
+  // the failing compaction forever with its failure counter still at zero.
+  let gated: Awaited<
+    ReturnType<
+      typeof gateSessionCompact<
+        { sessionMemory: CompactionResult } | { summarised: CompactionResult }
+      >
+    >
+  >
   try {
-    const compactionResult = await compactConversation(
+    gated = await gateSessionCompact({
+      trigger: 'auto',
       messages,
-      toolUseContext,
-      cacheSafeParams,
-      true, // Suppress user questions for autocompact
-      undefined, // No custom instructions for autocompact
-      true, // isAutoCompact
-      recompactionInfo,
-    )
-
-    // Reset lastSummarizedMessageId since legacy compaction replaces all messages
-    // and the old message UUID will no longer exist in the new messages array
-    setLastSummarizedMessageId(undefined)
-    runPostCompactCleanup(querySource)
-
-    return {
-      wasCompacted: true,
-      compactionResult,
-      // Reset failure count on success
-      consecutiveFailures: 0,
-    }
+      ...(toolUseContext.agentId !== undefined
+        ? { agentId: toolUseContext.agentId }
+        : {}),
+      run: async ({ messages: chosen }) => {
+        // EXPERIMENT: Try session memory compaction first
+        const sessionMemory = await trySessionMemoryCompaction(
+          chosen,
+          toolUseContext.agentId,
+          recompactionInfo.autoCompactThreshold,
+        )
+        if (sessionMemory) return { sessionMemory }
+        return {
+          summarised: await compactConversation(
+            chosen,
+            toolUseContext,
+            cacheSafeParams,
+            true, // Suppress user questions for autocompact
+            undefined, // No custom instructions for autocompact
+            true, // isAutoCompact
+            recompactionInfo,
+          ),
+        }
+      },
+    })
   } catch (error) {
     const wasUserAbort = hasExactErrorMessage(error, ERROR_MESSAGE_USER_ABORT)
     if (wasUserAbort) {
@@ -560,5 +559,45 @@ export async function autoCompactIfNeeded(
       circuitBreakerActive: circuitBreakerTripped,
       circuitBreakerTripped,
     }
+  }
+
+  if (gated.type === 'skipped') {
+    // The conversation stays as it is, so the model keeps working against a
+    // window it is about to overflow. That is the mod's call to make, and
+    // upstream's veto says the same thing. Reported as a plain non-compaction
+    // rather than a failure: nothing failed, a hook answered.
+    return { wasCompacted: false }
+  }
+
+  if ('sessionMemory' in gated.result) {
+    // Reset lastSummarizedMessageId since session memory compaction prunes messages
+    // and the old message UUID will no longer exist after the REPL replaces messages
+    setLastSummarizedMessageId(undefined)
+    runPostCompactCleanup(querySource)
+    // Reset cache read baseline so the post-compact drop isn't flagged as a
+    // break. compactConversation does this internally; SM-compact doesn't.
+    // BQ 2026-03-01: missing this made 20% of tengu_prompt_cache_break events
+    // false positives (systemPromptChanged=true, timeSinceLastAssistantMsg=-1).
+    if (true) {
+      notifyCompaction(querySource ?? 'compact', toolUseContext.agentId)
+    }
+    markPostCompaction()
+    return {
+      wasCompacted: true,
+      compactionResult: gated.result.sessionMemory,
+      consecutiveFailures: 0,
+    }
+  }
+
+  // Reset lastSummarizedMessageId since legacy compaction replaces all messages
+  // and the old message UUID will no longer exist in the new messages array
+  setLastSummarizedMessageId(undefined)
+  runPostCompactCleanup(querySource)
+
+  return {
+    wasCompacted: true,
+    compactionResult: gated.result.summarised,
+    // Reset failure count on success
+    consecutiveFailures: 0,
   }
 }

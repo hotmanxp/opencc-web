@@ -1,4 +1,3 @@
-// FeedbackSurvey utils types
-export type FeedbackSurveyUtils = {
-  // Add methods as needed
-}
+export type FeedbackSurveyResponse = 'dismissed' | 'bad' | 'fine' | 'good' | string & {};
+export type FeedbackSurveyType = 'session' | 'memory' | 'compact' | string & {};
+//# sourceMappingURL=utils.d.ts.map

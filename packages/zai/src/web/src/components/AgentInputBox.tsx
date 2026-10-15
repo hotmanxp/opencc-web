@@ -46,15 +46,18 @@ import {
 import { activeAtToken, formatFileMention } from "./mentionGrammar.js";
 import { useFsMentionSearch } from "./useFsMentionSearch.js";
 import FileMentionPopover from "./FileMentionPopover.js";
-import MentionChip from "./MentionChip.js";
+import { ComposerRuntime } from "./input/editor/runtime.js";
+import { ComposerSurface } from "./input/editor/ComposerSurface.js";
+import { registerComposerKeymap } from "./input/editor/keymap.js";
 import {
-  InputMachine,
-  PLACEHOLDER,
-  projectClipboard,
-} from "./input/inputMachine.js";
-import type { InputReference } from "./input/inputMachine.js";
-import { deriveChipDecorations } from "./input/decorations.js";
-import type { ChipDecoration } from "./input/decorations.js";
+  refreshTokenDecoration,
+  registerTokenDecoration,
+} from "./input/editor/token-decor.js";
+import { focusComposer, revealDraftSelection } from "./input/editor/view.js";
+import type { ArbitrateKey, ArbitrateOutcome, ReferenceInsert } from "./input/editor/contract.js";
+
+const INPUT_PLACEHOLDER =
+  "输入消息, 按 Enter 发送, Shift+Enter 换行. 拖入图片直接插入, 拖入其他文件自动上传并加入地址. 敲 @ 触发文件补全.";
 
 type PendingAttachment = {
   localId: string;
@@ -125,89 +128,6 @@ export function deriveCommandToken(
  */
 
 /**
- * backdrop 渲染辅助(追齐 deepseek-harness InputBar 的 decoration 手法):
- * 把 draft 切成「普通文本 / chip / token-mark」三段,按 offset 升序渲染。
- * 三种装饰源:
- * - chips:occurrence 表派生(U+FFFC 占位符处渲染 MentionChip)
- * - commandToken:leading `/命令` 的高亮 mark
- * - atToken:光标处仍活跃的 `@` token(用户正在敲,染紫)
- * 由于 chip 只占 1 字符(占位符),文本与 chip 之间天然对齐,不再需要旧的
- * hidden-placeholder 宽度对位。
- */
-function renderDraftDecorations(
-  draft: string,
-  chips: readonly ChipDecoration[],
-  commandToken: { start: number; end: number } | null,
-  atToken: { start: number; end: number; prefix: string } | null,
-  ghostHint: string | null,
-) {
-  const result: React.ReactNode[] = [];
-  type Instr =
-    | { at: number; stop: number; kind: "chip"; d: ChipDecoration }
-    | { at: number; stop: number; kind: "mark"; prefix: string };
-  const instructions: Instr[] = [];
-  for (const c of chips) {
-    instructions.push({ at: c.offset, stop: c.offset + 1, kind: "chip", d: c });
-  }
-  if (commandToken) {
-    instructions.push({
-      at: commandToken.start,
-      stop: commandToken.end,
-      kind: "mark",
-      prefix: draft.slice(commandToken.start, commandToken.end),
-    });
-  }
-  if (atToken) {
-    instructions.push({ at: atToken.start, stop: atToken.end, kind: "mark", prefix: atToken.prefix });
-  }
-  instructions.sort((a, b) => a.at - b.at);
-  let pos = 0;
-  for (const ins of instructions) {
-    if (ins.at < pos) continue;
-    if (ins.at > pos) {
-      result.push(<span key={`t-${pos}`}>{draft.slice(pos, ins.at)}</span>);
-    }
-    if (ins.kind === "chip") {
-      result.push(
-        <MentionChip
-          key={`oc-${ins.d.occurrenceId}`}
-          data={{ path: ins.d.path, label: ins.d.label, invalid: ins.d.invalid }}
-          onMouseDown={(e) => {
-            // 阻止焦点离开 textarea(combobox 模式:点击 chip 不丢光标)
-            e.preventDefault();
-          }}
-        />,
-      );
-    } else {
-      result.push(
-        <span
-          key={`m-${ins.at}`}
-          data-decoration="token-mark"
-          className="agent-input-cmd-token"
-        >
-          {ins.prefix}
-        </span>,
-      );
-    }
-    pos = ins.stop;
-  }
-  if (pos < draft.length) {
-    result.push(<span key="t-end">{draft.slice(pos)}</span>);
-  }
-  // 命令激活且尚未输入参数时,在行尾追一段灰色 argument-hint 幽灵文本
-  // (backdrop 是 aria-hidden 镜像层,不参与 textarea 内容/光标计算,
-  // 用户开始敲参数后 rest 非空 → hint 消失,不会与真实文本重叠)。
-  if (ghostHint) {
-    result.push(
-      <span key="cmd-hint" data-decoration="cmd-hint" className="agent-input-cmd-hint">
-        {ghostHint}
-      </span>,
-    );
-  }
-  return result;
-}
-
-/**
  * 工具栏定制项 — AgentConversation 被 /agent、/m、/desktop 等多场景复用,
  * 场景专属按钮(如分屏 toggle)不再内置,改由调用方通过插槽注入。
  * 详见 AgentConversation.tsx 顶部注释。
@@ -249,6 +169,9 @@ export default React.memo(function AgentInputBox({
   // zai race fix: createNewSession 异步窗口(~50–200ms)期间禁用 Send + 短路 Enter。
   // 见 useAgentStore.createNewSession 注释。
   const creatingSession = useAgentStoreOrCtx((s) => s.creatingSession);
+  // 压缩过程中的会话不可再发消息: 压缩会重写 transcript 的边界, 中途插入的
+  // prompt 会被一起摘掉/错位。与 creatingSession 同一条短路路径(见 sendDisabled)。
+  const compacting = useAgentStoreOrCtx((s) => s.compacting);
   const activeSessionId = useAgentStoreOrCtx((s) => s.activeSessionId);
   const isMobile = useAppStore((s) => s.isMobile);
   // dsh 连接状态指示 (2026-08-15): SSE 断流时显示"重连中…/连接已断开",
@@ -293,59 +216,88 @@ export default React.memo(function AgentInputBox({
   // handler 内现取(useAgentStoreOrCtxApi 内部 useContext,违反 Rules of Hooks)。
   const storeApi = useAgentStoreOrCtxApi();
 
-  // 输入状态机(zai 版 deepseek-harness InputMachine):draft + occurrence
-  // 表 + 事务 undo/redo 的权威源。React 只读镜像(render 时读 machine.state),
-  // 所有 mutation 走 machine.dispatch / insertTextAt,再 forceRender。
-  const machineRef = useRef<InputMachine | null>(null);
-  if (machineRef.current === null) machineRef.current = new InputMachine();
+  // ---- 输入编辑器(Lexical):内容权威 ----
+  // 编辑器持有全部草稿内容,文件引用是真实节点(旧方案的 chip 是 U+FFFC 占位
+  // 字符 + absolute 覆盖层,宽度被占位单元锁死)。React 只读它的投影:
+  // detectText 里每个 chip 恰好占 1 个 U+FFFC,所以所有既有的字符串坐标
+  // 计算(activeAtToken、span 替换)原样可用。所有 mutation 走 runtime 的
+  // 命令式方法,提交后重投影 + 推一次 React 渲染。
   const [, setTick] = useState(0);
   const forceRender = useCallback(() => setTick((t) => t + 1), []);
-  const input = machineRef.current.state.draft;
-  const machineChips = deriveChipDecorations(machineRef.current.state);
-  // 光标位置(activeAtToken 需要这个来定位 @-token,textarea selectionStart 不
-  // 在 React state 里;需要在 onChange/onKeyUp/onClick 里同步刷新。
-  // 初始值 0 + input 变化时由 onChange 重写,只为减少首挂载误判。
-  const [cursor, setCursor] = useState(0);
-  // machine 权威变更入口:以「完整新 draft」喂给状态机(diff 由机器恢复),
-  // 触发重渲;editRange 可省(机器内部 diff)。
-  const commitDraft = useCallback((next: string) => {
-    machineRef.current?.dispatch({ type: "draft-changed", draft: next });
-    forceRender();
-  }, [forceRender]);
+  // ---- IME 组合输入 ----
+  // 组合输入期间的 Enter 是「选词候选」,绝不能触发发送。keymap 里查这个
+  // 标志(见 input/editor/keymap.ts 的 IME 守卫),同时用来在组合期间隐藏
+  // placeholder 与幽灵提示。标志由 React 的合成事件驱动(比挂在 Lexical
+  // root 上的监听可靠 —— 那层依赖 setRootElement 的回调时序,实测收不到
+  // 事件)。compositionend 之后多守 10ms:Safari 的收尾 keydown 晚到。
+  const [composing, setComposing] = useState(false);
+  const composingRef = useRef(false);
+  const onCompositionStart = (): void => {
+    composingRef.current = true;
+    setComposing(true);
+  };
+  const onCompositionEnd = (): void => {
+    setComposing(false);
+    window.setTimeout(() => {
+      composingRef.current = false;
+    }, 10);
+  };
 
-  // ---- auto-grow + caret reveal(mirror 是高度权威) ----
-  // 与 deepseek-harness InputBar 同款:镜像层以同样的 metrics/wrap 渲染
-  // draft,决定 .grow 高度;scroll 是唯一滚动容器。光标 reveal 用 mirror
-  // 上的 Range 度量(浏览器对 textarea 自己的 reveal 会滚动到对话层)。
+  // ---- 滚动与选区可见性 ----
+  // scroll 是唯一滚动容器;编辑/光标移动后小步 reveal(不滚动时会话层)。
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const mirrorRef = useRef<HTMLDivElement | null>(null);
-  const revealCaret = useCallback((caret: number) => {
-    const scrollEl = scrollRef.current;
-    const mirrorEl = mirrorRef.current;
-    const text = mirrorEl?.firstChild;
-    if (scrollEl === null || mirrorEl === null || !(text instanceof Text)) return;
-    if (scrollEl.scrollHeight <= scrollEl.clientHeight) return;
-    const at = Math.min(caret, text.data.length);
-    const afterNewline = at > 0 && text.data[at - 1] === "\n";
-    const range = document.createRange();
-    range.setStart(text, afterNewline ? at - 1 : at);
-    if (afterNewline) range.setEnd(text, at);
-    else range.collapse(true);
-    const line = afterNewline
-      ? Number.parseFloat(getComputedStyle(mirrorEl).lineHeight) || 0
-      : 0;
-    const rect = range.getBoundingClientRect();
-    const box = scrollEl.getBoundingClientRect();
-    if (rect.bottom + line > box.bottom) {
-      scrollEl.scrollTop += rect.bottom + line - box.bottom;
-    } else if (rect.top + line < box.top) {
-      scrollEl.scrollTop -= box.top - rect.top - line;
-    }
+  const revealAfterEdit = useCallback(() => {
+    requestAnimationFrame(() => revealDraftSelection(scrollRef));
   }, []);
-  // 输入/光标变化后小步 reveal(不滚动时会话层;rea 光标可见)。
-  const revealAfterEdit = useCallback((caret: number) => {
-    requestAnimationFrame(() => revealCaret(caret));
-  }, [revealCaret]);
+  const runtimeRef = useRef<ComposerRuntime | null>(null);
+  if (runtimeRef.current === null) {
+    // onUpdate 闭包在构造期就要能拿到实例,故先声明局部变量再赋值
+    let created: ComposerRuntime | null = null;
+    created = new ComposerRuntime({
+      onUpdate: () => {
+        // 只做投影 + 渲染 + 选区可见性。token 高亮的「标脏」绝不能放在
+        // 这里:标脏本身是一次 update,会再次触发 onUpdate,形成无限递归
+        // (Lexical 会报 "update listeners are endlessly enqueueing")。
+        // 它由下面的 token 变化 effect 单独驱动。
+        created!.refreshProjection();
+        forceRender();
+        revealAfterEdit();
+      },
+    });
+    runtimeRef.current = created;
+  }
+  const runtime = runtimeRef.current;
+  const projection = runtime.projection;
+  const input = projection.detectText;
+  // 发送按钮的**单一**禁用判据 —— 按钮的 disabled / 底色 / 字色 / cursor
+  // 四处视觉态此前是同一条件的四份拷贝,加一个条件就得改四处(漏一处会
+  // 出现"按钮能点但长成不可点的样子"或反之)。集中成一个布尔。
+  //
+  // compacting: 压缩会重写 transcript 边界(旧消息被摘要替换),期间插入的
+  // prompt 会落在错误的锚点上。与 creatingSession 同一条短路路径。
+  //
+  // 按钮与 Enter 分两个值: **按钮**多一条"输入为空"(没东西可发就别亮),
+  // **Enter 不能有**这条 —— 只挂图片、文字为空的草稿是合法的一发
+  // (handleSend 的图片附件分支),拿按钮的判据去挡 Enter 会把它堵死。
+  const sendBlocked =
+    creatingSession || compacting || pendingAsk?.status === "pending";
+  const sendDisabled = sendBlocked || input.trim().length === 0;
+  // 光标(activeAtToken 定位 @-token 用):每次提交都会重投影,折叠光标由
+  // 投影直接给出;范围选区时退到选区末尾。
+  const cursor = projection.caret ?? projection.selection?.end ?? input.length;
+  // 整体替换草稿(命令补全、发送失败回填)。编辑器是权威,无需 diff。
+  const commitDraft = useCallback((next: string) => {
+    runtimeRef.current?.setDraft(next);
+  }, []);
+  // 发送后清空,并切断编辑器撤销历史 —— 已提交的内容不能被 undo 复活
+  // (旧 InputMachine 的 clear 事件同时做这两件事)。
+  const clearDraft = useCallback(() => {
+    const rt = runtimeRef.current;
+    if (!rt) return;
+    rt.clearCommittedDraft(() => null);
+    rt.clearHistory();
+  }, []);
+
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
   // 排队消息编辑态: editingQueuedId 非空 → 该行切换为内联编辑框。
@@ -353,7 +305,6 @@ export default React.memo(function AgentInputBox({
   const [editingQueuedId, setEditingQueuedId] = useState<string | null>(null);
   const [editingQueuedText, setEditingQueuedText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevStatusRef = useRef<typeof status>("idle");
 
   // 流式计时: 仅在 streaming 期间累加秒数, 状态切回 idle/aborted/error 时归零
@@ -402,7 +353,7 @@ export default React.memo(function AgentInputBox({
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
     if (prev === "streaming" && status !== "streaming" && !pendingAsk) {
-      textareaRef.current?.focus();
+      focusComposer(runtime.editor, () => {});
     }
   }, [status, pendingAsk]);
 
@@ -454,95 +405,33 @@ export default React.memo(function AgentInputBox({
   // (需要 atToken 互斥门控,先声明 atToken)。
 
   // 在光标处插入文本(分屏「插入对话」与拖入文件地址共用):
-  // rc-textarea(antd Input.TextArea)把 ref 变成命令式句柄
-  // { resizableTextArea: { textArea } },需要解码到原生 <textarea>
-  // 才能读 selection / 设光标。插入后聚焦并把光标移到文本末尾。
-  // happy-dom 等环境可能不实现 textarea selection API(selectionStart 为
-  // undefined),归一化后退化为「追加到末尾」,避免 slice(0, undefined)
-  // 把整段文本重复插入。
+  // 编辑器的当前选区就是插入点,替换语义与旧的 selectionStart/End 一致;
+  // 插入后聚焦并把光标留在文本之后(编辑器自己负责落点)。
   const insertAtCursor = useCallback((text: string) => {
-    const ta = textareaRef.current;
-    const valLen = ta?.value.length ?? 0;
-    const rawStart = ta ? ta.selectionStart : 0;
-    const rawEnd = ta ? ta.selectionEnd : rawStart;
-    const start = Number.isFinite(rawStart) ? rawStart : valLen;
-    const end = Number.isFinite(rawEnd) ? rawEnd : start;
-    // 完整事务语义:外部纯文本插入(替换选区/光标处)走机器 insertTextAt
-    if (end === start) {
-      machineRef.current?.insertTextAt(text, start);
-    } else {
-      const next =
-        machineRef.current!.state.draft.slice(0, start) +
-        text +
-        machineRef.current!.state.draft.slice(end);
-      machineRef.current?.dispatch({ type: "draft-changed", draft: next });
-      // U+FFFC 出现在被替换区间内时 reconcile 已清理对应 occurrence
-    }
-    forceRender();
+    runtimeRef.current?.replaceText(runtimeRef.current.caretSpan(), text);
     requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      const pos = start + text.length;
-      // happy-dom 未实现 setSelectionRange(测试环境),退回标准 selectionStart/
-      // selectionEnd 属性赋值,两者在真实浏览器均有等价效果。
-      if (typeof el.setSelectionRange === "function") {
-        el.setSelectionRange(pos, pos);
-      } else {
-        el.selectionStart = pos;
-        el.selectionEnd = pos;
-      }
+      focusComposer(runtimeRef.current!.editor, () => {});
     });
-  }, [forceRender]);
+  }, []);
 
   // 分屏文件管理「插入对话」→ 光标处插入 @"文件" 引用 chip(与 @ 菜单选择
   // 文件同一形态)。FsContextMenu dispatch agent-input-insert 事件,detail
-  // 带 path 与 kind;插入后聚焦并把光标移到 chip 之后便于继续打字。
-  // U+FFFC 占位 + occurrence 是机器的事务(chip 参与 undo/backspace 整删),
-  // 发送时由 projectClipboard 展开回 @path。
+  // 带 path 与 kind;插入后聚焦并把光标留在 chip 之后便于继续打字。
+  // chip 是编辑器里的真实节点(退格一次删净、undo/redo 由编辑器历史接管),
+  // 发送时由投影的 clipboardText 展开回 @path。
   const insertFileReferenceAtCaret = useCallback((text: string, kind?: 'file' | 'dir') => {
-    const ta = textareaRef.current;
-    const valLen = ta?.value.length ?? 0;
-    const rawStart = ta ? ta.selectionStart : 0;
-    const rawEnd = ta ? ta.selectionEnd : rawStart;
-    const start = Number.isFinite(rawStart) ? rawStart : valLen;
-    const end = Number.isFinite(rawEnd) ? rawEnd : start;
-    const machine = machineRef.current;
-    if (!machine) return;
-    // 有选区时先删除选区(consume-span 事务),再在光标处插入 chip
-    if (end !== start) {
-      machine.dispatch({
-        type: "consume-span",
-        span: { start, end, draftRev: machine.state.draftRev },
-      });
-    }
     const refPath = kind === "dir" && !text.endsWith("/") ? `${text}/` : text;
-    const reference: InputReference = {
+    const reference: ReferenceInsert = {
       source: "fs",
       ref: refPath,
       label: refPath.replace(/\/+$/, "").split("/").filter(Boolean).pop() ?? refPath,
       clipboardText: `@${refPath}`,
     };
-    const before = machine.state.draft;
-    machine.insertReferenceAt(reference, start);
-    forceRender();
-    // 新光标 = start + 前导空格(如在文字中间补的分隔) + 占位符(1) + 尾随空格
-    const beforeLen = start > 0 && !/\s/.test(before.slice(start - 1, start)) ? 1 : 0;
-    const tailFirst = before.slice(start, start + 1);
-    const afterLen = tailFirst === "" || tailFirst !== " " ? 1 : 0;
-    const pos = start + beforeLen + 1 + afterLen;
+    runtimeRef.current?.insertFileReferences([reference]);
     requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      if (typeof el.setSelectionRange === "function") {
-        el.setSelectionRange(pos, pos);
-      } else {
-        el.selectionStart = pos;
-        el.selectionEnd = pos;
-      }
+      focusComposer(runtimeRef.current!.editor, () => {});
     });
-  }, [forceRender]);
+  }, []);
 
   // 分屏文件管理「插入对话」事件桥:detail.text 为相对路径,kind 可选
   // (目录/文件);插入后聚焦输入框并把光标移到 chip 末尾。
@@ -571,6 +460,16 @@ export default React.memo(function AgentInputBox({
     () => activeAtToken(input, cursor),
     [input, cursor],
   );
+  // 供挂载一次的装配 effect 读取的「激活 token」(detect 坐标):slash 命令
+  // token 优先,没有时取光标处的 @ token —— 与旧的 backdrop 高亮口径一致。
+  const commandTokenRef = useRef<{ start: number; end: number } | null>(null);
+  commandTokenRef.current = commandToken
+    ? { start: commandToken.start, end: commandToken.end }
+    : null;
+  const atTokenSpanRef = useRef<{ start: number; end: number } | null>(null);
+  atTokenSpanRef.current = atToken
+    ? { start: atToken.end - atToken.prefix.length, end: atToken.end }
+    : null;
   const [atMenuDismissed, setAtMenuDismissed] = useState(false);
   const showAtMenu =
     atToken !== undefined && !showSkillMenu && !atMenuDismissed;
@@ -703,9 +602,6 @@ export default React.memo(function AgentInputBox({
               `已压缩 ${data.payload?.removedMessages ?? 0} 条历史`,
             );
             break;
-          case "status":
-            message.info(`状态: ${JSON.stringify(data.payload)}`);
-            break;
           case "message":
             message.info(data.payload?.text ?? "");
             break;
@@ -727,15 +623,14 @@ export default React.memo(function AgentInputBox({
     }
     commitDraft("/" + item.name + " ");
     setTimeout(() => {
-      textareaRef.current?.focus();
+      focusComposer(runtimeRef.current!.editor, () => {});
     }, 0);
   }, [sessionId, activeSessionId, commitDraft]);
 
   // 选中一个 @-mention 候选:
-  // - file → 把 active @ token 整段替换为一个「引用 chip」。
-  //   事务语义(deepseek-harness insert-reference):span 被替换为 U+FFFC 占位符
-  //   + occurrence 记录,尾随自动加一个空格。chip 是真实的 1 字符占位,不是
-  //   文本宽度对位的视觉假象 —— 长路径不会撑宽输入框,光标/换行天然对齐。
+  // - file → 把 active @ token 整段替换为一个「引用 chip」。编辑器节点替换
+  //   (deepseek-harness insert-reference):span 被替换为 chip 节点,尾随自动
+  //   加一个空格。chip 是真实的行内元素,宽度随 label 自然撑开。
   // - dir → 下钻:替换为 `@path/` 纯文本,弹层不关闭,继续列该目录子条目。
   const selectAtEntry = useCallback(
     (entry: FsSearchEntry) => {
@@ -752,76 +647,42 @@ export default React.memo(function AgentInputBox({
       // end 是 prefix 的真实结束 offset,start = end - prefix.length 始终给出
       // prefix 的起始位置。
       const start = atToken.end - atToken.prefix.length;
-      const machine = machineRef.current;
-      if (!machine) return;
+      const rt = runtimeRef.current;
+      if (!rt) return;
       // 选中目录 = 下钻而非完成引用:把 token 替换为纯文本 `@path/`
       // (formatFileMention 对 dir 已保证尾部 /;引号变体保持开引号),
       // 不落 chip、不软关闭弹层。atToken.query 随之变为 `path/`,
       // useFsMentionSearch 以该目录为查询路径列出子条目;用户之后选中
       // 子文件才落 chip 作为最终选择(走下方 file 分支)。
       if (entry.type === "dir") {
-        const draft = machine.state.draft;
-        const nextDraft =
-          draft.slice(0, start) + formatted + draft.slice(atToken.end);
-        if (nextDraft !== draft) {
-          machine.dispatch({
-            type: "draft-changed",
-            draft: nextDraft,
-            editRange: { start, end: atToken.end, insertedLength: formatted.length },
-          });
-          forceRender();
-        }
-        // 光标落在 `@path/` 末尾,token 保持 active,弹层继续展示子内容。
-        const dirCursor = start + formatted.length;
-        setCursor(dirCursor);
+        // 文本替换自带「光标落在插入之后」语义,token 保持 active
+        rt.replaceText({ start, end: atToken.end }, formatted);
         requestAnimationFrame(() => {
-          const el = textareaRef.current;
-          if (!el) return;
-          el.focus();
-          if (typeof el.setSelectionRange === "function") {
-            el.setSelectionRange(dirCursor, dirCursor);
-          } else {
-            el.selectionStart = dirCursor;
-            el.selectionEnd = dirCursor;
-          }
+          focusComposer(rt.editor, () => {});
         });
         return;
       }
       // 引用实体路径:纯相对路径(文件,不带尾部 /);
       // 剪贴板/发送投影才是 formatted(@path 或 @"path")。
       const refPath = entry.path;
-      const reference: InputReference = {
+      const reference: ReferenceInsert = {
         source: "fs",
         ref: refPath,
         label: refPath.replace(/\/+$/, "").split("/").filter(Boolean).pop() ?? refPath,
         clipboardText: formatted,
       };
-      machine.dispatch({
-        type: "insert-reference",
+      rt.insertReference(
+        { start, end: atToken.end },
         reference,
-        span: { start, end: atToken.end, draftRev: machine.state.draftRev },
-        tailSpace: true,
-      });
-      forceRender();
-      // 新光标 = 占位符(1) + 尾随空格(1),落在 chip 之后方便继续打字
-      const newCursor = start + 2;
-      setCursor(newCursor);
+        input.slice(atToken.end, atToken.end + 1),
+      );
       // 选中 file 即完成态,软关闭弹层
       setAtMenuDismissed(true);
-      // rAF 只保留 DOM 焦点 + selection 同步(不参与 React 状态)。
       requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        el.focus();
-        if (typeof el.setSelectionRange === "function") {
-          el.setSelectionRange(newCursor, newCursor);
-        } else {
-          el.selectionStart = newCursor;
-          el.selectionEnd = newCursor;
-        }
+        focusComposer(rt.editor, () => {});
       });
     },
-    [atToken, forceRender],
+    [atToken, input],
   );
 
   const addAttachments = async (files: File[]) => {
@@ -872,47 +733,6 @@ export default React.memo(function AgentInputBox({
       if (att) URL.revokeObjectURL(att.thumbnailUrl);
       return prev.filter((a) => a.localId !== localId);
     });
-  };
-
-  const handlePaste = (e: React.ClipboardEvent) => {
-    const files: File[] = [];
-    for (const item of e.clipboardData.items) {
-      if (item.kind === "file") {
-        const f = item.getAsFile();
-        if (f) files.push(f);
-      }
-    }
-    if (files.length === 0) {
-      // 文本粘贴消毒:U+FFFC 是机器内部占位符,外部粘贴进来会破坏
-      // occurrence 一致性,拦截并手动插入消毒后的纯文本。
-      const text = e.clipboardData.getData("text/plain");
-      if (text.includes(PLACEHOLDER)) {
-        e.preventDefault();
-        const el = textareaRef.current;
-        const start = el?.selectionStart ?? 0;
-        const end = el?.selectionEnd ?? start;
-        const clean = text.split(PLACEHOLDER).join("");
-        const next =
-          machineRef.current!.state.draft.slice(0, start) +
-          clean +
-          machineRef.current!.state.draft.slice(end);
-        commitDraft(next);
-        const pos = start + clean.length;
-        requestAnimationFrame(() => {
-          if (!el) return;
-          el.focus();
-          if (typeof el.setSelectionRange === "function") {
-            el.setSelectionRange(pos, pos);
-          } else {
-            el.selectionStart = pos;
-            el.selectionEnd = pos;
-          }
-        });
-      }
-      return;
-    }
-    e.preventDefault();
-    void addAttachments(files);
   };
 
   // 拖入文件允许的最大体积:服务端 express.json 上限 20mb,base64 膨胀
@@ -1004,161 +824,114 @@ export default React.memo(function AgentInputBox({
     void addAttachments(files);
     e.target.value = "";
   };
+  // ---- 键盘:整体下沉到编辑器的命令层(input/editor/keymap.ts) ----
+  // 旧的 React onKeyDown 退役:keydown 现在由 Lexical 独占,再叠一层 React
+  // handler 会出现「方向键既被弹层消费、又被编辑器移动光标」的双写。
+  // IME 守卫(组合输入收尾的 Enter 不发送)、Enter 提交、粘贴消毒一并搬到
+  // keymap 里 —— 详见该文件的模块注释。
+  //
+  // 仲裁:菜单打开时的 ↑↓/Enter/Esc/Tab 在这里裁决。返回 'pass' 即交回
+  // 编辑器默认行为(例如 Shift+Enter 换行、关掉菜单时的普通 ↑↓)。
+  const discardAtToken = useCallback(() => {
+    if (!atToken) return;
+    const start = atToken.end - atToken.prefix.length;
+    const rt = runtimeRef.current;
+    if (!rt) return;
+    // 删除 @ token 让 atToken 自然变 undefined,弹层随之消失;
+    // 这一步进编辑器历史,用户仍可撤销。
+    rt.replaceText({ start, end: atToken.end }, "");
+    setAtMenuDismissed(true);
+    requestAnimationFrame(() => {
+      focusComposer(rt.editor, () => {});
+    });
+  }, [atToken]);
 
-  // IME guard:composition Enter 选词候选,不能发送(否则中文输入法
-  // 候选区按 Enter 会直接发消息)。compositionend 的 keydown 在 Safari 晚到,
-  // 所以延迟一拍清标记。
-  const composingRef = useRef(false);
-  const onCompositionStart = (): void => {
-    composingRef.current = true;
-  };
-  const onCompositionEnd = (): void => {
-    setTimeout(() => {
-      composingRef.current = false;
-    }, 10);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // @-mention 文件补全菜单:优先级高于 slash,因为用户当前输入焦点就是 @
-    // (slash 与 at 由 grammar 自然互斥,但下面用 showSkillMenu 二次门控更稳)
-    if (showAtMenu) {
-      // 方向键 / Enter 走 ArrowDown/Up + Enter:即便 items 还没加载也安全
-      // (modulo 操作在 length=0 时返回 NaN/0,被后面的 in-list guard 过滤)
-      const len = atSearch.items.length;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        if (len > 0) setAtMenuIdx((i) => (i + 1) % len);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        if (len > 0) setAtMenuIdx((i) => (i - 1 + len) % len);
-        return;
-      }
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        const entry = atSearch.items[atMenuIdx];
-        if (entry) selectAtEntry(entry);
-        return;
-      }
-      if (e.key === "Escape") {
-        // Escape 在 items 还没加载时也必须能关闭(popup 已在 mount),
-        // 否则用户没法"放弃"。删除 @ token(consume-span 事务)让 atToken
-        // 自然变 undefined,同时进入机器 undo 栈(可撤销删除)。
-        e.preventDefault();
-        if (atToken) {
-          // 用 atToken.end(在 dir continuation 等 cursor > end 的场景下
-          // 仍然指向 prefix 真实结束位置)而不是 cursor 来切。
-          const start = atToken.end - atToken.prefix.length;
-          const machine = machineRef.current;
-          if (machine) {
-            machine.dispatch({
-              type: "consume-span",
-              span: { start, end: atToken.end, draftRev: machine.state.draftRev },
-            });
-            forceRender();
-          }
-          setCursor(start);
-          requestAnimationFrame(() => {
-            const el = textareaRef.current;
-            if (!el) return;
-            el.focus();
-            if (typeof el.setSelectionRange === "function") {
-              el.setSelectionRange(start, start);
-            } else {
-              el.selectionStart = start;
-              el.selectionEnd = start;
-            }
-          });
+  const arbitrateKey = useCallback(
+    (key: ArbitrateKey): ArbitrateOutcome => {
+      // @-mention 文件补全菜单优先于 slash:用户当前输入焦点就是 @
+      // (两者由 grammar 自然互斥,这里再用 showSkillMenu 二次门控更稳)
+      if (showAtMenu) {
+        const len = atSearch.items.length;
+        if (key === "down" && len > 0) {
+          setAtMenuIdx((i) => (i + 1) % len);
+          return "consumed";
         }
-        return;
+        if (key === "up" && len > 0) {
+          setAtMenuIdx((i) => (i - 1 + len) % len);
+          return "consumed";
+        }
+        if (key === "enter") {
+          // 即便 items 还没加载也消费(与旧实现一致:避免 Enter 穿透去发送)
+          const entry = atSearch.items[atMenuIdx];
+          if (entry) selectAtEntry(entry);
+          return "consumed";
+        }
+        if (key === "escape") {
+          // Escape 在 items 还没加载时也必须能关闭
+          discardAtToken();
+          return "consumed";
+        }
       }
-    }
-    if (showSkillMenu && filteredSlash.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSkillMenuIdx((i) => (i + 1) % filteredSlash.length);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSkillMenuIdx(
-          (i) => (i - 1 + filteredSlash.length) % filteredSlash.length,
-        );
-        return;
-      }
-      // Tab: 补全到输入框 (像 shell/IDE 的补全体感)
-      // Enter: 选中并执行 (与 Tab 分工, 避免误触发执行)
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const it = filteredSlash[skillMenuIdx];
-        if (it) {
-          commitDraft("/" + it.name + " ");
+      if (showSkillMenu && filteredSlash.length > 0) {
+        if (key === "down") {
+          setSkillMenuIdx((i) => (i + 1) % filteredSlash.length);
+          return "consumed";
+        }
+        if (key === "up") {
+          setSkillMenuIdx(
+            (i) => (i - 1 + filteredSlash.length) % filteredSlash.length,
+          );
+          return "consumed";
+        }
+        // Tab 补全进输入框(shell/IDE 补全体感);Enter 选中并执行(与 Tab
+        // 分工,避免误触发执行)
+        if (key === "tab") {
+          const it = filteredSlash[skillMenuIdx];
+          if (it) {
+            commitDraft("/" + it.name + " ");
+            setShowSkillMenu(false);
+          }
+          return "consumed";
+        }
+        if (key === "enter") {
+          const it = filteredSlash[skillMenuIdx];
+          if (it) void selectSlashItem(it);
+          return "consumed";
+        }
+        if (key === "escape") {
           setShowSkillMenu(false);
+          return "consumed";
         }
-        return;
       }
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        const it = filteredSlash[skillMenuIdx];
-        if (it) void selectSlashItem(it);
-        return;
+      // shift+tab: 轮转权限模式(仅空闲且有会话时);菜单未打开才到这里
+      if (key === "tabBack" && status === "idle" && sessionId) {
+        const currentMode =
+          storeApi.getState().sessions.find((s) => s.sessionId === sessionId)
+            ?.permissionMode ?? "default";
+        const idx = MODE_CYCLE_ORDER.indexOf(currentMode);
+        const next = MODE_CYCLE_ORDER[(idx + 1) % MODE_CYCLE_ORDER.length]!;
+        void storeApi.getState().patchSessionMode(sessionId, next);
+        return "consumed";
       }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setShowSkillMenu(false);
-        return;
-      }
-    }
-    // shift+tab: cycle permission mode (only when idle, not while streaming)
-    if (e.key === "Tab" && e.shiftKey && status === "idle" && sessionId) {
-      e.preventDefault();
-      const currentMode =
-        storeApi.getState().sessions.find(
-          (s) => s.sessionId === sessionId,
-        )?.permissionMode ?? "default";
-      const idx = MODE_CYCLE_ORDER.indexOf(currentMode);
-      const next = MODE_CYCLE_ORDER[(idx + 1) % MODE_CYCLE_ORDER.length]!;
-      void storeApi.getState().patchSessionMode(sessionId, next);
-      return;
-    }
-    // undo/redo:机器持有事务日志(chip 插入/删除也有事务语义),浏览器原生
-    // undo 无法表达「占位符 ↔ occurrence」,必须拦截,不让原生栈跑。
-    if (
-      (e.metaKey || e.ctrlKey) &&
-      (e.key === "z" || e.key === "Z" || e.key === "y")
-    ) {
-      e.preventDefault();
-      const redo = e.key === "y" || e.shiftKey;
-      const machine = machineRef.current;
-      if (!machine) return;
-      machine.dispatch({ type: redo ? "redo" : "undo" });
-      forceRender();
-      const el = textareaRef.current;
-      if (el) {
-        const caret = Math.min(el.selectionStart ?? 0, machine.state.draft.length);
-        requestAnimationFrame(() => {
-          el.focus();
-          if (typeof el.setSelectionRange === "function") {
-            el.setSelectionRange(caret, caret);
-          } else {
-            el.selectionStart = caret;
-            el.selectionEnd = caret;
-          }
-        });
-      }
-      return;
-    }
-    // IME 组合输入中的 Enter 是选词候选,绝不能触发发送。
-    if (composingRef.current && e.key === "Enter") return;
-    // zai race fix: createNewSession 异步窗口期,Send 按钮已 disabled,
-    // 但 Enter 键能绕过 disabled — 这里显式短路,避免 phantom POST。
-    if (creatingSession) return;
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
+      return "pass";
+    },
+    [
+      showAtMenu,
+      atSearch.items,
+      atMenuIdx,
+      selectAtEntry,
+      discardAtToken,
+      showSkillMenu,
+      filteredSlash,
+      skillMenuIdx,
+      commitDraft,
+      selectSlashItem,
+      status,
+      sessionId,
+      storeApi,
+    ],
+  );
+
 
   const { submitPrompt, pushUserMsg } = useSubmitPrompt();
 
@@ -1320,10 +1093,15 @@ export default React.memo(function AgentInputBox({
     // (line ~1039),这里是 Enter / Send button / 编程触发三入口的统一拦截。
     // 非 race 时(`creatingSession=false`):即便 sessionId 为空也走原 fallback
     // 路径(sid = sessionId || activeSessionId || undefined),保持向后兼容。
-    if (creatingSession) return;
-    // draft 里的 U+FFFC 占位符展开为剪贴板投影(@path 文本)再发送 —
-    // 后端协议不变:收到的还是「文本里夹着 @相对路径」。
-    const expanded = projectClipboard(machineRef.current!.state);
+    //
+    // compacting 同理: 压缩在重写 transcript 边界, 期间提交的 prompt 会落到
+    // 错误的锚点上。按钮与 Enter 都已拦, 这里是三入口(Enter / Send button /
+    // 编程触发)的最终兜底 —— 前两者的 disabled/canSubmit 都是渲染层的,
+    // 不能保证覆盖所有调用方。
+    if (creatingSession || compacting) return;
+    // 投影里 chip 展开为剪贴板文本(@path)再发送 —— 后端协议不变:
+    // 收到的还是「文本里夹着 @相对路径」。
+    const expanded = runtime.projection.clipboardText;
     const text = expanded.trim();
     const readyAttachments = attachments.filter((a) => a.status === "ready");
     const blocks = readyAttachments.map((a) => ({
@@ -1342,8 +1120,7 @@ export default React.memo(function AgentInputBox({
     // `/` 的文本(如 /Users/xxx)不是命令, 直接走下方普通 submitPrompt 路径;
     // 修复粘贴路径被误判为 slash 命令、draft 被清空后消息丢失的 bug。
     if (text.startsWith("/") && /^[A-Za-z0-9:_-]+$/.test(name)) {
-      machineRef.current?.dispatch({ type: "clear" });
-      forceRender();
+      clearDraft();
       const sid = sessionId || activeSessionId || undefined;
       try {
         const result = await api.post<{ type: string; payload: any }>(
@@ -1360,12 +1137,6 @@ export default React.memo(function AgentInputBox({
               `压缩完成,移除 ${result.payload.removedMessages} 条`,
             );
             await storeApi.getState().loadSessions();
-            return;
-          case "status":
-            message.info(
-              `cwd: ${result.payload.cwd}\nmodel: ${result.payload.model}\nsession: ${result.payload.sessionId ?? "-"}`,
-              5,
-            );
             return;
           case "prompt":
             // 与 opencc 一致: 只显示用户输入的 `/<command-name> <args>`,
@@ -1411,8 +1182,7 @@ export default React.memo(function AgentInputBox({
     if (!finalText && blocks.length === 0) return;
     // 追齐 OPENCC: 对话进行中(streaming)不禁用发送 — 消息进入后端
     // per-session 串行队列, 当前轮结束后自动执行, 输入框上方显示排队预览。
-    machineRef.current?.dispatch({ type: "clear" });
-    forceRender();
+    clearDraft();
 
     if (blocks.length > 0) {
       // 第一版排队仅文本: streaming 中图片消息不可发送(图片按钮/drop 已禁用,
@@ -1468,6 +1238,60 @@ export default React.memo(function AgentInputBox({
       await submitPrompt(finalText);
     }
   };
+
+  // ---- 编辑器装配(挂载一次) ----
+  // 运行时注册(纯文本绑定 / 撤销历史 / 更新监听)、键盘映射、token 高亮
+  // transform 都在这里装到编辑器上;卸载时整体摘掉。handlers 用 ref 转发到
+  // 最新闭包,避免每次渲染重新注册命令(重注册会丢原生 undo 栈的连续性)。
+  const handlersRef = useRef({ arbitrateKey, handleSend, addAttachments, runtime, sendBlocked });
+  handlersRef.current = { arbitrateKey, handleSend, addAttachments, runtime, sendBlocked };
+  useEffect(() => {
+    const rt = runtimeRef.current!;
+    const unregisterEditor = rt.register();
+    const unregisterKeymap = registerComposerKeymap(rt.editor, {
+      arbitrate: (key) => handlersRef.current.arbitrateKey(key),
+      dismissPopup: () => setShowSkillMenu(false),
+      canSubmit: () => !handlersRef.current.sendBlocked,
+      submit: () => void handlersRef.current.handleSend(),
+      intakeFiles: (files) => void handlersRef.current.addAttachments([...files]),
+      pasteText: (text) => rt.paste(text),
+      recentlyComposing: () => composingRef.current,
+    });
+    const unregisterDecor = registerTokenDecoration(
+      rt.editor,
+      // 激活 token = slash 命令 token,没有时取光标处的 @ token
+      () => {
+        const t = commandTokenRef.current ?? atTokenSpanRef.current;
+        return t === null ? null : { start: t.start, end: t.end };
+      },
+    );
+    rt.refreshProjection();
+    forceRender();
+    return () => {
+      unregisterDecor();
+      unregisterKeymap();
+      unregisterEditor();
+    };
+    // 装配只做一次:handlers 经 ref 转发到最新闭包
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 激活 token 变化时把文本节点标脏,让 TextNode transform 重新上色
+  // (token 出现/消失不一定伴随一次内容提交,transform 只跑在被标脏的
+  // 节点上)。依赖挂在声明之后的装配 effect 之后声明,保证挂载时
+  // register() 已完成。
+  const activeTokenKey =
+    commandTokenRef.current === null
+      ? ""
+      : `c${commandTokenRef.current.start}:${commandTokenRef.current.end}`;
+  const atTokenKey =
+    atTokenSpanRef.current === null
+      ? ""
+      : `a${atTokenSpanRef.current.start}:${atTokenSpanRef.current.end}`;
+  useEffect(() => {
+    refreshTokenDecoration(runtime.editor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTokenKey, atTokenKey]);
 
   return (
     <div>
@@ -1648,25 +1472,26 @@ export default React.memo(function AgentInputBox({
         )}
         <SettingsButton />
         {!hideShareAndPlugin && <PluginButton />}
-        {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
-            图标在 collapsed=false 时显示 Maximize2Icon (可折叠), true 时显示
-            Minimize2Icon (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮
-            视觉风格保持一致 (icon-only + flexShrink:0).
+        {/* 工具调用展开按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
+            transcriptCollapsed 现在只控制「工具运行段是否自动展开」:
+            false(默认)时运行中的段展开成明细行, 跑完的段收成一行摘要;
+            true(compact 输出风格 / 右侧分屏锁定)时连运行中的段也不展开.
 
-            视觉态 = transcriptCollapsed, 初值由 Layout 根据 settings.outputStyle
-            设好(compact → true,其余 → false). 按钮只翻这一个布尔, 不依赖 settings,
-            因此在 compact 模式下点击也能正常切换. tooltip 在 outputStyle=compact 时
-            提示"刷新后回到 compact"以区分与 settings 持久化的关系. */}
+            图标沿用 Maximize2/Minimize2 的"可展开/可收起"语义, hover Tooltip
+            给完整文案, 与同行其他图标按钮视觉风格保持一致 (icon-only + flexShrink:0).
+            初值由 Layout 根据 settings.outputStyle 设好(compact → true,其余 → false).
+            按钮只翻这一个布尔, 不依赖 settings, 因此在 compact 模式下点击也能正常切换.
+            tooltip 在 outputStyle=compact 时提示"刷新后回到 compact"以区分与 settings 持久化的关系. */}
         {!transcriptLockActive && !isMobile && (
           <Tooltip
             title={
               outputStyle === "compact"
                 ? transcriptCollapsed
-                  ? "临时展开 transcript(刷新后回到 compact)"
-                  : "临时收起 transcript(刷新后回到 compact)"
+                  ? "临时展开工具调用(刷新后回到 compact)"
+                  : "临时收起工具调用(刷新后回到 compact)"
                 : transcriptCollapsed
-                  ? "展开 transcript"
-                  : "折叠 transcript"
+                  ? "展开工具调用"
+                  : "收起工具调用"
             }
             placement="top"
           >
@@ -1961,32 +1786,8 @@ export default React.memo(function AgentInputBox({
               activeIndex={atMenuIdx}
               onActiveIndexChange={setAtMenuIdx}
               onSelect={selectAtEntry}
-              onDismiss={() => {
-                // 外部点击关闭:用删除 token 方式自然消失,保留光标。
-                if (atToken) {
-                  const start = atToken.end - atToken.prefix.length;
-                  const machine = machineRef.current;
-                  if (machine) {
-                    machine.dispatch({
-                      type: "consume-span",
-                      span: { start, end: atToken.end, draftRev: machine.state.draftRev },
-                    });
-                    forceRender();
-                  }
-                  setCursor(start);
-                  requestAnimationFrame(() => {
-                    const el = textareaRef.current;
-                    if (!el) return;
-                    el.focus();
-                    if (typeof el.setSelectionRange === "function") {
-                      el.setSelectionRange(start, start);
-                    } else {
-                      el.selectionStart = start;
-                      el.selectionEnd = start;
-                    }
-                  });
-                }
-              }}
+              // 外部点击关闭:删除 @ token 让弹层自然消失,光标留在删除处。
+              onDismiss={discardAtToken}
             />
           )}
           {/* 输入框 + 右侧发送/停止 按钮的 flex 行容器 —
@@ -2001,88 +1802,32 @@ export default React.memo(function AgentInputBox({
             data-testid="agent-input-row"
             className="flex flex-row items-stretch gap-0 flex-1 min-w-0"
           >
-          {/* Mirror-backdrop wrapper(追齐 deepseek-harness InputBar 的三层手法):
-            唯一滚动容器 .scroll → .grow → [backdrop(可见装饰层)/ textarea
-            (透明文本,只留 caret)/ mirror(隐藏,决定高度 → auto-grow)]。
-            三层共享 metrics + font-stack(DshChipCell 打头,保证 U+FFFC 占
-            位符在 textarea 与 backdrop 里宽度一致),文本与 chip 天然逐字
-            对齐、零漂移。backdrop 常驻:chip / token-mark / 普通文本全在
-            这里渲染。 */}
+          {/* 输入面(Lexical composer):滚动容器 + contenteditable + chip portal。
+              旧的「backdrop 可见文本 / 透明 textarea / 隐藏镜像」三层结构整层
+              删除 —— 文本、chip、`/命令` 高亮都是编辑器里的真实内容,高度由
+              contenteditable 自身增长。手法见 components/input/editor/。 */}
           <div
             data-testid="agent-input-decorator-wrap"
             className="agent-input-decorator-wrap"
           >
-            <div ref={scrollRef} className="agent-input-scroll" data-input-scroll>
-              <div className="agent-input-grow">
-                <div
-                  aria-hidden
-                  data-input-backdrop
-                  className="agent-input-backdrop"
-                  data-decoration={commandToken ? "token" : atToken ? "at" : "chips"}
-                >
-                  {renderDraftDecorations(
-                    input,
-                    machineChips,
-                    commandToken,
-                    atToken
-                      ? { start: atToken.end - atToken.prefix.length, end: atToken.end, prefix: atToken.prefix }
-                      : null,
-                    commandGhostHint,
-                  )}
-                </div>
-                <textarea
-                  ref={textareaRef}
-                  className="agent-input-textarea-field"
-                  value={input}
-                  data-testid="agent-input-textarea"
-                  placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 拖入图片直接插入, 拖入其他文件自动上传并加入地址. 敲 @ 触发文件补全."
-                  rows={1}
-                  disabled={pendingAsk?.status === "pending"}
-                  // onChange:写入新值(machine 事务),同时同步光标位置。
-                  onChange={(e) => {
-                    commitDraft(e.target.value);
-                    const sel = e.target.selectionStart;
-                    if (typeof sel === "number") {
-                      setCursor(sel);
-                      revealAfterEdit(sel);
-                    }
-                  }}
-                  // onKeyUp:方向键/Home/End 不触发 onChange,但会动光标;
-                  // 这里补一刀,保证下一次 render 之前 cursor 已就位。
-                  onKeyUp={(e) => {
-                    const sel = (e.target as HTMLTextAreaElement).selectionStart;
-                    if (typeof sel === "number") {
-                      setCursor(sel);
-                      revealAfterEdit(sel);
-                    }
-                  }}
-                  // onClick:鼠标点击定位光标;selectStart 同步刷新。
-                  onClick={(e) => {
-                    const sel = (e.target as HTMLTextAreaElement).selectionStart;
-                    if (typeof sel === "number") {
-                      setCursor(sel);
-                      revealAfterEdit(sel);
-                    }
-                  }}
-                  onKeyDown={handleKeyDown}
-                  onPaste={handlePaste}
-                  onCompositionStart={onCompositionStart}
-                  onCompositionEnd={onCompositionEnd}
-                />
-                {/* 隐藏镜像:含换行,决定 .grow 的真实高度(min 两行交给 CSS) */}
-                <div
-                  ref={mirrorRef}
-                  aria-hidden
-                  className="agent-input-mirror"
-                >{`${input}\n`}</div>
-              </div>
-            </div>
+            <ComposerSurface
+              editor={runtime.editor}
+              editable={pendingAsk?.status !== "pending"}
+              scrollRef={scrollRef}
+              placeholder={input === "" ? INPUT_PLACEHOLDER : null}
+              editorClassName="agent-input-editor"
+              hint={commandGhostHint}
+              composing={composing}
+              onCompositionStart={onCompositionStart}
+              onCompositionEnd={onCompositionEnd}
+            />
           </div>
           {/* 输入框右侧"发送 / 停止"按钮组 —
               - 桌面 + 移动端通用, 桌面端补回键盘快捷键的可视化入口(只读 Esc
                 提示不够显式), 移动端替代之前的 isMobile-only 停止按钮.
-              - 「发送」: 输入框非空 + 非 streaming + 非 creatingSession +
+              - 「发送」: 输入框非空 + 非 streaming + 非 creatingSession + 非 compacting +
                 无 pendingAsk 时可点, 与 Enter 等价(handleSend);
+                判据集中在 sendDisabled(见其定义处),按钮四态视觉全用它;
               - 「停止」: 仅 streaming 时显示, 与按 Esc 完全一致 — 调
                 storeApi.getState().stop(), 与 AgentConversation 的全局 Esc
                 处理路径走同一套后端 abort + status 流, 不绕过任何清理逻辑.
@@ -2100,7 +1845,7 @@ export default React.memo(function AgentInputBox({
                 onClick={() => {
                   void storeApi.getState().stop();
                 }}
-                className="!h-auto flex items-center justify-center gap-1 py-1.5 px-3.5 !bg-[rgba(255,102,0,0.15)] !border !border-solid !border-[#ff6600] !rounded-md !text-[#ff6600] !font-semibold !text-[13px] cursor-pointer"
+                className="!h-auto flex items-center justify-center gap-1 py-1.5 px-3.5 !bg-[color-mix(in_srgb,var(--cmd-token-color)_15%,transparent)] !border !border-solid !border-[var(--cmd-token-color)] !rounded-md !text-[var(--cmd-token-color)] !font-semibold !text-[13px] cursor-pointer"
               >
                 <SquareIcon />
                 <span>停止</span>
@@ -2112,11 +1857,7 @@ export default React.memo(function AgentInputBox({
                 onClick={() => {
                   void handleSend();
                 }}
-                disabled={
-                  creatingSession ||
-                  pendingAsk?.status === "pending" ||
-                  input.trim().length === 0
-                }
+                disabled={sendDisabled}
                 style={{
                   // 发送按钮的动态视觉态(条件 + CSS var + 实际 hex 混合)用 inline
                   // 表达更顺,Tailwind 写四组 disabled-state 不直观,保留 inline.
@@ -2126,33 +1867,17 @@ export default React.memo(function AgentInputBox({
                   justifyContent: "center",
                   gap: 4,
                   padding: "6px 14px",
-                  background:
-                    creatingSession ||
-                    pendingAsk?.status === "pending" ||
-                    input.trim().length === 0
+                  background: sendDisabled
                       ? "var(--bg-faint-08)"
-                      : "#ff6600",
-                  border:
-                    creatingSession ||
-                    pendingAsk?.status === "pending" ||
-                    input.trim().length === 0
-                      ? "1px solid var(--border-subtle)"
-                      : "1px solid #ff6600",
+                      : "var(--cmd-token-color)",
+                  border: "none",
                   borderRadius: 6,
-                  color:
-                    creatingSession ||
-                    pendingAsk?.status === "pending" ||
-                    input.trim().length === 0
-                      ? "var(--text-tertiary)"
-                      : "#fff",
+                  // 文字不是白:启用态底色是浅橙(#f97316)/浅紫(#a78bfa),
+                  // 白字对浅色底的对比度只有 ~2.7~2.9:1,深色字能到 5.4:1 以上。
+                  color: sendDisabled ? "var(--text-tertiary)" : "#1e1b4b",
                   fontWeight: 600,
                   fontSize: 13,
-                  cursor:
-                    creatingSession ||
-                    pendingAsk?.status === "pending" ||
-                    input.trim().length === 0
-                      ? "not-allowed"
-                      : "pointer",
+                  cursor: sendDisabled ? "not-allowed" : "pointer",
                 }}
               >
                 <ArrowUpIcon />

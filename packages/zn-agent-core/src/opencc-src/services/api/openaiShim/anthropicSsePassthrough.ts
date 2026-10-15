@@ -80,8 +80,16 @@ async function* anthropicSsePassthrough(
 
       buffer += decoder.decode(value, { stream: true })
 
-      // SSE events are delimited by a blank line (`\n\n`). Split the
-      // buffer, keep the last incomplete chunk, yield the rest.
+      // SSE events are delimited by a blank line, which the spec allows to be
+      // either "\n\n" or "\r\n\r\n". Matching only "\n\n" meant a CRLF gateway
+      // produced no boundary at all: the whole response sat in the buffer and
+      // the stream completed having yielded nothing (oc-005). Normalizing the
+      // carriage return first lets one delimiter cover both forms.
+      if (buffer.includes('\r\n')) {
+        buffer = buffer.replace(/\r\n/g, '\n')
+      }
+
+      // Split the buffer, keep the last incomplete chunk, yield the rest.
       let boundary = buffer.indexOf('\n\n')
       while (boundary !== -1) {
         if (signal?.aborted) {

@@ -14,6 +14,12 @@ import "@testing-library/jest-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useAgentStore, type V2TaskItem } from "../store/useAgentStore.js";
 import { useAppStore } from "../store/useAppStore.js";
+import {
+  detectTextOf,
+  editorRoot,
+  pressEditorKey,
+  setDraftText,
+} from "./input/editor/testDriver.js";
 
 const v2 = (id: string, subject: string, status: V2TaskItem["status"]): V2TaskItem => ({
   id, subject, status, blocks: [], blockedBy: [], updatedAt: 0,
@@ -83,15 +89,15 @@ beforeEach(() => {
   });
 });
 
-async function typeText(ta: HTMLTextAreaElement, text: string) {
-  fireEvent.change(ta, { target: { value: text, selectionStart: text.length } });
+function typeText(el: HTMLElement, text: string) {
+  setDraftText(el, text);
 }
 
 describe("AgentInputBox — 移动端 @-mention 流程", () => {
   test("isMobile=true 时 @-mention popup 仍然弹出", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const el = editorRoot();
+    typeText(el, "@");
     await waitFor(() => {
       expect(screen.getByTestId("file-mention-popover")).toBeInTheDocument();
     });
@@ -102,33 +108,33 @@ describe("AgentInputBox — 移动端 @-mention 流程", () => {
 
   test("移动端:键盘 Enter 选中候选同样工作", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@src/foo");
+    const el = editorRoot();
+    typeText(el, "@src/foo");
     await waitFor(() => {
       expect(screen.getByTestId("file-mention-row-src/foo.ts")).toBeInTheDocument();
     });
     // 第一项是 src/foo.ts(score 最高),选中后 draft 变为占位符 chip
-    fireEvent.keyDown(ta, { key: "Enter" });
+    pressEditorKey(el, "Enter");
     await waitFor(() => {
-      expect(ta.value).toBe("\ufffc ");
+      expect(detectTextOf(el)).toBe("￼ ");
     });
   });
 
   test("移动端:选中目录 → 下钻为 @src/ 文本,popup 保持打开", async () => {
     render(<AgentInputBox />);
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement;
-    await typeText(ta, "@");
+    const el = editorRoot();
+    typeText(el, "@");
     await waitFor(() => {
       expect(screen.getByTestId("file-mention-row-src")).toBeInTheDocument();
     });
     // 移动端无鼠标,通过键盘选中:ArrowDown 移到 src(它在初始顺序里是第几?)
     // mock 返回:src/foo.ts, src. 排序后 src/foo.ts (score 10) > src (score 5)。
     // atMenuIdx=0 是 src/foo.ts,选目录需要 ArrowDown 移到 src。
-    fireEvent.keyDown(ta, { key: "ArrowDown" });
-    fireEvent.keyDown(ta, { key: "Enter" });
+    pressEditorKey(el, "ArrowDown");
+    pressEditorKey(el, "Enter");
     // 新语义:dir 选择是下钻,token 替换为 @src/ 文本,不落 chip
     await waitFor(() => {
-      expect(ta.value).toBe("@src/");
+      expect(detectTextOf(el)).toBe("@src/");
     });
     expect(screen.getByTestId("file-mention-popover")).toBeInTheDocument();
   });

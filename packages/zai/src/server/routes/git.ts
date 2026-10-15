@@ -205,9 +205,8 @@ gitRouter.post('/git', async (req, res) => {
         const root = await svcRepoRoot(cwd, selected);
         const resolved = resolveGitPath(root, pathField);
         if (!resolved.ok) throw new GitCommandError(resolved.error, 'bad-path', 'diff');
-        const text = await svcDiff(cwd, resolved.rel, staged, selected);
-        return { diff: text, isUntracked: false };
-      }, ({ diff, isUntracked }) => ({ diff, isUntracked }));
+        return svcDiff(cwd, resolved.rel, staged, selected);
+      }, ({ diff, isUntracked, isBinary }) => ({ diff, isUntracked, isBinary }));
       res.json(value);
       return;
     }

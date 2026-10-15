@@ -10,7 +10,6 @@ import { isPolicyAllowed } from 'src/services/policyLimits/index.js';
 import { z } from 'zod/v4';
 import { getTeleportErrors, TeleportError, type TeleportLocalErrorType } from '../components/TeleportError.js';
 import { getOauthConfig } from '../constants/oauth.js';
-import {  } from '../constants/product.js'
 import { BRAND_NAME } from '../constants.js';
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js';
 import type { Root } from '../ink.js';

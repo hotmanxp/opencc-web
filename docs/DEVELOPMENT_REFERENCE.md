@@ -288,7 +288,6 @@ zai 端实现的能力,把 opencc 上游 `bashProvider.ts` 的"shell trailer 跟
 | unknown command | `unknown` | `if (!cmd)` 兜底 |
 | local cmd cleared | `cleared` | `result.kind === 'cleared'` |
 | local cmd compacted | `compacted` | `result.kind === 'compacted'` |
-| local cmd status | `status` | `result.kind === 'status'` |
 | local cmd message | `message` | `result.kind === 'message'` |
 | local cmd error | `error` | `result.kind === 'error'` |
 | PromptCommand success | `prompt` | `cmd.getPromptForCommand` 路径 |
@@ -374,9 +373,17 @@ zai 通过长轮询适配 Tencent iLink Bot API 把个人微信接入 `eventBus`
 **iLink Bot 身份限制(已知,启动日志强制 WARN)**:
 QR 登录后拿到的是 iLink bot identity(`...@im.bot`),不是普通微信账号。最常见的落地形态是只 DM;group policy 默认 `disabled`,即使设置 `open` 也常常拿不到群事件 — 这是 iLink 端的限制,不是 Hermes/zai 的 bug。详细见 plan 文档 B7 与启动警告。
 
+**通道归属:只有 `app=weixin` 的专用实例跑通道**(2026-09 重构,取代早期「主实例自己跑微信通道」的形态):
+- `services/weixinBot/channelProfile.ts` — 判定锚点 `isWeixinChannelHost()`(`process.env.ZAI_APP === 'weixin'`)。
+- `services/weixinBot/weixinDedicatedInstance.ts` — 编排:主实例按 `settings.weixinBot.enabled` 检查机器级 owner 锁,无锁则拉起一个 `app=weixin` 的受管子实例独占通道(默认端口 9199、cwd 默认用户主目录)。
+- `services/weixinBot/weixinRuntimeBoot.ts` — 通道启动,受管 + weixin 双门禁;`WeixinBotManager.ts:90` 注释里还有一道同样的 profile 门禁兜底。
+- **必须同进程**:入站注入走进程内 `getSessionInbox().followup()`、出站镜像订阅进程内 `eventBus`,收发消息与跑 agent turn 不能拆到两个进程 —— 专用实例必须是完整 zai 进程,不是轻量转发进程。
+- **已知副作用**:专用实例会话只出现在它自己的 Web UI(9199),主实例无跨实例聚合;重启主实例会连带停掉它(`shutdownInstanceSupervisor`);改端口/cwd/dmPolicy 需重启专用实例(面板保存动作会自动重启)。
+- **微信配置入口只在主实例显示**:设置页「微信机器人」入口按 `instanceContext.instanceId == null` 门控(`SettingsDrawer.tsx:920` 的 `weixinConfigVisible`)。**判据不能用 `isManagedChild`** —— 主实例在某些 supervisor 启动路径下 `isManagedChild` 也是 true;`instanceContext` 未 hydrate 时按主实例处理。前端门控只影响可见性,`/api/weixin/*` 路由本身对子实例不做拦截。
+
 **集成点**:
-- `services/agentRuntime.ts` `initAgentRuntime()` 末尾追加 `await getWeixinBotManager().start()`,best-effort 失败仅 warn。
-- `services/runtimeLifecycle.ts` `closeServer()` 末尾追加 `await getWeixinBotManager().stop()`:先 unsub eventBus,再 disconnect adapter(in-flight fetch abort + 锁释放)。
+- `services/runtimeLifecycle.ts` `closeServer()` 中 `await getWeixinBotManager().stop()`:先 unsub eventBus,再 disconnect adapter(in-flight fetch abort + 锁释放)。注:`initAgentRuntime()` 已不再启动 weixin manager(通道由专用实例负责)。
+- `settings.weixinBot.*` 变更需重启专用实例才生效。
 
 **测试覆盖** (14 个 test file, 102 tests):
 - `services/weixinBot/iLinkClient.test.ts` — 7 端点 + 错误码 + AbortError
@@ -406,6 +413,10 @@ QR 登录后拿到的是 iLink bot identity(`...@im.bot`),不是普通微信账�
 
 **分层**:`BashTab`(tab strip)→ `TerminalView`(xterm.js + FitAddon)→ `/api/terminal/*` → `TerminalService`(每 sessionId 一组)→ `PtySession`(node-pty;`@xterm/headless` 累积屏幕 + `@xterm/addon-serialize` 出重连快照)。
 
+**安装约束**:`node-pty` 是原生模块,必须留在 `pnpm-workspace.yaml` 的 `allowBuilds` 与根 `package.json` 的 `pnpm.onlyBuiltDependencies` 里,否则装出 load 不了的 `pty.node`。装不上时 `GET /api/terminal/environment` 返回 `available:false` + `hint`,面板显式报错而**不**退回 REPL。
+
+> `/api/bash-repl`(每条命令一次 `sh -c`)与 `/api/terminal/*` 并存是有意为之:前者只服务移动端快捷 Bash 与命令历史。
+
 **四条必须知道的约束**:
 1. **只有可见 tab 开 SSE** —— HTTP/1.1 同源并发连接有限(agent 流 + bash-tasks 流已占数条);切 tab 关旧开新,新连接首帧 `snapshot` 恢复整屏。
 2. **服务端是 tab 集合的唯一真相** —— 刷新后 `GET /api/terminal/list` 重建 tab 并重连同一批 PTY;localStorage 只记"当前看哪个"(`zai.splitPane.terminalTab`)。
@@ -417,3 +428,79 @@ QR 登录后拿到的是 iLink bot identity(`...@im.bot`),不是普通微信账�
 **测试**:`PtySession.test.ts`(真 PTY,断言状态与 CWD 跨命令保持 + close 真杀进程)、`TerminalService.test.ts`、`routes/terminal.test.ts`(含裸 http 读 SSE)、`useTerminalTabs.test.ts`、`TerminalView.test.tsx`、`BashTab.test.tsx`。
 
 **详设**:`docs/superpowers/specs/2026-09-22-zai-pty-terminal-design.md` / 计划与验收:`docs/superpowers/plans/2026-09-22-zai-pty-terminal.md`
+
+## 17. API 端点索引
+
+集中挂载在 `packages/zai/src/server/index.ts` 的 `app.use` 区段(约 232-303 行),全部经 `app.use('/api', <router>)` 前缀,子路径在各 `routes/*.ts` 内部声明。
+
+| 分组 | 端点 | 实现文件 |
+|------|------|---------|
+| 对话与运行时 | `/api/agent/*`(sessions / `:id/state` / prompt / `:id/model` / `:id/mode` / answer 等) | `routes/agent.ts` |
+| Agent 设置 | `/api/agent/settings`(work-mode / output-style / theme / auto-update / main-agent / computer-use + `GET /agent/computer-use/status`) | `routes/agentSettings.ts` |
+| 审批与权限 | `/api/agent/approve*`(`/approve`、`/approve/reject`、`/approve/file`)、`/api/agent/permission-response` | `routes/approve.ts`、`routes/permission.ts` |
+| 会话归档 | `/api/agent/sessions/archive` | `routes/sessionArchive.ts` |
+| 其他对话通道 | `/api/session-state`、`/api/slash`、`/api/transcript/*`、`/api/voice/getASRToken` | — |
+| 终端与执行 | `/api/terminal/*`(`/environment`、`/shells`、`/list`、`/create`、`/:id/{events,write,resize,rename,close}`) | `routes/terminal.ts` |
+| Shell 执行 | `/api/bash-tasks`、`/api/bash-repl`、`/api/repl-history`、`/api/exec`(GET+POST,带 cwd 透传)、`/api/git` | — |
+| 文件与资源 | `/api/fs/*`(`/list`、`/file`(GET 读 + PUT 写)、`/upload`、`/search`、`/content-search`)、`/api/fs/picker` | `routes/fs.ts`、`routes/fsPicker.ts` |
+| Desktop 资源 | `/api/desktop/fs/*`、`/api/desktop/wallpaper/*`、`/api/resources`、`/api/dirs`、`/api/quickstart` | `routes/desktopFs.ts` |
+| 任务工厂 | `/api/super-tasks`(列表 + DELETE、`/settings`(GET+PUT)、`/spawn-agents`、`/spawn-agents/:name/register`、`/:id`、`/:id/intake-check`)、`/api/tasks`、`/api/v2-tasks` | `routes/superTasks.ts` |
+| 实例与子进程 | `/api/instances`、`/api/internal/*`(`/internal/child-event`、`/internal/push-action` —— **子实例 → 主实例事件回传**)、`/api/system`(`/system/{status,restart,restart/cancel,stop}`)、`/api/login`、`/api/config` | `routes/internal/childEvent.ts`、`routes/internal/pushAction.ts` |
+| 外部集成 | `/api/aa/*`、`/api/weixin/*`、`/api/mcp/*`(`/mcp/status`、`/mcp/reconnect`)、`/api/plugins` | `routes/aa/{pairing,status,debug}.ts`、`routes/weixin.ts` |
+| 中间件 | `/proxy`(`reverseProxyMw`)、`/agent`(`redirectMobileUA`,按 UA 跳移动端) | — |
+
+**AA(Agents-Anywhere 云端接入)**:`/api/aa` 下有 `/pairing/{status,start,poll,cancel}`、`/config`、`/status`、`/debug/{discover,sessionmap}` —— 配对与状态通道。**AA 前端入口按 `--aa` 门控**(2026-09-30 起):`GET /api/system` 回 `aaEnabled: isAaEnabled()`,`Layout` / `MobileLayout` hydrate 进 `useAppStore.instanceContext.aaEnabled`,据此决定是否渲染 `/manage` 的「AA 桥」tab(未启用时 `?tab=aa` 回落「配置」)、`/instances` 每行的 AA 开关、以及 `AASettings` 页本身(未启用时返回 null,不再有「重启加 --aa」提示卡)。**门控语义是 fail-open**:老后端(不返回 `aaEnabled` 字段)与 `undefined` 同义、按启用处理 —— 滚动期不能让 AA 实例上的入口被误藏,只有显式 `false` 才藏;等所有 zai 实例升级完、关闭旧版 dist 后可收紧回 `=== true`(注释在 `useAppStore.ts` / `Layout.tsx` / `MobileLayout.tsx`)。
+
+## 18. 前端路由访问路径
+
+zai 提供多条顶层路径(`router.tsx`)。**验证时务必按目标切路由,不要靠缩窗口判断**。
+
+| 路径 | 页面 | 关键点 |
+|------|------|-------|
+| `/` | 重定向 | 由 `TaskFactoryRedirect` 按 `instanceContext.app` 分流到 `/agent` 或 `/super-tasks` |
+| `/login` | `pages/Login.tsx` | 顶层菜单入口,免进 tab |
+| `/manage` | `pages/Manage.tsx` | AntD Tabs 切 `resources`/`config`/`dirs`/`tools`;老 URL `/tools` `/resources` `/config` `/dirs` 经 `<Navigate>` 重定向到 `/manage?tab=<key>`,书签不丢 |
+| `/agent` | `Layout.tsx` + `pages/Agent.tsx`(内含 `<AgentConversation>`) | PC 端默认入口,左侧 Sider + 右侧分屏 tab;task-factory 实例下 `<TaskFactoryAgentEntry>` 重定向到 `/super-tasks` |
+| `/dashboard` | `pages/Dashboard.tsx` | 仪表盘 |
+| `/instances` | `pages/Instances.tsx` | 受 `<InstanceRouteGuard>` 包裹,子实例直接 URL 访问被重定向到 `/agent` |
+| `/m` | `pages/MobileAgent.tsx` + `MobileLayout` | 移动端(无 Sider,挂 visualViewport);**显式 mobile 路由不依赖视口宽度**,ego-browser 验 mobile drawer 直接访问此路径即可,无需 `Emulation.setDeviceMetricsOverride` |
+| `/m-super-tasks` | `pages/MobileSuperTasks.tsx` | 与 `/m` 是两条独立顶层路径,不按 instance profile 分流 |
+| `/desktop` | `pages/Desktop.tsx` + `components/desktop/` | 办公桌面(draft),**脱离 Layout**、全屏沉浸式:壁纸 + Dock + 可拖拽浮窗;资源拖入 `AttachmentZone` 即作为 `@` 文件引用。**验证直接访问 `/desktop`,不走 `/agent`** |
+| `/super-tasks` | `pages/SuperTasks.tsx` | 任务工厂面板,脱离 Layout,与 `/desktop` 并列 |
+| `*` | fallback | `TaskFactoryRedirect` 分流到 `/super-tasks` 或 `/agent` |
+
+> `Layout` 在视口宽度 `< 768`(`useIsMobile.ts` `MOBILE_BREAKPOINT=768`)时自身也会响应式收紧(隐藏 Sider、SplitPane 收起),但这跟 `/m` 是**两条独立路径**。
+
+## 19. vendor 终端 UI stub 约束(2026-10-04)
+
+opencc 的 ink / React 终端 UI 在 zai 里从不渲染(无 DOM/TTY),`src/opencc-src/{commands,components,ink}/` 下 426 个 `.tsx` 的组件函数体已就地替换为 `return null`,累计净删约 7.4 万行。**读这些文件时不要再找 UI 逻辑** —— 它们只剩类型、常量、hooks 与签名。
+
+**三条签名不变量**(改组件时必须守住,否则 tsc 立刻报):
+1. `LocalJSXCommandCall` 返回 `Promise<ReactNode>`,非 async 的 `call`(如 `commands/doctor`)stub 必须是 `return Promise.resolve(null)` 而非 `return null`;
+2. 带显式返回标注的组件(`React.ReactElement`)要把标注放宽成 `T | null`;
+3. **async 函数绝不能加 `| null`** —— 会把契约从 `Promise<ReactNode>` 变成 `Promise<ReactNode> | null`,打挂 `commands/chrome` 的 index.ts。
+
+**模块顶层 `React.createContext(...)` 不受组件 stub 保护**:这类调用发生在任何组件之外(见 `components/CtrlOToExpand.tsx`)。删掉 react import 后 **tsc 无感、build:core 绿、bundle 字节数不变**,只有真正 `import` bundle 才炸 `React is not defined` —— 改完务必 `node -e "import('./dist/opencc-core.mjs')"` 实测,别只看构建。
+
+**保留死函数 / 常量是刻意的**:`extractCodeBlocks`、`CHROME_ROWS`、`MAX_VISIBLE_ITEMS` 等 408 个声明运行时同样死,但记录了组件原本做什么,恢复组件或读上游时要参考。只清了悬空 import 与无人引用的 type/interface(不留空壳 `import { } from`)。
+
+**构建期的 `uiComponentStubPlugin` / `inkRenderStubPlugin` 仍在跑**(`scripts/bundle-opencc.ts`),与源码 stub 有重叠 —— 它们兜着未 stub 的文件与将来同步进来的新 UI,暂不摘。
+
+**四个工具脚本可重跑**(`packages/zn-agent-core/scripts/`):`stub-ui-sources.ts`(组件体 stub,splice 模式只改字符区间)、`prune-unused-imports.ts`(删未使用 import,含 react 整文件 guard)、`drop-dead-types.ts`(删死 type/interface)、`scan-dead-code.ts`(只读审计)。**审计类脚本必须先用 `DEAD_PROBE` 之类的探针验证「能检出已知死代码」再用** —— 这批脚本开发中出现过两次反向 bug:只做文件内计数导致 1712 个假阳性,以及 URL 解析错误导致「0 个死代码」这种更危险的假阴性。清理是迭代收敛的(类型互相引用、删类型会让 import 变未使用),要跑到两个脚本都报 0 才算收敛(实测 3 轮)。
+
+**未纳入**:`screens/` `tasks/` `state/` `context/` `hooks/` `utils/` —— React 与 zai 真正调用的逻辑混装(AppState store、LocalAgentTask 生命周期),需逐文件判断。
+
+## 20. Tailwind / inline style 边界
+
+`packages/zai` 的 Tailwind 3.4.15 链路:`tailwind.config.ts` + `postcss.config.js` + `src/web/src/index.css`(`@tailwind base/components/utilities`),content 扫描 `./src/web/src/**/*.{ts,tsx}` + `index.html`。迁移基线:2026-09-13 已把 ~750 处 `style={{...}}` 转 className,剩 ~200 处保留 inline(均为运行时计算值)。完整边界场景见 `docs/superpowers/plans/2026-09-13-zai-inline-style-to-tailwind-migration.md`。
+
+**走 Tailwind class**:静态布局 / 间距 / 颜色 / 字体 / 边框 / 圆角 / 阴影 / 显隐。CSS 变量走 arbitrary value,如 `text-[var(--text-primary)]`、`bg-[var(--bg-elevated,#1c1c26)]`、`border-l-[3px] border-l-[var(--accent-start)]`。
+
+**保留 inline 的 7 类合法场景**:
+1. 运行时计算值 —— 拖拽坐标 `left/top/width/height/zIndex`、动态 `maxWidth/maxHeight`、右键菜单位置 `ctx.x/ctx.y`;
+2. `calc()` / `env()` 视口与安全区,如 `height: 'calc(100vh - 140px)'`、`paddingBottom: 'env(safe-area-inset-bottom)'`;
+3. **AntD 组件的 `styles={{...}}` 语义槽位** —— AntD cssinjs 注入 style 标签且优先级压 Tailwind,必须用 `styles` prop;
+4. 事件驱动 DOM 修改 —— `onMouseEnter={(e) => e.currentTarget.style.background = ...}` 保留,或重构为 state + className 切换;
+5. `keyframes` 动画属性 —— 如 `animation: 'zai-blink 1s steps(1) infinite'`,`<style>{'@keyframes ...'}</style>` 块整体保留;
+6. `writingMode`、复杂 `backdropFilter`(`blur(18px) saturate(1.4)`)、SVG 内联 `fill`/`stroke`;
+7. AntD 组件单个 `style` prop(如 `<RobotFilled style={{ fontSize: 48, color: 'var(--accent-start)' }} />`,且不便拆为外层 wrapper)。

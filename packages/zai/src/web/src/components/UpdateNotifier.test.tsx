@@ -130,6 +130,22 @@ describe('UpdateNotifier — zai 自升级弹窗', () => {
     expect(mocks.modalInfo).toHaveBeenCalledTimes(1)
   })
 
+  test('回归: checking 通知 duration:0,必须靠 idle 终态销毁', () => {
+    render(<UpdateNotifier />)
+    mocks.notifDestroy.mockClear() // mount 时 idle 也会 destroy 一次,清掉
+
+    emit(checkEvent)
+    expect(mocks.notifInfo).toHaveBeenCalledTimes(1)
+    expect(mocks.notifInfo.mock.calls[0][0].duration).toBe(0)
+
+    // 「无需升级」——服务端 updater.ts 在已是最新时静默 return,此前
+    // 前端拿不到任何终态事件,通知永久悬挂。
+    emit({ type: 'app.update.idle', reason: 'up-to-date' })
+    expect(mocks.notifDestroy).toHaveBeenCalledWith('app-update-progress')
+    expect(mocks.modalInfo).not.toHaveBeenCalled()
+    expect(mocks.modalError).not.toHaveBeenCalled()
+  })
+
   test('failed 弹错误 Modal', () => {
     render(<UpdateNotifier />)
     emit({

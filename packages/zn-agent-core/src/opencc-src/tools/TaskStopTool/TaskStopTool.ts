@@ -12,7 +12,9 @@ const inputSchema = lazySchema(() =>
     task_id: z
       .string()
       .optional()
-      .describe('The ID of the background task to stop'),
+      .describe(
+        'The ID of the background task to stop. Agent-team teammates and named background agents are also accepted by agent ID or name.',
+      ),
     // shell_id is accepted for backward compatibility with the deprecated KillShell tool
     shell_id: z.string().optional().describe('Deprecated: use task_id instead'),
   }),

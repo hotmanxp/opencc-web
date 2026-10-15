@@ -37,6 +37,10 @@ import { getTranscriptPath } from './sessionStorage.js'
 import { readTranscriptForLoad } from './sessionStoragePortable.js'
 import { getInitialSettings } from './settings/settings.js'
 import { isUndercover } from './undercover.js'
+import {
+  dispatchModEngineSync,
+  hasModHandlersFor,
+} from '../mods/dispatch.js'
 
 export type AttributionTexts = {
   commit: string
@@ -140,7 +144,13 @@ export function getDefaultCommitCoAuthorEmail(_apiProvider: string): string {
  * - Backward compatibility with deprecated includeCoAuthoredBy setting as an opt-in
  * - Remote mode: returns session URL for attribution
  */
-export function getAttributionTexts(): AttributionTexts {
+/**
+ * zai patch (2026-10-12, mods 同步):上游把这层改名 `computeAttributionTexts`
+ * 并降为模块私有,再在上面加一层导出的 `getAttributionTexts` 走
+ * `attribution.text` 派发。那个改名 hunk 不含 mods 关键字,按「只搬 mods 相关
+ * hunk」的口径没被带过来 —— 不补就会与下面那层重名。
+ */
+function computeAttributionTexts(): AttributionTexts {
   if (process.env.USER_TYPE === 'ant' && isUndercover()) {
     return { commit: '', pr: '' }
   }
@@ -510,4 +520,36 @@ export async function getEnhancedPRAttribution(
 
   logForDebugging(`PR Attribution: returning summary: ${summary}`)
   return summary
+}
+
+/**
+ * Upstream `attribution.text` — the AI-attribution lines a commit or PR gets,
+ * as a mod-visible event.
+ *
+ * Two kinds ship here (`commit`, `pr`) because those are the two this host
+ * produces; upstream also has `exemption` and `remedy`, which have no
+ * producing site in opencc, so they are not dispatched rather than dispatched
+ * with an empty string a hook might mistake for something real.
+ *
+ * Each kind dispatches separately, as upstream does, so a handler can rewrite
+ * the commit trailer without touching the PR footer. The whole thing is
+ * gated on there being a subscriber: this is called from prompt-building on
+ * four paths, and a mod-free session should pay nothing for the wrapper.
+ */
+export function getAttributionTexts(): AttributionTexts {
+  if (!hasModHandlersFor('attribution.text')) {
+    return computeAttributionTexts()
+  }
+  const computed = computeAttributionTexts()
+  const commit = dispatchModEngineSync<string>(
+    'attribution.text',
+    { kind: 'commit', text: computed.commit },
+    e => String(e.text ?? ''),
+  )
+  const pr = dispatchModEngineSync<string>(
+    'attribution.text',
+    { kind: 'pr', text: computed.pr },
+    e => String(e.text ?? ''),
+  )
+  return { commit, pr }
 }

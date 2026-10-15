@@ -42,9 +42,15 @@ import { getAgentDefinitionsWithOverrides } from '../tools/AgentTool/loadAgentsD
 import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
 import { getAllMcpConfigs } from '../services/mcp/config.js'
 import { captureHooksConfigSnapshot } from '../utils/hooks/hooksConfigSnapshot.js'
+import { loadMods } from '../mods/hooks.js'
+import { processSessionStartHooks } from '../utils/sessionStart.js'
+import {
+  extractAdditionalContexts,
+  setSessionStartContexts,
+} from './sessionStartBridge.js'
+import { logForDebugging } from '../utils/debug.js'
 import { SandboxManager } from '../utils/sandbox/sandbox-adapter.js'
 import {
-  type AppStateStore,
   createAppStateStore,
 } from '../state/createAppStateStore.js'
 import { getDefaultAppState } from '../state/AppStateStore.js'
@@ -60,6 +66,7 @@ import {
   setCwdState,
   setIsInteractive,
   setOriginalCwd,
+  setSessionTrustAccepted,
 } from '../bootstrap/state.js'
 import { enableConfigs } from '../utils/config.js'
 import { getCanUseToolFn } from '../cli/print.js'
@@ -95,6 +102,9 @@ import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
  *   8. getTools(permissionContext)     — built-in tool registry
  *   9. getMcpToolsCommandsAndResources — MCP clients (best-effort)
  *  10. captureHooksConfigSnapshot      — hooks snapshot
+ *  10b. loadMods                       — 用户 JS 扩展 mod(zai patch: CLI 走
+ *                                       processSessionStartHooks,headless
+ *                                       不经过,必须显式调)
  *  11. getCanUseToolFn(undefined, ...) — permission rules (no prompt)
  *  12. SandboxManager exposed but NOT initialized (deferred)
  *
@@ -355,6 +365,72 @@ export async function createHeadlessContextImpl(
     snapshotCaptured = true
   } catch {
     // Same best-effort posture as MCP.
+  }
+
+  // Step 10a: zai patch (2026-10-11, hook 信任门)—— headless 路径显式置信任。
+  //
+  // **为什么必须在这里**:所有 hook 事件的统一入口 `executeHooks`
+  // (utils/hooks.ts)开头有三道门,第三道是 `shouldSkipHookDueToTrust()` ——
+  // 交互模式(非 SDK)下工作区未受信就 `return`,**静默跳过全部 hook**,不报错
+  // 不打日志。而信任的唯一设置点是 `interactiveHelpers.tsx` 里 TUI 信任弹窗
+  // 确认后的 `setSessionTrustAccepted(true)` —— headless/web 根本没有那个弹窗,
+  // 于是 `checkHasTrustDialogAccepted()` 恒为 false。
+  //
+  // 后果:zai 里 mod 注册完全正常(swapRegisteredHooks 拿到 7 个事件)、工具
+  // 照常执行,但**每个 handler 一次都没被调用** —— 实测 7 个事件计数全 0,
+  // 而 `/modctl` 面板正是靠这个计数自证的。同一道门也让用户配置的命令 hook
+  // 在 zai 里静默失效。
+  //
+  // **为什么 zai 可以无条件信任**:zai 只监听 localhost,无外部鉴权(见
+  // AGENTS.md「zai 仅监听 localhost,不依赖外部鉴权」),能连上来的用户就是
+  // 本机用户本身 —— 信任弹窗要确认的正是这件事。非交互(SDK)模式走
+  // `getIsNonInteractiveSession()` 的另一条分支,不受影响。
+  //
+  // 位置在 loadMods() 之前:mod 注册的 handler 要对随后所有事件可见,信任必须
+  // 先于第一次 hook 派发建立。
+  setSessionTrustAccepted(true)
+
+  // Step 10b: zai patch (2026-10-06, mods 同步)—— 加载用户 JS 扩展 mod。
+  //
+  // 为什么必须在这里显式调,而不是跟 CLI 一样只挂在 processSessionStartHooks:
+  // zai 的 headless 启动序列**不经过** processSessionStartHooks(那是 main.tsx
+  // 的路径),所以 mod 永远不会被加载。放在 snapshot 之后、权限规则之前,与
+  // CLI 侧 `loadMods` 早于 SessionStart hooks 的语义一致 —— mod 注册的
+  // handler 对随后所有事件(含 SessionStart)可见。
+  //
+  // 同步是 memoized 的(utils/hooks.ts loadMods),重复调无副作用;
+  // 单个 mod 失败在内部归因并跳过,永不抛出。
+  try {
+    await loadMods()
+  } catch {
+    // Mods 是可选增强,加载不了不影响 headless context 建立。
+  }
+
+  // Step 10c: zai patch (2026-10-11)—— 派发 SessionStart hooks。
+  //
+  // 与 Step 10b 同一形状的缺口:`processSessionStartHooks` 的唯一调用方是
+  // `main.tsx`(交互式 REPL 的入口),headless 路径从不经过它。结果是 mod
+  // 注册了 SessionStart handler 却一次都收不到事件 —— 信任门修好之后实测
+  // 面板里 SessionStart 恒为 ×0,而 PreToolUse / PostToolUse /
+  // UserPromptSubmit 都正常非 0。
+  //
+  // 位置在 loadMods() 之后:handler 必须先注册,SessionStart 才看得见它们。
+  //
+  // 产出不能直接丢弃 —— processSessionStartHooks 返回的 HookResultMessage[]
+  // 在 REPL 里是塞进本会话消息流的,headless 侧没有那个位置。所以只取其中的
+  // `hook_additional_context`,存进 sessionStartBridge,由 pre-API-call
+  // reminder provider 每次 LLM 调用前作为 <system-reminder> 注入
+  // (与 zai 的 inbox reminder 同一机制,见 sessionStartBridge.ts 的说明)。
+  try {
+    const startMessages = (await processSessionStartHooks('startup', {
+      sessionId: sessionIdForSlot,
+    })) as unknown as Array<Record<string, unknown>>
+    setSessionStartContexts(sessionIdForSlot, extractAdditionalContexts(startMessages))
+  } catch (error) {
+    // SessionStart hook 是可选增强;失败不影响 headless context 建立。
+    logForDebugging(
+      `[mods] SessionStart hooks failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
 
   // Step 11: permission rules. Pass `permissionPromptToolName:

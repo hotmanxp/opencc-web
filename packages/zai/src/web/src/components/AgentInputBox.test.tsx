@@ -12,6 +12,14 @@ const v2 = (id: string, subject: string, status: V2TaskItem["status"]): V2TaskIt
   id, subject, status, blocks: [], blockedBy: [], updatedAt: 0,
 });
 
+import {
+  detectTextOf,
+  editorRoot,
+  pressEditorKey,
+  setCaretAt,
+  setDraftText,
+  tokenMarkOf,
+} from "./input/editor/testDriver.js";
 import AgentInputBox from "./AgentInputBox.js";
 import SplitPaneToggleButton from "./splitPane/SplitPaneToggleButton.js";
 
@@ -76,9 +84,9 @@ describe('AgentInputBox — slash command UI visibility', () => {
 
   async function typeAndSubmit(text: string) {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: text } })
-    fireEvent.keyDown(ta, { key: "Enter", code: "Enter", shiftKey: false })
+    const ed = editorRoot()
+    setDraftText(ed, text )
+    pressEditorKey(ed, "Enter")
     await waitFor(() => expect(vi.mocked(api.post)).toHaveBeenCalled())
   }
 
@@ -121,9 +129,9 @@ describe('AgentInputBox — slash command UI visibility', () => {
   test("粘贴绝对路径不被误判为 slash 命令: 直接 POST /agent/prompt 且写入 transcript", async () => {
     vi.mocked(api.post).mockResolvedValue({ sessionId: "sess-new" } as any)
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: "/Users/foo/bar.png" } })
-    fireEvent.keyDown(ta, { key: "Enter", code: "Enter", shiftKey: false })
+    const ed = editorRoot()
+    setDraftText(ed, "/Users/foo/bar.png" )
+    pressEditorKey(ed, "Enter")
     await waitFor(() => {
       expect(vi.mocked(api.post)).toHaveBeenCalledWith(
         "/agent/prompt",
@@ -148,9 +156,9 @@ describe('AgentInputBox — slash command UI visibility', () => {
   test("/agent/command 抛异常时恢复草稿, 用户输入不被吞掉", async () => {
     vi.mocked(api.post).mockRejectedValueOnce(new Error("network down"))
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: "/greet alice" } })
-    fireEvent.keyDown(ta, { key: "Enter", code: "Enter", shiftKey: false })
+    const ed = editorRoot()
+    setDraftText(ed, "/greet alice" )
+    pressEditorKey(ed, "Enter")
     await waitFor(() =>
       expect(vi.mocked(api.post)).toHaveBeenCalledWith(
         "/agent/command",
@@ -158,15 +166,15 @@ describe('AgentInputBox — slash command UI visibility', () => {
       ),
     )
     // 修复前: catch 只 toast, draft 已在请求前 clear → 输入消失
-    await waitFor(() => expect(ta.value).toBe("/greet alice"))
+    await waitFor(() => expect(detectTextOf(ed)).toBe("/greet alice"))
   })
 
   test("'/' 触发下拉里出现 handoff builtin 命令", async () => {
     // /api/slash mock (above beforeAll) 已返回 handoff 项.
     // 输入 "/" 后 dropdown 应该列出 handoff 命令.
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: "/" } })
+    const ed = editorRoot()
+    setDraftText(ed, "/" )
     // 等 slash items 异步加载 + dropdown 渲染
     await waitFor(() => {
       expect(screen.getByText("/handoff")).toBeInTheDocument()
@@ -181,69 +189,64 @@ describe('AgentInputBox — 已知命令输入框内 token 高亮', () => {
   // 触发 slash items 异步加载 + 等待 dropdown 渲染出 /handoff。
   // 不能直接测内部 state — slashItems 内部 state 加载完成才进 deriveCommandToken。
   // 必须先用 "/" 让 fetch mock resolve 后 dropdown 显示 handoff,说明 items 已加载。
-  async function loadSlashItemsAndReset(ta: HTMLTextAreaElement) {
-    fireEvent.change(ta, { target: { value: "/" } })
+  async function loadSlashItemsAndReset(ed: HTMLElement) {
+    setDraftText(ed, "/" )
     await waitFor(() => {
       expect(screen.getByText("/handoff")).toBeInTheDocument()
     })
     // 清空,避免影响下一个用例的断言
-    fireEvent.change(ta, { target: { value: "" } })
+    setDraftText(ed, "" )
   }
 
-  test('输入开头为已知命令名, backdrop 渲染带 mark 的 /name 紫色块', async () => {
+  test('输入开头为已知命令名, 命令 token 染成命令色', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    await loadSlashItemsAndReset(ta)
+    const ed = editorRoot()
+    await loadSlashItemsAndReset(ed)
     // 输入 "/handoff some args" 触发高亮
-    fireEvent.change(ta, { target: { value: "/handoff some args" } })
-    const backdrop = await waitFor(() => {
-      const el = document.querySelector('[data-input-backdrop]')
+    setDraftText(ed, "/handoff some args")
+    // 高亮现在是 TextNode 的行内样式(--cmd-token-color),不再是 backdrop
+    // 里的装饰 span;token 只含 "/handoff",不含尾部空格
+    const mark = await waitFor(() => {
+      const el = tokenMarkOf(document.body)
       expect(el).not.toBeNull()
       return el as HTMLElement
     })
-    expect(backdrop.getAttribute('data-decoration')).toBe('token')
-    // mark 内文本 = "/handoff" (不含尾部空格, 贴齐 deepseek-harness 行为)
-    const mark = backdrop.querySelector('[data-decoration="token-mark"]')
-    expect(mark).not.toBeNull()
-    expect(mark!.textContent).toBe('/handoff')
-    // backdrop 整段 = 原 input (mark 文本 + 普通 span 文本),逐字对齐 antd textarea 文本
-    expect(backdrop.textContent).toBe('/handoff some args')
+    expect(mark.textContent).toBe('/handoff')
+    // 整段文本仍在同一个可编辑面里,没有第二个镜像层
+    expect(ed.textContent).toBe('/handoff some args')
+    expect(document.querySelector('[data-input-backdrop]')).toBeNull()
   })
 
   test('输入开头为未知命令名, 不渲染 token-mark', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    await loadSlashItemsAndReset(ta)
-    fireEvent.change(ta, { target: { value: "/totally-unknown-cmd" } })
-    // backdrop 常驻(承载全部可见文本),但对未知命令短路:不渲染 token-mark
-    const backdrop = document.querySelector('[data-input-backdrop]')
-    expect(backdrop).not.toBeNull()
-    expect(backdrop!.querySelector('[data-decoration="token-mark"]')).toBeNull()
+    const ed = editorRoot()
+    await loadSlashItemsAndReset(ed)
+    setDraftText(ed, "/totally-unknown-cmd")
+    // 对未知命令短路:不染色
+    expect(tokenMarkOf(document.body)).toBeNull()
   })
 
   test('输入不以 / 起首, 不渲染 token-mark', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    await loadSlashItemsAndReset(ta)
-    fireEvent.change(ta, { target: { value: "plain text no slash" } })
-    const backdrop = document.querySelector('[data-input-backdrop]')
-    expect(backdrop).not.toBeNull()
-    expect(backdrop!.querySelector('[data-decoration="token-mark"]')).toBeNull()
+    const ed = editorRoot()
+    await loadSlashItemsAndReset(ed)
+    setDraftText(ed, "plain text no slash")
+    expect(tokenMarkOf(document.body)).toBeNull()
   })
 
   test('输入框从命令切回普通文本后, token-mark 立即卸载', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    await loadSlashItemsAndReset(ta)
+    const ed = editorRoot()
+    await loadSlashItemsAndReset(ed)
     // 进入高亮态
-    fireEvent.change(ta, { target: { value: "/handoff " } })
+    setDraftText(ed, "/handoff")
     await waitFor(() => {
-      expect(document.querySelector('[data-input-backdrop] [data-decoration="token-mark"]')).not.toBeNull()
+      expect(tokenMarkOf(document.body)).not.toBeNull()
     })
-    // 切回普通文本 → token-mark 立即消失(backdrop 本身常驻承载文本)
-    fireEvent.change(ta, { target: { value: "no longer a command" } })
+    // 切回普通文本 → 染色立即消失
+    setDraftText(ed, "no longer a command")
     await waitFor(() => {
-      expect(document.querySelector('[data-input-backdrop] [data-decoration="token-mark"]')).toBeNull()
+      expect(tokenMarkOf(document.body)).toBeNull()
     })
   })
 
@@ -251,74 +254,83 @@ describe('AgentInputBox — 已知命令输入框内 token 高亮', () => {
     // handoff 是完整 name,/hando 是部分匹配 — deriveCommandToken 只在
     // 完整 word match 时返回高亮,避免把"前缀巧合"的输入也染紫。
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    await loadSlashItemsAndReset(ta)
-    fireEvent.change(ta, { target: { value: "/hando" } })
-    const backdrop = document.querySelector('[data-input-backdrop]')
-    expect(backdrop!.querySelector('[data-decoration="token-mark"]')).toBeNull()
+    const ed = editorRoot()
+    await loadSlashItemsAndReset(ed)
+    setDraftText(ed, "/hando")
+    expect(tokenMarkOf(document.body)).toBeNull()
   })
 
-  test('TextArea 文本永久透明 (backdrop 接管可见文本, textarea 仅保留 caret / selection)', async () => {
-    // 新三层结构:textarea 无条件透明(color/fill 由 CSS 类 agent-input-textarea-field
-    // 控制),不是高亮模式下的内联 style —— 断言放在 className 上。
+  test('可见文本只有一个来源: 单一 contenteditable,没有 backdrop / 隐藏镜像层', async () => {
+    // 旧结构是「backdrop 画可见文本 + 透明 textarea 只留 caret + 隐藏镜像
+    // 层定高」;现在是 Lexical contenteditable 自己渲染文本,那两个层整体
+    // 删掉了。这里钉住「不会再退回双层文本」,否则宽度对位类 bug 会复发。
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    await loadSlashItemsAndReset(ta)
-    fireEvent.change(ta, { target: { value: "/handoff" } })
+    const ed = editorRoot()
+    await loadSlashItemsAndReset(ed)
+    setDraftText(ed, "/handoff")
     await waitFor(() => {
-      expect(document.querySelector('[data-input-backdrop]')).not.toBeNull()
+      expect(ed.textContent).toBe('/handoff')
     })
-    const innerTa = document.querySelector('textarea[data-testid="agent-input-textarea"]') as HTMLTextAreaElement
-    expect(innerTa.className).toContain('agent-input-textarea-field')
+    expect(ed.className).toContain('agent-input-editor')
+    expect(ed.hasAttribute('contenteditable')).toBe(true)
+    expect(document.querySelector('[data-input-backdrop]')).toBeNull()
+    expect(document.querySelector('.agent-input-mirror')).toBeNull()
+    expect(document.querySelector('textarea[data-testid="agent-input-textarea"]')).toBeNull()
   })
 })
 
 // 命令激活(输入开头为已知命令且未输入参数)时,backdrop 行尾追加灰色
 // argument-hint 幽灵提示;用户开始敲参数后立即收起。
 describe('AgentInputBox — 激活命令后 argument-hint 幽灵提示', () => {
-  async function loadSlashItemsAndReset(ta: HTMLTextAreaElement) {
-    fireEvent.change(ta, { target: { value: "/" } })
+  async function loadSlashItemsAndReset(ed: HTMLElement) {
+    setDraftText(ed, "/" )
     await waitFor(() => {
       expect(screen.getByText("/handoff")).toBeInTheDocument()
     })
-    fireEvent.change(ta, { target: { value: "" } })
+    setDraftText(ed, "" )
   }
 
-  const hintSel = '[data-input-backdrop] [data-decoration="cmd-hint"]'
+  // 幽灵提示不进文档树(否则会被选中/被发送),而是作为 CSS 自定义属性喂给
+  // 末段的生成内容伪元素。断言读这个属性,不去 DOM 里找元素。
+  const hintOf = (el: HTMLElement): string | null => {
+    const raw = el.style.getPropertyValue('--agent-input-hint');
+    return raw === '' ? null : (JSON.parse(raw) as string);
+  }
 
-  test('选中命令后 token 后仅有空白 → 行尾渲染 argumentHint', async () => {
+  test('选中命令后 token 后仅有空白 → 挂上 argumentHint', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    await loadSlashItemsAndReset(ta)
-    fireEvent.change(ta, { target: { value: "/handoff " } })
+    const ed = editorRoot()
+    await loadSlashItemsAndReset(ed)
+    // token 后已有一个空格 → hint 直接贴上,不再补分隔空格
+    setDraftText(ed, "/handoff ")
     await waitFor(() => {
-      expect(document.querySelector(hintSel)).not.toBeNull()
+      expect(hintOf(ed)).not.toBeNull();
     })
-    expect(document.querySelector(hintSel)!.textContent).toBe("[--pick <filename>]")
+    expect(hintOf(ed)).toBe("[--pick <filename>]");
   })
 
   test('token 后无空格(手敲命令名) → hint 前自动补一个空格分隔', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    await loadSlashItemsAndReset(ta)
-    fireEvent.change(ta, { target: { value: "/handoff" } })
+    const ed = editorRoot()
+    await loadSlashItemsAndReset(ed)
+    setDraftText(ed, "/handoff")
     await waitFor(() => {
-      expect(document.querySelector(hintSel)).not.toBeNull()
+      expect(hintOf(ed)).not.toBeNull();
     })
-    expect(document.querySelector(hintSel)!.textContent).toBe(" [--pick <filename>]")
+    expect(hintOf(ed)).toBe(" [--pick <filename>]");
   })
 
   test('开始输入参数后 hint 收起', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    await loadSlashItemsAndReset(ta)
-    fireEvent.change(ta, { target: { value: "/handoff " } })
+    const ed = editorRoot()
+    await loadSlashItemsAndReset(ed)
+    setDraftText(ed, "/handoff")
     await waitFor(() => {
-      expect(document.querySelector(hintSel)).not.toBeNull()
+      expect(hintOf(ed)).not.toBeNull();
     })
-    fireEvent.change(ta, { target: { value: "/handoff --pick x.md" } })
+    setDraftText(ed, "/handoff --pick x.md")
     await waitFor(() => {
-      expect(document.querySelector(hintSel)).toBeNull()
+      expect(hintOf(ed)).toBeNull();
     })
   })
 })
@@ -564,8 +576,8 @@ describe('AgentInputBox — 消息排队 (追齐 OPENCC)', () => {
 
   test('streaming 时输入框不禁用', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    expect(ta.disabled).toBe(false)
+    const ed = editorRoot()
+    expect(editorRoot().hasAttribute("contenteditable")).toBe(true)
   })
 
   test('streaming 时发送: 后端响应 queued:true → 不 push user.text (消息排队等待)', async () => {
@@ -576,9 +588,9 @@ describe('AgentInputBox — 消息排队 (追齐 OPENCC)', () => {
       pending: [{ id: 'q1', text: 'second message' }],
     } as any)
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: 'second message' } })
-    fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter', shiftKey: false })
+    const ed = editorRoot()
+    setDraftText(ed, 'second message' )
+    pressEditorKey(ed, 'Enter')
     await waitFor(() => expect(vi.mocked(api.post)).toHaveBeenCalled())
     // 排队消息不立即写 transcript — 由 queue.changed 事件在真正开始执行时写入
     expect(useAgentStore.getState().messages).toEqual([])
@@ -817,14 +829,14 @@ describe('AgentInputBox — 首条消息带图片附件时 UI 立即渲染', () 
       })
     try {
       render(<AgentInputBox />)
-      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-      fireEvent.change(ta, { target: { value: 'describe this' } })
+      const ed = editorRoot()
+      setDraftText(ed, 'describe this' )
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
       const file = new File(['fake-bytes'], 'pasted.png', { type: 'image/png' })
       Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
       fireEvent.change(fileInput)
       await waitFor(() => expect(spy).toHaveBeenCalled())
-      fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter', shiftKey: false })
+      pressEditorKey(ed, 'Enter')
       // 拦截: 不调 /agent/prompt, 不写 user.text
       expect(vi.mocked(api.post)).not.toHaveBeenCalledWith(
         '/agent/prompt',
@@ -855,8 +867,8 @@ describe('AgentInputBox — 首条消息带图片附件时 UI 立即渲染', () 
       })
     try {
       render(<AgentInputBox />)
-      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-      fireEvent.change(ta, { target: { value: 'describe this' } })
+      const ed = editorRoot()
+      setDraftText(ed, 'describe this' )
 
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
       const file = new File(['fake-bytes'], 'pasted.png', { type: 'image/png' })
@@ -867,7 +879,7 @@ describe('AgentInputBox — 首条消息带图片附件时 UI 立即渲染', () 
       await waitFor(() => expect(spy).toHaveBeenCalled())
 
       // 点发送
-      fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter', shiftKey: false })
+      pressEditorKey(ed, 'Enter')
 
       // /agent/prompt 必须被调用一次 (说明 attachments 走完了 addAttachments 路径)
       await waitFor(() =>
@@ -908,7 +920,7 @@ describe('AgentInputBox — 首条消息带图片附件时 UI 立即渲染', () 
       })
     try {
       render(<AgentInputBox />)
-      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      const ed = editorRoot()
 
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
       const file = new File(['fake-bytes'], 'pasted.png', { type: 'image/png' })
@@ -917,7 +929,7 @@ describe('AgentInputBox — 首条消息带图片附件时 UI 立即渲染', () 
 
       await waitFor(() => expect(spy).toHaveBeenCalled())
 
-      fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter', shiftKey: false })
+      pressEditorKey(ed, 'Enter')
 
       await waitFor(() => {
         const msgs = useAgentStore.getState().messages
@@ -937,71 +949,50 @@ describe('AgentInputBox — 插入对话 (分屏文件管理 agent-input-insert 
 
   test('事件后把相对路径插入为 chip, 光标落在 chip 之后', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: 'look at now!' } })
-    // happy-dom 20.10.6 未实现 textarea selection API(selectionStart 读出
-    // undefined → 生产代码会退化为追加末尾),用实例访问器模拟「光标在
-    // 'look at ' 与 'now!' 之间 (index 8)」,语义与真实浏览器一致。若
-    // happy-dom 自带 setSelectionRange,它只更新内部槽、绕不开访问器,
-    // 需一并覆盖,让生产代码两条设光标路径都落进同一个 sel。
-    let sel = 8
-    Object.defineProperty(ta, 'selectionStart', {
-      configurable: true,
-      get: () => sel,
-      set: (v: number) => { sel = v },
-    })
-    Object.defineProperty(ta, 'selectionEnd', {
-      configurable: true,
-      get: () => sel,
-      set: (v: number) => { sel = v },
-    })
-    ta.setSelectionRange = (start: number, end: number) => { sel = end }
-    try {
-      act(() => {
-        window.dispatchEvent(
-          new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: { text: INSERT_TEXT } }),
-        )
-      })
-      // chip 化插入:占位符(U+FFFC) + 尾随空格,光标落在 chip 之后
-      await waitFor(() => expect(ta.value).toBe('look at \ufffc now!'))
-      await waitFor(() => expect(ta.selectionStart).toBe(10))
-      // backdrop 渲染 chip(路径/类型正确)
-      const chip = document.querySelector('[data-testid="mention-chip"]')
-      expect(chip?.getAttribute('data-mention-path')).toBe(INSERT_TEXT)
-    } finally {
-      Reflect.deleteProperty(ta, 'selectionStart')
-      Reflect.deleteProperty(ta, 'selectionEnd')
-    }
-  })
-
-  test('空输入框时插入相对路径 → chip + 尾随空格', async () => {
-    render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    const ed = editorRoot()
+    setDraftText(ed, 'look at now!')
+    // 光标落在 'look at ' 与 'now!' 之间(detect 下标 8)
+    setCaretAt(ed, 8)
     act(() => {
       window.dispatchEvent(
         new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: { text: INSERT_TEXT } }),
       )
     })
-    await waitFor(() => expect(ta.value).toBe('\ufffc '))
+    // chip 化插入:detect 投影里是 1 个 U+FFFC 占位 + 尾随空格
+    await waitFor(() => expect(detectTextOf(ed)).toBe('look at \ufffc now!'))
+    // 编辑器里渲染 chip(路径/类型正确)
+    const chip = document.querySelector('[data-testid="mention-chip"]')
+    expect(chip?.getAttribute('data-mention-path')).toBe(INSERT_TEXT)
+  })
+
+  test('空输入框时插入相对路径 → chip + 尾随空格', async () => {
+    render(<AgentInputBox />)
+    const ed = editorRoot()
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: { text: INSERT_TEXT } }),
+      )
+    })
+    await waitFor(() => expect(detectTextOf(ed)).toBe('\ufffc '))
     await waitFor(() => expect(document.querySelector('[data-testid="mention-chip"]')).not.toBeNull())
   })
 
   test('已有内容且 selection API 缺失时退化为追加到末尾(仍是 chip)', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: 'look at now!' } })
+    const ed = editorRoot()
+    setDraftText(ed, 'look at now!' )
     act(() => {
       window.dispatchEvent(
         new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: { text: INSERT_TEXT } }),
       )
     })
     // 追加在末尾时,前导空格补在上一个词之后,再插 chip + 尾随空格
-    await waitFor(() => expect(ta.value).toBe('look at now! \ufffc '))
+    await waitFor(() => expect(detectTextOf(ed)).toBe('look at now! \ufffc '))
   })
 
   test('detail 带 kind=dir 时插入目录 chip', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    const ed = editorRoot()
     act(() => {
       window.dispatchEvent(
         new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: { text: 'src', kind: 'dir' } }),
@@ -1016,11 +1007,11 @@ describe('AgentInputBox — 插入对话 (分屏文件管理 agent-input-insert 
 
   test('detail 缺 text 时不写入输入框', async () => {
     render(<AgentInputBox />)
-    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    const ed = editorRoot()
     act(() => {
       window.dispatchEvent(new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: {} }))
     })
-    expect(ta.value).toBe('')
+    expect(detectTextOf(ed)).toBe('')
   })
 })
 
@@ -1067,13 +1058,13 @@ describe('AgentInputBox — 拖拽文件: 图片入附件, 其他文件上传副
     })
     try {
       render(<AgentInputBox />)
-      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      const ed = editorRoot()
       dropFiles([new File(['hello world'], 'notes.txt', { type: 'text/plain' })])
       await waitFor(() => expect(uploadCalls.length).toBe(1))
       expect(uploadCalls[0]!.body.name).toBe('notes.txt')
       expect(uploadCalls[0]!.body.data.length).toBeGreaterThan(0) // base64 内容已附上
       await waitFor(() =>
-        expect(ta.value).toContain('/Users/u/code/proj/.zai/uploads/notes.txt'),
+        expect(detectTextOf(ed)).toContain('/Users/u/code/proj/.zai/uploads/notes.txt'),
       )
     } finally {
       vi.unstubAllGlobals()
@@ -1089,13 +1080,13 @@ describe('AgentInputBox — 拖拽文件: 图片入附件, 其他文件上传副
     stubFetch(() => uploadOk(absPaths[i++]!))
     try {
       render(<AgentInputBox />)
-      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      const ed = editorRoot()
       dropFiles([
         new File(['a'], 'notes.txt', { type: 'text/plain' }),
         new File(['b'], 'data.csv', { type: 'text/csv' }),
       ])
-      await waitFor(() => expect(ta.value).toContain('data-1.csv'))
-      expect(ta.value).toBe(`${absPaths[0]}\n${absPaths[1]}`)
+      await waitFor(() => expect(detectTextOf(ed)).toContain('data-1.csv'))
+      expect(detectTextOf(ed)).toBe(`${absPaths[0]}\n${absPaths[1]}`)
     } finally {
       vi.unstubAllGlobals()
     }
@@ -1112,11 +1103,11 @@ describe('AgentInputBox — 拖拽文件: 图片入附件, 其他文件上传副
     })
     try {
       render(<AgentInputBox />)
-      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      const ed = editorRoot()
       dropFiles([new File(['x'], 'shot.png', { type: 'image/png' })])
       await waitFor(() => expect(spy).toHaveBeenCalled())
       // 图片走附件条, 输入框保持为空, 不插入路径文本
-      expect(ta.value).toBe('')
+      expect(detectTextOf(ed)).toBe('')
     } finally {
       spy.mockRestore()
       vi.unstubAllGlobals()
@@ -1132,11 +1123,11 @@ describe('AgentInputBox — 拖拽文件: 图片入附件, 其他文件上传副
     )
     try {
       render(<AgentInputBox />)
-      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      const ed = editorRoot()
       dropFiles([new File(['x'], 'big.bin', { type: 'application/octet-stream' })])
       // 等上传 promise 落定:输入框不出现任何路径
       await new Promise((r) => setTimeout(r, 20))
-      await waitFor(() => expect(ta.value).toBe(''))
+      await waitFor(() => expect(detectTextOf(ed)).toBe(''))
     } finally {
       vi.unstubAllGlobals()
     }
@@ -1150,9 +1141,9 @@ describe('AgentInputBox — 桌面附件自动附带', () => {
   })
 
   async function doSend(text: string) {
-    const ta = screen.getByPlaceholderText(/输入消息/) as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: text } })
-    fireEvent.keyDown(ta, { key: "Enter", code: "Enter", shiftKey: false })
+    const ed = editorRoot()
+    setDraftText(ed, text)
+    pressEditorKey(ed, "Enter")
   }
 
   test('桌面页 (/desktop): 未并入附件自动前置为 @path; 同附件仅附带一次', async () => {
@@ -1161,7 +1152,7 @@ describe('AgentInputBox — 桌面附件自动附带', () => {
       .getState()
       .addRef({ id: 'r-/a/b.md', path: '/a/b.md', name: 'b.md', kind: 'file' })
     render(<AgentInputBox />)
-    await screen.findByPlaceholderText(/输入消息/)
+    editorRoot()
 
     await doSend('读一下')
     await waitFor(() => {
@@ -1188,7 +1179,7 @@ describe('AgentInputBox — 桌面附件自动附带', () => {
       .getState()
       .addRef({ id: 'r-/a/b.md', path: '/a/b.md', name: 'b.md', kind: 'file' })
     render(<AgentInputBox />)
-    await screen.findByPlaceholderText(/输入消息/)
+    editorRoot()
 
     await doSend('读一下')
     await waitFor(() => {
@@ -1198,5 +1189,69 @@ describe('AgentInputBox — 桌面附件自动附带', () => {
         expect.anything(),
       )
     })
+  })
+})
+
+// 压缩过程中禁止继续对话 (2026-10-12)。
+//
+// 压缩会重写 transcript 边界(旧消息被摘要替换),期间提交的 prompt 会落在
+// 错误的锚点上。三个入口都要拦: 发送按钮 disabled、Enter 的 canSubmit、
+// handleSend 的兜底 early-return —— 这里覆盖前两个,第三个由「Enter 也不发」
+// 间接证明(canSubmit 已 false 时根本走不到 handleSend)。
+describe('AgentInputBox — 压缩期间禁用发送', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset()
+    useAgentStore.setState({
+      status: 'idle',
+      compacting: false,
+      queuedPrompts: [],
+      messages: [],
+      sendSeq: 0,
+    })
+  })
+
+  test('compacting=false: 有输入时发送按钮可点', async () => {
+    render(<AgentInputBox />)
+    setDraftText(editorRoot(), '压缩前发的消息')
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-input-send-button')).not.toBeDisabled(),
+    )
+  })
+
+  test('compacting=true: 发送按钮 disabled', async () => {
+    useAgentStore.setState({ compacting: true })
+    render(<AgentInputBox />)
+    setDraftText(editorRoot(), '压缩期间的消息')
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-input-send-button')).toBeDisabled(),
+    )
+  })
+
+  test('compacting=true: Enter 也不发送 (canSubmit 经 handlersRef 取最新值)', async () => {
+    useAgentStore.setState({ compacting: true })
+    render(<AgentInputBox />)
+    const ed = editorRoot()
+    setDraftText(ed, '按回车也不该发')
+    pressEditorKey(ed, 'Enter')
+    // 让 keymap 的异步回调跑完
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(vi.mocked(api.post)).not.toHaveBeenCalled()
+  })
+
+  test('compacting 结束后按钮恢复可点', async () => {
+    useAgentStore.setState({ compacting: true })
+    render(<AgentInputBox />)
+    setDraftText(editorRoot(), '恢复后能发')
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-input-send-button')).toBeDisabled(),
+    )
+    act(() => {
+      useAgentStore.setState({ compacting: false })
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-input-send-button')).not.toBeDisabled(),
+    )
   })
 })

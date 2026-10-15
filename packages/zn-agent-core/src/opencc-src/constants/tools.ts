@@ -1,5 +1,4 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { TASK_OUTPUT_TOOL_NAME } from '../tools/TaskOutputTool/constants.js'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../tools/ExitPlanModeTool/constants.js'
 import { ENTER_PLAN_MODE_TOOL_NAME } from '../tools/EnterPlanModeTool/constants.js'
 import { AGENT_TOOL_NAME } from '../tools/AgentTool/constants.js'
@@ -33,7 +32,6 @@ import {
 } from '../tools/ScheduleCronTool/constants.js'
 
 export const ALL_AGENT_DISALLOWED_TOOLS = new Set([
-  TASK_OUTPUT_TOOL_NAME,
   EXIT_PLAN_MODE_V2_TOOL_NAME,
   ENTER_PLAN_MODE_TOOL_NAME,
   ASK_USER_QUESTION_TOOL_NAME,
@@ -87,7 +85,6 @@ export const IN_PROCESS_TEAMMATE_ALLOWED_TOOLS = new Set([
 /*
  * BLOCKED FOR ASYNC AGENTS:
  * - AgentTool: Blocked to prevent recursion
- * - TaskOutputTool: Blocked to prevent recursion
  * - ExitPlanModeTool: Plan mode is a main thread abstraction.
  * - TaskStopTool: Requires access to main thread task state.
  * - TungstenTool: Uses singleton virtual terminal abstraction that conflicts between agents.

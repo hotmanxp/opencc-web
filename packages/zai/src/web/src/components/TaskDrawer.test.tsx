@@ -4,6 +4,16 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { BashTaskView, buildTimeline, formatToolCallLine, formatToolInput, MarkdownText, PromptBlock, TaskDrawer } from './TaskDrawer.js'
 import { useAgentStore } from '../store/useAgentStore.js'
 
+// mermaid.js 靠 getBBox 做文本度量,happy-dom 里是返回 0 的桩 → 真库静默
+// 产出空 SVG。这里只关心「有没有路由到 MermaidBlock」,不关心图画得好不好,
+// 所以 mock 掉库让它返回一段成形 SVG(真库渲染效果由浏览器验收兜底)。
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: () => {},
+    render: async () => ({ svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><g><text>A</text></g></svg>' }),
+  },
+}))
+
 afterEach(() => {
   useAgentStore.setState({
     agentTasksBySession: {},
@@ -163,6 +173,18 @@ describe('MarkdownText (kind="text" 渲染器)', () => {
     const { container } = render(<MarkdownText text="用 `useMemo` 包一下" />)
     expect(container.querySelector('pre')).toBeNull()
     expect(container.querySelector('p code')?.textContent).toBe('useMemo')
+  })
+
+  test('```mermaid 围栏块走 MermaidBlock,不当源码高亮', async () => {
+    // TaskDrawer 自带一套 markdownComponents,不走主 MarkdownText —— 之前
+    // mermaid 会掉进 LazyCode 显示成高亮源码。
+    const { container } = render(
+      <MarkdownText text={'```mermaid\nflowchart LR\n  A --> B\n```'} />,
+    )
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mermaid-block"]')).toBeTruthy()
+    })
+    expect(container.querySelector('pre')).toBeNull()
   })
 
   test('列表渲染为 <ul><li>', () => {

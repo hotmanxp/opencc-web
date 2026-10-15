@@ -366,7 +366,7 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     // callers (CliAgent / in-process CLI subagents) don't go through
     // the dispatch streaming loop, so `task.resultText` is never set and
     // the parent session's <task-notification> ships without a `<result>`
-    // block — forcing the parent agent to follow up with `TaskOutput` /
+    // block — forcing the parent agent to follow up with a Read of
     // `Read output_file`. Accepting resultText here lets the lifecycle
     // plumb the final text through `mirrorFinalizeBgTask` so the
     // notification renders the result inline.
@@ -579,7 +579,7 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
           // 事件被翻译成 Anthropic primitives(content_block_delta / message_stop),
           // 原 assistant 分支(直接读 vendor Message)不再命中。改为从 text_delta
           // 累积当前 turn 文本,message_stop 时落为 resultText,保持
-          // SubagentNotifier 的 <result> 与 TaskOutput 的 resultText。
+          // SubagentNotifier 的 <result> 与 resultText。
           let turnText = ''
           for await (const ev of stream) {
             if (rec.controller.signal.aborted) break

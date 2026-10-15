@@ -630,6 +630,14 @@ export interface OpenAIClientOptions {
    * Optional.
    */
   extraParams?: Record<string, unknown>
+  /**
+   * zai patch: extra headers merged into every POST `/chat/completions`
+   * (in addition to `Authorization: Bearer …`). Used for providers that
+   * authenticate via additional side headers (e.g. WorkBuddy requires
+   * `X-User-Id` + `X-Source` alongside the Bearer access token).
+   * Optional.
+   */
+  customHeaders?: Record<string, string>
 }
 
 export class OpenAIClient {
@@ -637,12 +645,14 @@ export class OpenAIClient {
   private apiKey: string
   private model: string
   private extraParams: Record<string, unknown> | undefined
+  private customHeaders: Record<string, string> | undefined
 
   constructor(opts: OpenAIClientOptions) {
     this.baseURL = opts.baseURL.replace(/\/$/, '')
     this.apiKey = opts.apiKey
     this.model = opts.model
     this.extraParams = opts.extraParams
+    this.customHeaders = opts.customHeaders
   }
 
   messages = {
@@ -698,6 +708,11 @@ export class OpenAIClient {
     if (this.baseURL.includes('paic.com.cn')) {
       headers['client-code'] = 'Gemini'
       headers['plugin-version'] = 'Gemini'
+    }
+    if (this.customHeaders) {
+      for (const [k, v] of Object.entries(this.customHeaders)) {
+        headers[k] = v
+      }
     }
 
     let response: Response

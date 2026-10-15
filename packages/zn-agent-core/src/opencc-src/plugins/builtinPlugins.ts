@@ -23,6 +23,22 @@ const BUILTIN_PLUGINS: Map<string, BuiltinPluginDefinition> = new Map()
 export const BUILTIN_MARKETPLACE_NAME = 'builtin'
 
 /**
+ * zai patch (2026-10-10, mods 同步):mod 的 id 后缀。
+ *
+ * 定义在这里而不是 mods/pluginView.ts —— pluginLoader.ts 也需要它来把 mod
+ * 的条目从市场解析路径里排除掉(见该文件 2094 附近的注释)。从那里 import
+ * 会绕一圈 mods/hooks.ts,形成 loader → mods → loader 的环。常量下沉到
+ * 这个与 builtin 并列、无人反向依赖的位置,保持依赖单向。
+ * mods/pluginView.ts 改为从这里 re-export,调用方不用改。
+ */
+export const MODS_MARKETPLACE_NAME = 'mods'
+
+/** 该 plugin id 是否是一条 mod 记录(而非市场插件)。 */
+export function isModPluginId(pluginId: string): boolean {
+  return pluginId.endsWith(`@${MODS_MARKETPLACE_NAME}`)
+}
+
+/**
  * Register a built-in plugin. Call this from initBuiltinPlugins() at startup.
  */
 export function registerBuiltinPlugin(

@@ -94,11 +94,25 @@ These are the common corporate work systems on the intranet. Share the relevant 
  * 剔除,其余通用段落原样保留。见 mainAgents-promptSections.ts。
  */
 
-/** Office 办公助手主 Agent 配置。 */
+/**
+ * Office 办公助手主 Agent 配置。
+ *
+ * zai patch (2026-10-06, mods 同步):`mods` 槽显式设 `[]`。
+ *
+ * 这是**语义澄清**,不是功能开关 —— office 场景要的是"确定的工具集",
+ * 白名单已经覆盖了全部需求(见 OFFICE_TOOL_ALLOWLIST);将来若加载了
+ * 行为型 mod(比如自动改写 Bash 命令的守卫),不写这一行它会对 office
+ * 会话也生效,而 office 的用户并不知情。显式 `[]` = "本身份不启用任何
+ * mod",把这件事变成声明而不是默认。
+ *
+ * 省略该槽 ≠ 禁用,而是"全部可见"(= opencc 原始行为)—— 两个内置 agent
+ * (default / task-factory)刻意不写这一行,保持零回归。
+ */
 export const officeMainAgent: MainAgentConfig = {
   name: OFFICE_MAIN_AGENT_NAME,
   description:
     'Office 办公助手 —— 文档、表格、邮件和日常办公任务,工具集精简',
+  mods: () => [],
   systemPrompt: (origin) => [OFFICE_SYSTEM_PROMPT, ...stripCodingSections(origin)],
   tools: (origin) =>
     origin.filter((tool: Tool) => {

@@ -21,7 +21,7 @@ class FakeChild extends EventEmitter {
 interface Deps {
   now: () => number
   sleep: (ms: number) => Promise<void>
-  emit: (e: ServerEventInput) => void
+  emit: (e: ServerEventInput, opts?: { recordHistory?: boolean }) => void
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => FakeChild
   probePort: (start: number, max?: number) => Promise<number>
   assertPortAvailable?: (port: number) => Promise<void>
@@ -29,8 +29,13 @@ interface Deps {
   readFile?: () => Promise<{ definitions: Array<{ id: string; name: string; cwd: string; createdAt: string; port?: number | null }>; statuses: Record<string, unknown> }>
 }
 
-function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['emit']; readFile?: Deps['readFile']; assertPortAvailable?: Deps['assertPortAvailable'] }) {
+function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['emit']; readFile?: Deps['readFile']; assertPortAvailable?: Deps['assertPortAvailable']; probePort?: Deps['probePort'] }) {
   const events: ServerEventInput[] = []
+  // 记录被显式标记为「不进重放缓冲」的事件。心跳每 5s 一条、N 实例 ≈ N/5
+  // 条每秒,而 history 上限只有 256 —— 若心跳也进缓冲,全局 history 会被
+  // 彻底刷满(server.connected / session.* / job.* 全被挤掉),重连补发失效。
+  // 这里让测试能直接断言「心跳被排除、状态跃迁没被排除」。
+  const historyExcluded: ServerEventInput[] = []
   const writes: { def: unknown; statuses: Record<string, unknown> }[] = []
   let time = 1_000000
   let probeStart = 9201
@@ -40,7 +45,10 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
   const deps: Deps = {
     now: () => time,
     sleep: () => Promise.resolve(),
-    emit: extra?.emit ?? ((e) => { events.push(e) }),
+    emit: extra?.emit ?? ((e, opts) => {
+      events.push(e)
+      if (opts?.recordHistory === false) historyExcluded.push(e)
+    }),
     spawn: (_cmd, args, opts) => {
       spawnOptions.push(opts)
       spawnArgs.push(args)
@@ -48,7 +56,7 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
       fakeChildren.push(c)
       return c as unknown as FakeChild
     },
-    probePort: vi.fn(async (start: number) => {
+    probePort: extra?.probePort ?? vi.fn(async (start: number) => {
       probeStart = start
       return start
     }),
@@ -56,7 +64,7 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
     writeFile: extra?.onWriteFile ?? (async (w) => { writes.push(w) }),
     readFile: extra?.readFile,
   }
-  return { events, writes, deps, fakeChildren, spawnOptions, spawnArgs, advance: (t: number) => { time = t }, setProbe: (n: number) => { probeStart = n } }
+  return { events, historyExcluded, writes, deps, fakeChildren, spawnOptions, spawnArgs, advance: (t: number) => { time = t }, setProbe: (n: number) => { probeStart = n } }
 }
 
 async function initSup(deps: Deps, cwd = '/tmp/current', dataDir = '/tmp/x') {
@@ -68,6 +76,9 @@ async function initSup(deps: Deps, cwd = '/tmp/current', dataDir = '/tmp/x') {
 describe('instanceSupervisor (4a — state machine)', () => {
   beforeEach(() => {
     delete process.env.ZAI_DATA_DIR
+    // AA 相关用例各自显式 set/delete `ZAI_AA_ENABLED`。这里先清一次防止
+    // 上一个用例残留影响下一个(doStart 在 spawn 时读 env,不缓存)。
+    delete process.env.ZAI_AA_ENABLED
     vi.resetModules()
   })
   afterEach(() => { vi.restoreAllMocks() })
@@ -123,6 +134,44 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(after.state).toBe('running')
     expect(after.port).toBe(9205)
     expect(after.pid).toBe(222)
+  })
+
+  // H3 (docs/bugs/fix-plan-10-05.md):doStop 在 `entry.child === null` 时原本
+  // 无条件把状态翻成 stopped,会**撤销 in-flight start 设的 starting 态**。自动
+  // 端口扫描路径(每个候选都是真 connect+bind+close 的 await)把这个 check-then-
+  // act 窗口拉到 I/O 阶段,一个已排队的 stop 在扫描中途被派发 → 状态被 clobber
+  // → 原来的 doStart 穿过顶部守卫直接 spawn,叠加另一个 start 就是双 child。
+  it('并发 start + stop:doStop 不 clobber in-flight start 的状态,只 spawn 一个 child', async () => {
+    let releaseProbe: (() => void) | null = null
+    const probeGate = new Promise<void>((resolve) => { releaseProbe = resolve })
+    let probeCalls = 0
+    const { deps, fakeChildren } = makeSupervisor({
+      // 把**第二次**端口扫描(createInstance 之后那次)卡住,制造真实的 I/O
+      // 窗口 —— 自动扫描路径正是 H3 里窗口最宽的那条:每个候选都真
+      // connect + bind + close。
+      probePort: async (start: number) => {
+        if (++probeCalls === 2) await probeGate
+        return start
+      },
+    })
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emitExit(0) // 回到 stopped,给并发留出起点
+
+    const startP = getInstanceSupervisor().startInstance(snap.id)
+    await new Promise((r) => setTimeout(r, 0)) // 让 doStart 跑到 probePort 并 await 住
+    // 此时 entry.child 仍是 null,状态是 starting
+    const stopSnap = await getInstanceSupervisor().stopInstance(snap.id)
+    expect(stopSnap.state).toBe('starting') // 关键断言:不被翻成 stopped
+
+    releaseProbe!()
+    await startP
+    // createInstance 1 个 + start 1 个 = 2;stop 没有穿透出额外 spawn
+    expect(fakeChildren).toHaveLength(2)
+    fakeChildren[1]!.emit('message', { type: 'ready', pid: 333, port: 9206 })
+    const after = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(after.state).toBe('running')
+    expect(after.pid).toBe(333)
   })
 
   it('non-user exit → state down + lastError; user stop → stopped', async () => {
@@ -370,6 +419,184 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(last[idx + 1]).toBe('task-factory')
   })
 
+  // ───────── AA(Agents Anywhere)per-instance 开关 ─────────
+  // 契约(def.aa 三态 × root 门禁):
+  //   - def.aa=undefined → auto:跟随 root 是否带 --aa
+  //   - def.aa=true      → 请求启用:仅 root 启 AA 时才真的加 --aa
+  //   - def.aa=false     → 强制禁用:即便 root 启 AA 也不加 --aa
+  // **root 是硬门禁**:ZAI_AA_ENABLED!=='1' 时子实例一定不带 --aa(哪怕
+  // def.aa=true),因为 child 端要靠 ZAI_AA_PARENT_URL 才能转发事件,没有
+  // parent 就会白挂一个发不出去的 WS 客户端。
+  //
+  // `initRootPort` 永远有值(默认 '9201'),所以「root 没开 AA」在测试里
+  // 等价于 `process.env.ZAI_AA_ENABLED !== '1'`。
+
+  it('createInstance with def.aa=undefined follows root --aa (root on → child gets --aa)', async () => {
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, spawnArgs, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    expect(snap.aa).toBeUndefined()
+    expect(spawnArgs[0]).toContain('--aa')
+    const env = (spawnOptions[0] as SpawnOptions & { env: NodeJS.ProcessEnv }).env
+    // root port 来自 `initRootPort(process.env.ZAI_PORT ?? '9201')`,测试环境
+    // 可能继承机器上的 ZAI_PORT(比如本机跑着 9987 的实例),所以按 env 推导
+    // 而不硬编码 —— 断言的契约是"指向 root 自己",不是某个具体数字。
+    const rootPort = process.env.ZAI_PORT ?? '9201'
+    expect(env.ZAI_AA_PARENT_URL).toBe(`http://127.0.0.1:${rootPort}`)
+    expect(env.ZAI_AA_PARENT_PORT).toBe(rootPort)
+  })
+
+  it('createInstance with def.aa=undefined follows root --aa (root off → no --aa)', async () => {
+    delete process.env.ZAI_AA_ENABLED
+    delete process.env.ZAI_AA_PARENT_URL
+    delete process.env.ZAI_AA_PARENT_PORT
+    const { deps, spawnArgs, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const env = (spawnOptions[0] as SpawnOptions & { env: NodeJS.ProcessEnv }).env
+    expect(env.ZAI_AA_PARENT_URL).toBeUndefined()
+    expect(env.ZAI_AA_PARENT_PORT).toBeUndefined()
+  })
+
+  it('createInstance with aa=true spawns --aa when root has AA', async () => {
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: true })
+    expect(snap.aa).toBe(true)
+    expect(spawnArgs[0]).toContain('--aa')
+  })
+
+  it('createInstance with aa=true is IGNORED when root has no AA (root is a hard gate)', async () => {
+    // 这条锁死用户明确要求的语义:「如果 root 没开启,那么子实例就一定是关的」。
+    // 换回旧写法(仍传 --aa,只靠 childEventReporter early return 兜底)会红。
+    delete process.env.ZAI_AA_ENABLED
+    const { deps, spawnArgs, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: true })
+    // def.aa 仍如实落盘为 true(root 启 AA 后下次 restart 会自动生效)
+    expect(snap.aa).toBe(true)
+    // 但这次 spawn 不带 --aa —— root 没开,子实例一定关
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const env = (spawnOptions[0] as SpawnOptions & { env: NodeJS.ProcessEnv }).env
+    expect(env.ZAI_AA_PARENT_URL).toBeUndefined()
+  })
+
+  it('createInstance with aa=false suppresses --aa even when root has AA', async () => {
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: false })
+    expect(snap.aa).toBe(false)
+    expect(spawnArgs[0]).not.toContain('--aa')
+  })
+
+  it('def.aa=false child env does NOT inherit root ZAI_AA_ENABLED', async () => {
+    // 回归:`isAaEnabled()` 只读 env 不读 argv,而 child env 是 `...process.env`
+    // 全量继承 —— root 带 --aa 时 ZAI_AA_ENABLED=1 会漏给 def.aa=false 的子实例,
+    // 让它在 init.ts 的 isChild 判定里落进 ROOT 分支,拿同一个 connectorId 去
+    // 连 AA 云 → 403 + 每 5s 无限重连(现场 9399/9987 各刷 13~15 次)。
+    // 不变式:child env 说开 AA ⟺ argv 里有 `--aa`。
+    process.env.ZAI_AA_ENABLED = '1'
+    process.env.ZAI_AA_PARENT_URL = 'http://127.0.0.1:9999'
+    const { deps, spawnArgs, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: false })
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const env = (spawnOptions[0] as SpawnOptions & { env: NodeJS.ProcessEnv }).env
+    expect(env.ZAI_AA_ENABLED).toBeUndefined()
+    // 继承来的旧值也不能带过去 —— 同样会让子实例误判自己是 AA root
+    expect(env.ZAI_AA_PARENT_URL).toBeUndefined()
+    expect(env.ZAI_AA_PARENT_PORT).toBeUndefined()
+  })
+
+  it('restartInstance keeps honouring persisted def.aa=true after updateInstance', async () => {
+    // UI 开关走的正是这条路径:PATCH updateInstance({aa:true}) 落盘 → 下次
+    // restart 生效,不需要 per-call override。
+    // 用 aa:false 起步(root 已开 AA),让 before/after 的 --aa 差异可观测 ——
+    // 若用 def.aa=undefined 起步,auto 模式下首次 spawn 本来就带 --aa,
+    // 无法区分"patch 生效"与"auto 跟随"。
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: false })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const patched = await getInstanceSupervisor().updateInstance(snap.id, { aa: true })
+    expect(patched.aa).toBe(true)
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(spawnArgs[1]).toContain('--aa')
+  })
+
+  it('restartInstance({aa:false}) per-call override strips --aa from persisted def.aa=true', async () => {
+    // 与 lan 的 per-call override 对称:override 只作用于这一次 spawn,
+    // 不改落盘的 def.aa。
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: true })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id, { aa: false })
+    expect(spawnArgs[0]).toContain('--aa')
+    expect(spawnArgs[1]).not.toContain('--aa')
+    // def 未被 per-call override 污染
+    expect(getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)?.aa).toBe(true)
+  })
+
+  it('startInstance({aa:true}) per-call override is still gated by root', async () => {
+    // per-call override 不能绕过 root 硬门禁。
+    delete process.env.ZAI_AA_ENABLED
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().startInstance(snap.id, { aa: true })
+    expect(spawnArgs[1]).not.toContain('--aa')
+  })
+
+  it('warns when def.aa=true but root has no AA (def persists, no --aa on this spawn)', async () => {
+    // warn 是给用户的可观测信号:告诉他们设置没生效以及怎么修(root 加 --aa
+    // 后 restart)。断言 warn 文本里的关键信息,避免以后误改文案到无法定位。
+    delete process.env.ZAI_AA_ENABLED
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', aa: true })
+    expect(spawnArgs[0]).not.toContain('--aa')
+    const joined = warn.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(joined).toMatch(/wants --aa but root has no AA/)
+    expect(joined).toMatch(/WITHOUT --aa/)
+  })
+
+  it('hydrate from an old instances.json without `aa` leaves def.aa undefined (auto)', async () => {
+    // 旧 JSON 无 aa 字段 → JSON.parse 自然缺 key → 读出 undefined → auto。
+    // 换回 "hydrate 时强制补 aa: false" 之类的写法会让 root-AA-on 场景下的
+    // 老实例全部静默关掉 AA,这条锁住向后兼容。
+    process.env.ZAI_AA_ENABLED = '1'
+    const { deps, spawnArgs } = makeSupervisor({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_legacy', name: 'legacy', cwd: '/tmp/x', createdAt: '2026-01-01T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = getInstanceSupervisor().getSnapshots().find((s) => s.id === 'inst_legacy')!
+    expect(snap.aa).toBeUndefined()
+    await getInstanceSupervisor().startInstance('inst_legacy')
+    expect(spawnArgs[spawnArgs.length - 1]).toContain('--aa')
+  })
+
   // ───────── port 配置相关 ─────────
   // 用户在创建时钉死一个端口 → supervisor 用该端口启动,probePort 不调用。
   it('createInstance with port pins the child to that exact port (probePort not used)', async () => {
@@ -502,6 +729,72 @@ describe('instanceSupervisor (4b — heartbeat + shutdown)', () => {
     vi.resetModules()
   })
   afterEach(() => { vi.restoreAllMocks() })
+
+  // ========== 心跳不进重放缓冲 (2026-10-07) ==========
+  // 线上症状:eventBus 全局 history(上限 256)被 instance.changed 心跳刷满,
+  // history 时间跨度被压到 ~4.5 分钟,server.connected / session.* / job.*
+  // 全被挤掉,重连补发失效。实测 5 实例时前 256 条里 254 条是心跳。
+  it('心跳事件被标记为不进 history;状态跃迁仍然进', async () => {
+    const { deps, fakeChildren, events, historyExcluded } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    const child = fakeChildren[0]!
+    // ready = 状态跃迁(starting → running),必须留在 history 里
+    child.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const readyEvents = events.length
+    const readyExcluded = historyExcluded.length
+
+    // 连续心跳 —— 每一条都实时推给订阅者,但都不得进 history
+    child.emit('message', { type: 'heartbeat', instanceId: snap.id, port: 9205, ts: Date.now(), pid: 222 })
+    child.emit('message', { type: 'heartbeat', instanceId: snap.id, port: 9205, ts: Date.now(), pid: 222 })
+    child.emit('message', { type: 'heartbeat', instanceId: snap.id, port: 9205, ts: Date.now(), pid: 222 })
+
+    // 1) 心跳仍然实时下发(UI 的「最后心跳」要继续动)
+    const heartbeatEvents = events.slice(readyEvents)
+    expect(heartbeatEvents).toHaveLength(3)
+    expect(heartbeatEvents.every((e) => e.type === 'instance.changed')).toBe(true)
+    // 2) 但三条全部被标记为不进重放缓冲
+    expect(historyExcluded.length - readyExcluded).toBe(3)
+    expect(historyExcluded.every((e) => e.type === 'instance.changed')).toBe(true)
+    // 3) ready 那个状态跃迁**没有**被排除 —— 不能把心跳优化做过头
+    expect(readyExcluded).toBe(0)
+    expect(events[readyEvents - 1]?.type).toBe('instance.changed')
+  })
+
+  // 守门:心跳的 lastHeartbeatAt 状态更新本身不能被优化掉 —— 它是
+  // 20s 超时判定(tickHeartbeat)的唯一依据,丢了就会误杀健康实例。
+  //
+  // 判据设计成**可区分**的:时间轴取 ready@t0、心跳@t0+15s、tick@t0+30s。
+  //   - 心跳正确更新 lastHeartbeatAt → 距上次心跳 15s ≤ 20s → 保持 running;
+  //   - 心跳更新被优化掉(lastHeartbeatAt 停在 t0) → 距上次 30s > 20s →
+  //     误判超时,SIGKILL 掉一个其实健康的实例。
+  it('心跳仍然更新 lastHeartbeatAt(超时判定依赖它,丢了会误杀健康实例)', async () => {
+    const t0 = 1_000000
+    let time = t0
+    const { deps, fakeChildren } = makeSupervisor()
+    deps.now = () => time
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    const child = fakeChildren[0]!
+    child.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const atReady = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!.lastHeartbeatAt
+    expect(atReady).toBe(new Date(t0).toISOString())
+
+    time = t0 + 15_000
+    child.emit('message', { type: 'heartbeat', instanceId: snap.id, port: 9205, ts: time, pid: 222 })
+    // 心跳确实把 lastHeartbeatAt 推进了(而不是原地不动)
+    expect(
+      getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!.lastHeartbeatAt,
+    ).toBe(new Date(t0 + 15_000).toISOString())
+
+    // tick 在 t0+30s:距最后一次心跳 15s,在 20s 阈值内 → 不应被杀
+    time = t0 + 30_000
+    ;(getInstanceSupervisor() as unknown as { __tickHeartbeat?: () => void }).__tickHeartbeat?.()
+    expect(getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!.state).toBe('running')
+    expect(child.kill).not.toHaveBeenCalled()
+  })
 
   it('heartbeat tick: stale running instance → down + SIGKILL + lastError', async () => {
     let time = 1_000000
@@ -788,7 +1081,10 @@ describe('instanceSupervisor (4d — fix round 2: stale-child + post-SIGKILL + c
     const { getInstanceSupervisor } = await initSup(deps, '/tmp/current', '/tmp/persist-data')
     const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
     await getInstanceSupervisor().startInstance(snap.id)
-    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    // Live pid: on re-init below there is no child, and `resetStaleActive`
+    // signal-0 probes the persisted pid — a dead one (222 → ESRCH) would be
+    // reset on sight, which is not what this round-trip case is about.
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: process.pid, port: 9205 })
     await (getInstanceSupervisor() as unknown as { __flushPendingWrites: () => Promise<void> }).__flushPendingWrites()
     // The last write must include `state: 'running'`.
     const running = writes.find((w) => (w.statuses[snap.id] as { state?: string } | undefined)?.state === 'running')
@@ -902,11 +1198,17 @@ describe('instanceSupervisor (4f — stale running reset after supervisor restar
   afterEach(() => { vi.restoreAllMocks() })
 
   const STALE_MS = 30 * 60_000
+  // Hydrated entries have no child, so `resetStaleActive` signal-0 probes the
+  // persisted pid before falling through to the 30-min rule. A made-up pid
+  // (222) is ESRCH on the host, which would reset EVERY entry on sight and
+  // make these cases assert the dead-pid path instead of the 30-min window
+  // they are written to cover. Use the vitest worker's own pid — always alive.
+  const LIVE_PID = process.pid
   // Persisted status shape used by hydration: an "alive-looking" entry with
   // every runtime field set, so a reset must clear port/pid/lastError while
   // keeping lastHeartbeatAt.
   const makeStatus = (state: string, tsIso: string) => ({
-    state, port: 9205, pid: 222, startedAt: tsIso, lastHeartbeatAt: tsIso,
+    state, port: 9205, pid: LIVE_PID, startedAt: tsIso, lastHeartbeatAt: tsIso,
     lastError: { at: tsIso, message: 'boom' },
   })
 
@@ -980,5 +1282,59 @@ describe('instanceSupervisor (4f — stale running reset after supervisor restar
       return ev.type === 'instance.changed' && ev.instanceId === 'inst_orphan' && ev.state === 'stopped'
     })
     expect(changed).toBe(true)
+  })
+})
+
+// 子进程入口在 dev 下是 `src/cli/index.ts`(TypeScript 源文件),裸
+// `process.execPath` 起不来 —— 缺 loader 链,ESM 解析 `.js` 后缀的相对导入
+// 直接 ERR_MODULE_NOT_FOUND,实例永远停在 down。生产走纯 JS 的 bin/zai.js,
+// execArgv 为空,所以这个缺陷只在本仓库的 dev 工作流里暴露。
+describe('childExecArgv — 子进程继承 loader 链', () => {
+  async function load() {
+    const { childExecArgv } = await import('../../../src/server/services/instanceSupervisor.js')
+    return childExecArgv
+  }
+
+  it('原样透传父进程的 loader / preflight 链', async () => {
+    const childExecArgv = await load()
+    const argv = [
+      '--require', '/abs/tsx/dist/preflight.cjs',
+      '--import', 'file:///abs/tsx/dist/loader.mjs',
+      '--loader', '/abs/bun-protocol.mjs',
+    ]
+    expect(childExecArgv(argv, '/parent/cwd')).toEqual(argv)
+  })
+
+  it('相对 loader 路径按父进程 cwd 绝对化 —— 子进程 cwd 是实例目录,不绝对化必然解析失败', async () => {
+    const childExecArgv = await load()
+    const out = childExecArgv(['--loader', './node_modules/bun-protocol.mjs'], '/parent/pkg')
+    expect(out[0]).toBe('--loader')
+    expect(out[1]).toMatch(/^file:\/\/\/parent\/pkg\/node_modules\/bun-protocol\.mjs$/)
+  })
+
+  it('../ 相对路径同样绝对化', async () => {
+    const childExecArgv = await load()
+    const out = childExecArgv(['--import', '../shared/loader.mjs'], '/parent/pkg/sub')
+    expect(out[1]).toBe('file:///parent/pkg/shared/loader.mjs')
+  })
+
+  it('丢弃 --inspect* / --debug*:子进程会跟父进程抢同一个调试端口,起来就死', async () => {
+    const childExecArgv = await load()
+    const out = childExecArgv(
+      ['--inspect=9229', '--inspect-brk', '--debug', '--loader', '/abs/l.mjs'],
+      '/parent',
+    )
+    expect(out).toEqual(['--loader', '/abs/l.mjs'])
+  })
+
+  it('普通 V8 / node 开关不受影响', async () => {
+    const childExecArgv = await load()
+    const argv = ['--max-old-space-size=4096', '--enable-source-maps', '--no-warnings']
+    expect(childExecArgv(argv, '/parent')).toEqual(argv)
+  })
+
+  it('生产路径(execArgv 为空)不产生多余参数', async () => {
+    const childExecArgv = await load()
+    expect(childExecArgv([], '/parent')).toEqual([])
   })
 })

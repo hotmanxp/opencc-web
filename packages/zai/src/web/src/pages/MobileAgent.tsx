@@ -12,10 +12,11 @@ import { FilePreviewDrawer } from '../components/conversation/FilePreviewDrawer'
 import ConfigStatusBar from '../components/ConfigStatusBar'
 import MobileQuickDrawer from '../components/MobileQuickDrawer.jsx'
 import { UpdateNotifier } from '../components/UpdateNotifier'
+import { useIsLanAgentHost } from '../hooks/useIsLanAgentHost'
 
 /**
  * 移动端 /agent 页面:
- *   - MobileHeader 顶栏(≡ / 标题 / +)
+ *   - MobileHeader 顶栏(≡ / 标题 / +; lan-agent 宿主下多一个模型切换按钮)
  *   - AgentConversation 对话核心(内部从 useAppStore.isMobile 判断移动端)
  *   - ConfigStatusBar 底部状态栏(含模型切换按钮)
  *   - MobileSessionDrawer 左侧抽屉式会话切换
@@ -24,6 +25,13 @@ import { UpdateNotifier } from '../components/UpdateNotifier'
  *
  * isMobile 由 MobileLayout 顶部 useIsMobile() 通过 matchMedia 同步到
  * useAppStore, 任何子组件按需自取, 不再 props 透传.
+ *
+ * lan-agent App 内(Android WebView 宿主)不渲染 ConfigStatusBar — 该宿主
+ * 本身已有原生底部 Tab(任务/远程/服务/设置), 紧贴着 zai 的状态栏显得拥挤,
+ * 且状态栏那行在窄屏里横向空间不够。模型切换入口没有跟着一起消失, 由
+ * MobileHeader 在 [+ 左侧补一个 ModelStatusButton 接管(见 MobileHeader.tsx)。
+ * 副作用: 权限模式(mode)切换与后台任务 TaskDock 在该宿主下失去入口 — 分支
+ * 切换仍可从「常用指令 → Git」抽屉进入。
  */
 export default function MobileAgent() {
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -36,6 +44,9 @@ export default function MobileAgent() {
     s.sessionId ? s.cwdBySession[s.sessionId] : undefined,
   )
   const cwdName = instanceContext?.cwdName || '~'
+  // lan-agent App 内隐藏底部状态栏(见文件头注释)。判据是 Android WebView UA,
+  // 不依赖 lan-agent 改 APK —— 见 hooks/useIsLanAgentHost.ts。
+  const isLanAgentHost = useIsLanAgentHost()
   // branch=null 表示当前 PWD 不是 Git 目录 (server /system 端点在
   // git rev-parse --is-inside-work-tree 失败时返回 null). ConfigStatusBar
   // 据此隐藏整个分支段 + 前后分隔符, 不显示误导性的 'master' 兜底, 也
@@ -69,13 +80,15 @@ export default function MobileAgent() {
       <UpdateNotifier />
       <MobileHeader onOpenSessionDrawer={() => setDrawerOpen(true)} />
       <AgentConversation />
-      <ConfigStatusBar
-        cwdName={cwdName}
-        sessionCwd={cwdBySessionForSid}
-        branch={branch}
-        cwd={cwd}
-        onTaskSelect={setSelectedTaskId}
-      />
+      {!isLanAgentHost && (
+        <ConfigStatusBar
+          cwdName={cwdName}
+          sessionCwd={cwdBySessionForSid}
+          branch={branch}
+          cwd={cwd}
+          onTaskSelect={setSelectedTaskId}
+        />
+      )}
       <MobileSessionDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
       <ApproveDrawer />

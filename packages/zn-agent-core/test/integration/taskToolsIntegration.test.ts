@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { buildDefaultTools } from '../../src/compat/tools/index.js'
 import { setTaskListStore, TaskListStore } from '../../src/compat/taskListStore.js'
 import { TaskCreateTool } from '../../src/compat/tools/tasks/TaskCreateTool.js'
 import { TaskUpdateTool } from '../../src/compat/tools/tasks/TaskUpdateTool.js'
@@ -34,11 +33,16 @@ describe('task tools integration (end-to-end through stateChangeBus)', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('merged tool list contains TaskCreate/Get/Update/List', () => {
-    const names = buildDefaultTools().map((t) => t.name)
-    expect(names).toEqual(
-      expect.arrayContaining(['TaskCreate', 'TaskGet', 'TaskUpdate', 'TaskList']),
-    )
+  it('task executors are wired for create / update / list', () => {
+    // Was: assert `buildDefaultTools()` contains TaskCreate/Get/Update/List.
+    // The zai compat registry was removed when the tool pool moved to
+    // vendor's `getTools()` (opencc-src/tools.ts:237). Neither the registry
+    // nor the tool objects ship in the bundle surface, so assert the zai-owned
+    // executors instead — the rest of this file exercises their behavior.
+    for (const tool of [TaskCreateTool, TaskUpdateTool, TaskListTool]) {
+      expect(typeof tool.call).toBe('function')
+      expect(tool.inputSchema).toBeDefined()
+    }
   })
 
   it('TaskCreate persists and emits v2_task.changed with action=upsert', async () => {

@@ -201,6 +201,12 @@ export function parseSkillFrontmatterFields(
   userInvocable: boolean
   hooks: HooksSettings | undefined
   executionContext: 'fork' | undefined
+  /**
+   * Run a fork-context skill detached and return immediately instead of
+   * blocking on the result. Opt-in: opencc defaults to blocking, unlike
+   * upstream, which defaults forked skills to the background.
+   */
+  runInBackground: boolean
   agent: string | undefined
   effort: EffortValue | undefined
   shell: FrontmatterShell | undefined
@@ -258,6 +264,7 @@ export function parseSkillFrontmatterFields(
     userInvocable,
     hooks: parseHooksFromFrontmatter(frontmatter, resolvedName),
     executionContext: frontmatter.context === 'fork' ? 'fork' : undefined,
+    runInBackground: parseBooleanFrontmatter(frontmatter.background),
     agent: frontmatter.agent as string | undefined,
     effort,
     shell: parseShellFrontmatter(frontmatter.shell, resolvedName),
@@ -286,6 +293,7 @@ export function createSkillCommand({
   loadedFrom,
   hooks,
   executionContext,
+  runInBackground,
   agent,
   paths,
   effort,
@@ -309,6 +317,7 @@ export function createSkillCommand({
   loadedFrom: LoadedFrom
   hooks: HooksSettings | undefined
   executionContext: 'inline' | 'fork' | undefined
+  runInBackground: boolean
   agent: string | undefined
   paths: string[] | undefined
   effort: EffortValue | undefined
@@ -328,6 +337,7 @@ export function createSkillCommand({
     disableModelInvocation,
     userInvocable,
     context: executionContext,
+    runInBackground,
     agent,
     effort,
     paths,

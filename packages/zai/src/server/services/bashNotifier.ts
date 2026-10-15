@@ -1,4 +1,5 @@
 import type { BashTaskInfo } from '@zn-ai/zn-agent-core'
+import { getTaskOutputPath } from '@zn-ai/zn-agent-core'
 import {
   getRuntime,
   getCurrentSessionId,
@@ -153,6 +154,20 @@ export function __resetBashNotifierPendingForTests(): void {
 /**
  * 构造单个 <task-notification> 块(不含引导语)。
  * summary 对齐 LocalShellTask.enqueueShellNotification 的措辞。
+ *
+ * 2026-10-05 之前的 zai patch 在通知里内联 `<result>` 块;已回退,改回与
+ * upstream Claude Code / opencc LocalShellTask.enqueueShellNotification
+ * 一致的 path-only 形态 —— 通知只带 `<output-file>` 路径,LLM 自己 Read
+ * 文件拿 stdout/stderr。
+ *
+ * 原因:
+ * - 大输出吃光 notification token 配额;30KB 内联本身就比 path 多 1 个数量级。
+ * - stdout 里有 `<task-notification>` / `</...>` 之类字符串会被 LLM 误解析
+ *   为新段落(escapeXml 已挡,但语义噪音大)。
+ * - 与上游/上游 vendor 默认行为对齐,减少 zai 独有的 surface。
+ *
+ * 输出文件位置: `task.persistedOutputPath` 由 LocalShellTask 在 end-time
+ * 写入(目前未调,fallback 到 `getTaskOutputPath(taskId)` 计算)。
  */
 export function renderBashNotificationBlock(task: BashTaskInfo): string {
   const status = task.status
@@ -171,12 +186,14 @@ export function renderBashNotificationBlock(task: BashTaskInfo): string {
     default:
       summary = `Background command "${task.description}" ${status}`
   }
+  const outputPath = task.persistedOutputPath ?? getTaskOutputPath(task.taskId)
   return (
     `<task-notification>\n` +
     `<task-id>${escapeXml(task.taskId)}</task-id>\n` +
+    `<output-file>${escapeXml(outputPath)}</output-file>\n` +
     `<status>${status}</status>\n` +
-    `<summary>${escapeXml(summary)}</summary>\n` +
-    `</task-notification>`
+    `<summary>${escapeXml(summary)}</summary>` +
+    `\n</task-notification>`
   )
 }
 

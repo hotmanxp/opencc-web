@@ -27,7 +27,6 @@ const MAX_ARGS_LENGTH = 1024
 type CommandDoneResult =
   | 'cleared'
   | 'compacted'
-  | 'status'
   | 'message'
   | 'prompt'
   | 'error'
@@ -133,9 +132,6 @@ commandRouter.post('/command', async (req, res) => {
         case 'compacted':
           finishEvent('compacted')
           return res.json({ type: 'compacted', payload: { removedMessages: result.removedMessages, summary: result.summary } })
-        case 'status':
-          finishEvent('status')
-          return res.json({ type: 'status', payload: result.payload })
         case 'message':
           finishEvent('message')
           return res.json({ type: 'message', payload: { text: result.text } })

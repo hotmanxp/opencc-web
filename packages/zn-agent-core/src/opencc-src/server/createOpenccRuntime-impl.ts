@@ -41,11 +41,12 @@ import { getPluginCommands, getPluginSkills } from '../utils/plugins/loadPluginC
 import { getAgentDefinitionsWithOverrides } from '../tools/AgentTool/loadAgentsDir.js'
 import { refreshActivePlugins } from '../utils/plugins/refresh.js'
 import { loadInstalledPluginsV2, hasPendingUpdates, getPendingUpdatesDetails } from '../utils/plugins/installedPluginsManager.js'
-import { getMarketplace, getDeclaredMarketplaces, loadKnownMarketplacesConfig, addMarketplaceSource, saveMarketplaceToSettings, clearMarketplacesCache } from '../utils/plugins/marketplaceManager.js'
+import { getMarketplace, getDeclaredMarketplaces, loadKnownMarketplacesConfig, addMarketplaceSource, saveMarketplaceToSettings, clearMarketplacesCache, refreshMarketplace } from '../utils/plugins/marketplaceManager.js'
 import { getMarketplaceSourceDisplay } from '../utils/plugins/marketplaceHelpers.js'
 import { parseMarketplaceInput } from '../utils/plugins/parseMarketplaceInput.js'
 import { parsePluginIdentifier } from '../utils/plugins/pluginIdentifier.js'
 import { clearAllCaches } from '../utils/plugins/cacheUtils.js'
+import { getGitCommitSha } from '../utils/plugins/pluginVersioning.js'
 import { getUserConfigJson } from '../utils/userConfigJson.js'
 // zai patch (2026-08-29): 走 server/index.js barrel 拿 getAgentRegistry。
 // 直接 import './agentRegistry.js' 在 esbuild bundle 时把内部 call site
@@ -53,6 +54,14 @@ import { getUserConfigJson } from '../utils/userConfigJson.js'
 // 运行时报 "getAgentRegistry is not defined"。barrel re-export 触发
 // esbuild 同步生成 local binding,避开 TDZ。
 import { getAgentRegistry } from './index.js'
+// zai patch (2026-10-06, mods 同步):mod 门禁(mainAgent 第四槽 `mods`)。
+// getLoadedMods 取全部已加载 mod 名作为该槽的 origin;setSessionModGate
+// 写入 per-session 白名单,assembleToolPool / buildModCommands /
+// runModChain 三处消费。
+import { getLoadedMods, setSessionModGate } from '../mods/registry.js'
+import { getModsAsPlugins, modNameForPluginId } from '../mods/pluginView.js'
+import { setModEnabled, reloadMods } from '../mods/hooks.js'
+import { buildModCommands } from '../mods/engine.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult, OpenccMcpApi, OpenccMcpStatus, OpenccMcpConnectFailure } from './serverTypes.js'
 // zai patch (2026-09-12, plan cron-fire-to-prompt, fix断链1): v2 runtime
@@ -156,10 +165,17 @@ export async function createOpenccRuntimeImpl(options) {
   // zai patch (2026-08-20): 主 Agent tools 槽不再在此全局应用 —— 改为
   // per-engine 应用(createEngine 按会话恢复的 agent 包一个闭包),否则
   // 不同会话各自恢复的 agent 会互相污染工具池。
-  const computeTools = () => {
+  //
+  // zai patch (2026-10-06, mods 同步):同理,mod 门禁也是 per-session 的 ——
+  // `sessionId` 缺省时 assembleToolPool 行为与 opencc 一致(全部 mod 可见)。
+  const computeTools = (sessionId?: string) => {
     const state = ctx.appState.getState()
     const permissionContext = state.toolPermissionContext
-    const assembled = assembleToolPool(permissionContext, state.mcp?.tools ?? [])
+    const assembled = assembleToolPool(
+      permissionContext,
+      state.mcp?.tools ?? [],
+      sessionId,
+    )
     return mergeAndFilterTools(ctx.tools, assembled, permissionContext.mode)
   }
 
@@ -435,8 +451,39 @@ export async function createOpenccRuntimeImpl(options) {
       const fn = agent?.slots?.[slotId] as ((o: T, s: string) => T) | undefined
       return fn ? fn(origin, sid) : origin
     }
+
+    // zai patch (2026-10-06, mods 同步):第四槽 —— 应用 mod 门禁。
+    //
+    // 时序很关键:必须**先**建门禁,再算工具池 —— assembleToolPool 读门禁
+    // 决定哪些 mod 工具可见。门禁每 engine 建一次(agent 绑定是 per-session
+    // 的,engine 与 session 一对一,所以这不是 per-turn 开销)。
+    //
+    // origin 传已加载的全部 mod 名;agent 的 mods 槽返回本会话启用的子集。
+    // 不设槽 → 传 null → 全部可见(= opencc 行为,零回归)。
+    const applyModGate = (): void => {
+      const agent = resolveBoundAgent()
+      const fn = agent?.slots?.['mods'] as
+        | ((o: string[], s: string) => string[] | Promise<string[]>)
+        | undefined
+      if (!fn) {
+        setSessionModGate(sid, null)
+        return
+      }
+      const all = getLoadedMods().map(m => m.manifest.name)
+      // mods 槽按契约是同步的(与 tools 槽同约束:QueryEngine.tools 要 sync
+      // 数组)。若将来允许 async,这里需要改 async 并把 engineComputeTools
+      // 改成 Promise —— 那会破坏当前 sync 契约,故此处显式 fail-fast。
+      const next = fn(all, sid)
+      if (next && typeof (next as Promise<string[]>).then === 'function') {
+        setSessionModGate(sid, null)
+        return
+      }
+      setSessionModGate(sid, next as string[])
+    }
+    applyModGate()
+
     const engineComputeTools = () =>
-      resolveBoundSlot('tools', computeTools())
+      resolveBoundSlot('tools', computeTools(sid))
     // zai patch (2026-09-22, MCP live view): commands / mcpClients 过去取
     // `ctx.mcp.*` —— 那是 createHeadlessContextImpl 的 boot 期快照,而
     // `connectMcp: false` 时它恒为空数组(后台连接只写 appState.mcp)。
@@ -456,7 +503,10 @@ export async function createOpenccRuntimeImpl(options) {
       cwd,
       tools: engineComputeTools(),
       get commands() {
-        return liveMcp()?.commands ?? []
+        // zai patch (2026-10-06, mods 同步):并入本会话可见的 mod 命令。
+        // 传 sid 让 mod 门禁生效(与工具池同一份白名单)。无 mod 注册时
+        // buildModCommands 返回空数组,行为与之前完全一致。
+        return [...(liveMcp()?.commands ?? []), ...buildModCommands(sid)]
       },
       get mcpClients() {
         return (liveMcp()?.clients ?? []).filter(c => c.type === 'connected')
@@ -562,6 +612,79 @@ export async function createOpenccRuntimeImpl(options) {
     return counts
   }
 
+  /**
+   * Installed plugins whose marketplace now offers something newer.
+   *
+   * Two comparisons, in order of confidence:
+   *   1. explicit `entry.version` — a semver the maintainer bumped. Installed
+   *      version differing from it is a definitive "behind".
+   *   2. git HEAD — covers git-subdir plugins that carry no `version` field at
+   *      all (their installed "version" is a `<sha>-<pathhash>` token, not
+   *      something comparable as semver). Comparing the marketplace clone's
+   *      HEAD against the recorded `gitCommitSha` catches those.
+   *
+   * Anything we cannot compare (unreadable marketplace, local directory
+   * source with no git, no recorded sha) is simply not reported — the UI
+   * keeps the plugin updatable regardless, `updatePluginOp` no-ops on
+   * already-current installs.
+   */
+  async function findOutdatedInstalledPluginIds(
+    v2: Awaited<ReturnType<typeof loadInstalledPluginsV2>>,
+  ): Promise<string[]> {
+    const pluginIds = Object.keys(v2.plugins)
+    if (pluginIds.length === 0) return []
+
+    const declared = getDeclaredMarketplaces()
+    if (Object.keys(declared).length === 0) return []
+
+    const marketplaceConfig = await loadKnownMarketplacesConfig()
+    // One git HEAD read per marketplace, not per plugin.
+    const headByMarketplace = new Map<string, string | null>()
+    const entriesByMarketplace = new Map<string, Awaited<ReturnType<typeof getMarketplace>> | null>()
+
+    const outdated: string[] = []
+    for (const pluginId of pluginIds) {
+      const { name, marketplace } = parsePluginIdentifier(pluginId)
+      if (!name || !marketplace || !declared[marketplace]) continue
+
+      if (!entriesByMarketplace.has(marketplace)) {
+        entriesByMarketplace.set(
+          marketplace,
+          await getMarketplace(marketplace).catch(() => null),
+        )
+      }
+      const entry = entriesByMarketplace
+        .get(marketplace)
+        ?.plugins?.find((p) => p.name === name)
+      if (!entry) continue
+
+      for (const inst of v2.plugins[pluginId] ?? []) {
+        if (entry.version && inst.version && entry.version !== inst.version) {
+          outdated.push(pluginId)
+          break
+        }
+        if (entry.version && inst.version) continue // both known and equal
+
+        // No usable version field — fall back to git HEAD comparison.
+        if (!inst.gitCommitSha) continue
+        const installLocation = marketplaceConfig[marketplace]?.installLocation
+        if (!installLocation) continue
+        if (!headByMarketplace.has(marketplace)) {
+          headByMarketplace.set(
+            marketplace,
+            await getGitCommitSha(installLocation).catch(() => null),
+          )
+        }
+        const head = headByMarketplace.get(marketplace)
+        if (head && head !== inst.gitCommitSha) {
+          outdated.push(pluginId)
+          break
+        }
+      }
+    }
+    return outdated
+  }
+
   async function buildList(): Promise<OpenccPluginListResult> {
     const [loadResult, v2, counts] = await Promise.all([
       loadAllPlugins(),
@@ -575,19 +698,49 @@ export async function createOpenccRuntimeImpl(options) {
       e.mcpServers = Object.keys(p.mcpServers ?? {}).length
       counts.set(p.name, e)
     }
-    // 4) hasUpdate via pending updates registry
+    // zai patch (2026-10-10, mods 同步):mod 注册的命令/工具也计入组件数,
+    // 否则 UI 上一个注册了 3 个命令的 mod 会显示成 0,读起来像没生效。
+    // 注意这里遍历的是「已加载」集合:被禁用的 mod 代码根本没跑,没有
+    // 可数的注册 —— 它的空计数正是「已停用」的可视信号。
+    for (const mod of getLoadedMods()) {
+      const e = counts.get(mod.manifest.name) ?? { commands: 0, agents: 0, skills: 0, hooks: 0, mcpServers: 0 }
+      e.commands += mod.commands.length
+      e.hooks += mod.handlers.length
+      counts.set(mod.manifest.name, e)
+    }
+    // 4) hasUpdate — two independent signals, union'd.
+    //    4a) the background autoupdater already downloaded a newer version to
+    //        disk while this session still runs the old installPath.
+    //    4b) the marketplace itself moved on (see findOutdatedInstalledPluginIds).
+    //    4a alone left the flag permanently false in zai: the headless runtime
+    //    never runs the autoupdater, so nothing ever wrote a differing path.
     const pendingMap = new Map<string, boolean>()
     if (hasPendingUpdates()) {
       for (const u of getPendingUpdatesDetails()) {
-        pendingMap.set(u.id, true)
+        // The detail row's key is `pluginId`, not `id` — reading `u.id` yielded
+        // undefined, so even a completed autoupdate never lit the flag.
+        pendingMap.set(u.pluginId, true)
       }
+    }
+    for (const id of await findOutdatedInstalledPluginIds(v2)) {
+      pendingMap.set(id, true)
     }
     // Plugin enable/disable state is stored in the unified user config JSON
     // (~/.zai.json, fallback ~/.zai.json) — not the vendor settings
     // cascade. See utils/userConfigJson.ts for the read/write contract.
     const userConfig = getUserConfigJson()
     const enabled = userConfig.enabledPlugins as Record<string, boolean> | undefined
-    return assemblePluginList(loadResult, v2, enabled, counts, (id) => pendingMap.get(id) === true)
+    // zai patch (2026-10-10, mods 同步):把 mod 投影并入同一张列表。
+    // mod 的 id(`<name>@mods`)与开关状态读的是同一个 `enabledPlugins`,
+    // 所以 UI 里那一个 Switch 同时管住插件和 mod,没有任何 mod 专属分支。
+    return assemblePluginList(
+      loadResult,
+      v2,
+      enabled,
+      counts,
+      (id) => pendingMap.get(id) === true,
+      getModsAsPlugins(),
+    )
   }
 
   async function reloadActive(): Promise<OpenccPluginActionResult['reload']> {
@@ -609,9 +762,16 @@ export async function createOpenccRuntimeImpl(options) {
   async function buildAvailable(): Promise<OpenccMarketplacePluginDto[]> {
     const installed = await buildList()
     const installedIds = new Set(installed.plugins.map((p) => p.id))
-    const declared = getDeclaredMarketplaces()
+    // zai patch (2026-10-11, 市场 tab 空列表):枚举源从 getDeclaredMarketplaces()
+    // (settings 意图层)换成 loadKnownMarketplacesConfig()(磁盘状态层),与相邻的
+    // buildMarketplaces() 同源。官方市场只有在 enabledPlugins 里存在
+    // `@claude-plugins-official` 插件时才算 implicit 声明 —— 一个官方插件都没装的
+    // 用户意图层是空的,于是「市场来源」显示 315 个插件、「市场」tab 却空着。
+    // removeMarketplaceSource() 两层同时清,所以状态层里的条目就是真在盘上的,
+    // 不会让已删的市场复活。
+    const state = await loadKnownMarketplacesConfig()
     const out: OpenccMarketplacePluginDto[] = []
-    for (const [marketplaceName, decl] of Object.entries(declared)) {
+    for (const marketplaceName of Object.keys(state)) {
       const mp = await getMarketplace(marketplaceName).catch(() => null)
       if (!mp) continue
       for (const entry of mp.plugins ?? []) {
@@ -681,6 +841,18 @@ export async function createOpenccRuntimeImpl(options) {
     },
 
     async setEnabled(id, enabled) {
+      // zai patch (2026-10-10, mods 同步):mod 开关在进插件流水线之前分流。
+      // mod 的 id 来自同一张 `enabledPlugins`,但它没有 installed_plugins 记录,
+      // 走 setPluginEnabledOp 会因为「找不到这个插件」而失败。mod 的开关是
+      // 立即生效的(关 → unloadMod,开 → reloadMods),所以这里也不需要
+      // reloadActive() 重载插件流水线 —— 直接回最新列表即可。
+      const modName = modNameForPluginId(id)
+      if (modName !== undefined) {
+        const result = await setModEnabled(modName, enabled)
+        if (!result.success) return { success: false, message: result.message }
+        return { success: true, message: result.message, state: await buildList() }
+      }
+
       // Auto-detect the scope where the plugin lives rather than forcing
       // 'user'. The UI displays the merged state across scopes, but a
       // hardcoded user-scope write produced false "already disabled"
@@ -733,8 +905,28 @@ export async function createOpenccRuntimeImpl(options) {
 
     async reload() {
       const reload = await reloadActive()
-      if (reload === undefined) return { success: false, message: 'Hot reload failed' }
-      return { success: true, message: 'Reloaded', reload, state: await buildList() }
+      // zai patch (2026-10-10, mods 同步):插件热重载不会碰 mods —— 两条
+      // 加载器彼此独立。用户改完 mod 源码点同一个「重载插件」按钮时,
+      // 如果不带上 mods, mod 的改动不会生效(看上去重载成功了但什么都没变)。
+      // reloadMods 失败不回滚插件重载:两者无依赖,部分成功好过整体失败。
+      let modsReloaded = true
+      try {
+        await reloadMods()
+      } catch (error) {
+        modsReloaded = false
+        logForDebugging(
+          `[mods] reload during plugin reload failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+      if (reload === undefined) {
+        return { success: false, message: 'Hot reload failed', state: await buildList() }
+      }
+      return {
+        success: modsReloaded,
+        message: modsReloaded ? 'Reloaded' : 'Plugins reloaded, but mods failed to reload',
+        reload,
+        state: await buildList(),
+      }
     },
 
     async listMarketplaces(): Promise<OpenccMarketplaceDto[]> {
@@ -783,6 +975,54 @@ export async function createOpenccRuntimeImpl(options) {
           message: alreadyMaterialized
             ? `市场 '${name}' 已存在于本地，已重新登记`
             : `已添加市场: ${name}`,
+          marketplaces: await buildMarketplaces(),
+          available: await buildAvailable(),
+        }
+      } catch (e) {
+        return { success: false, message: e instanceof Error ? e.message : String(e) }
+      }
+    },
+
+    /**
+     * Mirrors the CLI's `marketplaceUpdateHandler`: refresh the upstream
+     * manifest in place, then drop every cache that could still serve the
+     * pre-refresh state. Refreshing only the source is deliberate — the
+     * installed plugins keep running until the user updates them
+     * individually from the 已安装 tab.
+     */
+    async updateMarketplace(name: string): Promise<OpenccMarketplaceActionResult> {
+      const trimmed = (name ?? '').trim()
+      if (!trimmed) return { success: false, message: '市场名称为空' }
+
+      // refreshMarketplace() returns silently (no signal) for settings-sourced
+      // marketplaces — they have no upstream. Rejecting them here is what lets
+      // the UI explain why the click produced no change instead of reporting
+      // a bogus success.
+      let config
+      try {
+        config = await loadKnownMarketplacesConfig()
+      } catch (e) {
+        return { success: false, message: e instanceof Error ? e.message : String(e) }
+      }
+      const entry = config[trimmed]
+      if (!entry) return { success: false, message: `市场 '${trimmed}' 不存在` }
+      if (entry.source?.source === 'settings') {
+        return {
+          success: false,
+          message: `市场 '${trimmed}' 来自 settings 内联配置，没有上游可拉取，已跳过`,
+        }
+      }
+
+      try {
+        await refreshMarketplace(trimmed)
+        // getMarketplace is memoized and clearAllCaches() does not touch that
+        // memo — without this the refreshed marketplace still reads as stale.
+        clearMarketplacesCache()
+        clearAllCaches()
+        return {
+          success: true,
+          name: trimmed,
+          message: `已更新市场: ${trimmed}`,
           marketplaces: await buildMarketplaces(),
           available: await buildAvailable(),
         }
@@ -964,6 +1204,14 @@ let initialMessages: Message[] | undefined
           // model to the exact provider the user picked when several
           // provider profiles share the same model name.
           ...(input.providerId ? { providerId: input.providerId } : {}),
+          // zai patch (2026-09-28): per-query reasoning effort (from
+          // transcript.meta.effort). Same channel as providerId; read by
+          // zai's createAnthropicModelCaller, which merges it into the
+          // request body as `reasoning.effort`. Third-party Anthropic-
+          // compatible endpoints (MiniMax) need this — the vendor's own
+          // effort path targets Anthropic's first-party output_config +
+          // beta header, which those endpoints reject.
+          ...(input.effort ? { effort: input.effort } : {}),
         })
         // zai patch: 绑定 vendor SDK context, 让 vendor 的 getSessionId()
         // 在本 query 的异步链上返回 input.sessionId, 从而 transcript 文件
@@ -1028,7 +1276,27 @@ let initialMessages: Message[] | undefined
         else (globalThis as any).__zaiBridgeCtx = prevBridge
         // zai patch: 本 query 结束, 释放该 session 的 abort controller。
         // engine 保留在 engines map 中——同 session 续传复用 mutableMessages。
+        //
+        // 必须 abort 而不只是 delete:query 正常收尾不 abort,挂在该 signal
+        // 上的 { once: true } listener 会永久滞留。StreamingToolExecutor 在
+        // query.ts:628 的 turn 循环里每轮重建,每次构造都
+        // createChildAbortController(toolUseContext.abortController)
+        // (StreamingToolExecutor.ts:69);这些 child 正常路径永不 abort,
+        // 于是 parent listener 逐轮累积,越过 createAbortController 的
+        // 阈值 50 后抛 MaxListenersExceededWarning("51 abort listeners
+        // added to [AbortSignal]")。
+        //
+        // 放 finally 而非 replaceAbortController:后者是 query *开始*时调用,
+        // 在那里 abort 上一轮 signal 会让残留的转发链
+        // (StreamingToolExecutor.ts:410-421 往 toolUseContext.abortController
+        // 冒泡的 handler)在下一轮 turn 命中 query.ts:1716 的 signal.aborted
+        // 短路,误判成用户中断并吐出一条假的 aborted_streaming。finally 处
+        // turn 循环已退出,该检查不会再跑。
         if (typeof input.sessionId === 'string') {
+          const finished = queryAbortControllers.get(input.sessionId)
+          if (finished && !finished.signal.aborted) {
+            finished.abort('query_finished')
+          }
           queryAbortControllers.delete(input.sessionId)
         }
       }

@@ -49,6 +49,10 @@ export default function MobileLayout() {
         isManagedChild?: boolean
         supervisorPid?: number | null
         instanceId?: string | null
+        // 与桌面端 Layout.tsx 对齐:AA 桥是否随本次启动开启(CLI `--aa`)。
+        // /m 路由下没有 AA 配置入口,灌进 store 只是让两份 /system hydrate
+        // 保持同一形状(切路由时 instanceContext 不会被半截覆盖)。
+        aaEnabled?: boolean
       }>('/system')
       .then((data) => {
         setInstanceContext({
@@ -63,6 +67,9 @@ export default function MobileLayout() {
             typeof data.supervisorPid === 'number' ? data.supervisorPid : null,
           instanceId:
             typeof data.instanceId === 'string' ? data.instanceId : null,
+          // fail-open:同 Layout.tsx —— 后端没回 aaEnabled 字段(旧版滚动中)
+          // 也按启用处理,只有显式 false 才藏。等所有 dist 都升级完可收紧。
+          aaEnabled: data.aaEnabled !== false,
         })
         document.title = `${data.cwdName}-Z.AI`
       })

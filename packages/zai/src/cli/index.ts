@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerProcessOutputErrorHandlers } from '@zn-ai/zn-agent-core';
+import { installProcessGuards } from './processGuards.js';
 import { runDev } from './dev.js';
 import { runStart } from './start.js';
 
@@ -11,6 +12,11 @@ import { runStart } from './start.js';
 // detached TTY) 被关闭后, console.log 会触发 EPIPE. 不处理会让 zai
 // 因为 unhandled 'error' event 直接 crash.
 registerProcessOutputErrorHandlers();
+
+// 进程级 unhandledRejection 兜底(2026-10-05, bug
+// `async-handler-rejection-kills-process`)。理由见 processGuards.ts 注释。
+// 必须在这里、任何服务代码跑起来之前装上 —— 装晚了就漏掉了启动期的 rejection。
+installProcessGuards();
 
 // bun run / pnpm 追加参数给脚本时会留下一个裸 `--` (例如
 // `pnpm dev -- --sdk` → `bun run src/cli/index.ts dev -- --sdk`, bun
@@ -49,12 +55,17 @@ program
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
   .option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定调度器 Agent')
+  .option('--aa', 'Enable Agents Anywhere (AA) bridge — root initializes AA client, child reports events to root. Default: local-only.')
   .action((options) => {
     // 应用 profile 透传到 env ZAI_APP：routes/agent.ts 据此把会话 mainAgent
     // 锁为 'task-factory'，routes/system.ts 据此在 /api/system 响应里回
     // 显当前 profile。`--app` 是 opt-in profile，未知值在 CLI 层不触发任何
     // 行为、直接透传（由下游 agent.ts / system.ts 按 env 各查各表），无害。
     if (options.app) process.env.ZAI_APP = options.app;
+    // `--aa` 透传到 env ZAI_AA_ENABLED：所有 AA 代码路径 (eventAdapter /
+    // runtimeRegistry / reverseDispatch / WS client) 用 isAaEnabled() 读这个
+    // env 决定是否激活。详见 docs/2026-09-27-zai-aa-integration.md。
+    if (options.aa) process.env.ZAI_AA_ENABLED = '1';
     return runDev(options);
   });
 
@@ -66,6 +77,7 @@ program
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
   .option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定调度器 Agent')
+  .option('--aa', 'Enable Agents Anywhere (AA) bridge — root initializes AA client, child reports events to root. Default: local-only.')
   // Internal marker: when the supervisor spawns a managed child it
   // re-invokes `zai start --managed-child ...` so the child recognises
   // it is already inside a managed session and skips the supervisor
@@ -75,6 +87,14 @@ program
   .action((options) => {
     // 见上方 dev command 的说明。start 也按同口径透传（未知 profile 无害）。
     if (options.app) process.env.ZAI_APP = options.app;
+    if (options.aa) process.env.ZAI_AA_ENABLED = '1';
+    // Marker for init.ts to distinguish the `__current__` "root" instance
+    // from real children spawned by InstanceSupervisor. Both receive
+    // --managed-child (cli-only flag), but only the user-launched `zai start`
+    // path goes through this action with `--managed-child` UNSET (it would
+    // be set by the supervisor's inner spawn). Without this marker, init.ts
+    // can't tell which mode it's in.
+    if (!options.managedChild) process.env.ZAI_IS_ROOT_INSTANCE = '1';
     return runStart(options);
   });
 

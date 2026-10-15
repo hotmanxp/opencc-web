@@ -30,7 +30,6 @@
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { wrapAskUserQuestionToolAsOpencc } from './AskUserQuestionTool.js'
-import { wrapSkillToolAsOpencc } from './SkillTool.js'
 import { wrapCliAgentToolAsOpencc } from './CliAgentTool.js'
 
 export type OpenccBuiltinTool = any
@@ -125,13 +124,8 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   // AskUserQuestion assumes an in-process interactive prompt which
   // doesn't fit zai's HTTP-driven flow. The wrapper reads
   // `__zaiBridgeCtx` itself at call time so the cached wrapper stays
-  // correct across concurrent sessions (matches SkillTool.ts pattern).
+  // correct across concurrent sessions.
   const AskUserQuestionOpencc = wrapAskUserQuestionToolAsOpencc()
-
-  // Skill 走 zai-native wrapper (vendor 的 SkillTool 是 Bun-only,
-  // 不能在 Node+tsx 下跑;zai-native skillTool 已处理 ctx.skills +
-  // ZAI_SKILL_DIRS fallback,Node-safe).
-  const skillToolsOpencc = wrapSkillToolAsOpencc()
 
   // CliAgent 走 zai-native wrapper — 承载 claude-code / dsh 两个
   // CLI subagent(subagent_type → compat/subagents registry 路由)。
@@ -219,7 +213,6 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
     GlobTool,
     GrepTool,
     AskUserQuestionOpencc,
-    ...skillToolsOpencc,
     CliAgentOpencc,
     AgentTool,
     BackgroundAgentResultTool,

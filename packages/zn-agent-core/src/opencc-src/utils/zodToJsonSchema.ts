@@ -17,7 +17,16 @@ const cache = new WeakMap<ZodTypeAny, JsonSchema7Type>()
 export function zodToJsonSchema(schema: ZodTypeAny): JsonSchema7Type {
   const hit = cache.get(schema)
   if (hit) return hit
-  const result = toJSONSchema(schema) as JsonSchema7Type
+  // `unrepresentable: 'any'` 是兜底:碰到 `.transform()` 这种 JSON Schema
+  // 表达不出的节点时退化成 `{}`,**不再抛 "Transforms cannot be
+  // represented in JSON Schema"**。原来没传这个选项会让任何 tool 的
+  // inputSchema 一旦带 transform(典型如 AgentTool 的 model 字段)就让整轮
+  // API 调用挂掉 —— 见 utils/api.ts:208 toolToAPISchema 对每个 tool 每次
+  // LLM 调用都跑一次。
+  //
+  // 与 utils/settings/schemaOutput.ts:6 的策略保持一致;那里也是用同一招
+  // 防住 settings JSON Schema 生成时不抛。
+  const result = toJSONSchema(schema, { unrepresentable: 'any' }) as JsonSchema7Type
   cache.set(schema, result)
   return result
 }

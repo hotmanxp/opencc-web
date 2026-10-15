@@ -26,6 +26,36 @@ function badRequest(res: import('express').Response, msg: string): void {
   res.status(400).json({ error: msg })
 }
 
+/**
+ * Per-instance 生命周期操作的串行化闸。
+ *
+ * Why(fix-plan-10-05 H3):`doStart` / `doStop` / `doRestart` 各自读
+ * `entry.child` / `entry.status` 做 check-then-act,中间夹着
+ * `assertPortAvailable` / `probePort`(自动扫描最多 100 个候选,每个都是
+ * 真 connect + bind + close 的 await)这样的长 I/O 窗口。两个并发的
+ * start/stop 会在窗口中途被派发,看到过时的 entry 状态就各自往下走。
+ *
+ * 这里按 `id` 排队:同一实例的 start / stop / restart 严格顺序执行,
+ * 不丢请求也不改变返回值语义(后来的请求排到前面那个完成后再跑)。
+ * 不同 id 互不阻塞。
+ */
+const lifecycleQueues = new Map<string, Promise<unknown>>()
+
+function serializeLifecycle<T>(id: string, task: () => Promise<T>): Promise<T> {
+  const prev = lifecycleQueues.get(id) ?? Promise.resolve()
+  const run = prev.then(task, task)
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  lifecycleQueues.set(id, tail)
+  // 队列排空后删掉,避免 id 集合无界增长(实例数量有界但会 churn)。
+  void tail.then(() => {
+    if (lifecycleQueues.get(id) === tail) lifecycleQueues.delete(id)
+  })
+  return run
+}
+
 function handleError(res: import('express').Response, err: unknown): void {
   const code = (err as { code?: string } | null)?.code
   if (code === 'NOT_FOUND') {
@@ -65,6 +95,27 @@ function parseBoolField(
   if (v === undefined) return { ok: true, value: undefined }
   if (typeof v !== 'boolean') return { ok: false, error: `${field} must be a boolean` }
   return { ok: true, value: v === true }
+}
+
+/**
+ * Parse an optional boolean body field that also accepts an explicit
+ * `null` as "clear this override back to inherit / auto".
+ *
+ * Same strictness as {@link parseBoolField} for everything but `null`:
+ * only `undefined` (absent), `null` (clear) and a real `boolean` pass;
+ * JSON-truthy like `1` / `"yes"` still 400. Used by PATCH `aa`, where
+ * the UI genuinely needs a way to express "off = follow root again" —
+ * without `null` the only off-switch would be `false`, which pins the
+ * instance to force-off forever instead of returning it to auto.
+ */
+function parseNullableBoolField(
+  v: unknown,
+  field: string,
+): { ok: true; value: boolean | null | undefined } | { ok: false; error: string } {
+  if (v === undefined) return { ok: true, value: undefined }
+  if (v === null) return { ok: true, value: null }
+  if (typeof v !== 'boolean') return { ok: false, error: `${field} must be a boolean or null` }
+  return { ok: true, value: v }
 }
 
 /**
@@ -128,6 +179,10 @@ router.post('/instances', async (req, res) => {
   if (rawApp !== undefined && rawApp !== 'task-factory' && rawApp !== 'weixin') {
     return badRequest(res, 'app must be "task-factory" or "weixin" when present')
   }
+  // AA per-instance 覆盖:`undefined` = auto(跟随 root);`true` = 强制开;`false`
+  // = 强制关。`parseBoolField` 与 `lan` 走同一收窄,非布尔值 400。
+  const aa = parseBoolField((req.body ?? {}).aa, 'aa')
+  if (!aa.ok) return badRequest(res, aa.error)
   try {
     const instance = await getInstanceSupervisor().createInstance({
       name: name.trim(),
@@ -135,6 +190,7 @@ router.post('/instances', async (req, res) => {
       lan: lan.value === true,
       port: port.value as number | undefined,
       app: rawApp as InstanceDefinition['app'],
+      aa: aa.value,
     })
     res.status(201).json({ instance })
   } catch (err) {
@@ -149,17 +205,24 @@ router.post('/instances/:id/start', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  // Per-call `aa` override 与 `lan` 对齐:body 显式给 `true` / `false` 临时覆盖
+  // def.aa(不影响落盘),`undefined` 走 persisted value。
+  const aa = parseBoolField((req.body ?? {}).aa, 'aa')
+  if (!aa.ok) return badRequest(res, aa.error)
   try {
-    // Per-call `lan` / `port` override the persisted definition so the
-    // UI can "start this one with --lan / on port X just this once"
+    // Per-call `lan` / `port` / `aa` override the persisted definition so the
+    // UI can "start this one with --lan / on port X / with --aa just this once"
     // without rewriting the definition. `value === undefined` means
     // "use the persisted value".
-    const overrides: { lan?: boolean; port?: number | null } = {}
+    const overrides: { lan?: boolean; port?: number | null; aa?: boolean } = {}
     if (lan.value !== undefined) overrides.lan = lan.value
     if (port.value !== undefined) overrides.port = port.value
-    const instance = await getInstanceSupervisor().startInstance(
-      req.params.id,
-      Object.keys(overrides).length > 0 ? overrides : undefined,
+    if (aa.value !== undefined) overrides.aa = aa.value
+    const instance = await serializeLifecycle(req.params.id, () =>
+      getInstanceSupervisor().startInstance(
+        req.params.id,
+        Object.keys(overrides).length > 0 ? overrides : undefined,
+      ),
     )
     res.json({ instance })
   } catch (err) {
@@ -171,7 +234,9 @@ router.post('/instances/:id/stop', async (req, res) => {
   if (!ensureNotInstanceChild(res)) return
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot stop current instance')
   try {
-    const instance = await getInstanceSupervisor().stopInstance(req.params.id)
+    const instance = await serializeLifecycle(req.params.id, () =>
+      getInstanceSupervisor().stopInstance(req.params.id),
+    )
     res.json({ instance })
   } catch (err) {
     handleError(res, err)
@@ -185,13 +250,18 @@ router.post('/instances/:id/restart', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  const aa = parseBoolField((req.body ?? {}).aa, 'aa')
+  if (!aa.ok) return badRequest(res, aa.error)
   try {
-    const overrides: { lan?: boolean; port?: number | null } = {}
+    const overrides: { lan?: boolean; port?: number | null; aa?: boolean } = {}
     if (lan.value !== undefined) overrides.lan = lan.value
     if (port.value !== undefined) overrides.port = port.value
-    const instance = await getInstanceSupervisor().restartInstance(
-      req.params.id,
-      Object.keys(overrides).length > 0 ? overrides : undefined,
+    if (aa.value !== undefined) overrides.aa = aa.value
+    const instance = await serializeLifecycle(req.params.id, () =>
+      getInstanceSupervisor().restartInstance(
+        req.params.id,
+        Object.keys(overrides).length > 0 ? overrides : undefined,
+      ),
     )
     res.json({ instance })
   } catch (err) {
@@ -206,14 +276,26 @@ router.patch('/instances/:id', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  // PATCH aa:落盘到 def.aa,下次 start/restart 立即生效。三态:
+  //   `true`  = 请求启用   `false` = 强制禁用   `null` = 清除,回到 auto(跟随 root)
+  // 字段缺省 = 不改。
+  //
+  // `null` 是后加的。之前这里走 `parseBoolField`(只收 `undefined | boolean`),
+  // 于是「清除回 auto」在 wire 上没法表达,客户端只能发空 body `{}`,撞上
+  // supervisor 的「空补丁守卫」400 `no patchable fields supplied` —— 真机上
+  // 的表现是 lan-agent 的 AA 开关点关不掉。UI 两态开关本身走 `true`/`false`
+  // (关 = force-off),`null` 供 API 侧把 force-off 掰回 auto。
+  const aa = parseNullableBoolField((req.body ?? {}).aa, 'aa')
+  if (!aa.ok) return badRequest(res, aa.error)
   try {
     // `cwd` is intentionally absent from the HTTP surface: the only caller
     // that mutates it is the weixin orchestration (which validates the
     // directory itself, see weixinDedicatedInstance.ts). `name` is not
     // patchable at all.
-    const patch: { lan?: boolean; port?: number | null } = {}
+    const patch: { lan?: boolean; port?: number | null; aa?: boolean | null } = {}
     if (lan.value !== undefined) patch.lan = lan.value
     if (port.value !== undefined) patch.port = port.value
+    if (aa.value !== undefined) patch.aa = aa.value
     const instance = await getInstanceSupervisor().updateInstance(req.params.id, patch)
     res.json({ instance })
   } catch (err) {

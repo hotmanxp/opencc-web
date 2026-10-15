@@ -55,6 +55,10 @@ import {
 } from '../../tools/ToolSearchTool/prompt.js'
 import { getAllBaseTools } from '../../tools.js'
 import type { HookProgress } from '../../types/hooks.js'
+import {
+  dispatchModEngine,
+  hasModHandlersFor,
+} from '../../mods/dispatch.js'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -1122,8 +1126,49 @@ export async function checkPermissionsAndCallTool(
     assistantMessage,
     toolUseID,
   )
-  const permissionDecision = resolved.decision
+  let permissionDecision = resolved.decision
   processedInput = resolved.input
+
+  // Upstream `tool.check` — a mod votes on whether this call may run.
+  //
+  // Sits where it does upstream: after the PreToolUse hooks and the engine's
+  // own verdict, before the mode settles an ask.
+  //
+  // **Plugins can only tighten.** A mod may turn an allow into an ask or a
+  // deny; a mod's `allow` cannot override a deny the permission check already
+  // reached. That rule is upstream's verbatim — it is what stops a mod from
+  // being a way to *widen* access — so a widening answer is logged and
+  // discarded rather than honoured.
+  // Upstream gates on the tool too: `Jl("tool.check", {tool: …})`. This is the
+  // hottest site in the list — it runs before every tool call — so a mod that
+  // only watches `Bash` should not make every other tool pay for a dispatch.
+  // The probe is deliberately `{tool}` alone, not the input: a matcher that
+  // narrows on `input` would then have to be evaluated against data this call
+  // has not validated yet, and upstream gates the same field here.
+  if (hasModHandlersFor('tool.check', { tool: tool.name })) {
+    const decided = await dispatchModEngine<{
+      decision: string
+      reason?: string
+    }>(
+      'tool.check',
+      { tool: tool.name, input: processedInput, tool_use_id: toolUseID },
+      e => ({
+        decision:
+          typeof e.decision === 'string' ? e.decision : permissionDecision,
+        reason: typeof e.reason === 'string' ? e.reason : undefined,
+      }),
+    )
+    if (decided.decision === 'allow' && permissionDecision === 'deny') {
+      logForDebugging(
+        '[mods] tool.check: ignored a mod\'s allow and kept the permission check\'s deny; plugins can only tighten',
+      )
+    } else if (decided.decision !== 'allow') {
+      permissionDecision = decided.decision as typeof permissionDecision
+      if (decided.reason !== undefined && hookPermissionResult) {
+        hookPermissionResult.permissionDecisionReason = decided.reason
+      }
+    }
+  }
   const permissionDurationMs = Date.now() - permissionStart
   // In auto mode, canUseTool awaits the classifier (side_query) — if that's
   // slow the collapsed view shows "Running…" with no (Ns) tick since

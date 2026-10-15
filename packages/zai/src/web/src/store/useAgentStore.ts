@@ -4,6 +4,7 @@ import { createContext, useContext } from 'react'
 import type { ServerEvent } from '../../../shared/events.js'
 import type { FilePreviewPayload } from '../../../shared/fs.js'
 import type { ModelEntry } from '../../../shared/settings.js'
+import type { EffortLevel } from '../../../shared/types.js'
 import type { PermissionMode } from '@zn-ai/zn-agent-core'
 import type { BashTaskInfo, BackgroundTask, TaskStatus } from '../lib/taskApi.js'
 
@@ -246,6 +247,13 @@ interface AgentState {
      * absence as "no preference" and uses the legacy first-match path.
      */
     providerId?: string
+    /**
+     * zai patch (2026-09-28): 会话级推理强度 (from transcript.meta.effort),
+     * 在 model picker 底部设置。'off' 是显式的「不下发 reasoning 字段」,
+     * 与 undefined(从未设过)语义不同但对上游行为一致。详见 shared/types.ts
+     * 的 EffortLevel。
+     */
+    effort?: EffortLevel
     /** Per-session permission mode (default/acceptEdits/plan/bypassPermissions/dontAsk). */
     permissionMode?: PermissionMode
     cwd?: string
@@ -330,6 +338,10 @@ interface AgentState {
   // 每 session 已应用的最大事件 seq (只升不降) — 重放/乱序事件被丢弃,
   // 替代部分手工 key 拼接防御 (手工 key 仍负责 React 渲染分组, 渐进式)。
   lastSeqBySession: Record<string, number>
+  // 服务端进程启动标识(server.connected.bootId)。seq 是进程内计数器,
+  // 重启后归零;见到新的 bootId 就清空 lastSeqBySession,否则高水位会把
+  // 重启后所有新事件当旧事件丢弃(页面空白且无提示)。
+  serverBootId: string | null
   // 投影值存储: sessionId → key → { value, seq }, higher-seq-wins 合并。
   // host 算完的派生值快照 (title / context.tokens), 重连后整体重发。
   projectionsBySession: Record<string, Record<string, { value: unknown; seq: number }>>
@@ -341,6 +353,12 @@ interface AgentState {
   applyPromptAsk: (event: ServerEvent) => void
   // queue.changed 事件 reducer: 用后端队列快照覆盖 queuedPrompts。
   applyQueueChanged: (event: { pending: QueuedPrompt[] }) => void
+  /**
+   * 收到 `server.connected` 时上报服务端 bootId。值变化 = 服务端重启过 →
+   * 清空 seq 高水位(事件会被当作新事件重新应用)。
+   * 传入 undefined(老服务端没有该字段)时什么都不做。
+   */
+  noteServerBootId: (bootId: string | undefined) => void
   // session/projection 帧 reducer: higher-seq-wins 写入投影存储 (T5)。
   applyProjection: (event: Extract<ServerEvent, { type: 'session/projection' }>) => void
 
@@ -370,6 +388,14 @@ interface AgentState {
   toasts: CompactionToast[]
   applyCompactionEvent: (event: Extract<ServerEvent, { type: 'runtime.compacted' }>) => void
   dismissCompactionToast: (id: string) => void
+
+  // zai patch (2026-10-12): 压缩**过程中**的状态位,UI 渲染「正在压缩…」。
+  // 与上面的 toasts 是两件独立的事,不要合并 —— toasts 是压缩**结束后**的
+  // 5s 一次性提示(带 expiresAt 自动回收),而压缩本身常耗时数十秒,塞进
+  // toast 池会被 expiresAt 误删。所以过程态是独立 boolean, 由独立的
+  // CompactingIndicator 组件渲染。
+  compacting: boolean
+  applyCompactingEvent: (event: Extract<ServerEvent, { type: 'runtime.compacting' }>) => void
 
   addMessage: (msg: AgentMessage) => void
   upsertToolCall: (msg: AgentMessage) => void
@@ -444,6 +470,12 @@ interface AgentState {
   patchSessionModel: (sid: string, payload: string | { model: string; providerId?: string }) => Promise<void>
   /** Optimistic PATCH /api/agent/sessions/:id + local session mode update. */
   patchSessionMode: (sid: string, mode: PermissionMode) => Promise<void>
+  /**
+   * zai patch (2026-09-28): 只改会话的推理强度,不碰 model/providerId。
+   * 独立于 patchSessionModel 是因为后端 PATCH 按「字段缺省即跳过」语义处理
+   * —— 借 patchSessionModel 发 {model} 会顺带重写 model,所以拆开。
+   */
+  patchSessionEffort: (sid: string, effort: EffortLevel) => Promise<void>
   sendMessage: (prompt: string) => Promise<void>
   stop: () => Promise<void>
   setAskAnswer: (questionText: string, label: string) => void
@@ -455,6 +487,54 @@ interface AgentState {
   setAskOtherText: (questionText: string, text: string) => void
   submitAsk: () => Promise<void>
   rejectAsk: (reason?: string) => Promise<void>
+}
+
+// 展示型工具 (PresentFile / displayFiles) 的 mapToolResultToToolResultBlockParam
+// 把回灌给 LLM 的 content 压成占位串 'done' 省上下文,真正的展示数据另存在
+// 同一 message 的 toolUseResult.output 里。实时 SSE 走的是旁路
+// (routes/agent.ts 的 takePresentFileOutput,取出即删),刷新后的历史回放拿不到
+// 旁路,只能从 toolUseResult 取 —— 不取则 output 只剩 'done',
+// presentFileRenderer.parsePresented 解析失败,文件卡片整块不渲染。
+//
+// 仅在 content 恰为占位串时回退,其余一律原样透传 —— 判据是值而不是工具名,
+// 这样 displayFiles 等同构工具无需各自登记。若某工具的真实输出恰好是 'done',
+// 回退取回的仍是它自己的 toolUseResult.output,属修正而非误伤。
+function pickToolResultOutput(content: unknown, msg: any): unknown {
+  if (content !== 'done') return content
+  const tur = msg?.toolUseResult
+  if (tur && typeof tur === 'object' && typeof tur.output === 'string') {
+    return tur.output
+  }
+  return content
+}
+
+/**
+ * 把自动压缩摘要正文挂到**紧邻其上**的 compact_boundary 分界线上。
+ *
+ * 为什么需要:vendor 的 auto-compact 落盘顺序是
+ * `[boundaryMarker, ...summaryMessages, ...]`(services/compact/compact.ts:340
+ * `buildPostCompactMessages`),摘要紧跟在分界线之后。而摘要本身是 user 消息
+ * 带 isCompactSummary 标记 —— 不能作为用户发言渲染(会变成一个巨大的英文
+ * 用户气泡),但内容是有价值的(它就是被压缩掉的那段对话的续接依据)。
+ *
+ * 做法:摘要不产出独立的 AgentMessage,而是回填到最近一条 boundary 节点的
+ * `summary` 字段,由分隔线折叠展示。找不到 boundary(理论上不该发生)时静默
+ * 丢弃,退化成"压缩了但看不到摘要",好过渲染成一个假用户气泡。
+ */
+function attachSummaryToBoundary(out: AgentMessage[], summary: string): void {
+  if (!summary) return
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i] as { type?: string }
+    if (m.type === 'compact_boundary') {
+      out[i] = { ...(out[i] as AgentMessage), summary } as AgentMessage
+      return
+    }
+    // 只回溯到**紧邻**的 boundary: 摘要必须在它的下一条(见上)。若已经越过
+    // 别的消息节点仍在往前扫, 第二条分界线损坏/缺失时摘要会错挂到更早的
+    // 那条上 —— 摘要与错误的分界配对, 比"不挂"更难排查。故命中非 boundary
+    // 就停。
+    break
+  }
 }
 
 // 把 transcript.messages 还原成 AgentMessage[] (供 React 渲染).
@@ -475,6 +555,36 @@ export function loadTranscriptMessages(
     }
     const content = msg.message?.content
 
+    // zai patch (2026-10-12): 压缩边界 —— vendor 形状是 `type:'system'` +
+    // `subtype:'compact_boundary'`, content 在**顶层** msg.content 而非
+    // msg.message.content(所以下面的 content 取到 undefined 会直接跳过)。
+    // 必须在取 content 之前拦。
+    //
+    // 同时兼容 legacy 形状 `type:'compact_boundary'`:遗留 shim
+    // compat/runtime/compactService.ts:171 仍在写这种行(已在
+    // zn-agent-core/src/index.ts:107-116 标注待删),历史会话里读得回来。
+    const isBoundary =
+      (msg.type === 'system' && msg.subtype === 'compact_boundary') ||
+      msg.type === 'compact_boundary'
+    if (isBoundary) {
+      const meta = (msg.compactMetadata ?? {}) as {
+        trigger?: 'auto' | 'manual'
+        preTokens?: number
+        messagesSummarized?: number
+      }
+      out.push({
+        ...baseFields,
+        eventId: msg.uuid,
+        type: 'compact_boundary',
+        trigger: meta.trigger === 'manual' ? 'manual' : 'auto',
+        preTokens: typeof meta.preTokens === 'number' ? meta.preTokens : 0,
+        ...(typeof meta.messagesSummarized === 'number'
+          ? { messagesSummarized: meta.messagesSummarized }
+          : {}),
+      })
+      continue
+    }
+
     // 字符串 content: 用户在输入框发出的纯文本 prompt.
     if (typeof content === 'string') {
       const text = content
@@ -482,6 +592,17 @@ export function loadTranscriptMessages(
         // 对齐 OpenCC isMeta: SubagentNotifier 注入的 <task-notification>
         // 等系统 user 消息带 isMeta:true, LLM 可见但前端不渲染.
         if (msg.isMeta === true) continue
+        // zai patch (2026-10-12): 自动压缩的摘要是 **user 消息**带
+        // isCompactSummary:true(见 opencc-src/services/compact/compact.ts:1085
+        // 与 sessionMemoryCompact.ts:477),但 isMeta **没有**置位 —— 所以上面
+        // 的 isMeta 守卫拦不住它,整段英文摘要("This session is being
+        // continued from a previous conversation...")会冒充用户发言渲染成
+        // 一个巨大的用户气泡。改为不单独渲染, 正文折进紧邻其上的
+        // compact_boundary 分界线(attachSummaryToBoundary)。
+        if (msg.isCompactSummary === true) {
+          attachSummaryToBoundary(out, text)
+          continue
+        }
         out.push({ ...baseFields, eventId: msg.uuid, type: 'user.text', text })
       } else if (msg.type === 'assistant') {
         out.push({ ...baseFields, eventId: msg.uuid, type: 'assistant.text', text })
@@ -511,6 +632,20 @@ export function loadTranscriptMessages(
       // tool_result 分支与多模态分支共享这条守卫, 避免 SubagentNotifier 注入
       // 的 <task-notification> user 消息以任何形态在 UI 上泄漏.
       if (msg.isMeta === true) continue
+      // 自动压缩摘要(isCompactSummary)同理不单独渲染, 正文折进分界线.
+      // 理由见上面字符串分支的注释。
+      if (msg.isCompactSummary === true) {
+        const text = blocks
+          .filter(
+            (b) =>
+              b.type === 'text' &&
+              typeof (b as { text?: unknown }).text === 'string',
+          )
+          .map((b) => (b as { text: string }).text)
+          .join('\n')
+        attachSummaryToBoundary(out, text)
+        continue
+      }
       // tool_result 块: 把对应 tool_use:start 合并为 done/error.
       const tr = blocks.find((b) => b.type === 'tool_result') as
         | { tool_use_id: string; content: unknown; is_error: boolean }
@@ -521,7 +656,7 @@ export function loadTranscriptMessages(
           out[idx] = {
             ...out[idx],
             type: tr.is_error ? 'tool_use:error' : 'tool_use:done',
-            output: tr.content,
+            output: pickToolResultOutput(tr.content, msg),
             error: tr.is_error ? tr.content : undefined,
           }
         }
@@ -688,6 +823,8 @@ export function createAgentStore() {
   // 与 useAppStore 的 ToastInfo (server.system toast / server.error) 完全独立,
   // 不混用同一个池.
   toasts: [],
+  // zai patch (2026-10-12): 压缩过程态,初始 false(没在压缩)。
+  compacting: false,
   // 待清空定时器: 每 sessionId 一份, "全部任务完成" 后 5s 自动从 store 移除
   // (避免"全部完成还一直挂着"的 UI 噪音). 重新写入含未完成任务时取消.
   _taskClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
@@ -695,6 +832,7 @@ export function createAgentStore() {
   contextTokensBySession: {},
   // seq 守卫 / 投影存储 (T5): 初始为空, 事件到达时惰性写入。
   lastSeqBySession: {},
+  serverBootId: null,
   projectionsBySession: {},
 
   setV2Tasks: (sessionId, tasks) => {
@@ -746,10 +884,21 @@ export function createAgentStore() {
   // sid 过滤.
   applyCompactionEvent: (event) => {
     set((state) => {
-      const saved = Math.max(0, Math.floor(event.savedTokens))
+      // zai patch (2026-10-12): 文案分叉。vendor 的 compact boundary 消息
+      // (systemFactories.ts:204) 的 compactMetadata 里**没有** post-compact
+      // token 数 —— 那个值只存在于 CompactionResult (compact.ts:317), 从没
+      // 进过 boundary。所以 auto 路径的 savedTokens 必然是 undefined,
+      // 此时显示「节省 0 tokens」是谎话, 改成陈述已归档的上下文规模。
+      const saved =
+        typeof event.savedTokens === 'number'
+          ? Math.max(0, Math.floor(event.savedTokens))
+          : null
       const newToast: CompactionToast = {
         id: `compacted-${event.timestamp}`,
-        text: `对话已压缩 · 节省 ${saved.toLocaleString()} tokens`,
+        text:
+          saved !== null
+            ? `对话已压缩 · 节省 ${saved.toLocaleString()} tokens`
+            : `对话已压缩 · 上下文 ${Math.max(0, Math.floor(event.preTokens)).toLocaleString()} tokens 已归档`,
         level: 'info',
         sessionId: event.sessionId,
         expiresAt: event.timestamp + 5000,
@@ -759,6 +908,44 @@ export function createAgentStore() {
         toasts: [...(state.toasts ?? []), newToast],
       }
     })
+  },
+  // zai patch (2026-10-12): 压缩过程态翻转。
+  //
+  // 幂等语义照搬 vendor 的 `isCompactingRef`(opencc-src/hooks/
+  // useRemoteSession.ts:228-232):
+  //   compacting:true  且已经 true  → 早退, 不重复写状态;
+  //   compacting:false            → 无条件置 false。
+  //
+  // 为什么幂等这么重要:core 侧把 vendor 的 setSDKStatus('compacting') 与
+  // onCompactProgress({compact_start}) 都映射成了同一个 true(见
+  // buildReplToolUseContext),所以一次压缩本来就会收到 start×2 / end×2;
+  // 此外 keep-alive 定时器(opencc-src/services/compact/compact.ts:1237-1246)
+  // 每 30s 还会重发一次 'compacting'。不早退的话 UI 会被反复唤醒重渲染。
+  //
+  // 「end 即置 false」覆盖了**孤立 end**:vendor 的 compact_end 在 finally
+  // 里, 而 compact_start 在 PreCompact hook 之后 —— hook 抛错时会先来 end
+  // 再(可能永远不来)start。只在配对时才关的话, 压缩态就永久卡住了。
+  //
+  // **不按 sessionId 过滤**:过程态是会话级提示, 收到就应用。
+  //
+  // ⚠️ 投递侧有个缺口(2026-10-12 已由 setCurrentSession/clearMessages 兜住):
+  // runtime.compacting 是 **sid-scoped**(不在 isGlobalEvent 白名单), 所以
+  // "切到 B 后收到 A 的结束帧"在现实中**根本到不了这里** —— SSE 已按
+  // ?sid=B 重连并把 A 的帧过滤掉了。原注释写的那个意图与服务端投递是矛盾的,
+  // 别再依赖"另一会话的结束帧会来关状态"。
+  applyCompactingEvent: (event) => {
+    const next = event.compacting !== false
+    // zai fix (2026-10-12): 必须用闭包里的 `get()`, 不能写
+    // `useAgentStore.getState()` —— 后者是**模块级单例**, 而本 reducer
+    // 是 create() 产出的闭包, Context store(NewSuperTaskModal 等走
+    // applyBatchTo(store, ...) 的路径)会拿到另一个实例。
+    //
+    // 写单例的后果: 单例 compacting=false、modal store=true, 来一个
+    // false 事件时 `false === false` 成立 → 早退 → **modal store 永远
+    // 不更新**, 压缩指示在弹窗里卡死。get() 与同段的 set() 配对, 读的
+    // 一定是当前实例。
+    if (get().compacting === next) return
+    set({ compacting: next })
   },
   // UI 端可主动 dismiss (例如用户点 ×); reducer 不强制依赖 expiresAt 清理
   // 路径, 两条路并存, 兼容未来需要的"立即清除"交互.
@@ -1024,7 +1211,22 @@ export function createAgentStore() {
   setStatus: (status: AgentStatus) => set({ status }),
   // queue.changed 快照覆盖排队列表 — 后端 per-session 串行队列的等待中
   // 命令 {id, text} 列表(不含正在执行的那条)。
-  applyQueueChanged: (event) => set({ queuedPrompts: event.pending }),
+  // queue.changed 只带当前会话的排队队列,必须按 sid 过滤 —— SSE
+  // reconnect 的 replay 切片可能带着别的会话的 queue 事件,不过滤会把
+  // A 的排队提示串到正在看 B 的页面上(与 applyRuntimeEvent 的 currentSid
+  // 守卫同源;useEventStream.ts:43-46 的注释也自认过这个缺口)。
+  applyQueueChanged: (event: any) =>
+    set((s) => {
+      const sid = (event as { sessionId?: string | null }).sessionId
+      if (sid && s.sessionId && sid !== s.sessionId) return s
+      return { queuedPrompts: event.pending }
+    }),
+
+  noteServerBootId: (bootId) =>
+    set((s) => {
+      if (!bootId || bootId === s.serverBootId) return s
+      return { serverBootId: bootId, lastSeqBySession: {} }
+    }),
   // session/projection 帧 — host 算完的派生值快照, higher-seq-wins 合并。
   // value 是完整快照(不是 diff); 重放/低 seq 直接丢弃, 高 seq 覆盖。
   applyProjection: (event) => set((s) => {
@@ -1050,6 +1252,9 @@ export function createAgentStore() {
   clearMessages: () =>
     set((s) => {
       const sid = s.sessionId
+      // zai fix (2026-10-12): 与 setCurrentSession 同因同解 —— 压缩过程态
+      // 是 sid-scoped, 清屏/切视图后原会话的结束帧到不了(见该处注释),
+      // 在这里就地复位。见 CompactingIndicator 的注释。
       // 切会话/清屏只清理当前 sid 的 v2 task.
       const { [sid as string]: _dropV2, ...restV2 } = (s.v2TasksBySession ?? {}) as Record<string, V2TaskItem[]>
       void _dropV2
@@ -1062,7 +1267,11 @@ export function createAgentStore() {
         segmentedToolUseIds: {},
         sendSeq: 0,
         lastRuntimeTurnIndex: null,
+        // seq 高水位同样要重置:服务端 seq 是进程内计数器,清屏/切会话后
+        // 回到的可能是同一个 sid 的低 seq 事件,带着旧高水位会把它们全丢。
+        lastSeqBySession: {},
         v2TasksBySession: sid ? restV2 : s.v2TasksBySession,
+        compacting: false,
       }
     }),
 
@@ -1082,10 +1291,9 @@ export function createAgentStore() {
       }
       set({ sessions, availableModels })
       // 特殊标记: URL 带 ?sid=newID 表示 "新 tab 想开全新会话".
-      // ConfigStatusBar 上的 N 按钮会在新 tab 里打开 /agent?sid=newID,
-      // 我们在这里拦截 → 立即调 createNewSession() 建一条空 transcript,
-      // 然后让 createNewSession 内部通过 writeUrlSid 把 URL 改成真实 sid,
-      // 避免列表回退把 URL 又改成 first.
+      // 打开 /agent?sid=newID 时在这里拦截 → 立即调 createNewSession() 建一条
+      // 空 transcript, 然后让 createNewSession 内部通过 writeUrlSid 把 URL
+      // 改成真实 sid, 避免列表回退把 URL 又改成 first.
       const requested = readUrlSid()
       if (requested === 'newID') {
         await get().createNewSession()
@@ -1109,7 +1317,21 @@ export function createAgentStore() {
   },
 
   setCurrentSession: (sessionId: string) => {
-    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0, lastRuntimeTurnIndex: null })
+    // zai fix (2026-10-12): 复位 compacting。
+    //
+    // 手动 /compact 期间切会话会让指示永久卡死: runtime.compacting 是
+    // **sid-scoped**(不在 isGlobalEvent 白名单), 切到 B 后 SSE 重连带
+    // ?sid=B, A 的 `compacting:false` 被服务端静默丢弃 —— 那个帧根本
+    // 到不了这里(applyCompactingEvent 注释里"切到 B 后 A 的结束帧照样
+    // 要关掉"的意图与服务端投递是矛盾的)。而切会话门禁只看
+    // status==='streaming', /compact 期间 status 始终 idle, 故这条路径
+    // 完全可达(实测压缩窗口约 20 秒)。
+    //
+    // 为什么不在这里用 (b) 把 runtime.compacting 加进 isGlobalEvent:
+    // 那样所有 tab 都会收到任意会话的压缩态 —— 后台会话压缩时, 正在看
+    // 别的会话的 tab 也会弹出"正在压缩…", 是新的串扰。(a) 在视图切换
+    // 这一侧就地复位, 语义更准: 换了会话就不该显示上一个会话的压缩态。
+    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0, lastRuntimeTurnIndex: null, lastSeqBySession: {}, compacting: false })
     // 同步 URL ?sid=..., 让刷新/分享链接落到同一会话.
     writeUrlSid(sessionId)
     // ★ Cold-start 快照补全: 切会话时 fire-and-forget 拉一次 4 字段快照,
@@ -1223,6 +1445,18 @@ export function createAgentStore() {
         break
       }
     }
+    // zai patch (2026-09-28): 同样带上用户最近手动选过的推理强度。独立扫
+    // 一遍而不是复用上面 break 出来的那个 session —— 强度是逐会话设的,
+    // 最近改过强度的会话未必是最近改过模型的会话, 复用会让「我刚把强度调成
+    // high,开新会话又变回 medium」。没设过(effort 为 undefined)就不带字段,
+    // 服务端维持未设置。
+    let lastSelectedEffort: EffortLevel | null = null
+    for (const s of sortedSessions) {
+      if (s.effort) {
+        lastSelectedEffort = s.effort
+        break
+      }
+    }
     // 同步在 server 端建一条空 transcript, 让 sidebar 立即多一条
     // '新会话' 占位条目 (而不是等第一条消息发出去才出现).
     try {
@@ -1231,12 +1465,13 @@ export function createAgentStore() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
         body: JSON.stringify(
-          lastSelectedModel
-            ? {
-                model: lastSelectedModel,
-                ...(lastSelectedProviderId ? { providerId: lastSelectedProviderId } : {}),
-              }
-            : {},
+          // effort 与 model 各判各的: model 从没手动选过(lastSelectedModel
+          // 为 null)时, 用户仍可能设过强度, 不能让它跟着 model 一起被丢掉。
+          {
+            ...(lastSelectedModel ? { model: lastSelectedModel } : {}),
+            ...(lastSelectedProviderId ? { providerId: lastSelectedProviderId } : {}),
+            ...(lastSelectedEffort ? { effort: lastSelectedEffort } : {}),
+          },
         ),
       })
       if (!res.ok) return
@@ -1343,6 +1578,30 @@ export function createAgentStore() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
         body: JSON.stringify({ permissionMode: mode }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch {
+      // Revert the optimistic update.
+      set({ sessions: prev })
+    }
+  },
+
+  patchSessionEffort: async (sid, effort) => {
+    // Snapshot for revert on failure.
+    const prev = get().sessions
+    set({
+      sessions: prev.map((x) =>
+        x.sessionId === sid ? { ...x, effort } : x,
+      ),
+    })
+    try {
+      const token = localStorage.getItem('zai-token') || ''
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
+        // 只发 effort —— model / providerId 缺省时后端按「跳过」处理,
+        // 不会把已持久化的选择擦掉。
+        body: JSON.stringify({ effort }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch {
@@ -1553,6 +1812,15 @@ export function createAgentStore() {
       get().applyCompactionEvent(event)
       return
     }
+    // zai patch (2026-10-12): 压缩过程态。与上面的 compacted 同样放在
+    // sid 过滤之前 —— 收到就应用。
+    // ⚠️ 但**别指望**靠"另一会话的结束帧"来复位: runtime.compacting 是
+    // sid-scoped, SSE 已按 ?sid=<当前会话> 过滤, 别的会话的帧收不到。
+    // 跨会话的兜底在 setCurrentSession / clearMessages 里就地复位。
+    if (event.type === 'runtime.compacting') {
+      get().applyCompactingEvent(event)
+      return
+    }
     // Defense-in-depth: 后端已经按 sid 过滤 (subscribeScoped), 但切换会话
     // 时旧 sid 的迟到事件可能穿透 (e.g. EventSource 重建有几十 ms 真空期,
     // 旧连接还没 close 时最后一批事件已落地). 这种事件不应该写入当前
@@ -1569,6 +1837,43 @@ export function createAgentStore() {
     // runtime.* 事件全部带 sessionId, 上面的 narrow 已保证它存在.
     // runtime.* 不在 ServerEvent union 之外的 type 才会进入这里.
     switch (event.type) {
+      case 'compact_boundary': {
+        // zai patch (2026-10-12): 压缩分界线**写进 messages**(不是 toasts)——
+        // 它是 transcript 里常驻的一条,刷新后仍在;toast 那条 5s 就消失了。
+        // 形态与 loadTranscriptMessages 的历史回放完全一致(同一个 type),
+        // 所以实时流与刷新回放共用一套渲染分支。
+        //
+        // 放在 sid 过滤**之后**(不像上面的 runtime.compacted):边界是会话
+        // 内容,不是提示 —— 切到别的会话后不该把 A 的分界线写进 B 的视图。
+        set((s) => {
+          // 分界线是**纯追加**的事件(不像 delta/tool_call 可 upsert),所以
+          // SSE 重连的 Last-Event-ID replay 若重发同一帧就会画出两条分隔线。
+          // 按 eventId 去重 —— 同一事件在重放里 eventId 不变, 而真的发生第二
+          // 次压缩会有新的 eventId。lastSeqBySession 那套水位守卫在这里不适用:
+          // 它是"每 session 单调递增", 而本分支是一次性追加, 用水位会把
+          // 后续合法的压缩边界(共用更小的 seq? 不会) 一并误杀, 语义不如
+          // eventId 精确。
+          if (s.messages.some((m) => m.eventId === event.eventId)) return s
+          return {
+            messages: [
+              ...s.messages,
+              {
+                eventId: event.eventId,
+                sessionId: sid,
+                ts: event.ts,
+                turnIndex: 0,
+                type: 'compact_boundary',
+                trigger: event.trigger,
+                preTokens: event.preTokens,
+                ...(typeof event.messagesSummarized === 'number'
+                  ? { messagesSummarized: event.messagesSummarized }
+                  : {}),
+              },
+            ],
+          }
+        })
+        return
+      }
       case 'runtime.started': {
         // 标记当前活跃 session + 进入 streaming 态. status 已经是
         // 'idle' 时也会被覆盖成 'streaming'; UI 看到 streaming 后立即
@@ -1664,7 +1969,7 @@ export function createAgentStore() {
         // 详见 eventBus.ts STREAMING_REPLAY_EXCLUDE). 收到 delta 时若
         // status 仍是 'idle', 切回 'streaming' 并同步 activeSessionId,
         // 避免 UI 一直停留在 "就绪".
-        // 只覆盖 'idle'; 'aborted' / 'error' / 'retrying' 是有意停留的
+        // 只覆盖 'idle'; 'aborted' / 'error' 是有意停留的
         // 终态, 不让迟到的 delta 把它们冲掉.
         if (get().status === 'idle') {
           set({ activeSessionId: sid, status: 'streaming' })
@@ -1752,39 +2057,11 @@ export function createAgentStore() {
         get().upsertToolCall(resultMsg)
         return
       }
-      case 'runtime.retrying':
-        set((s) => {
-          // Toast 去重: 同 session 已存在 runtime.retrying 消息时, 用新事件
-          // 替换旧 toast, 而不是再追加一条. 避免每次 retry attempt 都往
-          // messages 里 push 一行导致 transcript 被 toast 刷屏.
-          const lastIdx = [...s.messages].reverse().findIndex(
-            (m) => m.type === 'runtime.retrying' && (m as { sessionId?: string }).sessionId === sid,
-          )
-          const tail: typeof s.messages = lastIdx === -1
-            ? s.messages
-            : [
-                ...s.messages.slice(0, s.messages.length - 1 - lastIdx),
-                ...s.messages.slice(s.messages.length - lastIdx),
-              ]
-          return {
-            status: 'retrying',
-            messages: [
-              ...tail,
-              {
-                eventId: event.eventId,
-                sessionId: sid,
-                ts: event.ts,
-                turnIndex: event.turnIndex,
-                type: 'runtime.retrying',
-                attempt: event.attempt,
-                delayMs: event.delayMs,
-                nextAttemptAtMs: event.nextAttemptAtMs,
-                category: event.category,
-              },
-            ],
-          }
-        })
-        return
+      // zai patch 2026-10-12: 删掉 runtime.retrying 分支(连同 schema 与
+      // AgentStatus 的 'retrying')。该事件全仓无生产者 —— 后台重试循环
+      // DefaultBackgroundRuntime.runOne 只 classifyRetryableError + sleep,
+      // 从不 emit。留着会让 status 永久可能停在 'retrying' 却没有任何事件
+      // 能把它推回 idle, 是条死路径。真要做重试提示请从重试循环 emit 起。
       case 'runtime.done': {
         // zai patch (2026-08-09): 累加 API 请求次数 + 当前上下文大小。
         // server 端 vendor sessionApiCounter 单调增,apiRequestCount 直接
@@ -1919,6 +2196,10 @@ export function createAgentStore() {
   }),
   applyPromptAsk: (event) => set((state) => {
     if (event.type !== 'prompt.ask') return state
+    // currentSid 守卫(与 applyRuntimeEvent 一致):ask 卡片是**单槽**的
+    // pendingAsk,不带过滤的话 A 会话弹出的提问会盖到正在看 B 的页面上,
+    // 并卡住 B 的发送按钮 / 输入框(AgentInputBox 读 pendingAsk 决定禁用)。
+    if (state.sessionId && event.sessionId && event.sessionId !== state.sessionId) return state
     // 必须初始化 status / answers / annotations: QuestionCard 拿到 pendingAsk
     // 后, `questions.every((q) => answers[q.question])` 立刻读 answers, 缺
     // 字段直接抛 TypeError → 组件崩溃 → 用户看到 "卡片不渲染". 旧实现
@@ -1942,6 +2223,7 @@ export function createAgentStore() {
   // shows a loading state (fetchStatus: 'loading').
   applyPromptApprove: (event) => set((state) => {
     if (!event || event.type !== 'prompt.approve') return state
+    if (state.sessionId && event.sessionId && event.sessionId !== state.sessionId) return state
     const filePath = String((event as any).filePath ?? '')
     return {
       ...state,
@@ -2039,6 +2321,7 @@ export function createAgentStore() {
   // renders toolName/description/input and lets the user allow/deny.
   applyPromptPermission: (event) => set((state) => {
     if (!event || event.type !== 'prompt.permission') return state
+    if (state.sessionId && event.sessionId && event.sessionId !== state.sessionId) return state
     return {
       ...state,
       pendingPermission: {
@@ -2104,9 +2387,12 @@ export function createAgentStore() {
   // pattern 一致.
 
   applyCwdChanged: (event) => {
-    set((s) => ({
-      cwdBySession: { ...s.cwdBySession, [event.sessionId]: event.cwd },
-    }))
+    set((s) => {
+      if (s.sessionId && event.sessionId && event.sessionId !== s.sessionId) return s
+      return {
+        cwdBySession: { ...s.cwdBySession, [event.sessionId]: event.cwd },
+      }
+    })
   },
 
   applyBashTaskChanged: (event) => {

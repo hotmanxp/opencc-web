@@ -161,3 +161,148 @@ describe('assemblePluginList', () => {
     expect(r.plugins[0].marketplace).toBe('market')
   })
 })
+
+// zai patch (2026-10-10, mods 同步):mod 投影并入同一张列表。
+describe('assemblePluginList — mod 投影', () => {
+  const EMPTY_LOAD: PluginLoadResult = { enabled: [], disabled: [], errors: [] }
+  const EMPTY_V2: InstalledPluginsFileV2 = { version: 2, plugins: {} }
+
+  function makeDiskMod(overrides: Partial<NonNullable<LoadedPlugin['mod']>> = {}): LoadedPlugin {
+    return makePlugin({
+      name: 'demo',
+      // 投影刻意带 isBuiltin:true —— 目的是绕开 install/uninstall/update
+      // 流水线,而不是把它显示成「内置」。
+      isBuiltin: true,
+      source: 'demo@mods',
+      repository: 'demo@mods',
+      mod: {
+        modName: 'demo',
+        root: '/home/u/.zai/mods/demo',
+        builtin: false,
+        handlerEvents: ['PostToolUse'],
+        toolNames: ['echo'],
+        commandNames: ['hello'],
+        ...overrides,
+      },
+    })
+  }
+
+  it('磁盘 mod 的 id 沿用投影给的 `<name>@mods`,不再二次拼接', () => {
+    const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, undefined, new Map(), undefined, [makeDiskMod()])
+    expect(r.plugins[0].id).toBe('demo@mods')
+    expect(r.plugins[0].name).toBe('demo')
+  })
+
+  it('磁盘 mod 的 scope 是 user(不是 builtin),但仍可写 —— 开关要能用', () => {
+    const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, undefined, new Map(), undefined, [makeDiskMod()])
+    expect(r.plugins[0].scope).toBe('user')
+    expect(r.plugins[0].writable).toBe(true)
+  })
+
+  it('内置 mod 的 scope 才是 builtin', () => {
+    const mod = makeDiskMod({ builtin: true, root: '(builtin)' })
+    const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, undefined, new Map(), undefined, [mod])
+    expect(r.plugins[0].scope).toBe('builtin')
+  })
+
+  it('启用态读同一个 enabledPlugins 键,与真插件同源', () => {
+    const on = assemblePluginList(EMPTY_LOAD, EMPTY_V2, { 'demo@mods': true }, new Map(), undefined, [makeDiskMod()])
+    const off = assemblePluginList(EMPTY_LOAD, EMPTY_V2, { 'demo@mods': false }, new Map(), undefined, [makeDiskMod()])
+    expect(on.plugins[0].enabled).toBe(true)
+    expect(off.plugins[0].enabled).toBe(false)
+  })
+
+  it('键不存在时默认启用(与插件流水线同一默认)', () => {
+    const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, undefined, new Map(), undefined, [makeDiskMod()])
+    expect(r.plugins[0].enabled).toBe(true)
+  })
+
+  it('mod 元信息透传到 DTO,真插件不带该字段', () => {
+    const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, undefined, new Map(), undefined, [makeDiskMod()])
+    expect(r.plugins[0].mod).toMatchObject({
+      modName: 'demo',
+      handlerEvents: ['PostToolUse'],
+      toolNames: ['echo'],
+      commandNames: ['hello'],
+    })
+    const plain = assemblePluginList(
+      { enabled: [makePlugin({ name: 'a' })], disabled: [], errors: [] },
+      EMPTY_V2, undefined, new Map(),
+    )
+    expect(plain.plugins[0].mod).toBeUndefined()
+  })
+
+  it('组件计数按 mod 名命中(命令/handler 计入)', () => {
+    const counts = new Map<string, OpenccPluginComponentCounts>([
+      ['demo', { ...EMPTY_COUNTS, commands: 2, hooks: 1 }],
+    ])
+    const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, undefined, counts, undefined, [makeDiskMod()])
+    expect(r.plugins[0].components.commands).toBe(2)
+    expect(r.plugins[0].components.hooks).toBe(1)
+  })
+
+  it('mod 与真插件并排在同一张列表里', () => {
+    const load: PluginLoadResult = { enabled: [makePlugin({ name: 'a', repository: 'market' })], disabled: [], errors: [] }
+    const r = assemblePluginList(load, EMPTY_V2, {}, new Map(), undefined, [makeDiskMod()])
+    expect(r.plugins.map(p => p.name)).toEqual(['a', 'demo'])
+  })
+
+  it('不传 mod 时行为与引入 mod 之前完全一致', () => {
+    const load: PluginLoadResult = { enabled: [makePlugin({ name: 'a', repository: 'market' })], disabled: [], errors: [] }
+    const r = assemblePluginList(load, EMPTY_V2, {}, new Map())
+    expect(r.plugins).toHaveLength(1)
+    expect(r.plugins[0].mod).toBeUndefined()
+  })
+
+  // zai patch (2026-10-13, mods 同步第三批):optIn 内置 mod 的启用态判定。
+  describe('optIn 内置 mod', () => {
+    function makeOptInMod(): LoadedPlugin {
+      // repository 决定 DTO 的 id(`toDto` 对 isBuiltin 直接取 repository),
+      // 内置 mod 的投影给的是 `<name>@builtin` 而不是 `@mods`。
+      return makePlugin({
+        name: 'demo',
+        isBuiltin: true,
+        source: 'demo@builtin',
+        repository: 'demo@builtin',
+        mod: {
+          modName: 'demo',
+          root: '(builtin)',
+          builtin: true,
+          handlerEvents: [],
+          toolNames: [],
+          commandNames: [],
+          optIn: true,
+        },
+      })
+    }
+
+    it('键不存在 → 显示关闭,而加载器也判定它没开', () => {
+      // 这一行原本按 `?? true` 算,报「已启用」;加载器读 `=== true`,从不
+      // 加载。两边对同一个事实给出相反答案,而这一行的开关是唯一能打开
+      // 它的控件 —— 显示成已开,那个控件就再也点不动了。
+      const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, undefined, new Map(), undefined, [makeOptInMod()])
+      expect(r.plugins[0].enabled).toBe(false)
+    })
+
+    it('显式 false → 关闭', () => {
+      const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, { 'demo@builtin': false }, new Map(), undefined, [makeOptInMod()])
+      expect(r.plugins[0].enabled).toBe(false)
+    })
+
+    it('显式 true → 开启', () => {
+      const r = assemblePluginList(EMPTY_LOAD, EMPTY_V2, { 'demo@builtin': true }, new Map(), undefined, [makeOptInMod()])
+      expect(r.plugins[0].enabled).toBe(true)
+    })
+
+    it('同一份数据下,功能型 mod 与 optIn mod 读出相反的默认值', () => {
+      // optIn 只对内置 mod 有意义;磁盘 mod 恒走 `?? true`。若把 optIn 的
+      // 谓词错施到磁盘 mod 上,用户新装的 mod 会显示成关闭。
+      const both = assemblePluginList(
+        EMPTY_LOAD, EMPTY_V2, {}, new Map(), undefined,
+        [makeDiskMod(), makeOptInMod()],
+      )
+      expect(both.plugins.find(p => p.name === 'demo' && p.mod?.builtin === false)?.enabled).toBe(true)
+      expect(both.plugins.find(p => p.mod?.builtin === true)?.enabled).toBe(false)
+    })
+  })
+})

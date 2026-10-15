@@ -1,11 +1,8 @@
 import chalk from 'chalk';
-import figures from 'figures';
 import React, { useEffect } from 'react';
 import { getAdditionalDirectoriesForClaudeMd, setAdditionalDirectoriesForClaudeMd } from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext } from '../../commands.js';
-import { MessageResponse } from '../../components/MessageResponse.js';
 import { AddWorkspaceDirectory } from '../../components/permissions/rules/AddWorkspaceDirectory.js';
-import { Box, Text } from '../../ink.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { applyPermissionUpdate, persistPermissionUpdate } from '../../utils/permissions/PermissionUpdate.js';
 import type { PermissionUpdateDestination } from '../../utils/permissions/PermissionUpdateSchema.js';
@@ -18,20 +15,8 @@ type AddDirErrorProps = {
   onDone: () => void;
 };
 
-function AddDirError({ message, args, onDone }: AddDirErrorProps): React.ReactNode {
-  useEffect(() => {
-    const timer = setTimeout(onDone, 0);
-    return () => clearTimeout(timer);
-  }, [onDone]);
-
-  return (
-    <Box flexDirection="column">
-      <Text dimColor={true}>{figures.pointer} /add-dir {args}</Text>
-      <MessageResponse>
-        <Text>{message}</Text>
-      </MessageResponse>
-    </Box>
-  );
+function AddDirError({ message, args, onDone }: AddDirErrorProps): React.ReactNode | null {
+  return null;
 }
 export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXCommandContext, args?: string): Promise<React.ReactNode> {
   const directoryPath = (args ?? '').trim();

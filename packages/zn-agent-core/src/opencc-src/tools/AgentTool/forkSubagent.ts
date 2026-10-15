@@ -44,6 +44,27 @@ export function isForkSubagentEnabled(): boolean {
   return true
 }
 
+/**
+ * Whether the fork feature is permitted at all (regardless of user-facing gate).
+ *
+ * Upstream's analog checks a launch-mode predicate (`DRe() / Ea()`) which is
+ * Anthropic-specific. opencc has no equivalent concept; we reuse the
+ * coordinator + non-interactive guard. The semantic is "fork is not safe in
+ * restricted modes" — true in both codebases.
+ *
+ * Currently unused in opencc — kept for parity with upstream's API surface
+ * (called by `/fork <directive>` slash command and BashTool fork checks in
+ * upstream). If a future opencc feature needs to gate a fork spawn from a
+ * non-conversation surface, this is the right hook.
+ */
+// [FORK_SUBAGENT] parity with upstream `oPr` (`isForkAllowedForScriptSpawn`)
+// — original was `!DRe() && a.CLAUDE_CODE_FORK_SUBAGENT !== !1`
+export function isForkAllowedForScriptSpawn(): boolean {
+  if (isCoordinatorMode()) return false
+  if (getIsNonInteractiveSession()) return false
+  return true
+}
+
 /** Synthetic agent type name used for analytics when the fork path fires. */
 export const FORK_SUBAGENT_TYPE = 'fork'
 
@@ -89,7 +110,7 @@ export function isInForkChild(messages: MessageType[]): boolean {
     return content.some(
       block =>
         block.type === 'text' &&
-        block.text.includes(`<${FORK_BOILERPLATE_TAG}>`),
+        block.text.startsWith(`<${FORK_BOILERPLATE_TAG}>`),
     )
   })
 }

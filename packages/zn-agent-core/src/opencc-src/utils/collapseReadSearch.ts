@@ -30,11 +30,9 @@ import {
   isMemoryDirectory,
   isShellCommandTargetingMemory,
 } from './memoryFileDetection.js'
+import * as teamMemOps from './teamMemoryOps.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const teamMemOps = true
-  ? (require('./teamMemoryOps.js') as typeof import('./teamMemoryOps.js'))
-  : null
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /**

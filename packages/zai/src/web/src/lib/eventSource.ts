@@ -49,6 +49,16 @@ const NAMED_EVENT_TYPES = [
   'runtime.aborted',
   'runtime.error',
   'runtime.compacted',
+  // runtime.compacting — 压缩过程态「正在压缩…」(zi patch 2026-10-12)。
+  // 与上一行的 runtime.compacted 语义相反,别合并:那个是压缩**结束后**弹的
+  // 5s toast,这个是压缩**过程中**常驻的状态条。漏登记的表现是"压缩了几十秒
+  // 界面毫无反应",且不会有任何报错。
+  'runtime.compacting',
+  // compact_boundary — 压缩分界线(zi patch 2026-10-12)。**不带 runtime.
+  // 前缀**(它是 transcript 常驻内容,不是流式运行时事件),但同样必须登记,
+  // 否则 EventSource 不为它注册 listener、帧直接消失 —— 表现是"toast 会弹、
+  // 对话流里的分隔线永远不出现",刷新后靠历史回放才补上。
+  'compact_boundary',
   // session.*
   'session.created',
   'session.deleted',
@@ -67,6 +77,19 @@ const NAMED_EVENT_TYPES = [
   'server.error',
   'toast',
   'branch.changed',
+  // system.restarting / stopping / restart.canceled — zai 自身的服务重启通道
+  // (server/routes/system.ts:171 / :223 发出, GLOBAL_TOPIC_SYSTEM 白名单)。
+  // 2026-10-12 补登: 此前漏登记, useAppStore.applySystemEvent 里对应的
+  // serviceState 状态机(phase / reason / deadlineMs)永远收不到事件。
+  //
+  // 现状说明(别误读成"UI 上有横幅"): serviceState 目前**没有任何组件读取**
+  // —— SettingsDrawer 的重启/停服按钮是 fire-and-forget(调完 requestRestart
+  // 就结束, 靠页面自己断开来表达"服务没了")。所以这次修复把**状态层**接通
+  // 了, 横幅本身仍待建。stopping 一并补是因为它语义独立(服务退出后不会
+  // 回来), 未来做横幅时与 restarting 必须分开文案。
+  'system.restarting',
+  'system.stopping',
+  'system.restart.canceled',
   // skills.changed — skill/command 目录热更新(server services/skillWatcher.ts
   // 起 vendor skillChangeDetector)。AgentInputBox 收到后重拉 /api/slash,
   // 新装 skill 立即出现在 / 自动补全。与 shared/events.ts SystemEvent union
@@ -89,6 +112,7 @@ const NAMED_EVENT_TYPES = [
   // 弹窗「升级完成 / 失败」。对齐 shared/events.ts SystemEvent union,
   // 新增事件必须同步加到 NAMED_EVENT_TYPES,否则 EventSource 静默丢事件。
   'app.update.checking',
+  'app.update.idle',
   'app.update.installing',
   'app.update.complete',
   'app.update.failed',
@@ -105,10 +129,44 @@ const NAMED_EVENT_TYPES = [
   'command.done',
 ] as const
 
+/**
+ * 白名单与 ServerEvent union 的**双向类型断言** (zi patch 2026-10-12)。
+ *
+ * ⚠️ 重要限定: packages/zai/tsconfig.json 的 `include` 只含
+ * `src/server` / `src/cli` / `src/shared`, 并 `exclude` 了 `src/web/**` ——
+ * **本文件不在任何 tsc --noEmit 的检查范围内**, 所以下面这对断言目前**不会**
+ * 在 `pnpm -r exec tsc` 时触发。它是给 IDE 与未来把 web 纳入 typecheck 后
+ * 准备的护栏, 不是当前生效的闸门。
+ *
+ * 当前真正生效的闸门是 eventSource.test.ts 里那条**从 union 派生**的运行时
+ * 断言("白名单覆盖 ServerEvent union 的每个 type")—— 它已实测能在漏登记
+ * 时变红。加/删 ServerEvent type 时请同时看那一条。
+ *
+ * 这一对断言是为将来准备的: 一旦 web 纳入 typecheck, 它会在编译期直接报出
+ * 漏了哪几个 type, 比运行时测试更快。
+ */
+// union 里存在、但白名单漏掉 → 报错(报出漏了哪几个)
+type _MissingFromWhitelist = Exclude<ServerEvent['type'], (typeof NAMED_EVENT_TYPES)[number]>
+const _exhaustiveCoverage: _MissingFromWhitelist extends never
+  ? true
+  : { ERROR: 'NAMED_EVENT_TYPES 漏登记以下 ServerEvent type'; missing: _MissingFromWhitelist } = true
+// 白名单里存在、但 union 已删(改名/合并) → 同样报错, 避免留一条永不触发的死登记
+type _StaleInWhitelist = Exclude<(typeof NAMED_EVENT_TYPES)[number], ServerEvent['type']>
+const _noStaleEntries: _StaleInWhitelist extends never
+  ? true
+  : { ERROR: 'NAMED_EVENT_TYPES 含 ServerEvent union 已不存在的 type'; stale: _StaleInWhitelist } = true
+// 引用一次, 防 noUnusedLocals 剥掉上面的断言(它们是纯类型 + 常量赋值, 必须保留)
+export const _NAMED_EVENT_TYPES_ASSERTIONS = [_exhaustiveCoverage, _noStaleEntries] as const
+
 // 打开一条 SSE 连接到 /api/event. 后端按 sid 过滤:
 // - sid 非空: server 只推 sid 匹配 + 全局事件 (session.* / system.*),
 //   防止多个 tab / 同一 tab 切会话时消息互串.
-// - sid 为 null: 维持旧行为 (全量), 给未绑定会话的页面用.
+// - sid 为 null 且带 topics: 只推命中 topics 白名单的全局事件。
+//   给「没有活跃会话」的页面 (实例管理 / 管理 / 仪表盘) 用 —— 它们不需要
+//   runtime.* / prompt.* ,但确实需要 instance.changed / task_factory。
+// - sid 为 null 且无 topics: 维持旧行为 (全量), 给未绑定会话的页面用。
+//   **不要**在新代码里用这一档做无会话订阅:runtime.* / prompt.* 的 reducer
+//   不按 sid 过滤,全量流会把别的会话的待确认卡片串到当前页。
 //
 // 调用方在 sessionId 变化时 close 旧 handle 重新 subscribe, 让 EventSource
 // 用新 URL 重建连接 (新连接走 per-sid 切片 + Last-Event-ID 续读).
@@ -116,10 +174,22 @@ export function subscribeServerEvents(
   sid: string | null,
   onEvent: (event: ServerEvent) => void,
   onState?: (state: StreamState, attempt: number) => void,
+  topics?: readonly string[],
 ): StreamHandle {
-  const url = sid
-    ? `${API_BASE}/event?sid=${encodeURIComponent(sid)}`
-    : `${API_BASE}/event`
+  const params = new URLSearchParams()
+  // topics 只在无 sid 时有意义:有 sid 时后端已按 sid 切片,再叠 topic 白名单
+  // 会把本该收到的会话事件误杀。静默忽略而不是报错,让调用方少一个分支。
+  if (!sid && topics && topics.length > 0) params.set('topics', topics.join(','))
+  // sid 保持手写 encodeURIComponent 而不是交给 URLSearchParams:后者把空格
+  // 编成 '+' (application/x-www-form-urlencoded),而 sid 里的 '+' 会被服务端
+  // query parser 原样解回成 '+' 字符,与 encodeURIComponent 的 '%20' 语义不一致。
+  // sid 是 opaque id,两种编码都能到服务端,但保持单一编码方式避免调试时
+  // 看到两种 URL 误判为两个不同会话。
+  const qs = [
+    sid ? `sid=${encodeURIComponent(sid)}` : '',
+    params.toString(),
+  ].filter(Boolean).join('&')
+  const url = qs ? `${API_BASE}/event?${qs}` : `${API_BASE}/event`
   const es = new EventSource(url)
 
   let attempt = 0

@@ -65,13 +65,42 @@ describe('TextDebouncer', () => {
     expect(flushed).toEqual([['/a.jpg']])
   })
 
-  it('flushAll drains everything immediately', () => {
+  it('flushAll drains everything immediately', async () => {
     const d = new TextDebouncer({ defaultDelaySeconds: 10 })
     const flushed: string[] = []
     d.enqueue('a', { text: 'A', mediaPaths: [], mediaTypes: [] }, (i) => { flushed.push(i.text) })
     d.enqueue('b', { text: 'B', mediaPaths: [], mediaTypes: [] }, (i) => { flushed.push(i.text) })
-    d.flushAll((_, item) => { flushed.push(item.text) })
+    await d.flushAll()
     expect(flushed.sort()).toEqual(['A', 'B'])
+    vi.useRealTimers()
+  })
+
+  it('flushAll uses the per-key handler registered at enqueue time', async () => {
+    // Regression: flushAll 早先接收调用方临时传入的回调,而真正的派发闭包
+    // 只存在于 enqueue 的参数里 → adapter 断连时缓冲区被静默丢弃,而游标
+    // 已经推进,服务端不重投,消息永久丢失。
+    const d = new TextDebouncer({ defaultDelaySeconds: 10 })
+    const dispatched: string[] = []
+    d.enqueue('a', { text: 'buffered', mediaPaths: [], mediaTypes: [] }, (i) => {
+      dispatched.push(i.text)
+    })
+    expect(dispatched).toEqual([])
+    await d.flushAll()
+    expect(dispatched).toEqual(['buffered'])
+    vi.useRealTimers()
+  })
+
+  it('flushAll awaits async handlers before resolving', async () => {
+    // adapter 靠 flushAll 的 promise 确认「disconnect 返回时消息已落 pending」。
+    // 用微任务链而非 setTimeout —— 本文件开了 fake timers,真 setTimeout 不会触发。
+    const d = new TextDebouncer({ defaultDelaySeconds: 10 })
+    let persisted = false
+    d.enqueue('a', { text: 'A', mediaPaths: [], mediaTypes: [] }, async () => {
+      await Promise.resolve()
+      persisted = true
+    })
+    await d.flushAll()
+    expect(persisted).toBe(true)
     vi.useRealTimers()
   })
 })

@@ -1,13 +1,13 @@
 /**
  * MentionChip — 输入框里的文件引用 chip。
  *
- * 设计要点(追齐 deepseek-harness `InputBar.tsx` 的 chip 渲染):
- * - draft 中该引用只占一个 U+FFFC 占位符(机器 occurrence),本组件只负责
- *   backdrop 层的可视渲染 —— 不再需要旧的 hidden-placeholder 宽度对位,
- *   单元的宽度由 DshChipCell 字体在 textarea 与 backdrop 两层天然一致。
- * - 视觉:小胶囊 + icon + basename(超出省略),title 显示完整路径;
- *   dir 以尾部 `/` 识别(引用插入时 ref 保留 dir 尾部斜杠)。
- * - 纯展示组件(仅展示不交互):onMouseDown 仅用于防止焦点离开 textarea。
+ * 现在它挂在 Lexical 装饰节点上(见 `input/editor/chip-node.tsx`):chip 是
+ * 真实的行内元素,宽度随 label 自然撑开,不再是旧方案里被 U+FFFC 占位单元
+ * 锁死宽度的 `scale(0.72)` 覆盖层 —— 那是长文件名必然被截断的根因。
+ *
+ * 视觉对齐 deepseek-harness `input/editor/ReferenceChip.tsx`:透明底 +
+ * 强调色文字 + 图标 + 超出省略,hover 才出底色,失效态置灰加删除线;
+ * 配色用 zai 品牌橙(`--accent-start`)。
  */
 import { FolderIcon, FileIcon } from "lucide-react";
 
@@ -23,8 +23,8 @@ export interface MentionChipData {
 export interface MentionChipProps {
   data: MentionChipData;
   /**
-   * mousedown 拦截:组合框(combobox)模式下点击 chip 不能让焦点离开
-   * textarea。由父组件传入 null 时仅展示。
+   * mousedown 拦截:chip 宿主是 contenteditable=false 的不可编辑节点,
+   * 点它不能让焦点离开输入框(combo 模式约束)。
    */
   onMouseDown?: (e: React.MouseEvent) => void;
 }
@@ -42,21 +42,12 @@ export default function MentionChip({ data, onMouseDown }: MentionChipProps) {
       title={path}
       onMouseDown={onMouseDown}
     >
-      {/* icon + label 都放进 absolute 覆盖层:chip 的流内宽度只由 ::before
-          (U+FFFC 单元)决定,图标不会把 chip 撑宽 → 与 textarea 占位符严格
-          一致,不漂移。 */}
-      <span className="agent-input-ref-chip-label">
-        {isDir ? (
-          <FolderIcon
-            className="agent-input-ref-chip-icon text-[#facc15]"
-          />
-        ) : (
-          <FileIcon
-            className="agent-input-ref-chip-icon text-[var(--text-dim-45)]"
-          />
-        )}
-        <span>{label}</span>
-      </span>
+      {isDir ? (
+        <FolderIcon className="agent-input-ref-chip-icon" />
+      ) : (
+        <FileIcon className="agent-input-ref-chip-icon" />
+      )}
+      <span className="agent-input-ref-chip-label">{label}</span>
     </span>
   );
 }

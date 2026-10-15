@@ -1,15 +1,24 @@
 import { Fragment, useMemo, type ReactElement } from 'react'
 import { useAgentStoreOrCtx, type AgentMessage } from '../../store/useAgentStore.js'
 import { MessageBubble } from './MessageBubble.js'
-import { CollapsedMessageBubble } from './CollapsedMessageBubble.js'
-import { ToolGroupCard } from './ToolGroupCard.js'
-import { deriveTranscriptNodes, type ToolGroupEntry, type ToolGroupStatus } from './deriveTranscriptNodes.js'
-import { lastAssistantTextIndex } from './deriveStreamLive.js'
+import { ToolRunGroup } from './ToolRunGroup.js'
+import { deriveTranscriptNodes, type GroupItem, type ToolGroupStatus } from './deriveTranscriptNodes.js'
 import { getRenderer } from '../toolRenderers/registry.js'
 import { deriveTurnArtifacts, type TurnArtifacts } from './deriveTurnArtifacts.js'
 import { TurnArtifactsBlock } from './TurnArtifactsBlock.js'
+import CompactBoundaryDivider from './CompactBoundaryDivider.js'
 
-// toolGroup 内的 status 是否需要保留 ToolGroupCard 外壳(展示状态提示)。
+/** 组内一项的 React key: eventId 优先, 退回「类型-下标」。 */
+function itemKey(it: GroupItem): string {
+  return ((it.message as { eventId?: unknown }).eventId as string) ?? `${it.kind}-${it.index}`
+}
+
+function firstItemId(items: GroupItem[]): string | undefined {
+  const first = items[0]
+  return first === undefined ? undefined : itemKey(first)
+}
+
+// toolGroup 内的 status 是否需要保留「工具运行段」外壳。
 // pending/error/invalid/denied 都保留外壳。
 const STATUS_KEEPS_SHELL: ReadonlySet<ToolGroupStatus> = new Set([
   'pending',
@@ -18,34 +27,42 @@ const STATUS_KEEPS_SHELL: ReadonlySet<ToolGroupStatus> = new Set([
   'denied',
 ])
 
-/** 同一 toolGroup 拆出来的渲染段:inline 直接内联,card 进 ToolGroupCard。 */
+/** 同一 toolGroup 拆出来的渲染段:inline 直接内联,run 进 ToolRunGroup。 */
 type GroupSegment =
-  | { kind: 'inline'; entries: ToolGroupEntry[] }
-  | { kind: 'card'; entries: ToolGroupEntry[] }
+  | { kind: 'inline'; items: GroupItem[] }
+  | { kind: 'run'; items: GroupItem[] }
 
 /**
  * 把 toolGroup 的条目按「是否自包含展示工具」切成保序段。
  *
  * 判定单条粒度(与旧 shouldSkipOuterGroup 同规则,但不再要求整组一致):
  * - renderer.skipOuterGroup === true 且 status === 'done' → inline
- * - 其余(含 pending/error/invalid/denied,以及未标标记的工具)→ card
+ * - 其余(含 pending/error/invalid/denied,以及未标标记的工具)→ run
  *
  * 这样「模型一轮里先 Read 再 PresentFile」不会因为组内有别的工具而把
- * 文件卡整组吞进折叠卡(2026-09-24 PresentFile 设计 §7)。
+ * 文件卡整组吞进运行段(2026-09-24 PresentFile 设计 §7)。
+ *
+ * 思考项不参与切段: 它归入当前打开的那一段, 没有打开的段才自己起一段。
+ * 段内首项是思考(理论上不会发生, 组由工具开启)时走 inline, 仍按原序渲染。
  */
-function splitToolGroupEntries(entries: ToolGroupEntry[]): GroupSegment[] {
+function splitToolGroupItems(items: GroupItem[]): GroupSegment[] {
   const segs: GroupSegment[] = []
-  for (const e of entries) {
-    const name = (e.message as { name?: unknown }).name
+  for (const item of items) {
+    const last = segs[segs.length - 1]
+    if (item.kind === 'thinking') {
+      if (last) last.items.push(item)
+      else segs.push({ kind: 'inline', items: [item] })
+      continue
+    }
+    const name = (item.message as { name?: unknown }).name
     const selfContained =
       typeof name === 'string' &&
       name.length > 0 &&
       getRenderer(name).skipOuterGroup === true &&
-      !STATUS_KEEPS_SHELL.has(e.status)
-    const kind: GroupSegment['kind'] = selfContained ? 'inline' : 'card'
-    const last = segs[segs.length - 1]
-    if (last && last.kind === kind) last.entries.push(e)
-    else segs.push({ kind, entries: [e] })
+      !STATUS_KEEPS_SHELL.has(item.status)
+    const kind: 'inline' | 'run' = selfContained ? 'inline' : 'run'
+    if (last && last.kind === kind) last.items.push(item)
+    else segs.push({ kind, items: [item] })
   }
   return segs
 }
@@ -57,22 +74,20 @@ interface Props {
 
 // Agent 工具调用不在主 transcript 内联展示 —— 子代理的执行改由后台任务 dock
 // 呈现 (服务端 agentTaskBridge 把 LocalAgentTask 状态推成 agent_task.changed)。
-// 这里在渲染入口统一过滤,expanded (直接 map) 与 collapsed (deriveTranscriptNodes)
-// 两条路径都覆盖。
+// 这里在渲染入口统一过滤。
 function isAgentToolMessage(m: AgentMessage): boolean {
   const name = (m as { name?: unknown }).name ?? (m as { toolName?: unknown }).toolName
   return name === 'Agent'
 }
 
 export function MessageListView({ messages, streaming }: Props) {
-  // 单一布尔字段,初值由 Layout hydrate 时根据 settings.outputStyle 设置:
-  //   - outputStyle === 'compact' → transcriptCollapsed = true (默认收起)
-  //   - 其余                     → transcriptCollapsed = false (默认展开)
-  // 用户点工具栏按钮 → setTranscriptCollapsed(!transcriptCollapsed) 直接翻转;
-  // 刷新回到 settings.outputStyle 决定的值.
-  const collapsed = useAgentStoreOrCtx((s) => s.transcriptCollapsed)
+  // transcriptCollapsed 现在的语义是「工具运行段全程折叠」: 关闭时(默认)
+  // 运行中的段会自动展开成明细行, 跑完的段收成一行摘要; 打开时
+  // (outputStyle === 'compact' 或右侧分屏锁定) 连运行中的段也不展开,
+  // 优先把纵向空间让给对话正文。
+  const transcriptCollapsed = useAgentStoreOrCtx((s) => s.transcriptCollapsed)
   const status = useAgentStoreOrCtx((s) => s.status)
-  // filter 每次渲染都产生新数组 → 不 memo 的话下面两个 useMemo 会全量重算
+  // filter 每次渲染都产生新数组 → 不 memo 的话下面几个 useMemo 会全量重算
   const visibleMessages = useMemo(
     () => messages.filter((m) => !isAgentToolMessage(m)),
     [messages],
@@ -83,54 +98,13 @@ export function MessageListView({ messages, streaming }: Props) {
     () => deriveTurnArtifacts(visibleMessages, { status }),
     [visibleMessages, status],
   )
-  // expanded 分支用:锚点下标 → 该轮产物(expanded 每条消息各占一项,
-  // 轮的 endIndex 必然等于某条消息的下标,精确匹配即可)。
-  // collapsed 分支不能这样查 —— 见下方 artifactsByNode 的说明。
-  // (`as const` 让 map 回调产出 readonly tuple,匹配 Map 的 iterable 签名)
-  const artifactsByAnchor = useMemo(
-    () => new Map<number, TurnArtifacts>(turns.map((t) => [t.endIndex, t] as const)),
-    [turns],
-  )
 
-  if (!collapsed) {
-    // expanded: 逐条渲染,并在每一轮的最后一条消息之后插入「本轮产物」块。
-    return (
-      <>
-        {visibleMessages.flatMap((msg, idx) => {
-          const t = msg.type as string
-          const toolUseId = t.startsWith('tool_use:')
-            ? (msg as any).toolUseId
-            : undefined
-          const reactKey =
-            (toolUseId ? `tool-${toolUseId}` : (msg as any).eventId) || String(idx)
-          // 判定: "最后一条消息是 thinking" 即视为流式 thinking 累积中,
-          // 给 ThinkingBlock 传 streaming={true} 启动动画. 旧实现这里
-          // 用 idx === lastIdx 也能覆盖大多数场景; text 一切到, lastIdx
-          // 立刻变成 text → thinking 自动失活 → 动画停. 简单可靠.
-          const lastIdx = visibleMessages.length - 1
-          const isLive =
-            t === 'assistant.thinking'
-              ? idx === lastIdx
-              : t === 'assistant.text' && Boolean(streaming) && idx === lastIdx
-          const bubble = <MessageBubble key={reactKey} msg={msg} streaming={isLive} />
-          const turn = artifactsByAnchor.get(idx)
-          if (!turn) return [bubble]
-          return [
-            bubble,
-            <TurnArtifactsBlock key={`art-${turn.turnKey}`} files={turn.files} />,
-          ]
-        })}
-      </>
-    )
-  }
-
-  // collapsed: derive nodes, fall back to expanded on any derive error.
   let nodes
   try {
     nodes = deriveTranscriptNodes(visibleMessages)
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.error('deriveTranscriptNodes failed; falling back to expanded view', err)
+    console.error('deriveTranscriptNodes failed; falling back to flat list', err)
     return (
       <>
         {visibleMessages.map((msg, idx) => (
@@ -140,25 +114,10 @@ export function MessageListView({ messages, streaming }: Props) {
     )
   }
 
-  // 在 collapsed 视图下, 找到 messages 里最后一条 assistant.text 的索引;
-  // 渲染时给对应气泡传 forceExpanded, 完整展开 (绕开 6 行 clamp). 分屏模式
-  // (transcriptCollapsed=true) 用户期望看到 AI 的最近一条完整回答, 历史
-  // 仍然 clamp — 这条规则与 splitPaneOpen 无关 (transcriptCollapsed 已经是
-  // 单一真源, useSplitPaneCompactLock 把它锁到 true).
-  const lastAssistantIdx = lastAssistantTextIndex(visibleMessages)
-
-  // 「本轮产物」块在 collapsed 视图里的落点。
-  //
-  // 不能像 expanded 那样要求 node 末尾恰好等于轮的 endIndex: collapsed 的
-  // text bucket 会跨轮合并 —— 上一轮收尾的 assistant.text 与下一轮开头的
-  // user.text 同桶(deriveTranscriptNodes 只在工具边界 flush),于是轮的
-  // endIndex 可能落在某个 node 的中间。
-  //
-  // 所以改成「挂到包含该轮最后一条消息的那个 node 上」,两者都按 index 有序,
-  // 一次线性扫描即可。node 的覆盖区间由自身载荷推导(startIndex + 元素数 - 1),
-  // **不读 node.endIndex**:尾部 text 节点有个既存 off-by-one(尾刷把
-  // messages.length - 1 当 idx 传入,而 pushText 内部又减 1),会得到
-  // endIndex = startIndex - 1。
+  // 「本轮产物」块挂在包含该轮最后一条消息的那个 node 上。node 的覆盖区间
+  // 由自身载荷推导(startIndex + 元素数 - 1), **不读 node.endIndex**:尾部
+  // text 节点有个既存 off-by-one(尾刷把 messages.length - 1 当 idx 传入,
+  // 而 pushText 内部又减 1),会得到 endIndex = startIndex - 1。
   const artifactsByNode = new Map<number, TurnArtifacts[]>()
   if (turns.length > 0) {
     let ti = 0
@@ -167,7 +126,7 @@ export function MessageListView({ messages, streaming }: Props) {
       const nodeEnd = node.kind === 'text'
         ? node.startIndex + node.messages.length - 1
         : node.kind === 'toolGroup'
-          ? node.startIndex + node.toolCalls.length - 1
+          ? node.startIndex + node.items.length - 1
           : node.index
       const bucket: TurnArtifacts[] = []
       while (ti < turns.length && turns[ti]!.endIndex <= nodeEnd) {
@@ -187,45 +146,64 @@ export function MessageListView({ messages, streaming }: Props) {
           // ([el] 或 [el, ...产物块]),无 key 会触发 React 的列表 key 警告。
           el = (
             <Fragment
-              key={`grp-${node.toolCalls[0]?.message.eventId ?? node.startIndex}`}
+              key={`grp-${firstItemId(node.items) ?? node.startIndex}`}
             >
-              {splitToolGroupEntries(node.toolCalls).map((seg) => {
-                // key 用段内首条 entry 的 eventId(而非下标区间):新消息 append
-                // 不改变已有段的 key → 不重挂载,组卡折叠态与卡内展开态都不丢。
-                const firstId =
-                  ((seg.entries[0]?.message as any).eventId as string) ??
-                  `seg-${seg.entries[0]?.index ?? 0}`
+              {splitToolGroupItems(node.items).map((seg) => {
+                // key 用段内首项的 eventId(而非下标区间):新消息 append
+                // 不改变已有段的 key → 不重挂载,运行段的展开态不丢。
+                const segKey = firstItemId(seg.items) ?? `seg-${seg.items[0]?.index ?? 0}`
                 if (seg.kind === 'inline') {
                   return (
-                    <span key={`seg-inline-${firstId}`}>
-                      {seg.entries.map((e) => {
-                        const evtId = ((e.message as any).eventId as string) ?? `tool-${e.index}`
-                        return (
-                          <MessageBubble
-                            key={evtId}
-                            msg={e.message}
-                            streaming={e.status === 'pending'}
-                          />
-                        )
-                      })}
+                    <span key={`seg-inline-${segKey}`}>
+                      {seg.items.map((it) => (
+                        <MessageBubble
+                          key={itemKey(it)}
+                          msg={it.message}
+                          streaming={
+                            it.kind === 'tool'
+                              ? it.status === 'pending'
+                              : it.index === visibleMessages.length - 1
+                          }
+                        />
+                      ))}
                     </span>
                   )
                 }
-                return <ToolGroupCard key={`seg-card-${firstId}`} entries={seg.entries} />
+                // 段末的思考是最后一条消息时视为正在流式输出 —— 该段要跟着
+                // 自动展开, 否则「模型还在想」被折叠起来看不见。
+                const lastItem = seg.items[seg.items.length - 1]
+                const streamingThinking =
+                  lastItem !== undefined &&
+                  lastItem.kind === 'thinking' &&
+                  lastItem.index === visibleMessages.length - 1
+                return (
+                  <ToolRunGroup
+                    key={`seg-run-${segKey}`}
+                    items={seg.items}
+                    autoExpandRunning={!transcriptCollapsed}
+                    streamingThinking={streamingThinking}
+                  />
+                )
               })}
             </Fragment>
           )
         } else if (node.kind === 'thinking') {
-          // 注意: collapsed 视图下, 流式 'assistant.thinking' 不会进这种
-          // 节点 (deriveTranscriptNodes 只把 legacy 'assistant' + thinking
-          // 字段提为 kind: 'thinking'). 流式 'assistant.thinking' 走
-          // text bucket, 见下面的 isThinkingMsg 分支.
-          // 这里是历史回放里的 legacy thinking 节点, 始终静态 (不闪烁).
+          // 没被工具段包住的思考(轮首思考 / 纯问答轮)。思考是边流边追加的,
+          // 所以「是不是最后一条」就是它的 live 信号, 不看 streaming prop。
           el = (
             <MessageBubble
               key={`think-${node.index}-${i}`}
               msg={node.message}
-              streaming={false}
+              streaming={node.index === visibleMessages.length - 1}
+            />
+          )
+        } else if (node.kind === 'compactBoundary') {
+          // 压缩分界线 —— 常驻在 transcript 里, 刷新后仍在(历史回放同样
+          // 产出 compact_boundary 消息, 见 loadTranscriptMessages)。
+          el = (
+            <CompactBoundaryDivider
+              key={`compact-${node.index}-${i}`}
+              message={node.message}
             />
           )
         } else if (node.kind === 'ask') {
@@ -238,38 +216,22 @@ export function MessageListView({ messages, streaming }: Props) {
             />
           )
         } else {
-          // text node: render each contained message through CollapsedMessageBubble (single-msg view)
-          // key 用首条消息的 eventId (而非此时的下标区间) 作为稳定标识: 新消息
-          // append 到同一 text bucket 末尾时, 首条 eventId 不变, key 不变 →
-          // 子树不重挂载, CollapsedMessageBubble / AssistantTextBody 内部展开态保留.
+          // text node: 每条消息各走 MessageBubble (assistant.text 扁平散文 /
+          // user.text 右对齐气泡 / 未知类型兜底), 不再拆成两套渲染器。
+          // key 用每条自己的 eventId:新消息 append 不改已有 key → 不重挂载。
           el = (
-            <div key={`txt-${node.messages[0]?.eventId ?? node.startIndex}`}>
+            <Fragment key={`txt-${node.messages[0]?.eventId ?? node.startIndex}`}>
               {node.messages.map((m, mi) => {
                 const evtId = ((m as any).eventId as string) ?? `txt-${node.startIndex}-${mi}`
                 const msgIdx = node.startIndex + mi
-                // "最后一条 assistant.text" 完整展开 (绕开 clamp);
-                // 历史 assistant.text 仍走默认 6 行 clamp + "显示更多" 按钮.
-                const isLastAssistant = msgIdx === lastAssistantIdx
-                // 判定: 最后一条消息是 thinking → 走 streaming=true; 否则
-                // 走 status-based streaming (text 累积光标等).
-                // assistant.thinking 在 collapsed 视图走 text bucket;
-                // 简单规则: "thinking 是最后一条 messages" 即可.
-                const mt = (m as { type?: string }).type
-                const isThinkingMsg = mt === 'assistant.thinking'
-                const lastOverallIdx = visibleMessages.length - 1
-                const itemStreaming = isThinkingMsg
-                  ? msgIdx === lastOverallIdx
-                  : streaming && node.endIndex === lastOverallIdx
+                // 思考消息不再进 text 桶(derive 已把它摘走并入工具段), 这里
+                // 只有正文/用户气泡 —— 末尾那条才是流式中的那条。
+                const itemStreaming = streaming && msgIdx === visibleMessages.length - 1
                 return (
-                  <CollapsedMessageBubble
-                    key={evtId}
-                    message={m}
-                    streaming={itemStreaming}
-                    forceExpanded={isLastAssistant}
-                  />
+                  <MessageBubble key={evtId} msg={m} streaming={itemStreaming} />
                 )
               })}
-            </div>
+            </Fragment>
           )
         }
         const turnsHere = artifactsByNode.get(i)
