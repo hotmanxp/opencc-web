@@ -39,10 +39,18 @@ function parseArguments(argv) {
 
 /**
  * Reject a target this machine cannot build.
+ *
+ * Windows targets are cross-buildable from macOS and Linux: electron-builder
+ * fetches the target's own Electron distribution and ships native makensis, so
+ * the NSIS installer and the portable executable both build anywhere. What it
+ * cannot do off-host is patch an existing executable, so the shell drops the
+ * icon/version stamp (see `electron-builder-config.mjs`). macOS targets are
+ * still host-only — an `.app` bundle cannot be produced by a foreign builder.
  * @param {{ platform: string, id: string }} target - resolved target.
  */
 function assertBuildableOnHost(target) {
   if (target.platform === process.platform) return
+  if (target.platform === 'win32') return
   throw new Error(
     `desktop package: target ${target.id} needs a ${target.platform} build host, this is ${process.platform}`,
   )
@@ -70,7 +78,9 @@ async function runElectronBuilder(target, dir, log) {
   if (!existsSync(cli)) throw new Error(`desktop package: electron-builder is not installed (${cli})`)
 
   const args = ['--config', 'electron-builder.config.mjs', target.platform === 'darwin' ? '--mac' : '--win']
-  if (!dir) args.push(...(target.platform === 'darwin' ? ['dmg', 'zip'] : ['nsis']))
+  // Both target lists live in the config so they cannot drift; the CLI here
+  // only picks the platform/arch switches.
+  if (!dir) args.push(...(target.platform === 'darwin' ? ['dmg', 'zip'] : ['nsis', 'portable']))
   args.push(target.arch === 'arm64' ? '--arm64' : '--x64')
   if (dir) args.push('--dir')
 

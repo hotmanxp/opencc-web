@@ -7,8 +7,8 @@
  * `@zn-ai/zn-agent-core` as a real directory instead of a workspace link. The
  * result is copied verbatim into `Contents/Resources/zai-runtime`.
  */
-import { existsSync, readdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readlinkSync, realpathSync, rmSync } from 'node:fs'
+import { join, resolve, sep } from 'node:path'
 import { REPO_ROOT, desktopTargetPaths } from './target.mjs'
 import { run } from './run.mjs'
 
@@ -74,6 +74,67 @@ function pruneForeignBinaries(runtime, target, log) {
 }
 
 /**
+ * Remove symlinks that would stop resolving once the tree is relocated.
+ *
+ * Almost every entry under `node_modules/.pnpm/node_modules/` is a pnpm
+ * hoisting shortcut pointing at `../.pnpm/<pkg>/node_modules/<name>`. Those
+ * stay valid through the copy: `.pnpm/` travels along, so the relative depth
+ * is unchanged. The exception is a link whose target sits *outside* the
+ * staged tree — `@zn-ai/zai` points back at the repository's `packages/zai`.
+ * It resolves while the tree sits inside the repository, then dangles the
+ * moment electron-builder copies the runtime into the application bundle.
+ *
+ * 7-Zip, which NSIS packaging uses to build the payload archive, reports a
+ * dangling link as a hard scan error and exits non-zero — which aborts the
+ * installer build after the (expensive) archive pass. Removing only the
+ * escaping links fixes it without touching the ~365 hoisting shortcuts that
+ * resolution depends on. Nothing reads the escaped path at runtime: zai's own
+ * entry under `node_modules/` is materialized by `pnpm deploy`.
+ * @param {string} runtime - deployed runtime directory.
+ * @param {(message: string) => void} log - progress sink.
+ */
+function pruneEscapingSymlinks(runtime, log) {
+  const hoisted = join(runtime, 'node_modules', '.pnpm', 'node_modules')
+  if (!existsSync(hoisted)) return
+  const root = resolve(runtime)
+
+  /** @type {string[]} */
+  const escaping = []
+  const walk = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isSymbolicLink()) {
+        // A link inside the tree that survives the copy iff its resolved
+        // target is also inside the tree.
+        let target
+        try {
+          target = realpathSync(path)
+        } catch {
+          target = resolve(directory, readlinkSync(path))
+        }
+        if (target !== root && !target.startsWith(root + sep)) escaping.push(path)
+      } else if (entry.isDirectory()) {
+        walk(path)
+      }
+    }
+  }
+  walk(hoisted)
+
+  for (const path of escaping) {
+    rmSync(path, { force: true })
+    log(`desktop: pruned symlink escaping the runtime tree: ${path.slice(hoisted.length + 1)}`)
+  }
+
+  // Empty scope directories left behind by the prune are noise in the bundle.
+  for (const entry of readdirSync(hoisted, { withFileTypes: true })) {
+    const scope = join(hoisted, entry.name)
+    if (entry.isDirectory() && readdirSync(scope).length === 0) {
+      rmSync(scope, { recursive: true, force: true })
+    }
+  }
+}
+
+/**
  * Deploy the built zai package for one target.
  * @param {{ id: string }} target - resolved desktop target.
  * @param {(message: string) => void} [log] - progress sink.
@@ -108,6 +169,7 @@ export async function prepareRuntime(target, log = console.log) {
   }
 
   pruneForeignBinaries(paths.runtime, target, log)
+  pruneEscapingSymlinks(paths.runtime, log)
 
   log(`desktop: runtime ready at ${paths.runtime}`)
   return paths.runtime

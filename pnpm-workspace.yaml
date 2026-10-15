@@ -13,3 +13,13 @@ allowBuilds:
 onlyBuiltDependencies:
   - sharp
   - node-pty
+# 交叉打 Windows 包时需要 win32 的原生 optional 依赖(`@img/sharp-win32-x64`
+# 等)。sharp 的 libvips 二进制按平台分包,只装宿主平台的话,打出来的
+# 绿色版在 Windows 上第一次用到图像处理就会 load 失败。
+supportedArchitectures:
+  os:
+    - current
+    - win32
+  cpu:
+    - current
+    - x64
