@@ -7,6 +7,7 @@ import { getAPIProvider } from 'src/utils/model/providers.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
 import { fetchWithProxyRetry } from '../../services/api/fetchWithProxyRetry.js'
+import { collectCodexCompletedResponse } from '../../services/api/codexShim.js'
 import { resolveProviderRequest } from '../../services/api/providerConfig.js'
 
 import { tuple, z } from 'zod/v4'

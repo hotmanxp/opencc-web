@@ -482,6 +482,7 @@ type State = {
   hasAttemptedReactiveCompact: boolean
   hasAttemptedContextOverflowRecovery: boolean
   maxOutputTokensOverride: number | undefined
+  providerMaxOutputTokensCap: number | undefined
   pendingToolUseSummary: Promise<ToolUseSummaryMessage | null> | undefined
   stopHookActive: boolean | undefined
   // One-shot guard for the provider-fallback recovery branch (issue #768).
@@ -596,6 +597,7 @@ async function* queryLoop(
     messages: params.messages,
     toolUseContext: params.toolUseContext,
     maxOutputTokensOverride: params.maxOutputTokensOverride,
+    providerMaxOutputTokensCap: undefined,
     autoCompactTracking: params.autoCompactTracking,
     stopHookActive: undefined,
     maxOutputTokensRecoveryCount: 0,
@@ -714,11 +716,18 @@ async function* queryLoop(
       hasAttemptedContextOverflowRecovery,
       hasAttemptedProviderFallback,
       maxOutputTokensOverride,
+      providerMaxOutputTokensCap,
       pendingToolUseSummary,
       stopHookActive,
       turnCount,
       agentStepLimit,
     } = state
+    const effectiveMaxOutputTokensOverride =
+      maxOutputTokensOverride === undefined
+        ? providerMaxOutputTokensCap
+        : providerMaxOutputTokensCap === undefined
+          ? maxOutputTokensOverride
+          : Math.min(maxOutputTokensOverride, providerMaxOutputTokensCap)
 
     // Skill discovery prefetch — per-iteration (uses findWritePivot guard
     // that returns early on non-write iterations). Discovery runs while the
