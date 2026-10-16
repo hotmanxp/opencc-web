@@ -19,9 +19,10 @@
 //   - 缩放到 <100% 时工具栏浮出实时百分比提示(点它进全屏);
 //   - 容器右上角常驻菜单:全屏预览(按视口再放大一次 + 居中,带 Esc/关闭
 //     按钮)/ 复制源码。
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  adaptNodeLabelColors,
   ensureMermaidBundle,
   hasMermaidBundle,
   mermaidDiagramLabel,
@@ -129,6 +130,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   const [copied, setCopied] = useState(false);
   const lastCodeRef = useRef<string>(code);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const fullscreenHostRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const renderedSvg = state.status === "rendered" ? state.svg : null;
@@ -148,6 +150,17 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
     });
     return () => obs.disconnect();
   }, []);
+
+  // 渲染后校正标签字色:作者用 `style fill:` 写死底色的节点,mermaid 给的仍是
+  // 主题字色 —— 浅底配浅字在深色主题下整块读不出来(见 mermaidRenderer 里
+  // adaptNodeLabelColors 的说明)。用 layout effect 在绘制前改掉,不闪那一帧。
+  // 全屏预览是同一份 SVG 的第二个副本,同样要过一遍。
+  useLayoutEffect(() => {
+    if (state.status !== "rendered") return;
+    for (const host of [hostRef.current, fullscreenHostRef.current]) {
+      if (host) adaptNodeLabelColors(host);
+    }
+  }, [state, fullscreen]);
 
   // 主渲染 effect:依赖 code 和 themeKey
   useEffect(() => {
@@ -379,6 +392,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
                 </div>
               </div>
               <div
+                ref={fullscreenHostRef}
                 className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4 [&_svg]:block [&_svg]:w-auto [&_svg]:h-auto [&_svg]:max-w-full [&_svg]:max-h-full"
                 dangerouslySetInnerHTML={{ __html: state.svg }}
               />

@@ -236,7 +236,61 @@ describe("mermaidRenderer: buildThemeVariables", () => {
     expect(v.lineColor).toBe(DARK.line);
     expect(v.textColor).toBe(DARK.fg);
     expect(v.primaryColor).toBe(DARK.accent);
-    expect(v.nodeBorder).toBe(DARK.border);
+    // 节点描边走和箭头同一条 token(缺省那条 rgba(...,0.18) 在两种主题下
+    // 都几乎看不见)
+    expect(v.nodeBorder).toBe(DARK.line);
+  });
+
+  // 回归:用户报「流程图对比度太低」。mermaid base 主题把 nodeTextColor /
+  // stateLabelColor / titleColor 等一批 token 缺省派生自 primaryTextColor,
+  // 而 primaryTextColor 是给品牌橙底准备的深色 —— 于是暗色主题下节点字
+  // 跟着变近黑(深字深底)、浅色主题下跟 primaryTextColor 的另一分支变白
+  // (白字浅底),两种主题的节点文字全读不出来。
+  it("never derives label text from the accent-side color (contrast regression)", async () => {
+    const { buildThemeVariables } = await import("./mermaidRenderer.js");
+    for (const t of [LIGHT, DARK]) {
+      const v = buildThemeVariables(t);
+      // 落在 surface / 画布上的字,必须等于该主题的前景字色
+      expect(v.nodeTextColor, t.mode).toBe(t.fg);
+      expect(v.textColor, t.mode).toBe(t.fg);
+      expect(v.stateLabelColor, t.mode).toBe(t.fg);
+      expect(v.titleColor, t.mode).toBe(t.fg);
+      expect(v.classText, t.mode).toBe(t.fg);
+      expect(v.actorTextColor, t.mode).toBe(t.fg);
+      expect(v.labelTextColor, t.mode).toBe(t.fg);
+      // 节点字色绝不能等于给 accent 用的那个色(近黑),否则暗色主题下
+      // 就是本次报的「深字深底」
+      expect(v.nodeTextColor, t.mode).not.toBe(v.primaryTextColor);
+      // 边标签的底要贴着节点面,不能是缺省那条从中灰派生的药丸
+      expect(v.edgeLabelBackground, t.mode).toBe(t.surface);
+    }
+  });
+
+  it("pins the surface/neutral text pair so no label falls back to a mid-gray or its own fill", async () => {
+    const { buildThemeVariables } = await import("./mermaidRenderer.js");
+    const dark = buildThemeVariables(DARK);
+    const light = buildThemeVariables(LIGHT);
+    // 状态名缺省会被染成 stateBkg(= mainBkg,即节点底色本身)
+    expect(dark.stateLabelColor).not.toBe(dark.mainBkg);
+    expect(light.stateLabelColor).not.toBe(light.mainBkg);
+    // 分组容器缺省 = tertiaryColor(中灰块)
+    expect(dark.clusterBkg).toBe(DARK.bg);
+    expect(light.clusterBkg).toBe(LIGHT.bg);
+    // 复合状态内层缺省 = tertiaryColor
+    expect(dark.altBackground).toBe(DARK.surface);
+  });
+
+  it("flips mermaid's own dark derivation with the theme (cScale / rowOdd-Even)", async () => {
+    const { buildThemeVariables } = await import("./mermaidRenderer.js");
+    // 只在 themeVariables 里给这个键才生效 —— 缺省一律按浅色推
+    expect(buildThemeVariables(DARK).darkMode).toBe(true);
+    expect(buildThemeVariables(LIGHT).darkMode).toBe(false);
+    // 平涂,不要同色系渐变
+    expect(buildThemeVariables(DARK).useGradient).toBe(false);
+    // 暗色下关掉 neo look 的浅灰投影(深底上会变成每节点一道灰边);
+    // 浅色下保留 mermaid 默认的柔和投影
+    expect(buildThemeVariables(DARK).dropShadow).toBe("none");
+    expect(buildThemeVariables(LIGHT).dropShadow).toBeUndefined();
   });
 
   it("picks a readable actor/note palette in dark vs light", async () => {
@@ -321,6 +375,35 @@ describe("mermaidRenderer: sanitize + responsive", () => {
     expect(result.svg).toContain("max-width:100%");
     expect(result.svg).not.toContain("min-width");
     expect(result.svg).not.toMatch(/onclick=/i);
+  });
+});
+
+describe("mermaidRenderer: label contrast for author-styled nodes", () => {
+  // 回归:LLM 生成的图爱写 `style D fill:#fde68a`,而 mermaid 的标签字色只认
+  // 主题 token —— 深色主题下「白字压浅黄」1.2:1,整块读不出来。
+  it("picks the higher-contrast text color for a given fill", async () => {
+    const { labelColorOn, contrastRatio } = await import("./mermaidRenderer.js");
+    // 浅底 → 深字
+    expect(labelColorOn("rgb(253, 230, 138)")).toBe("#0a0a0f");
+    expect(labelColorOn("#fca5a5")).toBe("#0a0a0f");
+    // 深底 → 浅字
+    expect(labelColorOn("#1a1a2e")).toBe("#f8fafc");
+    expect(labelColorOn("rgba(18, 18, 26, 1)")).toBe("#f8fafc");
+    // 主题面(浅色主题的 surface)也要落到深字
+    expect(labelColorOn("#e2e8f0")).toBe("#0a0a0f");
+    // 结果必须真的达标,而不是只挑了个相对好的
+    expect(contrastRatio(labelColorOn("#fde68a")!, "#fde68a")!).toBeGreaterThan(4.5);
+    expect(contrastRatio(labelColorOn("#1a1a2e")!, "#1a1a2e")!).toBeGreaterThan(4.5);
+  });
+
+  it("bails out on fills it cannot read (none / gradients) so the theme token wins", async () => {
+    const { labelColorOn, contrastRatio, parseCssColor } = await import("./mermaidRenderer.js");
+    expect(labelColorOn("none")).toBeNull();
+    expect(labelColorOn("url(#gradient)")).toBeNull();
+    expect(parseCssColor("rgb(1, 2, 3)")).toEqual([1, 2, 3]);
+    expect(parseCssColor("#abc")).toEqual([170, 187, 204]);
+    expect(parseCssColor("var(--x)")).toBeNull();
+    expect(contrastRatio("#fff", "none")).toBeNull();
   });
 });
 

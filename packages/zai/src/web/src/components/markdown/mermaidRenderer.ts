@@ -127,15 +127,53 @@ function notifyAll(): void {
 
 // ---- theme → themeVariables ------------------------------------------------
 
-/** 相对亮度(0=黑,1=白);仅用于 mode 缺省时按 bg 推断明暗。 */
-function relativeLuminance(hex: string): number | null {
-  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return null;
-  let h = m[1]!;
-  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-  const rgb = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
-  if (rgb.some((c) => !Number.isFinite(c))) return null;
-  return (0.2126 * rgb[0]! + 0.7152 * rgb[1]! + 0.0722 * rgb[2]!) / 255;
+/** 相对亮度(0=黑,1=白);WCAG 定义,仅用于按底色挑文字色。 */
+function relativeLuminance(color: string): number | null {
+  const rgb = parseCssColor(color);
+  if (!rgb) return null;
+  const lin = rgb.map((v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * lin[0]! + 0.7152 * lin[1]! + 0.0722 * lin[2]!;
+}
+
+/** CSS 颜色 → [r,g,b](0-255)。支持 #rgb / #rrggbb / rgb() / rgba();解析不出返回 null。 */
+export function parseCssColor(color: string): [number, number, number] | null {
+  const c = color.trim().toLowerCase();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(c);
+  if (hex) {
+    let h = hex[1]!;
+    if (h.length === 3) h = h.split("").map((x) => x + x).join("");
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
+  }
+  const rgb = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/.exec(c);
+  if (!rgb) return null;
+  return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+}
+
+/** WCAG 对比度(1:1 ~ 21:1)。任一颜色解析不出返回 null。 */
+export function contrastRatio(a: string, b: string): number | null {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  if (la === null || lb === null) return null;
+  const [hi, lo] = la > lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** 深浅两个候选字色;与主题无关 —— 底是作者写死的,和当前主题没关系。 */
+const DARK_TEXT = "#0a0a0f";
+const LIGHT_TEXT = "#f8fafc";
+
+/**
+ * 给某个底色挑对比度更高的字色。底解析不出(如 `none` / `url(#grad)` 渐变)
+ * 返回 null,交给主题 token 决定。
+ */
+export function labelColorOn(fill: string, dark = DARK_TEXT, light = LIGHT_TEXT): string | null {
+  if (relativeLuminance(fill) === null) return null;
+  const onDark = contrastRatio(dark, fill) ?? 0;
+  const onLight = contrastRatio(light, fill) ?? 0;
+  return onLight >= onDark ? light : dark;
 }
 
 /** 主题是否为深色:优先用显式 mode,否则按 bg 亮度推断(解析不出则当浅色)。 */
@@ -154,60 +192,109 @@ function isDarkTheme(theme: MermaidTheme): boolean {
  *
  * 深浅色分别给值:序列图 actor、note、rect 色带在深色下用 theme.bg 兜底会
  * 看不见,所以 dark 走深一档的 surface。
+ *
+ * **文字色必须和它实际落在的底成对**(2026-10-14 修):mermaid base 主题
+ * 有一大批 token 缺省**派生自 primaryTextColor**(theme-base 的 updateColors
+ * 里清一色是 `this.x = this.x || this.primaryTextColor`,覆盖 nodeTextColor /
+ * actorTextColor / labelTextColor / stateLabelColor …)。而 primaryTextColor
+ * 本该只服务 accent 底(品牌橙是亮色,压深字),之前只覆盖了它 → 那批派生
+ * token 全跟着 accent 的反色走:暗色主题下 surface 底配近黑字、浅色主题下
+ * 配漂白字,两种主题的节点文字都读不出来。所以这里分两类文字色,凡是底是
+ * surface / 画布的文字 token 一律显式压回 onSurface,不再靠派生链。
  */
-export function buildThemeVariables(theme: MermaidTheme): Record<string, string> {
+export function buildThemeVariables(
+  theme: MermaidTheme,
+): Record<string, string | boolean> {
   const dark = isDarkTheme(theme);
+  // 两类文字色:onSurface 落在 surface/mainBkg/画布上;onAccent 落在品牌橙上
+  // —— 橙是亮色,只有深字压得住,与主题明暗无关。
+  const onSurface = theme.fg;
+  const onAccent = "#0a0a0f";
   return {
     // 画布
     background: theme.bg,
     mainBkg: theme.surface,
     secondBkg: dark ? theme.bg : theme.muted,
+    // 明暗派生开关:mermaid 只在 themeVariables 里认这个键(顶层的
+    // config.darkMode 不参与 base 主题推导),它决定 cScale* / rowOdd-Even /
+    // edgeLabelBackground 等一批 token 往哪边推;不给就一律按浅色推,暗色下
+    // ER / gitGraph / 多色 class 会拿到浅色系。
+    darkMode: dark,
+    // 节点填充保持平涂:缺省 useGradient 会拿主/次边框色拉渐变,同色系渐变在
+    // 小图里等于削弱文字与底的对比。
+    useGradient: false,
+    // flowchart 的 per-diagram 配置自带 look:"neo"(压过根配置的 classic),neo
+    // 给节点矩形挂的是近不透明的浅灰投影 —— 浅色主题下是正常投影,暗色主题下
+    // 等于在深底上给每个节点镶一道灰边(用户截图里那圈灰)。暗色下关掉。
+    ...(dark ? { dropShadow: "none" } : {}),
     // 线与字
     lineColor: theme.line,
-    textColor: theme.fg,
+    textColor: onSurface,
     // 节点
-    nodeBorder: theme.border,
-    mainColor: theme.fg,
+    nodeBorder: theme.line,
+    nodeTextColor: onSurface,
+    mainColor: onSurface,
     // 强调
     primaryColor: theme.accent,
     primaryBorderColor: theme.accent,
-    primaryTextColor: dark ? "#0a0a0f" : "#ffffff",
+    primaryTextColor: onAccent,
     // 次级 / 第三级配色(gantt / pie / quadrant 多系列)
     secondaryColor: dark ? theme.muted : theme.surface,
+    secondaryTextColor: onSurface,
     tertiaryColor: theme.muted,
+    tertiaryTextColor: onSurface,
+    // 标题 / 分组标签(cluster)落在画布上;缺省 titleColor 派生自
+    // tertiaryTextColor(tertiaryColor 的反色),暗色下是深棕,画布上读不出。
+    titleColor: onSurface,
+    // 分组容器:缺省 clusterBkg = tertiaryColor(一块中灰)/ clusterBorder 是它
+    // 的边框 —— 浅色下深灰底、暗色下浅灰底,都不是「容器」该有的样子。这里让
+    // 容器退成画布色 + 品牌橙描边,靠里面节点的填充把层次浮出来。
+    clusterBkg: theme.bg,
+    clusterBorder: theme.line,
+    // 边标签(labelBkg):缺省浅色下拿 secondaryColor、暗色下拿它再压暗 30%,
+    // 在暗色主题里是一块中灰药丸;压回节点同色,标签文字(onSurface)才压得住。
+    edgeLabelBackground: theme.surface,
     // 字体 —— 与 CODE_FONT_FAMILY 保持同一族,避免图内文字和代码块跳字体
     fontFamily:
       'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontSize: "14px",
     // 时序图
     actorBkg: theme.surface,
-    actorBorder: theme.border,
-    actorTextColor: theme.fg,
+    actorBorder: theme.line,
+    actorTextColor: onSurface,
     actorLineColor: theme.muted,
     signalColor: theme.fg,
-    signalTextColor: theme.fg,
+    signalTextColor: onSurface,
     labelBoxBkgColor: theme.surface,
-    labelBoxBorderColor: theme.border,
-    labelTextColor: theme.fg,
-    loopTextColor: theme.fg,
+    labelBoxBorderColor: theme.line,
+    labelTextColor: onSurface,
+    loopTextColor: onSurface,
     noteBkgColor: dark ? "#1f2937" : "#fffbeb",
     noteBorderColor: theme.border,
-    noteTextColor: theme.fg,
+    noteTextColor: onSurface,
     activationBkgColor: theme.muted,
     activationBorderColor: theme.border,
     // 类图
-    classText: theme.fg,
+    classText: onSurface,
     // 状态图
-    labelColor: theme.fg,
-    // 统计图 / 甘特
-    pie1: theme.accent,
-    pie2: theme.muted,
-    pie3: theme.fg,
+    labelColor: onSurface,
+    // 缺省 stateLabelColor = stateBkg(= mainBkg)—— 状态名被染成底色本身,
+    // 直接消失;显式压回 onSurface。
+    stateLabelColor: onSurface,
+    // 缺省 altBackground = tertiaryColor(中灰):复合状态/分隔条的内层在暗色
+    // 主题下会是整块亮灰。
+    altBackground: theme.surface,
+    // 统计图 / 甘特。pie1..3 不再手写 —— mermaid 由 primaryColor 派生 pie1、由
+    // secondaryColor / tertiaryColor 派生 pie2/3、再按色相轮转出 pie4..12,
+    // 手写的那版把 pie3 设成 textColor(浅色主题下几乎全黑的扇区)。
+    pieSectionTextColor: onAccent,
+    pieStrokeColor: theme.bg,
+    pieOuterStrokeColor: theme.border,
     todayLineColor: theme.accent,
     taskBkgColor: theme.surface,
     taskBorderColor: theme.border,
-    taskTextColor: theme.fg,
-    taskTextDarkColor: theme.fg,
+    taskTextColor: onSurface,
+    taskTextDarkColor: onSurface,
     taskTextLightColor: theme.bg,
     activeTaskBkgColor: theme.accent,
     activeTaskBorderColor: theme.accent,
@@ -243,6 +330,42 @@ export function sanitizeSvg(svg: string): string {
     .replace(FORBID_TAG_RE, "")
     .replace(ON_ATTR_RE, "")
     .replace(JS_HREF_RE, "");
+}
+
+// ---- 作者写死底色的节点:标签字色跟着底走 -----------------------------------
+//
+// `style X fill:#fde68a` / `classDef` 这类作者样式, mermaid 只打到节点**形状**
+// 上, 标签字色仍然走主题 token(nodeTextColor)。于是「浅底 + 主题的浅字」在深色
+// 主题下必然撞车:白字压浅黄 1.2:1, 整块读不出来 —— 而 LLM 生成的图很爱写这种
+// 硬编码底色(用户那张「三层静默」图就是 style D fill:#fde68a)。
+//
+// 渲染后按节点**自己的**底色核对标签字色, 只救对比度低于阈值的(>= 阈值说明是
+// 作者有意配的色, 不动);主题驱动的节点算出来就是主题那个色, 观感不变。
+
+/** 低于这个对比度就认为读不出来, 需要改字色。 */
+const MIN_LABEL_CONTRAST = 3;
+
+/**
+ * 校正渲染结果里各节点的标签字色。入参是已注入 SVG 的容器。
+ * 无 DOM/无布局能力的环境(happy-dom)下 `getComputedStyle` 拿不到 CSS 值,
+ * 会原样跳过 —— 真实浏览器验收兜底(见 MermaidBlock 的 layout effect)。
+ */
+export function adaptNodeLabelColors(root: HTMLElement): void {
+  if (typeof getComputedStyle !== "function") return;
+  root.querySelectorAll("g.node").forEach((node) => {
+    const shape = node.querySelector("rect, polygon, circle, ellipse, path");
+    if (!shape) return;
+    const fill = getComputedStyle(shape).fill;
+    if (relativeLuminance(fill) === null) return;
+
+    node.querySelectorAll("text").forEach((text) => {
+      const current = getComputedStyle(text).fill;
+      const ratio = contrastRatio(current, fill);
+      if (ratio !== null && ratio >= MIN_LABEL_CONTRAST) return;
+      const next = labelColorOn(fill);
+      if (next) text.style.fill = next;
+    });
+  });
 }
 
 // ---- responsive svg root ---------------------------------------------------
