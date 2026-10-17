@@ -7,6 +7,8 @@
 > 逐条对账结果是：**15 条已修 / 2 条部分修 / 5 条仍成立**。
 > 换言之 **本表有 17 条已经过时** —— 照着它修会修到已经修好的东西。
 > 对账文档同时记录了 2 条与本表重合的本场新发现（wb-004、wb-008）。
+>
+> ⚠️ **2026-10-17 补充**：本目录已新增两场 bug-hunt 比赛的产出，**含 7 条从未被任何静态审计扫到的新缺陷**，见下方「2026-10-17 bug-hunt 场新增」。另外对账结论本身也会过时 —— 上一届据对账认定已彻底修完的 `instance-supervisor-double-spawn`，本场实测发现其**删除路径仍未覆盖**。**判定「已知缺陷是否还活着」一律以当前源码为准。**
 
 命名沿用仓库约定 `YYYY-MM-DD-<topic>.md`。设计/取舍类文档在
 [`../superpowers/specs/`](../superpowers/specs/)，实施计划在
@@ -35,9 +37,33 @@
 > 同时出现在 `--by claude` 的 `wechat-memory-rotation-noop`（附带发现）与
 > `--by zai` 的 `weixin-media-unbounded`（主体）两篇中。
 
+## 2026-10-17 bug-hunt 场新增（7 条，**全部未修**）
+
+> 来源：[`bug-hunt-game-10-17/`](./bug-hunt-game-10-17/)（双人赛，`opencc` + `claude`，裁判 zai）
+> 终裁见 [`VERDICT.md`](./bug-hunt-game-10-17/VERDICT.md)，修复计划见 [`FIX-PLAN.md`](./bug-hunt-game-10-17/FIX-PLAN.md)。
+> **这 7 条的去重后根因只有 5 个簇，其中 3 条来自「上一届的修复本身」** —— 详见下方「本节必读」。
+
+| ID | 终裁 | 簇 | 标题 | 一句话 |
+|---|---|---|---|---|
+| **oc-002** | **S2/E3b** | A | `claude` provider 不在 `preferCliAgent` 枚举内 | `superTasks.ts:90` 加了 `claude`、`factorySettings.ts:65` 的 zod 枚举没同步；UI 下拉框照给、zod 拒收 → **保存必 400 且粘住**（一次失败连坐同批 4 项编辑全丢） |
+| **cl-003** | S3/E1 | B | `d66d09f5` 声称「一次收口」，实际三处解析器未迁 | `compat/permissions.ts:83`、`commands/userLoader.ts:26-28,39-40`、`ReplHistoryService.ts:162-164` 仍硬写 `homedir()/.zai`；**writer 迁了 reader 没迁 → 写 A 读 B** |
+| **cl-r1** | S3/E3b | B | tier-2 无条件读真实 `~/.claude/` 并回写实例目录 | `zaiSettingsCache.ts:161,166` 读用户真实配置，`:174-176` boot 回填再写进隔离目录 —— **不是读泄漏，是把真实 home 的配置复制进隔离实例** |
+| **oc-001** | S3/E3a | C | `starting` 窗口内 DELETE 跳过 `doStop` | `instanceSupervisor.ts:581` → 子进程从 supervisor 脱管，`shutdown():693` / `tickHeartbeat:592` 都只遍历 `entries.values()` 故看不见它 |
+| **oc-r1** | **S2** | D | manifest 撕裂读 → 整份清空 | `manifest.ts:79` 非原子写 + `:64-71` 裸 catch 返回空 manifest → 下一次写回把**所有插件**的 `extractedVersions` + `latestVersion` 一起抹掉 |
+| **cl-001** | S3/E3a | D | `updateCachedVersion` 覆盖掉 `extractedVersions` | `manifest.ts:106` 无 `...existing` 展开（同模块 `:132`/`:156` 两处都有）→ LRU prune 永久失效 |
+| **cl-002** | S3/E3a | E | `OfflineBuffer.setPort()` 全仓零调用 | per-child outbox 隔离从未发生；`enforceSizeCap` 的 FIFO 截断无归属概念 → 跨子实例驱逐。**需 `--aa` + 已 pairing + 50MB 溢出，三层门** |
+
+### 本节必读
+
+**① 3 条是「上一届的修复本身」留下的缺陷**（`oc-001` ← `5dedfe4d` 漏了 `doRemove`；`oc-002` ← `7c32e4da` 加 provider 漏了 zod 枚举；`cl-003` ← `d66d09f5` 声称一次收口实际漏三处）。这意味着**修它们是「把上一届说已修的修完」，不是加新功能**。
+
+**② 上一届还有一条从未修过的债：`wb-010`**（`WebFetchTool/utils.ts:304-306` 超时 fallback 裸 `fetch` 绕过 SSRF 守卫）。它**不在本场 7 条里**，裁判 2026-10-17 复核仍成立。**这是本仓库唯一一条已知 SSRF**，而 `7c32e4da` 之后网络面又扩了（AA 通道）。建议单列一次修复，不要继续挂。
+
+**③ 上一届「已修 16 条」的说法已被本场勘误推翻两条**，完整勘误见 [`bug-hunt-game-10-17/ERRETA.md`](./bug-hunt-game-10-17/ERRETA.md)。由此得到一条操作性教训：**不要用「文件被修复 commit 动过」推断「那条缺陷修完」** —— `instanceSupervisor.ts` 确实被 `5dedfe4d` 改过，但缺陷只修了一半。
+
 ## 未修复
 
-### 严重
+### 严重（2026-10-05 审计批次）
 
 | 日期 | 发现者 | 标题 | 一句话 |
 |------|--------|------|--------|
