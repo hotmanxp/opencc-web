@@ -17,8 +17,64 @@ import {
 import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { ssrfGuardedLookup } from '../../utils/hooks/ssrfGuard.js'
+import type * as undici from 'undici'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
+
+/**
+ * zai patch (2026-10-17, wb-010):超时 fallback 的出网管控。
+ *
+ * 主路径走 axios,带 `lookup: ssrfGuardedLookup`;这里的 fallback 是后来为绕开
+ * 「axios + 自定义 lookup 在 Bun/Node bundled 场景偶发挂死」补的,写的时候
+ * 没给它挂同样的守卫 —— 于是**同一威胁两条车道,只修了一条**。绕过可主动
+ * 构造:主路径挂死 → fallback 生效,此时私网地址能拿到响应,而主路径会拦。
+ *
+ * 修法是给 fallback 挂一个带同样 lookup 的 undici Agent 当 dispatcher。
+ * `undici` 本就是这个包的依赖(`utils/proxy.ts` / `utils/mtls.ts` 同样惰性
+ * require 它),不引入新依赖。
+ *
+ * **必须连 fetch 实现一起换,不能只挂 dispatcher。** Node 内建 `fetch` 用的是
+ * 内置那一份 undici,它的 Dispatcher 接口与 npm `undici@8` 不兼容 —— 把 npm
+ * 的 Agent 传进去会报 `invalid onRequestStart method`(实测),那等于把一个
+ * 安全洞换成了「fallback 恒失败」。故这里用 npm undici 自己的 `fetch`。
+ *
+ * **配了代理 / mTLS 时不接管**:此时全局 dispatcher 已被 `proxy.ts` 换成自定义
+ * agent,域名由代理侧解析,`lookup` 守卫在语义上不适用(主路径走 proxyAgent
+ * 时 axios 的 lookup 同样不生效);硬挂一个新的直连 Agent 反而会让这些用户
+ * 在 fallback 上彻底连不出去 —— 拿一个安全洞换一个新故障。
+ *
+ * **本守卫仍拦不住 IP 字面量 URL**(实测 `lookup` 被调 0 次:Node 的
+ * `net.connect` 对字面量跳过 DNS)。这是**主路径同样存在的老洞**,不属于
+ * wb-010,修它要另开一条:在进网络层之前先校验 `new URL(url).hostname`
+ * 是否是私网字面量。
+ *
+ * 惰性 import `proxy.js` / `mtls.js` 而非顶层 import:避免给 vendor bundle
+ * 新增可能成环的顶层边(构建全绿但只有 `import(dist)` 才炸的那类)。
+ */
+type GuardedFetch = { fetch: typeof fetch; dispatcher: undici.Dispatcher }
+
+let guardedFetch: GuardedFetch | null | undefined
+
+async function getGuardedFetch(): Promise<GuardedFetch | null> {
+  if (guardedFetch !== undefined) return guardedFetch
+  const [{ getProxyUrl }, { getMTLSConfig }] = await Promise.all([
+    import('../../utils/proxy.js'),
+    import('../../utils/mtls.js'),
+  ])
+  if (getProxyUrl() || getMTLSConfig()) {
+    guardedFetch = null
+    return null
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const undiciMod = require('undici') as typeof undici
+  guardedFetch = {
+    fetch: undiciMod.fetch as unknown as typeof fetch,
+    dispatcher: new undiciMod.Agent({
+      connect: { lookup: ssrfGuardedLookup },
+    }),
+  }
+  return guardedFetch
+}
 
 // Custom error classes for domain blocking
 class DomainBlockedError extends Error {
@@ -303,11 +359,16 @@ export async function getWithPermittedRedirects(
           error.message?.toLowerCase().includes('timeout')))
     if (isTimeoutLike && !signal.aborted) {
       try {
-        const fetchResponse = await fetch(url, {
+        // zai patch (2026-10-17, wb-010):挂上与主路径同一个 SSRF 守卫 ——
+        // 否则这条 fallback 是私网直取的旁路。详见 getGuardedFetch。
+        const guarded = await getGuardedFetch()
+        const doFetch = guarded ? guarded.fetch : fetch
+        const fetchResponse = await doFetch(url, {
           signal,
           redirect: 'manual',
           headers: axiosConfig.headers,
-        })
+          ...(guarded ? { dispatcher: guarded.dispatcher } : {}),
+        } as RequestInit)
         // Handle redirects manually
         if ([301, 302, 307, 308].includes(fetchResponse.status)) {
           const redirectLocation = fetchResponse.headers.get('location')

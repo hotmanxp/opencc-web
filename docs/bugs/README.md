@@ -66,7 +66,13 @@
 
 **② 裁判撤回了一条自己的裁定。** 原第 7 条 `cl-r1`（tier-2 无条件读真实 `~/.claude/` 并回写实例目录）被判 CONFIRMED S3/E3b，**修复阶段动手前被裁判自行撤回**：读代码时才发现 `paths.ts` 的边界声明明写「`~/.claude/*` 属别的工具，**不受 `ZAI_DATA_DIR` 管辖，不要为了「统一」把它们也改掉**」，且 `zaiSettingsCache.test.ts:58` 有 4 个用例正经断言这个行为。**那是刻意钉住的产品特性，不是漏网。** 完整勘误见 [`bug-hunt-game-10-17/ERRETA.md`](./bug-hunt-game-10-17/ERRETA.md) §三。
 
-**③ 上一届还有一条从未修过的债：`wb-010`**（`WebFetchTool/utils.ts:304-306` 超时 fallback 裸 `fetch` 绕过 SSRF 守卫）。裁判 2026-10-17 复核仍成立。**这是本仓库唯一一条已知 SSRF**，而 `7c32e4da` 之后网络面又扩了（AA 通道）。建议单列一次修复，不要继续挂。
+**③ 上一届还有一条从未修过的债：`wb-010`**（`WebFetchTool/utils.ts:304-306` 超时 fallback 裸 `fetch` 绕过 SSRF 守卫）—— ✅ **已修**（批 6，commit 见下）。这是本仓库唯一一条已知 SSRF，现已清零。
+
+> **wb-010 的修法不是「加个 dispatcher」那么简单，第一版是错的。** 两个坑都是实测撞出来的，不是读文档能避开的：
+> 1. **npm `undici@8` 的 `Agent` 不能传给 Node 内建 `fetch`** —— 内建 fetch 用的是内置那一份 undici，Dispatcher 接口不兼容，直接报 `invalid onRequestStart method`。**那等于把一个安全洞换成了「fallback 恒失败」。** 必须连 fetch 实现一起换成 npm undici 自己的 `fetch`。
+> 2. **守卫对 IP 字面量 URL 完全不生效**（实测 `lookup` 被调 0 次）—— Node 的 `net.connect` 对字面量跳过 DNS，`ssrfGuardedLookup` 里那段「已是字面量就直接校验」的分支在这条链路上是死代码。**这是主路径同样存在的老洞，不属于 wb-010**，要修得在进网络层之前先校验 `new URL(url).hostname` 是否是私网字面量。建议单列。
+>
+> 另：配了代理 / mTLS 时**故意不接管**这条 fallback —— 那时全局 dispatcher 已被 `proxy.ts` 换成自定义 agent，域名由代理侧解析，`lookup` 守卫语义上不适用（主路径走 proxyAgent 时 axios 的 lookup 同样不生效）；硬挂直连 Agent 会让这些用户彻底连不出去。
 
 **③ 上一届「已修 16 条」的说法已被本场勘误推翻两条**，完整勘误见 [`bug-hunt-game-10-17/ERRETA.md`](./bug-hunt-game-10-17/ERRETA.md)。由此得到一条操作性教训：**不要用「文件被修复 commit 动过」推断「那条缺陷修完」** —— `instanceSupervisor.ts` 确实被 `5dedfe4d` 改过，但缺陷只修了一半。
 
