@@ -25,11 +25,17 @@ export interface FsContextMenuProps {
   onRequestCreate?: (target: { type: 'file' | 'dir'; dir: string }) => void;
 }
 
-async function postFsCommand(endpoint: 'reveal' | 'open-terminal' | 'delete', path: string): Promise<void> {
+async function postFsCommand(
+  endpoint: 'reveal' | 'open-terminal' | 'delete',
+  path: string,
+  // wb-012:服务端判断「是不是目录」不能靠 `path.endsWith('/')` —— 目录条目的
+  // path 由 name 拼成,结构上没有尾斜杠。把本组件已经持有的 kind 传下去。
+  kind?: 'file' | 'dir',
+): Promise<void> {
   const res = await fetch(`/api/fs/${endpoint}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path, ...(kind ? { kind } : {}) }),
   });
   const body = (await res.json().catch(() => ({ ok: false, error: 'parse' }))) as { ok: boolean; error?: string };
   if (!res.ok || !body.ok) {
@@ -210,7 +216,7 @@ export function FsContextMenu(props: FsContextMenuProps): JSX.Element | null {
       key: 'open-terminal',
       'data-testid': 'fs-cm-open-terminal',
       label: '在终端中打开',
-      onClick: () => postFsCommand('open-terminal', path).then(onClose),
+      onClick: () => postFsCommand('open-terminal', path, kind).then(onClose),
     },
     { type: 'divider' as const },
     {

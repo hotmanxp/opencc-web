@@ -952,6 +952,26 @@ type PendingPrompt = {
 const sessionQueues = new Map<string, PendingPrompt[]>()
 const sessionRunning = new Set<string>()
 
+/**
+ * wb-011(2026-10-16):已被 DELETE 的 sid。
+ *
+ * core 侧 `markSessionDeleted` 只护**写端**(append / patchSession /
+ * appendEntry 三处),它挡得住 transcript 复活,却挡不住**调度端**:会话被删
+ * 后,正在跑的那一轮照样走完 `runNextInQueue` 的 finally,无条件
+ * `void runNextInQueue(sid)` 再拉起一轮完整 LLM 调用去消费排队消息 ——
+ * 写进来的东西全被 core 丢弃,token 白烧。已知条目 #11 的文档自己就把
+ * 「runNextInQueue 需加守卫」列为第二道防线待办,这里是它的未完成尾巴。
+ *
+ * 与 core 的 `deletedSessions` 是**同一件事的两个面**:core 那边管写,这边
+ * 管调度。arm 点同在 DELETE 路由(`markSessionDeleted` 由
+ * `store.remove` 触发,本集合由路由显式 add),不存在「写入端走一处、
+ * 失效端走另一处」的分裂。
+ *
+ * 只增不删,理由同 core 的 deletedSessions:同 sid 不会被复用(新会话用
+ * 新 sid),条目本身只是一串短字符串。
+ */
+const deletedSessions = new Set<string>()
+
 // ---------------------------------------------------------------------------
 // 会话级 429 冷却(zai patch 2026-08-08)
 // ---------------------------------------------------------------------------
@@ -991,6 +1011,16 @@ export function __clearSessionRunningForTests(sessionId: string): void {
   sessionRunning.delete(sessionId)
 }
 
+/**
+ * 测试 seam:清空所有 session 的运行标记 / 排队车道 / 已删集合。模块级
+ * Map 跨用例残留会让「这一轮到底有没有起新 turn」的断言失真。
+ */
+export function __resetSessionRunningForTests(): void {
+  sessionRunning.clear()
+  sessionQueues.clear()
+  deletedSessions.clear()
+}
+
 /** 判断错误消息是否命中 rate-limit(duck-type,兼容 MiniMax status 不可靠)。 */
 export function isRateLimitErrorMessage(message: unknown): boolean {
   if (typeof message !== 'string') return false
@@ -1018,6 +1048,16 @@ function emitQueueChanged(sid: string): void {
 
 async function runNextInQueue(sid: string): Promise<void> {
   if (sessionRunning.has(sid)) return
+
+  // wb-011:已删会话不再起新 turn。放在入口而不是 `:1062` 的 finally 前
+  // —— 三个调用点(wake handler / `wasIdle` 入队 / finally)共用同一个
+  // 入口守卫,inbox 车道(子 agent <task-notification>)也就一并挡住了。
+  // 顺带把排队车道丢掉,否则条目永远滞留(删除会话后没人会再 cancel 它)。
+  if (deletedSessions.has(sid)) {
+    sessionQueues.delete(sid)
+    emitQueueChanged(sid)
+    return
+  }
 
   const httpCmd = nextHttpPrompt(sid)
   // zai patch (2026-10-02, subagent-notification-loss): 原来是无条件
@@ -2239,6 +2279,11 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
     // 把刚 rm 掉的 transcript 重新写回来,被删的会话自己复活。
     abortSessionController(req.params.id, 'session_deleted')
     disposeSessionInbox(req.params.id)
+    // wb-011:调度端的 stale 守卫,必须与 store.remove 里的 markSessionDeleted
+    // (core 写端守卫)同一时刻 arm —— abort 是异步生效的,这一轮仍会走完
+    // finally,而 finally 会 `void runNextInQueue(sid)`。没有这道闸,已删
+    // 会话会被队列车道再拉起一轮完整 LLM 调用,写进来的内容全被 core 丢弃。
+    deletedSessions.add(req.params.id)
     await store.remove(req.params.id, { cwd: ctx.cwd })
     // 同时清掉 per-session cwd map(防内存泄漏 + 防止 stale data)
     CwdStore.delete(req.params.id)

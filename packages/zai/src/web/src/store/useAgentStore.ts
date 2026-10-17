@@ -1261,6 +1261,14 @@ export function createAgentStore() {
       return {
         messages: [],
         status: 'idle',
+        // cc-003:清屏同样要清 pendingAsk。本 reducer 把 status 置 'idle',
+        // 这一步**直接解除 isBusy 门禁** —— 用户不必按 Esc 就能切走
+        // (触发点是 /clear,AgentInputBox.tsx:597/1132 均无 isBusy 前置;
+        // 服务端 clear.ts:23 确实先 abortAgentSession 再清 transcript,
+        // 即服务端接受流式期间的 /clear)。所以这不是竞态,是确定触发:
+        // /clear 之后 pendingAsk 若留着,就是一个已解锁会话里挂着的
+        // 无人可答的阻塞卡片,输入框直接锁死。
+        pendingAsk: null,
         // 重置 stream block 状态: 切会话/清屏 后, 工具边界计数器也得回到 0,
         // 否则新会话的 text 段会被旧会话遗留的 textSegmentRev 错位归并.
         textSegmentRev: 0,
@@ -1331,7 +1339,12 @@ export function createAgentStore() {
     // 那样所有 tab 都会收到任意会话的压缩态 —— 后台会话压缩时, 正在看
     // 别的会话的 tab 也会弹出"正在压缩…", 是新的串扰。(a) 在视图切换
     // 这一侧就地复位, 语义更准: 换了会话就不该显示上一个会话的压缩态。
-    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0, lastRuntimeTurnIndex: null, lastSeqBySession: {}, compacting: false })
+    // cc-003:pendingAsk 必须一起清。上面这一长串清了 8 个 sid-scoped 的键,
+    // 独缺 pendingAsk —— 于是 A 的 AskUserQuestion 阻塞卡片会跟着渲染进 B,
+    // 并且 `AgentInputBox.tsx:282-283` 的
+    // `sendBlocked = pendingAsk?.status === 'pending'` 把 **B** 的输入框锁死:
+    // 用户在 B 里发不出任何消息,也没法解释为什么。
+    set({ sessionId, messages: [], pendingAsk: null, textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0, lastRuntimeTurnIndex: null, lastSeqBySession: {}, compacting: false })
     // 同步 URL ?sid=..., 让刷新/分享链接落到同一会话.
     writeUrlSid(sessionId)
     // ★ Cold-start 快照补全: 切会话时 fire-and-forget 拉一次 4 字段快照,
@@ -1415,6 +1428,8 @@ export function createAgentStore() {
         activeSessionId: null,
         messages: [],
         status: 'idle',
+        // cc-003:新建会话同样要清 pendingAsk(同 setCurrentSession)。
+        pendingAsk: null,
         textSegmentRev: 0,
         segmentedToolUseIds: {},
         sendSeq: 0,
@@ -1619,6 +1634,20 @@ export function createAgentStore() {
       const data = await res.json()
       const transcript = data.transcript
       if (!transcript) return
+      // cc-004:`await` 之后不得用函数参数 sessionId 覆写 store。用户在响应
+      // 回来之前切走了会话,而 setCurrentSession 已经把 URL 写成新 sid ——
+      // 这里再写回去,URL 与界面就分叉了(刷新后跳回旧会话)。
+      //
+      // 判据是「**别人**换过会话」,不是「值不相等」:
+      //   - 冷启动首屏:`loadSessions:1311` 先 `set({sessionId})` 再
+      //     `await loadTranscript`,此刻 cur === sessionId,正常放行;
+      //   - 慢响应窗口:cur 已是别的 sid → 丢弃。
+      // 写成 `cur !== sessionId` 会把上面第一条也误杀,首屏直接空白。
+      // `cur !== null` 这半句是刻意的:还没有任何会话时(cur === null)仍
+      // 放行 —— 此时不存在「用户切走了」这回事,把首个会话的 transcript
+      // 一起挡掉会让首屏空白。
+      const cur = get().sessionId
+      if (sessionId !== cur && cur !== null) return
       // 把 transcript messages 转换成 AgentMessage 格式 (v2 ContentBlock[] + v1 旧 fallback)
       const messages = loadTranscriptMessages(sessionId, (transcript.messages ?? []) as any[])
       set({

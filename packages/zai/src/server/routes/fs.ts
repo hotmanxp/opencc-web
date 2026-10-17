@@ -1494,10 +1494,26 @@ fsRouter.post('/fs/open-terminal', async (req, res) => {
     res.status(status).json({ ok: false, error: safe.error } satisfies FsAck);
     return;
   }
+  // wb-012:目录判定不能靠字符串形状。`/fs/list` 的目录条目 path 由 name 拼成
+  // (`:396` 的 relPath.split(sep).join('/')),**结构上不可能带尾斜杠**,所以
+  // `rel.endsWith('/')` 恒为 false —— 在目录上右键「在终端中打开」永远开在
+  // 父目录。判据改成两条,都不依赖字符串形状:
+  //   1. 调用方给了 `kind` 就采信它(前端 FsContextMenu / openFilePath 都持有);
+  //   2. 没给就 stat 一次 —— 服务端自己就是权威,不必猜。
+  // 两条都拿不到(路径不存在等)才退回「按文件处理」,即取父目录,与旧行为一致。
+  const kind = req.body?.kind === 'dir' || req.body?.kind === 'file' ? req.body.kind : undefined;
+  let isDir = kind === 'dir';
+  if (!kind) {
+    try {
+      isDir = (await stat(safe.abs)).isDirectory();
+    } catch {
+      isDir = false;
+    }
+  }
   // For files, open terminal at the parent directory (Linux/Win fallback
   // wouldn't understand a file arg). On macOS, `open -a Terminal <dir>`
   // also wants a directory, so we always compute the dir.
-  const absDir = rel && !rel.endsWith('/')
+  const absDir = !isDir
     ? safe.abs.substring(0, safe.abs.lastIndexOf(sep))
     : safe.abs;
   const { cmd, buildArgs } = PLATFORM_COMMANDS.openTerminal;

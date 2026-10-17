@@ -44,7 +44,7 @@ import { getSessionMap } from './sessionMap.js';
 import { AaNetworkError, AaServerError } from './pairing.js';
 import { upsertTimelineItem } from './rpc.js';
 import { nextTimelineOrderSeq } from './timelineOrder.js';
-import { getNotice, listNoticesForSession, resolveNotice } from './noticeStore.js';
+import { getNotice, listNoticesForSession, resolveNotice, resolveNoticesForZaiSession } from './noticeStore.js';
 import { AaTerminalRegistry, type AaTerminalCreateParams } from './terminal.js';
 import { logHttp } from '../accessLog.js';
 import {
@@ -2023,7 +2023,14 @@ export class ReverseDispatch {
   private async handleInterrupt(p: z.infer<typeof InterruptParamsSchema>): Promise<unknown> {
     const childPort = await this.resolveChildPort(p.sessionId);
     const zaiSid = await this.resolveZaiSessionId(childPort, p.sessionId);
-    return forwardToChild(childPort, 'interrupt', zaiSid, {});
+    const result = await forwardToChild(childPort, 'interrupt', zaiSid, {});
+    // oc-003(2026-10-16):中断已经送达,该 zai 会话下挂着的 ask 全部作废,
+    // 对应的 notice 卡片必须一起回收 —— 否则它只能靠用户在 AA 侧误点才被
+    // `resolveNotice` 清掉,而那一次误点会把一个子进程已经没有 pending 的
+    // toolUseId forward 回去。清在转发**之后**:转发失败说明中断没生效,
+    // 此时卡片仍应留着。
+    resolveNoticesForZaiSession(zaiSid);
+    return result;
   }
 
   /**
