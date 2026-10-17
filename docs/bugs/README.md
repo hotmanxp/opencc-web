@@ -42,19 +42,23 @@
 > 来源：[`bug-hunt-game-10-17/`](./bug-hunt-game-10-17/)（双人赛，`opencc` + `claude`，裁判 zai）
 > 终裁见 [`VERDICT.md`](./bug-hunt-game-10-17/VERDICT.md)，修复计划见 [`FIX-PLAN.md`](./bug-hunt-game-10-17/FIX-PLAN.md)。
 > **其中 3 条来自「上一届的修复本身」** —— 详见下方「本节必读」。
+>
+> **修复进度：5/6 已修，仅 `cl-002` 未动**（S3 + 三层门，离默认用户最远，见下表）。
 
 | ID | 终裁 | 簇 | 标题 | 一句话 |
 |---|---|---|---|---|
-| **oc-002** | **S2/E3b** | A | `claude` provider 不在 `preferCliAgent` 枚举内 | `superTasks.ts:90` 加了 `claude`、`factorySettings.ts:65` 的 zod 枚举没同步；UI 下拉框照给、zod 拒收 → **保存必 400 且粘住**（一次失败连坐同批 4 项编辑全丢） |
-| **cl-003** | S3/E1 | B | `d66d09f5` 声称「一次收口」，实际三处解析器未迁 | `compat/permissions.ts:83`、`commands/userLoader.ts:26-28,39-40`、`ReplHistoryService.ts:162-164` 仍硬写 `homedir()/.zai`；**writer 迁了 reader 没迁 → 写 A 读 B** — ✅ **已修** |
-| **oc-001** | S3/E3a | C | `starting` 窗口内 DELETE 跳过 `doStop` | `instanceSupervisor.ts:581` → 子进程从 supervisor 脱管，`shutdown():693` / `tickHeartbeat:592` 都只遍历 `entries.values()` 故看不见它 |
-| **oc-r1** | **S2** | D | manifest 撕裂读 → 整份清空 | `manifest.ts:79` 非原子写 + `:64-71` 裸 catch 返回空 manifest → 下一次写回把**所有插件**的 `extractedVersions` + `latestVersion` 一起抹掉 |
-| **cl-001** | S3/E3a | D | `updateCachedVersion` 覆盖掉 `extractedVersions` | `manifest.ts:106` 无 `...existing` 展开（同模块 `:132`/`:156` 两处都有）→ LRU prune 永久失效 |
+| **oc-002** | **S2/E3b** | A | `claude` provider 不在 `preferCliAgent` 枚举内 | `superTasks.ts:90` 加了 `claude`、`factorySettings.ts:65` 的 zod 枚举没同步；UI 下拉框照给、zod 拒收 → **保存必 400 且粘住**（一次失败连坐同批 4 项编辑全丢）— ✅ **已修** `3faef74d`（取值域收敛到 `@shared/cliAgents` 单一真相源） |
+| **cl-003** | S3/E1 | B | `d66d09f5` 声称「一次收口」，实际三处解析器未迁 | `compat/permissions.ts:83`、`commands/userLoader.ts:26-28,39-40`、`ReplHistoryService.ts:162-164` 仍硬写 `homedir()/.zai`；**writer 迁了 reader 没迁 → 写 A 读 B** — ✅ **已修** `707b0674` |
+| **oc-001** | S3/E3a | C | `starting` 窗口内 DELETE 跳过 `doStop` | `instanceSupervisor.ts:581` → 子进程从 supervisor 脱管，`shutdown():693` / `tickHeartbeat:592` 都只遍历 `entries.values()` 故看不见它 — ✅ **已修** `563e0803`（上一届 wb-004 残留） |
+| **oc-r1** | **S2** | D | manifest 撕裂读 → 整份清空 | `manifest.ts:79` 非原子写 + `:64-71` 裸 catch 返回空 manifest → 下一次写回把**所有插件**的 `extractedVersions` + `latestVersion` 一起抹掉 — ✅ **已修** `cfd4c9d9`（改原子写 + 损坏改抛错） |
+| **cl-001** | S3/E3a | D | `updateCachedVersion` 覆盖掉 `extractedVersions` | `manifest.ts:106` 无 `...existing` 展开（同模块 `:132`/`:156` 两处都有）→ LRU prune 永久失效 — ✅ **已修** `cfd4c9d9`（同批） |
 | **cl-002** | S3/E3a | E | `OfflineBuffer.setPort()` 全仓零调用 | per-child outbox 隔离从未发生；`enforceSizeCap` 的 FIFO 截断无归属概念 → 跨子实例驱逐。**需 `--aa` + 已 pairing + 50MB 溢出，三层门** |
 
 ### 本节必读
 
-**① 3 条是「上一届的修复本身」留下的缺陷**（`oc-001` ← `5dedfe4d` 漏了 `doRemove`；`oc-002` ← `7c32e4da` 加 provider 漏了 zod 枚举；`cl-003` ← `d66d09f5` 声称一次收口实际漏三处）。这意味着**修它们是「把上一届说已修的修完」，不是加新功能**。
+**① 3 条是「上一届的修复本身」留下的缺陷**（`oc-001` ← `5dedfe4d` 漏了 `doRemove`；`oc-002` ← `7c32e4da` 加 provider 漏了 zod 枚举；`cl-003` ← `d66d09f5` 声称一次收口实际漏三处）。这意味着**修它们是「把上一届说已修的修完」，不是加新功能**。三条现已全部修完。
+
+**④ 修 `oc-002` 时顺带发现：`7c32e4da` 留了一条红测试** —— 它加了 `claude` 却没更新 `superTasks.factorySettings.test.ts` 的断言，之后 **6 个 commit 没人跑过那个文件**（AGENTS.md 要求跑直接受影响的文件，`superTasks.ts` 正是），于是它一直红着。修 `oc-002` 时一并修好并改成跟随真相源。**这条本身就是「修复本身是新排查面」的又一例：上一届的漏不只在产品代码里，也在它的验证里。**
 
 **② 裁判撤回了一条自己的裁定。** 原第 7 条 `cl-r1`（tier-2 无条件读真实 `~/.claude/` 并回写实例目录）被判 CONFIRMED S3/E3b，**修复阶段动手前被裁判自行撤回**：读代码时才发现 `paths.ts` 的边界声明明写「`~/.claude/*` 属别的工具，**不受 `ZAI_DATA_DIR` 管辖，不要为了「统一」把它们也改掉**」，且 `zaiSettingsCache.test.ts:58` 有 4 个用例正经断言这个行为。**那是刻意钉住的产品特性，不是漏网。** 完整勘误见 [`bug-hunt-game-10-17/ERRETA.md`](./bug-hunt-game-10-17/ERRETA.md) §三。
 
