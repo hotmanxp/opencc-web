@@ -53,9 +53,11 @@ function make401Error() {
 
 async function setupMockHome() {
   tmpHomeBox.path = mkdtempSync(join(tmpdir(), 'zai-mc-test-'))
-  mkdirSync(join(tmpHomeBox.path, '.zai'), { recursive: true })
+  // zai patch (2026-10-16, oc-001):seed 目标改为 ZAI_DATA_DIR 本身 ——
+  // settings.json 现在只从该目录读(此前靠 homedir() 兜住 <home>/.zai)。
+  mkdirSync(process.env.ZAI_DATA_DIR ?? tmpHomeBox.path, { recursive: true })
   writeFileSync(
-    join(tmpHomeBox.path, '.zai', 'settings.json'),
+    join(process.env.ZAI_DATA_DIR ?? tmpHomeBox.path, 'settings.json'),
     JSON.stringify({
       env: {
         ANTHROPIC_AUTH_TOKEN: 'test-key',
@@ -248,7 +250,7 @@ describe('resolveProviderForModel — apiKeyEnv resolution', () => {
   // and our per-test env overrides would be silently ignored.
   async function primeCache(env: Record<string, string>) {
     writeFileSync(
-      join(tmpHomeBox.path, '.zai', 'settings.json'),
+      join(process.env.ZAI_DATA_DIR ?? tmpHomeBox.path, 'settings.json'),
       JSON.stringify({ env }),
     )
     const cacheMod = await import('../../src/server/services/zaiSettingsCache.js')
