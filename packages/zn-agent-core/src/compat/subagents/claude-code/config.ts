@@ -16,13 +16,17 @@ import {
  * Mirrors the codex provider's config schema (zod-validated; documented
  * in `docs/superpowers/specs/2026-08-21-zai-subagent-codex-provider-design.md`).
  * `command` here is the explicit CLI binary path — usually a plain
- * `opencc` is fine, but staging may pin to a specific build.
+ * `claude` is fine, but staging may pin to a specific build.
+ *
+ * zai patch (2026-10-17): 默认 `command` 由 `'opencc'` 改为 `'claude'` ——
+ * 本 provider 现在真的 spawn Claude Code CLI。opencc 二进制由
+ * `../opencc/` 那个同名协议的 provider 负责,两者可并存。
  */
 export const claudeCodeConfigSchema = z.object({
   /** Master switch. */
   enabled: z.boolean().default(false),
-  /** Binary on PATH. Defaults to `opencc` (the canonical CLI). */
-  command: z.string().min(1).default('opencc'),
+  /** Binary on PATH. Defaults to `claude` (the canonical Claude Code CLI). */
+  command: z.string().min(1).default('claude'),
   /** Args tail after `command`. Default = `['--print', '--output-format', 'stream-json']`. */
   args: z
     .array(z.string().min(1))

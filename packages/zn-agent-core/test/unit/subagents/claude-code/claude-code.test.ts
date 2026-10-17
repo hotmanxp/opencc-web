@@ -10,7 +10,10 @@ describe('claude-code/config.parseClaudeCodeConfig', () => {
   it('returns all defaults on empty input', () => {
     const cfg = parseClaudeCodeConfig({})
     expect(cfg.enabled).toBe(false)
-    expect(cfg.command).toBe('opencc')
+    // zai patch (2026-10-17): 默认 command 由 'opencc' 改为 'claude' ——
+    // 本 provider 现在真的 spawn Claude Code CLI。opencc 二进制改由
+    // `compat/subagents/opencc/` 那个 provider 负责(同协议,另一注册名)。
+    expect(cfg.command).toBe('claude')
     expect(cfg.args).toEqual(['--print', '--output-format', 'stream-json'])
     expect(cfg.outputFormat).toBe(CLAUDE_OUTPUT_FORMAT.streamJson)
     expect(cfg.permissionMode).toBe(CLAUDE_PERMISSION_MODE.bypassPermissions)

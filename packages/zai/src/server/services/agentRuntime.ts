@@ -582,7 +582,7 @@ export function hasActiveQuery(sessionId: string): boolean {
  * subagent config object.
  */
 async function readSubagentConfigSafe(
-  name: 'opencc' | 'dsh' | 'opencode',
+  name: 'opencc' | 'claude' | 'dsh' | 'opencode',
 ): Promise<unknown | undefined> {
   try {
     const settings = await readZaiSettings()
@@ -661,8 +661,11 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   try {
     const subagentMod = await import('@zn-ai/zn-agent-core')
     const applyClaude = (subagentMod as unknown as {
-      applyClaudeCodeProvider?: (registry: unknown, config?: unknown) => void
+      applyClaudeCodeProvider?: (registry: unknown, config?: unknown) => (() => void) | undefined
     }).applyClaudeCodeProvider
+    const applyOpencc = (subagentMod as unknown as {
+      applyOpenccProvider?: (registry: unknown, config?: unknown) => (() => void) | undefined
+    }).applyOpenccProvider
     const applyDsh = (subagentMod as unknown as {
       applyDshProvider?: (registry: unknown, config?: unknown) => (() => void) | undefined
     }).applyDshProvider
@@ -681,14 +684,31 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       )
     } else {
       const registry = getSubagentRegistry()
-      if (typeof applyClaude === 'function') {
-        applyClaude(
-          registry,
-          await readSubagentConfigSafe('opencc'),
-        )
+      // zai patch (2026-10-17): claude 与 opencc 是**两个** provider。
+      //   - opencc: 随 zai 一起装的 CLI,无条件注册。
+      //   - claude: 需用户自行安装 Claude Code 并登录,按
+      //     `settings.subagents.claude.enabled` 开关注册(与 dsh/opencode 同款)。
+      // 此前只有 `applyClaudeCodeProvider` 一个入口,且它注册名就叫 `opencc`、
+      // 实际 spawn opencc 二进制 —— 真正的 Claude CLI 根本无法启用
+      // (registry 对重名直接 throw)。
+      if (typeof applyOpencc === 'function') {
+        const openccDisposer = applyOpencc(registry, await readSubagentConfigSafe('opencc'))
+        if (typeof openccDisposer === 'function') {
+          subagentProviderDisposers.push(openccDisposer)
+        }
       } else {
         console.warn(
-          '[initAgentRuntime] opencc (claude-code) subagent symbols missing — did you forget to rebuild core?',
+          '[initAgentRuntime] opencc subagent symbols missing — did you forget to rebuild core?',
+        )
+      }
+      if (typeof applyClaude === 'function') {
+        const claudeDisposer = applyClaude(registry, await readSubagentConfigSafe('claude'))
+        if (typeof claudeDisposer === 'function') {
+          subagentProviderDisposers.push(claudeDisposer)
+        }
+      } else {
+        console.warn(
+          '[initAgentRuntime] claude subagent symbols missing — did you forget to rebuild core?',
         )
       }
       const dshConfig = await readSubagentConfigSafe('dsh')

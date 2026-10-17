@@ -83,8 +83,11 @@ function guarded(fn: AsyncHandler): AsyncHandler {
   }
 }
 
-/** cliAgent provider 白名单(注册/探测端点共用;向导架构可扩展)。 */
-const CLI_AGENT_NAMES = ['opencc', 'dsh', 'opencode'] as const
+/** cliAgent provider 白名单(注册/探测端点共用;向导架构可扩展)。
+ *  zai patch (2026-10-17): 加 `claude` —— Claude Code CLI 与 opencc 同协议,
+ *  但注册名与二进制都不同(见 compat/subagents/{claude-code,opencc}/)。
+ *  白名单同时决定 `/spawn-agents` 的探测与 `/spawn-agents/:name/register`。 */
+const CLI_AGENT_NAMES = ['opencc', 'claude', 'dsh', 'opencode'] as const
 
 /** `which <cmd>` 探测全局命令。失败/未找到 → found=false。 */
 async function whichProbe(cmd: string): Promise<{ found: boolean; path: string | null }> {

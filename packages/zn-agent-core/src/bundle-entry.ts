@@ -425,7 +425,13 @@ export {
 // 握手在无人值守下失败);`compat/subagents/codex/` 模块保留,修复后
 // 可在此重新导出 apply。
 export * from './compat/subagents/index.js'
+// zai patch (2026-10-17): claude / opencc 拆成两个 provider。
+// `applyClaudeCodeProvider` 注册 `name:'claude'`(spawn `claude` CLI,按
+// settings.subagents.claude.enabled 开关);`applyOpenccProvider` 注册
+// `name:'opencc'`(spawn `opencc` CLI,无条件注册 —— 它随 zai 一起装)。
+// 二者 wire 协议相同,共用 claude-code/ 那套 run / wire / result。
 export { apply as applyClaudeCodeProvider } from './compat/subagents/claude-code/index.js'
+export { apply as applyOpenccProvider } from './compat/subagents/opencc/index.js'
 // zai patch (2026-08-31): dsh (deepseek-harness) provider — apply registers
 // only when `settings.subagents.dsh.enabled === true` (returns the
 // unregister disposer, or undefined when disabled).

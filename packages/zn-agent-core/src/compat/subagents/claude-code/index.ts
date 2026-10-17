@@ -33,11 +33,23 @@ import { startClaudeCodeRun } from './run.js'
  * Installation, login, model selection, settings, permission semantics,
  * MCP servers, and session persistence are native Claude Code concerns
  * and are NOT touched here.
+ *
+ * ── zai patch (2026-10-17) ──────────────────────────────────────────
+ * 本 provider 原先注册名是 `'opencc'`、默认 `command` 也是 `'opencc'` ——
+ * 目录叫 claude-code,跑的却是 opencc 二进制。二者不能并存:
+ * `SubagentRegistry.registerProvider` 对重名直接 throw(`PROVIDER_ALREADY_
+ * REGISTERED`),所以无法既当 claude provider 又保留 opencc。
+ *
+ * 现在按二进制真正拆开:
+ *   - 本类 → `name: 'claude'`,默认 command `claude`(按配置开关注册)
+ *   - `../opencc/` → `name: 'opencc'`,默认 command `opencc`(无条件注册)
+ * wire 协议不变 —— opencc CLI 与 Claude Code CLI 同协议
+ * (`--print --output-format stream-json`),所以两边共用同一套解析。
  */
 export class ClaudeCodeProvider implements SubagentProvider {
-  readonly name = 'opencc'
+  readonly name = 'claude'
   readonly description =
-    "Delegate a one-shot task to a fresh OpenCC CLI session (independent process; no parent context). Use when you want a separate OpenCC context with the CLI's native tools for a standalone task."
+    "Delegate a one-shot task to a fresh Claude Code CLI session (independent process; no parent context). Use when you want a separate Claude context with the CLI's native tools for a standalone task."
   readonly inheritsParentContext = false
   readonly capabilities: SubagentCapabilities = NO_START_CAPABILITIES
 
@@ -58,20 +70,25 @@ export class ClaudeCodeProvider implements SubagentProvider {
   }
 }
 
-/** Default provider config used when `apply` is called without a config —
- * matches "feature off by default" via `enabled: false`.
- */
-const DEFAULT_CONFIG: ClaudeCodeConfig = safeParseClaudeCodeConfig({})
-
 /**
- * Register the claude-code provider under the registry's `'opencc'` name.
+ * Register the claude provider under the registry's `'claude'` name.
  *
- * Idempotent: the registry itself rejects duplicate-name registration.
+ * Config-gated (2026-10-17): spawning a real `claude` child requires an
+ * operator-installed Claude Code CLI and its own login, so `apply` is a
+ * no-op unless `config.enabled === true` — same policy as `dsh` / `opencode`.
+ * Previously this registered unconditionally, which was fine while it
+ * pointed at `opencc` (the default binary); now that it means the actual
+ * Claude CLI, an ungated registration would advertise a provider that
+ * cannot run on machines without Claude Code installed.
+ *
+ * Returns the unregister disposer when it registers, `undefined` when it
+ * does not (so callers can conditionally track it).
  */
-export function apply(registry: SubagentRegistry, config?: unknown): void {
-  const resolved: ClaudeCodeConfig =
-    config === undefined ? DEFAULT_CONFIG : parseClaudeCodeConfig(config)
-  registry.registerProvider(new ClaudeCodeProvider(resolved))
+export function apply(registry: SubagentRegistry, config?: unknown): (() => void) | undefined {
+  if (config === undefined) return undefined
+  const resolved: ClaudeCodeConfig = parseClaudeCodeConfig(config)
+  if (!resolved.enabled) return undefined
+  return registry.registerProvider(new ClaudeCodeProvider(resolved))
 }
 
 export {
