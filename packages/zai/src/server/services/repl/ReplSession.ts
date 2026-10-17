@@ -145,7 +145,21 @@ export class ReplSession extends EventEmitter {
       const shell = IS_WIN32
         ? await resolveWindowsShell()
         : { cmd: 'sh', prefixArgs: ['-c'] as string[] }
-      child = spawn(shell.cmd, [...shell.prefixArgs, command], { cwd: targetCwd, env: filterEnv() })
+      // zai patch (2026-10-16, cc-005): `detached: true` 让 sh 成为进程组
+      // 组长,`killChildTree` 才能用 `process.kill(-pid)` 一次带走整组。
+      // 实测 detached:false 时 pgid ≠ sh pid,负 pid 直接 ESRCH —— 也就是说
+      // 不加这个,组杀根本无从谈起,sh fork 出的命令体会活下来。
+      //
+      // 代价:子进程脱离控制终端,不再因终端关闭收到 SIGHUP。回收责任因此
+      // 明确落到 `runtimeLifecycle.closeServer()` 的 `getReplRegistry()
+      // .disposeAll()` —— 那条路径 dispose() → killChildTree(force) 兜底。
+      // 仅在 POSIX 上加:win32 走 taskkill /T,不需要进程组,且 detached 会
+      // 干扰 cmd.exe 的控制台语义。
+      child = spawn(shell.cmd, [...shell.prefixArgs, command], {
+        cwd: targetCwd,
+        env: filterEnv(),
+        detached: !IS_WIN32,
+      })
     } catch (err) {
       throw new ReplSpawnError(err)
     }

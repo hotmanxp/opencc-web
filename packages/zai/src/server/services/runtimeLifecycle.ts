@@ -90,8 +90,13 @@ export async function closeServer(): Promise<void> {
   // 移动端快捷 Bash / 命令历史走的 `sh -c` REPL —— 与上面的 PTY 终端是两条
   // 独立路径。ReplRegistry 的 dispose() 全仓只有测试 seam 可达,不接这里就
   // 永远不会被回收:`sh -c` + piped stdio 的子进程是普通同进程组进程,父进程
-  // 干净 exit(0) 时收不到任何信号,会被 init 收养继续存活。managed child 以
-  // detached:false spawn 按 pid kill,supervisor 驱动的重启也扫不到这些孙进程。
+  // 干净 exit(0) 时收不到任何信号,会被 init 收养继续存活。
+  //
+  // zai patch (2026-10-16, cc-005):REPL 的 spawn 已改为 `detached: true`
+  // (sh 成为进程组组长),`killChildTree` 相应改走 `process.kill(-pid)`,
+  // 能带走 sh fork 出的命令体。**代价是子进程脱离控制终端,不再因终端关闭
+  // 收到 SIGHUP** —— 所以这段 disposeAll 不是冗余兜底,而是 detached 之后
+  // 唯一的回收路径,删不得。supervisor 驱动的重启也扫不到这些进程。
   // (PTY 路径不受影响:node-pty 走 forkpty,PTY shell 是 session leader 且以
   //  slave 为控制终端,master 关闭时内核自动发 SIGHUP。)
   try {

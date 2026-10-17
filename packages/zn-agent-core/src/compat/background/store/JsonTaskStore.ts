@@ -185,9 +185,17 @@ export class JsonTaskStore implements TaskStore {
       throw err
     }
     // ENOENT 可能在 stream 启动后才触发
+    // zai patch (2026-10-16, wb-008): 此前 `else throw err` 在 emit 栈上抛出 ——
+    // 那个栈不属于任何 async 上下文,throw 会变成进程级 uncaughtException。
+    // `processGuards` 明确不注册 `uncaughtException` 兜底,故这一行能直接杀掉
+    // 整个 server;同时调用方的 `for await (const ev of readEvents(...))` 永远
+    // 收不到终态(async generator 既不 yield 也不 return),调用方挂死。
+    // 改为 `stream.destroy(err)`:错误经下方 `for await (const line of rl)`
+    // 的正常 rejection 路径抛给调用方,由正确层级消费。
+    // ENOENT 语义不变 —— 事件文件不存在视为「没有事件」,静默结束。
     stream.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'ENOENT') stream.destroy()
-      else throw err
+      else stream.destroy(err)
     })
 
     const rl = createInterface({ input: stream, crlfDelay: Infinity })
