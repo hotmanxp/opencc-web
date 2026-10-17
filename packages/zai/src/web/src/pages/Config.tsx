@@ -152,6 +152,11 @@ function ProviderForm({
         // The form has no extraParams field — keep whatever the profile
         // already carried (e.g. hand-edited temperature/reasoning pins).
         ...(existing?.extraParams ? { extraParams: existing.extraParams } : {}),
+        // zai patch (2026-10-16, tc-003): 同上 —— 表单没有 apiKey 输入框,
+        // 但编辑 profile 时必须原样带回已有凭证。不带这一行,任何一次保存都会
+        // 把 inline apiKey 从 nextProfile 里丢掉(前端这一丢 + 服务端 schema
+        // strip 那一丢,两头夹击)。
+        ...(existing?.apiKey ? { apiKey: existing.apiKey } : {}),
       };
       const updated = editingId
         ? profiles.map((p) => (p.id === editingId ? nextProfile : p))

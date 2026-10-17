@@ -234,7 +234,7 @@ export interface ProviderProfile {
   /**
    * Name of the env var to read as the API key for this provider.
    * Resolution order at request time:
-   *   1. `profile.apiKey` (inline, if set — not currently surfaced in UI)
+   *   1. `profile.apiKey` (inline, if set)
    *   2. `zaiEnv[profile.apiKeyEnv]` (e.g. `DEEPSEEK_API_KEY`)
    *   3. `OPENAI_API_KEY` (openai providers) or `ANTHROPIC_AUTH_TOKEN`
    *      (anthropic providers) — the global zai default.
@@ -243,6 +243,15 @@ export interface ProviderProfile {
    * without changing the global env var.
    */
   apiKeyEnv?: string;
+  /**
+   * zai patch (2026-10-16, tc-003): inline API key,解析顺序的第一位。
+   *
+   * 此前运行时(`modelCaller.ts` 的 `profile.apiKey ?? envKey ?? fallbackKey`)
+   * 已经认这个字段,但本类型**没有声明**它 —— 前端读写它连类型检查都过不了,
+   * `config.ts` 的 zod schema 也默认 strip 掉。三方各自缺一环,合起来就是
+   * 「保存一次即丢凭证」。现在三层同步声明。
+   */
+  apiKey?: string;
   /**
    * Free-form request-body fields merged into every LLM call routed
    * through this profile (anthropic → `messages.create({...})`,

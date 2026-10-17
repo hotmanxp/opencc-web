@@ -38,6 +38,13 @@ const ProviderProfileSchema = z.object({
   // env[apiKeyEnv] → provider-family global env
   // (OPENAI_API_KEY / ANTHROPIC_AUTH_TOKEN).
   apiKeyEnv: z.string().optional(),
+  // zai patch (2026-10-16, tc-003): inline API key。modelCaller.ts 的解析
+  // 顺序第一位就是它(`profile.apiKey`),但此前**本 schema 没声明** ——
+  // z.object 默认 strip 把它悄悄丢掉,于是「保存一次」就丢凭证,且无任何报错。
+  //
+  // 刻意**不**改成 `.passthrough()`:下方注释说明了 strip 是有意为之(保持
+  // 落盘 profile 干净)。正解是「加运行时字段时同步 schema」。
+  apiKey: z.string().optional(),
   // zai patch: free-form request-body fields merged into every LLM
   // call routed through this profile (anthropic → messages.create,
   // openai → POST /chat/completions). Lets users pin per-provider
