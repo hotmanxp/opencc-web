@@ -20,6 +20,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
 import { atomicWriteFile } from '../utils/atomicWrite.js'
+import { CLI_AGENT_NAMES, isCliAgentName, type CliAgentName } from '../../shared/cliAgents.js'
 
 export interface FactorySettings {
   /** 需求文档目录 = 需求讨论(task-intake)会话的 cwd。空串 = 未配置。 */
@@ -28,8 +29,8 @@ export interface FactorySettings {
   repoRoot: string
   /** 并行执行任务上限,整数 2–8。 */
   maxParallelTasks: number
-  /** 委派执行时优先的 cliAgent;"opencc" | "dsh" | "opencode" | null(未选)。 */
-  preferCliAgent: 'opencc' | 'dsh' | 'opencode' | null
+  /** 委派执行时优先的 cliAgent;取值域见 `@shared/cliAgents`。null = 未选。 */
+  preferCliAgent: CliAgentName | null
   /** finished-tasks 终态任务过期自动归档进 history-tasks 的阈值(小时),整数 1–8760。 */
   historyArchiveHours: number
   /**
@@ -62,7 +63,7 @@ export const factorySettingsPatchSchema = z.object({
   docsDir: z.string().optional(),
   repoRoot: z.string().optional(),
   maxParallelTasks: z.number().int().min(2).max(8).optional(),
-  preferCliAgent: z.enum(['opencc', 'dsh', 'opencode']).nullable().optional(),
+  preferCliAgent: z.enum(CLI_AGENT_NAMES).nullable().optional(),
   historyArchiveHours: z.number().int().min(1).max(8760).optional(),
   stagnantThresholdMs: z.number().int().min(5_000).max(3_600_000).optional(),
   stagnantCooldownMs: z.number().int().min(5_000).max(3_600_000).optional(),
@@ -102,11 +103,10 @@ function sanitize(raw: unknown): FactorySettings {
   ) {
     out.maxParallelTasks = o.maxParallelTasks
   }
-  if (
-    o.preferCliAgent === 'opencc' ||
-    o.preferCliAgent === 'dsh' ||
-    o.preferCliAgent === 'opencode'
-  ) {
+  // zai patch (2026-10-17, oc-002):原先是三个 `=== 'xxx'` 的手写白名单,
+  // 与 zod 枚举、UI options、vendor 侧 CoreFactorySettings 各抄一份。
+  // 改为从唯一真相源判定,加 provider 时不必再改这里。
+  if (isCliAgentName(o.preferCliAgent)) {
     out.preferCliAgent = o.preferCliAgent
   } else if (o.preferCliAgent === null) {
     out.preferCliAgent = null

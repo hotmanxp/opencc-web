@@ -8,6 +8,16 @@
  * 每次构建 systemPrompt 时同步读(文件极小,无缓存需求)。
  *
  * 字段语义见 zai 侧 factorySettings.ts 注释。
+ *
+ * zai patch (2026-10-17, oc-002):`coreFactorySettingsPath()` 与 zai 侧的
+ * `factorySettingsPath()` **逐字相同**(同一个 `factory-settings.json`),
+ * 所以下面的 `preferCliAgent` 取值域必须与 zai 侧一致 —— 否则 zai 写入的值
+ * 会被这里**静默丢弃**(读到不认识的值 → 回落默认 null),而用户那边显示
+ * 「已保存」。`7c32e4da` 加 `claude` 时只改了 zai 侧的 UI/白名单,这里漏了。
+ *
+ * ⚠️ **这是全仓唯一做不到单一真相源的地方**:取值域的真源在
+ * `packages/zai/src/shared/cliAgents.ts`,但 core 不能反向 import zai 的
+ * `@shared`(包边界)。**加 provider 时这里必须与那个文件一起改。**
  */
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -17,7 +27,8 @@ export interface CoreFactorySettings {
   docsDir: string
   repoRoot: string
   maxParallelTasks: number
-  preferCliAgent: 'opencc' | 'dsh' | 'opencode' | null
+  /** 取值域必须与 zai 侧 `@shared/cliAgents` 一致 —— 见文件头注释。 */
+  preferCliAgent: 'opencc' | 'claude' | 'dsh' | 'opencode' | null
 }
 
 export const CORE_FACTORY_SETTINGS_DEFAULTS: CoreFactorySettings = {
@@ -51,6 +62,7 @@ export function readCoreFactorySettings(): CoreFactorySettings {
     }
     if (
       o.preferCliAgent === 'opencc' ||
+      o.preferCliAgent === 'claude' ||
       o.preferCliAgent === 'dsh' ||
       o.preferCliAgent === 'opencode'
     ) {

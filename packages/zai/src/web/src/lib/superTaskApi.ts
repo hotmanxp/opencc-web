@@ -1,4 +1,5 @@
 import type { IntakeDocCheck, TaskBucket, TaskDetails, TaskSummary } from '@zn-ai/zn-agent-core'
+import type { CliAgentName } from '@shared/cliAgents'
 
 /**
  * GET /api/super-tasks 响应(2026-09-03 起支持 since-hash 短路)。
@@ -123,7 +124,8 @@ export interface FactorySettingsDto {
   docsDir: string
   repoRoot: string
   maxParallelTasks: number
-  preferCliAgent: 'opencc' | 'dsh' | 'opencode' | null
+  /** 取值域见 `@shared/cliAgents` —— zai patch (2026-10-17, oc-002) */
+  preferCliAgent: CliAgentName | null
   /** finished-tasks 终态任务过期自动归档阈值(小时,1–8760)。 */
   historyArchiveHours: number
   /** 派生字段(服务端 stat):目录存在性徽标,不进 PUT schema。 */

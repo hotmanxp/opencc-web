@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import express from 'express'
 import supertest from 'supertest'
+import { CLI_AGENT_NAMES } from '@shared/cliAgents'
 
 // ~/.zai/settings.json 读写走内存替身 —— 测试绝不碰真实用户 settings.json。
 const h = vi.hoisted(() => ({
@@ -131,6 +132,32 @@ describe('PUT /api/super-tasks/settings', () => {
     expect(r2.status).toBe(400)
   })
 
+  // oc-002 回归:`7c32e4da` 把 claude 加进了 UI 提供的 provider 名单,
+  // 却没加进这里落盘校验的 zod 枚举 —— 于是 UI 能选、服务端 400。
+  // 断言「名单里的每个值都必须被接受」,而不是逐个手写:以后加 provider
+  // 这条会自己跟上,漏一处就红。
+  it.each([...CLI_AGENT_NAMES])('preferCliAgent=%s → 200 且往返一致', async (name) => {
+    const put = await supertest(app)
+      .put('/api/super-tasks/settings')
+      .send({ preferCliAgent: name })
+    expect(put.status).toBe(200)
+    const got = await supertest(app).get('/api/super-tasks/settings')
+    expect(got.status).toBe(200)
+    expect(got.body.preferCliAgent).toBe(name)
+  })
+
+  it('claude 可选:UI options 不会因 schema 拒绝而给出选了必 400 的值', async () => {
+    // UI 的 options 来自 /spawn-agents 的 agents 数组,服务端校验来自 zod。
+    // 两者现在同源于 CLI_AGENT_NAMES,所以 UI 给出的每个名字都必然被接受 ——
+    // 断言「UI 报的 name 集合 ⊆ 服务端接受的集合」。
+    const agents = (await supertest(app).get('/api/super-tasks/spawn-agents')).body
+      .agents as Array<{ name: string }>
+    for (const a of agents) {
+      const r = await supertest(app).put('/api/super-tasks/settings').send({ preferCliAgent: a.name })
+      expect(r.status, `UI 提供了 ${a.name} 但服务端拒绝`).toBe(200)
+    }
+  })
+
   it('非法值不落盘:GET 仍是旧值', async () => {
     await supertest(app).put('/api/super-tasks/settings').send({ maxParallelTasks: 5 })
     const bad = await supertest(app).put('/api/super-tasks/settings').send({ maxParallelTasks: 99 })
@@ -141,24 +168,32 @@ describe('PUT /api/super-tasks/settings', () => {
 })
 
 describe('GET /api/super-tasks/spawn-agents', () => {
-  it('返回 opencc/dsh/opencode 三个 provider 的状态快照', async () => {
+  it('返回 CLI_AGENT_NAMES 里每个 provider 的状态快照', async () => {
     const res = await supertest(app).get('/api/super-tasks/spawn-agents')
     expect(res.status).toBe(200)
     const agents = res.body.agents as Array<Record<string, unknown>>
-    expect(agents.map((a) => a.name)).toEqual(['opencc', 'dsh', 'opencode'])
-    const opencc = agents[0]!
+    // zai patch (2026-10-17, oc-002):原先这里硬写
+    // `toEqual(['opencc', 'dsh', 'opencode'])` —— `7c32e4da` 加 `claude` 时
+    // 没同步,这条测试从那天起一直是红的,而且之后 6 个 commit 没人跑过它
+    // (AGENTS.md 要求跑直接受影响的文件,superTasks.ts 正是)。改为跟着真相源走,
+    // 以后加 provider 不会再漂。
+    expect(agents.map((a) => a.name)).toEqual([...CLI_AGENT_NAMES])
+    const byName = (n: string) => agents.find((a) => a.name === n)!
+
+    const opencc = byName('opencc')
     expect(typeof opencc.commandFound).toBe('boolean')
     expect(opencc.commandPath === null || typeof opencc.commandPath === 'string').toBe(true)
     expect(opencc.registered).toBe(false) // h.settings.subagents 无 opencc 块
     expect(opencc.active).toBe(true) // mock registry: ['opencc']
-    expect(agents[1]!.registered).toBe(false)
-    expect(agents[1]!.active).toBe(false)
+
+    expect(byName('dsh').registered).toBe(false)
+    expect(byName('dsh').active).toBe(false)
     // opencode: config-gated like dsh → not active under the mock registry.
-    const opencode = agents[2]!
-    expect(opencode.name).toBe('opencode')
-    expect(typeof opencode.commandFound).toBe('boolean')
-    expect(opencode.registered).toBe(false)
-    expect(opencode.active).toBe(false)
+    expect(byName('opencode').registered).toBe(false)
+    expect(byName('opencode').active).toBe(false)
+    // claude(7c32e4da 新增):config-gated 同 dsh/opencode
+    expect(byName('claude').registered).toBe(false)
+    expect(byName('claude').active).toBe(false)
   })
 
   it('settings.json 已有 subagents.<name> → registered=true', async () => {

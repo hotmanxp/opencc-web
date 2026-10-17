@@ -18,6 +18,7 @@ import {
   type CliAgentStatus,
 } from '../../lib/superTaskApi'
 import { LIGHT_PAGE_VARS } from './lightThemeVars'
+import { isCliAgentName, type CliAgentName } from '@shared/cliAgents'
 
 /**
  * FactorySettingsDrawer — 任务工厂独立设置抽屉(tf-pnsl5m5e)。
@@ -38,7 +39,8 @@ interface Draft {
   docsDir: string
   repoRoot: string
   maxParallelTasks: number | null
-  preferCliAgent: 'opencc' | 'dsh' | 'opencode' | null
+  /** 取值域见 `@shared/cliAgents` —— zai patch (2026-10-17, oc-002) */
+  preferCliAgent: CliAgentName | null
   historyArchiveHours: number | null
 }
 
@@ -295,7 +297,7 @@ export default function FactorySettingsDrawer({
                     showIcon
                     className="mb-2"
                     message="当前没有可用的 cliAgent provider"
-                    description="请在下方「cliAgent 管理」注册 opencc / dsh / opencode,重启 zai 服务后即出现在此列表。"
+                    description="请在下方「cliAgent 管理」注册对应 provider,重启 zai 服务后即出现在此列表。"
                   />
                 )}
                 <Select
@@ -304,8 +306,8 @@ export default function FactorySettingsDrawer({
                   placeholder="未指定"
                   className="w-60"
                   value={draft.preferCliAgent ?? undefined}
-                  onChange={(v) => setDraft((p) => ({ ...p, preferCliAgent: (v ?? null) as Draft['preferCliAgent'] }))}
-                  options={agents.map((a) => ({
+                  onChange={(v) => setDraft((p) => ({ ...p, preferCliAgent: isCliAgentName(v) ? v : null }))}
+                  options={agents.filter((a) => isCliAgentName(a.name)).map((a) => ({
                     value: a.name,
                     disabled: !a.active,
                     label: `${a.name}${a.active ? '' : '(未激活)'}`,
