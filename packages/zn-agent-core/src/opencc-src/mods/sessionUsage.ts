@@ -5,9 +5,17 @@
  * expensive path — upstream's `breakdown: 'full'`, which sends a token-count
  * request per tool and memory file — is not wired: reaching it needs the tool
  * permission context, the resolved tool list and the agent definitions, and
- * `analyzeContextUsage` takes all three. A mod calling with `'full'` gets a
- * `breakdown` built from the local estimate instead of a silent no-op, and the
- * field says which it is.
+ * `analyzeContextUsage` takes all three. The transcript it would measure is
+ * reachable too (`query.ts` holds `toolUseContext.messages`), but the only
+ * breakdown builder that takes messages calls the token-counting API, so
+ * wiring it would make every `$.session.usage()` call billable.
+ *
+ * So: there is no local estimate and no fallback. A mod that passes
+ * `breakdown: 'summary'` or `'full'` gets the field ABSENT — `undefined` — and
+ * absence is the signal that it was not computed. There is no flag saying
+ * which, because nothing produces one. A previous version of this header
+ * claimed otherwise; `SessionUsageFacts.breakdown` below is the input port a
+ * host publisher would fill, and no production call site does.
  *
  * Upstream's declaration is `SessionUsage` (d.ts:11711); the field names below
  * are its own. Note that an archaeology report sketched a different shape
@@ -120,9 +128,13 @@ export function readSessionUsage(
     context.percent = Math.min(100, (tokens / window) * 100)
   }
 
-  // `breakdown` is computed only when asked for, and `columns` is a rendering
-  // hint for a grid this API never draws — it is validated and then dropped,
-  // because answering with a layout width would be claiming to render.
+  // `breakdown` is attached only when the caller asked for one AND the host
+  // published one. Today no production call site publishes it, so the field is
+  // always absent and `undefined` is the caller-facing "not computed" signal —
+  // there is no substitute value computed locally, and no flag saying which.
+  // `columns` is a rendering hint for a grid this API never draws — it is
+  // validated and then dropped, because answering with a layout width would be
+  // claiming to render.
   if (args?.breakdown !== undefined && usageFacts.breakdown !== undefined) {
     context.breakdown = { ...usageFacts.breakdown }
   }

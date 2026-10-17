@@ -724,7 +724,11 @@ function getRetryAfter(error: unknown): string | null {
 export function getRetryDelay(
   attempt: number,
   retryAfterHeader?: string | null,
-  maxDelayMs = 32000,
+  // The default has to be the same constant the validator bounds
+  // OPENCC_RETRY_DELAY_MS with and the docs quote. It was a literal 32000,
+  // which silently capped every configured base at 32000 no matter what
+  // `OPENCC_RETRY_DELAY_MS` (or the documented 60000 ceiling) said.
+  maxDelayMs = MAX_RETRY_DELAY_BASE_MS,
 ): number {
   if (retryAfterHeader) {
     const seconds = parseInt(retryAfterHeader, 10)
@@ -739,7 +743,10 @@ export function getRetryDelay(
     maxDelayMs,
   )
   const jitter = Math.random() * 0.25 * baseDelay
-  return baseDelay + jitter
+  // Jitter rides on top of an already-clamped base, so without this second
+  // clamp the return value could exceed `maxDelayMs` itself — the parameter
+  // says "cap" and the code did not deliver one.
+  return Math.min(baseDelay + jitter, maxDelayMs)
 }
 
 /**

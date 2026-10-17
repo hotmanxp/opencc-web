@@ -21,9 +21,9 @@ import type { Message } from '../types/message.js'
 import {
   dispatchModOp,
   dispatchModStream,
-  hasModHandlersFor,
 } from './dispatch.js'
 import { readSessionUsage } from './sessionUsage.js'
+import { getLoadedMods } from './registry.js'
 
 // ---------------------------------------------------------------------------
 // fs walk types
@@ -57,6 +57,39 @@ export type AncestorsArgs = {
  * must outlive the mod's own process and be visible to a later hook.
  */
 const stores = new Map<string, unknown>()
+
+/**
+ * Fence a `store` WRITE that would land inside another mod's `state`
+ * namespace, and allow everything else.
+ *
+ * `store` and `state` share this one Map, and `state` writes under
+ * `${modName}.${key}` — so without a fence `$.store.set` / `$.store.delete`
+ * could overwrite or destroy any other mod's private `$.state`, which
+ * `engine.ts` declares as "This mod's OWN key/value state".
+ *
+ * Only the mutating half is fenced. `get` / `keys` stay cross-mod readable
+ * because that is the design, not an accident: the `<modName>.` prefix exists
+ * precisely so the key "looks like" a store key when read back from another
+ * mod. Upstream's own `cc-plugin-diff` relies on it — remembering a git base
+ * under `<repo>.base`, a dotted key that matches no loaded mod name and so is
+ * deliberately left alone.
+ *
+ * A mod writing its OWN namespace through `store` is allowed: `$.state` is the
+ * documented way to do it, but the write is not reaching anyone else and
+ * refusing it would be a gratuitous behaviour change.
+ */
+function assertStoreKeyWritable(modName: string, key: string): void {
+  for (const other of getLoadedMods()) {
+    const owner = other.manifest.name
+    if (owner === modName) continue
+    if (key.startsWith(`${owner}.`)) {
+      throw new Error(
+        `${modName}: $.store: "${key}" belongs to ${owner}'s $.state namespace — ` +
+          `use $.state for your own state, and do not write another mod's`,
+      )
+    }
+  }
+}
 
 export function clearModStores(): void {
   stores.clear()
@@ -297,8 +330,10 @@ export type ModSession = {
 /** Upstream `SessionUsageArgs` (d.ts:11744). */
 export type ModSessionUsageArgs = {
   /**
-   * `'summary'` estimates every category locally; `'full'` sends one
-   * token-count request per tool and memory file, as `/context` does.
+   * Upstream: `'summary'` estimates every category locally; `'full'` sends one
+   * token-count request per tool and memory file, as `/context` does. Neither
+   * is wired here — see the header in `sessionUsage.ts`. The value is still
+   * validated, so a mod spelling it wrong is told so rather than ignored.
    */
   breakdown?: 'summary' | 'full'
   /**
@@ -335,7 +370,12 @@ export type ModSessionContextUsage = {
   /** The model's context window, in tokens. */
   window: number
   percent?: number
-  /** Only when the caller passed `breakdown`. */
+  /**
+   * Only when the caller passed `breakdown` AND the host published one. No
+   * production call site publishes it today, so in practice this is always
+   * absent and `undefined` is the "not computed" signal — nothing computes a
+   * substitute locally. See the header in `sessionUsage.ts`.
+   */
   breakdown?: {
     categories: Array<{ name: string; tokens: number }>
     totalTokens: number
@@ -1064,10 +1104,12 @@ export function buildModNouns(modName: string): ModNouns {
     get: key => dispatchModOp('store.get', { key }, () => stores.get(key)),
     set: (key, value) =>
       dispatchModOp('store.set', { key, value }, () => {
+        assertStoreKeyWritable(modName, key)
         stores.set(key, value)
       }),
     delete: key =>
       dispatchModOp('store.delete', { key }, () => {
+        assertStoreKeyWritable(modName, key)
         stores.delete(key)
       }),
     keys: () => dispatchModOp('store.keys', {}, () => [...stores.keys()]),
@@ -1419,34 +1461,24 @@ export function buildModNouns(modName: string): ModNouns {
   const config: ModConfig = {
     list: () =>
       dispatchModOp('config.list', {}, async () => {
-        const { getAllKeys, getConfig } = await import(
+        const { getAllKeys } = await import(
           '../tools/ConfigTool/supportedSettings.js'
         )
-        // Each row is described on the way out, which is upstream's second
-        // listed trigger for `config.describe` ("and for `$.config.list`").
-        // A mod that hides or renames a row therefore sees the rename on the
-        // one path that actually enumerates rows in opencc.
-        await Promise.all(
-          getAllKeys().map(key => {
-            // Upstream gates per key: `Jl("config.describe", {key: e.key})`.
-            // Without this a mod watching one setting still pays a dispatch
-            // for every other setting `getAllKeys()` enumerates — and this is
-            // the one site where the loop is genuinely per-item.
-            if (!hasModHandlersFor('config.describe', { key })) {
-              return undefined
-            }
-            return dispatchModOp(
-              'config.describe',
-              {
-                key,
-                label: key,
-                description: getConfig(key)?.description,
-                isHidden: false,
-              },
-              () => ({ label: key, description: undefined, isHidden: false }),
-            )
-          }),
-        )
+        // Raw keys, and nothing else.
+        //
+        // This used to fan one `config.describe` dispatch out per key here —
+        // upstream's second listed trigger — and then discard every result. It
+        // could not have worked even if the results had been kept: `list()` is
+        // declared `Promise<readonly string[]>`, which has nowhere to put a
+        // rewritten `label`, and opencc's settings menu does not read this list
+        // at all. `tools/ConfigTool/ConfigTool.ts` and
+        // `tools/ConfigTool/prompt.ts` both import `supportedSettings`
+        // directly and never enter the mods layer, so no mod can rename or
+        // hide a menu row through this path.
+        //
+        // A row's presentation is therefore NOT moddable in this fork.
+        // `$.config.describe` is still there for a mod that wants to ask about
+        // a row itself; it is just not called on the mod's behalf here.
         return getAllKeys()
       }),
     // Not an op event, deliberately. Upstream's config events are exactly
