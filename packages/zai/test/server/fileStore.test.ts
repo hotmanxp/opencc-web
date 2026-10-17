@@ -5,6 +5,9 @@ import {
   readAgentsMd,
   writeAgentsMd,
 } from '../../src/server/services/fileStore.js';
+// zai patch (2026-10-16, oc-001): zai 自己的 AGENTS.md 路径改走
+// resolveZaiDir(),断言随之对齐(设了 ZAI_DATA_DIR 时不再出现 `.zai/` 段)。
+import { resolveZaiDir } from '../../src/server/services/paths.js';
 import { mkdtempSync, rmSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,7 +69,7 @@ describe('writeAgentsMd + readAgentsMd roundtrip', () => {
     expect(result.content).toBe(md);
     // opencc 走 ~/.claude/AGENTS.md, 与 zai 走 ~/.zai/AGENTS.md 互不影响。
     expect((await readAgentsMd('opencc')).path).toMatch(/\.claude\/AGENTS\.md$/);
-    expect((await readAgentsMd('zai')).path).toMatch(/\.zai\/AGENTS\.md$/);
+    expect((await readAgentsMd('zai')).path).toBe(join(resolveZaiDir(), 'AGENTS.md'));
   });
 
   it('allows empty content (clears the file)', async () => {
@@ -81,7 +84,7 @@ describe('writeAgentsMd + readAgentsMd roundtrip', () => {
     expect((await readAgentsMd('nova')).path).toMatch(/\.nova\/AGENTS\.md$/);
     expect((await readAgentsMd('opencode')).path).toMatch(/\.config\/opencode\/AGENTS\.md$/);
     expect((await readAgentsMd('opencc')).path).toMatch(/\.claude\/AGENTS\.md$/);
-    expect((await readAgentsMd('zai')).path).toMatch(/\.zai\/AGENTS\.md$/);
+    expect((await readAgentsMd('zai')).path).toBe(join(resolveZaiDir(), 'AGENTS.md'));
   });
 
   it('opencc and zai do NOT share — paths are independent', async () => {

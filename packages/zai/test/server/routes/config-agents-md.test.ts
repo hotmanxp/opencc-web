@@ -19,7 +19,9 @@ beforeAll(() => {
   process.env.HOME = tempHome;
   // 预创建 ~/.zai (zai 路径) 和 ~/.claude (opencc 路径) 让首次写入走 mkdir parent 已覆盖;
   // nova/opencode 路径不预创建,用于验证"首次 PUT 自动 mkdir 父目录"。
-  mkdirSync(join(tempHome, '.zai'), { recursive: true });
+  // zai patch (2026-10-16, oc-001): zai 自己的 AGENTS.md 走 resolveZaiDir(),
+  // 设了 ZAI_DATA_DIR 时是那个目录本身,不再是 <HOME>/.zai/。
+  mkdirSync(process.env.ZAI_DATA_DIR ?? join(tempHome, '.zai'), { recursive: true });
   mkdirSync(join(tempHome, '.claude'), { recursive: true });
 });
 
@@ -128,6 +130,6 @@ describe('PUT /api/config/:tool/agents-md', () => {
 
     const zaiGet = await request(app).get('/api/config/zai/agents-md');
     expect(zaiGet.body.content).toBe('zai-md');
-    expect(zaiGet.body.path).toMatch(/\.zai\/AGENTS\.md$/);
+    expect(zaiGet.body.path).toBe(join(process.env.ZAI_DATA_DIR ?? join(tempHome, '.zai'), 'AGENTS.md'));
   });
 });

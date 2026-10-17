@@ -62,7 +62,7 @@ describe('PUT /api/agent/settings/main-agent', () => {
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ mainAgent: 'office' })
     const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
     )
     expect(onDisk.mainAgent).toBe('office')
   })

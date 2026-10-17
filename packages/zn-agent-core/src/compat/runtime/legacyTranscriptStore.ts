@@ -19,7 +19,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { getDefaultMode } from '../permissions.js'
 import { isSessionDeleted, markSessionDeleted } from './deletedSessions.js'
 
@@ -80,6 +80,33 @@ const JSONL_EXT = '.jsonl'
 // 列表 title 从首条 user 消息推断时的截断长度, 与 OpenCC CLI 行为一致。
 const INFERRED_TITLE_MAX = 50
 
+/**
+ * sessionId 形状围栏 (wb-001)。
+ *
+ * 曾经的注释声称「校验 sess-... 前缀以避免接受任意字符串」,但
+ * `startsWith('sess-')` 是前缀检查而非完整校验 —— `'sess-../../..'` 同样以
+ * `sess-` 开头,再经 `join()` 规范化后即可穿越出 dataDir。实测可写。
+ *
+ * 刻意**不用** `/^sess-[A-Za-z0-9_-]+$/` 这类白名单:AA 的 session.create
+ * 由客户端分配 id 再经 connector 传入,前缀不保证是 `sess-`(见 create() 里
+ * 补前缀的分支),收紧会打断 AA 绑定。故这里只挡**危险形状**:
+ * 路径分隔符、路径段、路径穿越、控制字符、长度上限。
+ */
+const SESSION_ID_MAX_LENGTH = 256
+const DANGEROUS_SESSION_ID = /[/\\]|\.\.|[\u0000-\u001f\u007f]/
+
+function assertSessionIdShape(sessionId: string): void {
+  if (sessionId.length === 0) {
+    throw new Error('transcript: sessionId must not be empty')
+  }
+  if (sessionId.length > SESSION_ID_MAX_LENGTH) {
+    throw new Error(`transcript: sessionId exceeds ${SESSION_ID_MAX_LENGTH} chars`)
+  }
+  if (DANGEROUS_SESSION_ID.test(sessionId)) {
+    throw new Error(`transcript: illegal characters in sessionId`)
+  }
+}
+
 export class TranscriptStore {
   constructor(public readonly dataDir: string) {}
 
@@ -92,7 +119,15 @@ export class TranscriptStore {
   }
 
   private filePathFor(sessionId: string, cwd: string): string {
-    return join(this.dirFor(cwd), `${sessionId}${JSONL_EXT}`)
+    const dir = this.dirFor(cwd)
+    // 围栏断言 (wb-001 第二道防线):`join` 会规范化 `..`,所以拼完之后必须
+    // 复核仍在 dir 之内。create() 的 id 校验是第一道,但 id 也可能从 patch /
+    // append 等旁路进来 —— 这里是所有落盘路径的必经关口。
+    const p = resolve(dir, `${sessionId}${JSONL_EXT}`)
+    if (p !== dir && !p.startsWith(dir + sep)) {
+      throw new Error(`transcript: sessionId escapes the session directory`)
+    }
+    return p
   }
 
   /** 读整个 JSONL 文件为条目数组; 文件不存在返回 [] (与旧 compat 不抛行为一致)。 */
@@ -235,11 +270,17 @@ export class TranscriptStore {
   ): Promise<string> {
     // zai patch (2026-09-27, AA integration): accept an external sessionId
     // so AA's session.create RPC (which allocates the id client-side) can
-    // map to the same id in zai. Validate the shape (sess-... prefix) to
-    // avoid accepting arbitrary strings as transcript ids.
-    const sessionId = meta.sessionId && meta.sessionId.length > 0
+    // map to the same id in zai.
+    //
+    // zai patch (2026-10-16, wb-001): 这里的「校验 sess- 前缀」被长期注释
+    // 描述成完整校验,但它只是前缀检查 —— `'sess-../../..'` 同样以 `sess-`
+    // 开头,经 join 规范化后即可写出 dataDir。改为按危险形状拦截,仍不收窄
+    // AA 可能传入的合法 id 集合(见 assertSessionIdShape 的说明)。
+    const requested = meta.sessionId && meta.sessionId.length > 0
       ? (meta.sessionId.startsWith('sess-') ? meta.sessionId : `sess-${meta.sessionId}`)
-      : `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      : null
+    if (requested) assertSessionIdShape(requested)
+    const sessionId = requested ?? `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     const cwd = opts?.cwd ?? meta.cwd
     REGISTRY.set(this.key(sessionId, cwd), {
       cwd,

@@ -24,6 +24,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { stateChangeBus } from '../stateChangeBus.js'
 
@@ -286,7 +287,17 @@ export function getTaskListStore(): TaskListStore {
     // 默认根目录:zai-agent-core 的 dataDir 概念里没有,这里延迟到
     // BackgroundRuntime 注入的同时注入。fallback 到 ~/.zai/,单 session
     // 文件最终落在 ~/.zai/tasks/<sessionId>.json。
-    _store = new TaskListStore(`${process.env.HOME ?? '/tmp'}/.zai`)
+    //
+    // zai patch (2026-10-16, tc-002): 此前拼的是 `${HOME}/.zai`,
+    // 连 `ZAI_DATA_DIR` 都不看 —— 设了隔离目录的实例仍会把任务文件
+    // 写进用户真实 home。模板字符串还绕开了 `join(homedir(), '.zai')`
+    // 这个 grep 特征,导致同类清单漏掉了这一处。
+    //
+    // core 够不到 zai 的 `paths.ts`(那是 zai 包的服务,compat 不能反向
+    // 依赖),所以这里自带一份解析 —— 这是结构性约束而非疏忽。改用
+    // `homedir()` 而非 `$HOME` 是为了跟 `paths.ts:23` 保持同一口径:
+    // Windows 上 `$HOME` 通常不存在,原实现在那儿会掉到 `/tmp`。
+    _store = new TaskListStore(process.env.ZAI_DATA_DIR || join(homedir(), '.zai'))
   }
   return _store
 }

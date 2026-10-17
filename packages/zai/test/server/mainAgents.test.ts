@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mainAgentsDir, resolveMainAgent } from '../../src/server/services/mainAgents.js'
+import { resolveZaiDir } from '../../src/server/services/paths.js'
 import {
   getAgentRegistry,
   resetAgentRegistryForTests,
@@ -28,8 +29,12 @@ async function makeTmpDir(): Promise<string> {
 }
 
 describe('mainAgentsDir', () => {
-  it('returns ~/.zai/main-agents', () => {
-    expect(mainAgentsDir()).toMatch(/\.zai\/main-agents$/)
+  it('returns <ZAI_DATA_DIR>/main-agents (默认 ~/.zai/main-agents)', () => {
+    // zai patch (2026-10-16, oc-001):此前 mainAgentsDir() 硬写 homedir(),
+    // 无视 ZAI_DATA_DIR。断言改为对齐被测的解析函数 —— 仍钉住「zai 自己的
+    // dataDir」这个意图,但不再把 `.zai/` 这段路径形状写死在用例里
+    // (设了 ZAI_DATA_DIR 时该段本就不出现)。
+    expect(mainAgentsDir()).toBe(join(resolveZaiDir(), 'main-agents'))
   })
 })
 

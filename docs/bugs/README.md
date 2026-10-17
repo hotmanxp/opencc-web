@@ -2,6 +2,12 @@
 
 已确认但**尚未修复**的缺陷记录。每条包含：根因、精确位置、可复现的实证、修复方向。
 
+> ⚠️ **动手修之前先读 [`2026-10-16-known-bug-reconciliation.md`](./2026-10-16-known-bug-reconciliation.md)**。
+> 下表 22 条成文于 2026-10-05，至 2026-10-16 的 HEAD `6f9ceaeb` 已过 **66 个提交**，
+> 逐条对账结果是：**15 条已修 / 2 条部分修 / 5 条仍成立**。
+> 换言之 **本表有 17 条已经过时** —— 照着它修会修到已经修好的东西。
+> 对账文档同时记录了 2 条与本表重合的本场新发现（wb-004、wb-008）。
+
 命名沿用仓库约定 `YYYY-MM-DD-<topic>.md`。设计/取舍类文档在
 [`../superpowers/specs/`](../superpowers/specs/)，实施计划在
 [`../superpowers/plans/`](../superpowers/plans/)。

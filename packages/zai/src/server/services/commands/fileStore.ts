@@ -1,12 +1,14 @@
 import { writeFileSync, readFileSync, readdirSync, mkdirSync, unlinkSync, existsSync, renameSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
+import { resolveZaiDir } from '../paths.js'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-_]*$/
 
+/** zai patch (2026-10-16, oc-001 收口): 改走 `resolveZaiDir()`,否则
+ *  设了 `ZAI_DATA_DIR` 的实例仍读写用户真实 home 下的用户级命令。 */
 export function commandsDir(): string {
-  return join(homedir(), '.zai', 'commands')
+  return join(resolveZaiDir(), 'commands')
 }
 
 function ensureDir(): void {

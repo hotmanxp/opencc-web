@@ -5,13 +5,18 @@ import type { AgentsMdFile, ConfigFile, ConfigTool } from '../../shared/types.js
 import { atomicWriteFile } from '../utils/atomicWrite.js';
 import { threeWayMerge } from '../utils/threeWayMerge.js';
 import { mutateZaiSettings, zaiSettingsPath } from './zaiSettingsStore.js';
+import { resolveZaiDir } from './paths.js';
 import type { ZaiSettings } from '../../shared/settings.js';
 
 const CONFIG_PATHS: Record<ConfigTool, () => string> = {
   nova: () => join(homedir(), '.nova', 'settings.json'),
   opencode: () => join(homedir(), '.config', 'opencode', 'opencode.json'),
-  opencc: () => join(homedir(), '.zai', 'settings.json'),
-  zai: () => join(homedir(), '.zai', 'settings.json'),
+  // zai patch (2026-10-16, oc-001 收口): `opencc` 与 `zai` 两个 tab 指向
+  // 同一个文件,必须**一起**改走 `resolveZaiDir()` —— `writeConfig` 靠
+  // `path === zaiSettingsPath()` 判断是否进串行队列,只改一个会让另一个
+  // 掉出队列、复活已修的 settings tmp 冲突。
+  opencc: () => join(resolveZaiDir(), 'settings.json'),
+  zai: () => join(resolveZaiDir(), 'settings.json'),
 };
 
 // 顶层 JSON 配置文件直读直写 — 与 readConfig/writeConfig 同语义
@@ -116,7 +121,9 @@ const AGENTS_MD_PATHS: Record<ConfigTool, () => string> = {
   nova: () => join(homedir(), '.nova', 'AGENTS.md'),
   opencode: () => join(homedir(), '.config', 'opencode', 'AGENTS.md'),
   opencc: () => join(homedir(), '.claude', 'AGENTS.md'),
-  zai: () => join(homedir(), '.zai', 'AGENTS.md'),
+  // zai patch (2026-10-16, oc-001 收口): zai 自身 dataDir。`opencc` 保持
+  // `~/.claude/` 不动 —— 那是 opencc 自己的 config home,与 zai 不共享。
+  zai: () => join(resolveZaiDir(), 'AGENTS.md'),
 };
 
 /**

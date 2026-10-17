@@ -43,7 +43,7 @@ describe('PUT /api/agent/settings/enable-dynamic-workflow', () => {
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ value: true })
     const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
     )
     expect(onDisk.enableDynamicWorkflow).toBe(true)
     // 关键: PUT true 必须同步写 process.env,下次 query() 才能立刻
@@ -63,7 +63,7 @@ describe('PUT /api/agent/settings/enable-dynamic-workflow', () => {
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ value: false })
     const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
     )
     expect(onDisk.enableDynamicWorkflow).toBe(false)
     // 关键: 关闭时必须 delete env var, 否则 isWorkflowsDisabled() 仍
@@ -95,7 +95,7 @@ describe('PUT /api/agent/settings/enable-dynamic-workflow', () => {
       .put('/api/agent/settings/enable-dynamic-workflow')
       .send({ value: true })
     const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
     )
     expect(onDisk.outputStyle).toBe('compact')
     expect(onDisk.enableDynamicWorkflow).toBe(true)
@@ -121,8 +121,8 @@ describe('GET /api/agent/settings returns enableDynamicWorkflow', () => {
   it('coerces non-boolean junk in settings.json to false', async () => {
     // 模拟用户手编 settings.json 写错 (e.g. enableDynamicWorkflow: "yes"),
     // 服务端必须折叠为 false — 否则 LLM 可能看到 WorkflowTool 而 UI 显示关闭
-    const settingsPath = join(dataDir, '.zai', 'settings.json')
-    mkdirSync(join(dataDir, '.zai'), { recursive: true })
+    const settingsPath = join(dataDir, 'settings.json')
+    mkdirSync(dataDir, { recursive: true })
     writeFileSync(
       settingsPath,
       JSON.stringify({ enableDynamicWorkflow: 'yes' }),

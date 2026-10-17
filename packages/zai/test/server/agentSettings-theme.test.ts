@@ -41,7 +41,7 @@ describe('PUT /api/agent/settings/theme', () => {
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ theme: 'dark' })
     const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
     )
     expect(onDisk.theme).toBe('dark')
   })
@@ -82,7 +82,7 @@ describe('PUT /api/agent/settings/theme', () => {
       .send({ theme: 'light' })
 
     const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
     )
     expect(onDisk.theme).toBe('light')
     expect(onDisk.outputStyle).toBe('compact')
@@ -109,7 +109,7 @@ describe('GET /api/agent/settings returns theme', () => {
   it('defaults to dark when settings.json theme is unknown (兜底)', async () => {
     // 直接写一个垃圾值到磁盘
     const { mkdirSync, writeFileSync } = await import('node:fs')
-    const dir = join(dataDir, '.zai')
+    const dir = dataDir
     mkdirSync(dir, { recursive: true })
     writeFileSync(
       join(dir, 'settings.json'),

@@ -34,7 +34,7 @@ afterEach(() => {
 
 function onDisk(): Record<string, unknown> {
   return JSON.parse(
-    readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+    readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
   )
 }
 
@@ -160,9 +160,9 @@ describe('GET /api/agent/settings exposes the memory trio', () => {
   it('coerces hand-edited junk to the safe defaults', async () => {
     // 手编 settings.json 写错类型时:autoWrite/requireApproval 折叠为"开/需审批"
     // (fail-safe),autoDream 折叠为关。
-    mkdirSync(join(dataDir, '.zai'), { recursive: true })
+    mkdirSync(dataDir, { recursive: true })
     writeFileSync(
-      join(dataDir, '.zai', 'settings.json'),
+      join(dataDir, 'settings.json'),
       JSON.stringify({
         memory: { autoWrite: 'no', requireApprovalBeforeWrite: 'nope' },
         autoDreamEnabled: 'yes',

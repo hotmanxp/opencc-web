@@ -26,6 +26,26 @@ export const ZN_ASSETS_DIR = join(ZAI_DIR, 'zn-assets');
 export const BACKGROUND_DIR = join(ZAI_DIR, 'background');
 export const PLUGIN_PKG = '@zn-ai/plugin';
 
+/**
+ * zai 自身数据目录的**唯一**解析入口。
+ *
+ * zai patch (2026-10-16, oc-001/cc-r2/tc-002):此前多个模块各自写
+ * `join(homedir(), '.zai', …)`,彼此不同源。设了 `ZAI_DATA_DIR` 的实例
+ * 因此只被**一部分**模块隔离 —— 漏掉的恰好是会写的那几个,组合效果是
+ * 「启动即改写用户真实配置」。
+ *
+ * 函数形态而非只用顶层常量:ESM 的静态 import 在模块加载时即求值,
+ * 测试(以及 weixin 那批路径的既有做法)需要在设完 `ZAI_DATA_DIR` 之后
+ * 才解析。两者同源,不存在第二个口径。
+ *
+ * ⚠️ 边界:只管 zai 自己的数据。`~/.claude/*`、`~/.nova/*`、`~/.zai.json`
+ * 属于别的工具,`<cwd>/.zai/*` 是项目级 —— 都**不**受 `ZAI_DATA_DIR` 管辖,
+ * 不要为了「统一」把它们也改掉。
+ */
+export function resolveZaiDir(): string {
+  return process.env.ZAI_DATA_DIR || join(homedir(), '.zai');
+}
+
 // ─── Weixin (WeChat) bot 持久化目录 ────────────────────────────────
 // 详见 docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md。
 // 与 ~/.zai/ 下其它子系统平级,与其他平台适配器(未来 qq/telegram)不冲突。
@@ -122,7 +142,12 @@ export function weixinPairingsFile(): string {
  */
 export function weixinOwnerLockRoot(): string {
   const override = process.env.ZAI_WEIXIN_OWNER_LOCK_DIR;
-  return override && override.length > 0 ? override : join(homedir(), '.zai', 'weixin', 'locks');
+  // zai patch (2026-10-16, oc-001 收口): 此前回落写死 `~/.zai/weixin/locks`,
+  // 无视 `ZAI_DATA_DIR` —— 隔离实例仍会在用户真实 home 里建锁文件。
+  // 与本文件其它 weixin 路径函数保持同一口径。
+  return override && override.length > 0
+    ? override
+    : join(resolveZaiDir(), 'weixin', 'locks');
 }
 export function weixinOwnerLockFile(): string {
   return join(weixinOwnerLockRoot(), 'owner.lock');

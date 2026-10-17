@@ -41,7 +41,7 @@ describe('PUT /api/agent/settings/default-split-screen', () => {
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ value: true })
     const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
     )
     expect(onDisk.defaultSplitScreen).toBe(true)
   })
@@ -57,7 +57,7 @@ describe('PUT /api/agent/settings/default-split-screen', () => {
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ value: false })
     const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
     )
     expect(onDisk.defaultSplitScreen).toBe(false)
   })
@@ -86,7 +86,7 @@ describe('PUT /api/agent/settings/default-split-screen', () => {
       .put('/api/agent/settings/default-split-screen')
       .send({ value: true })
     const onDisk = JSON.parse(
-      readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+      readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
     )
     expect(onDisk.outputStyle).toBe('compact')
     expect(onDisk.defaultSplitScreen).toBe(true)
@@ -111,9 +111,9 @@ describe('GET /api/agent/settings returns defaultSplitScreen', () => {
 
   it('coerces non-boolean junk in settings.json to false', async () => {
     // 直接写脏数据到磁盘 (模拟用户手编 settings.json 写错), 服务端必须折叠
-    const settingsPath = join(dataDir, '.zai', 'settings.json')
+    const settingsPath = join(dataDir, 'settings.json')
     const { mkdirSync, writeFileSync } = await import('node:fs')
-    mkdirSync(join(dataDir, '.zai'), { recursive: true })
+    mkdirSync(dataDir, { recursive: true })
     writeFileSync(settingsPath, JSON.stringify({ defaultSplitScreen: 'yes' }))
     const { __resetCacheForTests } = await import(
       '../../src/server/services/zaiSettingsCache.js'

@@ -12,16 +12,18 @@
  *
  * 见 docs/superpowers/specs/2026-08-29-agent-plugin-system-refactor-design.md。
  */
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
   getAgentRegistry,
   type AgentConfig,
 } from '@zn-ai/zn-agent-core'
+import { resolveZaiDir } from './paths.js'
 
-/** 外置 agent 目录:`~/.zai/main-agents/`(保留兼容)。 */
+/** 外置 agent 目录:`~/.zai/main-agents/`(保留兼容)。
+ *  zai patch (2026-10-16, oc-001 收口): 改走 `resolveZaiDir()`,否则
+ *  设了 `ZAI_DATA_DIR` 的实例仍读写用户真实 home 下的 agent 定义。 */
 export function mainAgentsDir(): string {
-  return join(homedir(), '.zai', 'main-agents')
+  return join(resolveZaiDir(), 'main-agents')
 }
 
 /**

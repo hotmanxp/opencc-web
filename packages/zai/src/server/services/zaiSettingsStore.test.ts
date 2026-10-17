@@ -17,6 +17,10 @@ import { DEFAULT_PERMISSIONS } from './zaiSettingsCache.js'
 
 const tempDirs: string[] = []
 
+// zai patch (2026-10-16, oc-001):beforeEach 会覆盖 ZAI_DATA_DIR,afterEach
+// 负责还原成 harness 设的原值(而不是删掉)。
+const SAVED_ZAI_DATA_DIR = process.env.ZAI_DATA_DIR
+
 function makeTempHome(): string {
   const dir = mkdtempSync(join(tmpdir(), 'zai-settings-test-'))
   tempDirs.push(dir)
@@ -36,12 +40,20 @@ vi.mock('node:os', async () => {
 beforeEach(async () => {
   // fresh temp dir per test so writeZaiSettings never collides
   currentHome = makeTempHome()
+  // zai patch (2026-10-16, oc-001):settings.json 现在从 `ZAI_DATA_DIR` 读。
+  // 本文件靠 mock `homedir()` 控制路径,该 mock 只对 tier-2 的 `~/.claude`
+  // 仍然有效,所以把 ZAI_DATA_DIR 显式指到 mock home 下的 `.zai/`。
+  process.env.ZAI_DATA_DIR = join(currentHome, '.zai')
   // clear the module-level settings cache so each test re-runs the tier chain
   const { __resetCacheForTests } = await import('./zaiSettingsCache.js')
   __resetCacheForTests()
 })
 
 afterEach(() => {
+  // 还原 isolation harness 设的值(而非 delete),否则同 worker 的后续文件
+  // 会失去自己的数据目录。
+  if (SAVED_ZAI_DATA_DIR === undefined) delete process.env.ZAI_DATA_DIR
+  else process.env.ZAI_DATA_DIR = SAVED_ZAI_DATA_DIR
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
     if (dir) rmSync(dir, { recursive: true, force: true })

@@ -535,3 +535,118 @@ describe('sanitizePath (跨包导出)', () => {
     }
   })
 })
+
+/**
+ * 回归测试 — sessionId 不得成为路径穿越载体(wb-001, S1)。
+ *
+ * 缺陷:`create()` 只查 `meta.sessionId.startsWith('sess-')` 就当"校验过
+ * 形状",而 `'sess-../../..'` 同样以 `sess-` 开头;随后 `filePathFor` 用
+ * `join()` 拼路径,`..` 被规范化后穿越出 `${dataDir}/projects/`。
+ * 实测穿越无上界(不是固定层数)。
+ *
+ * 修法是双保险:
+ *   1. create() 拒绝含路径分隔符 / `..` / 控制字符 / 超长的 id
+ *   2. filePathFor() 加围栏断言,任何路径以 dirFor 开头
+ * 本组用例覆盖 create 的入口拒绝;filePathFor 的围栏由下方
+ * 「围栏兜底」小节覆盖(直接 append 到穿越 id 上,绕过 create 校验)。
+ */
+describe('TranscriptStore sessionId 路径围栏 (wb-001)', () => {
+  it('拒绝 `sess-../` 前缀的穿越 id,且不在 dataDir 外产生文件', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-traversal-1-'))
+    // 逃逸目标选在 tmpdir 根部(**可写**)。若围栏不存在,文件会真的被创建在
+    // dataDir 之外 —— 这样修复前的 RED 是「越权写真的发生了」,而不是
+    // 「mkdir 撞只读根目录报了个 EROFS」。
+    // 层级:filePathFor = <dir>/projects/<sanitized>/<sid>.jsonl,即 sid 前面
+    // 有 3 层,再 `../../../` 回到 <dir> 之上的 tmpdir。故需 5 个 `../`。
+    const escapeFile = join(tmpdir(), `core-traversal-escape-1-${process.pid}.jsonl`)
+    try {
+      const store = new TranscriptStore(dir)
+      const cwd = '/Users/foo/code/trav1'
+      await expect(
+        store.create(
+          { cwd, model: 'm', sessionId: `sess-../../../../../core-traversal-escape-1-${process.pid}` },
+          { cwd },
+        ),
+      ).rejects.toThrow()
+
+      // dataDir 之外一个文件都不能留下
+      expect(existsSync(escapeFile)).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+      await rm(escapeFile, { force: true })
+    }
+  })
+
+  it('拒绝百分号编码形态与反斜杠形态', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-traversal-2-'))
+    try {
+      const store = new TranscriptStore(dir)
+      const cwd = '/Users/foo/code/trav2'
+      for (const bad of ['sess-..%2F..%2Fevil', 'sess-..\\..\\evil', 'sess-a/b', 'sess-a\\b']) {
+        await expect(
+          store.create({ cwd, model: 'm', sessionId: bad }, { cwd }),
+          `应拒绝 ${bad}`,
+        ).rejects.toThrow()
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('拒绝空字节 / 控制字符与超长 id', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-traversal-3-'))
+    try {
+      const store = new TranscriptStore(dir)
+      const cwd = '/Users/foo/code/trav3'
+      for (const bad of ['sess-a b', 'sess-a\nb', `sess-${'a'.repeat(5000)}`]) {
+        await expect(
+          store.create({ cwd, model: 'm', sessionId: bad }, { cwd }),
+          `应拒绝长度 ${bad.length} 的 id`,
+        ).rejects.toThrow()
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('仍接受 AA 侧形状合法的外部 id(兼容性护栏)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-traversal-ok-'))
+    try {
+      const store = new TranscriptStore(dir)
+      const cwd = '/Users/foo/code/trav-ok'
+      // AA 的 session.create 由客户端分配 id,前缀不是 sess- 也是合法的
+      // (create 会补前缀)。这里锁住「不能为了堵穿越把 AA 打断」这条边界。
+      for (const good of ['550e8400-e29b-41d4-a716-446655440000', 'abc123', 'a.b-c_d']) {
+        const sid = await store.create({ cwd, model: 'm', sessionId: good }, { cwd })
+        expect(sid.startsWith('sess-')).toBe(true)
+        expect(sid).not.toMatch(/[/\\]|\.\./)
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('围栏兜底:即使绕过 create,append 也不得写到 dataDir 外', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'core-traversal-fence-'))
+    const escapeFile = join(tmpdir(), `core-traversal-escape-fence-${process.pid}.jsonl`)
+    try {
+      __resetDeletedSessionsForTests()
+      const store = new TranscriptStore(dir)
+      const cwd = '/Users/foo/code/trav-fence'
+      await store.create({ cwd, model: 'm' }, { cwd })
+      // 不经 create,直接拿穿越 id 写 —— filePathFor 的围栏必须兜住
+      await expect(
+        store.appendMessageEntry(
+          `sess-../../../../../core-traversal-escape-fence-${process.pid}`,
+          { type: 'user', text: 'pwn' },
+          { cwd },
+        ),
+      ).rejects.toThrow()
+
+      expect(existsSync(escapeFile)).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+      await rm(escapeFile, { force: true })
+    }
+  })
+})

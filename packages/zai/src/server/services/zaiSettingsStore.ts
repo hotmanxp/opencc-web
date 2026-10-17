@@ -1,8 +1,8 @@
 import { readFile, mkdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
+import { resolveZaiDir } from './paths.js'
 import { atomicWriteFile } from '../utils/atomicWrite.js'
 // Re-export the cache API so existing `zaiSettingsStore` importers can reach
 // it without a second import path.
@@ -31,9 +31,20 @@ async function readFreshSettingsFromDisk(): Promise<ZaiSettings> {
   }
 }
 
-/** Path to ~/.zai/settings.json — the on-disk persistence layer. */
+/**
+ * Path to the zai settings.json — the on-disk persistence layer.
+ *
+ * zai patch (2026-10-16, oc-001): 此前硬写 `join(homedir(), '.zai', ...)`,
+ * 完全无视 `ZAI_DATA_DIR`。改为与 `paths.ts:23` 的 `ZAI_DIR` 同源解析,使
+ * 设了 `ZAI_DATA_DIR` 的实例真正被隔离 —— 否则隔离只对一部分模块生效,
+ * 而漏掉的这一半恰好是会**写**的那一半(见 zaiSettingsCache 的 boot 期回填)。
+ *
+ * 保留函数形态而非改成顶层常量:测试需要在设 `ZAI_DATA_DIR` 之后才求值。
+ * 刻意只改 zai 自己的数据;`~/.claude/*`、`~/.zai.json`、`<cwd>/.zai/*`
+ * 属于别的工具与项目级,不受 ZAI_DATA_DIR 管辖。
+ */
 export function zaiSettingsPath(): string {
-  return join(homedir(), '.zai', 'settings.json')
+  return join(resolveZaiDir(), 'settings.json')
 }
 
 /**

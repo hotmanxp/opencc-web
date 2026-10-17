@@ -6,7 +6,7 @@ import { tmpdir, homedir } from 'node:os';
 import { join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import http from 'node:http';
-import fsRouter from './fs.js';
+import fsRouter, { resolveUploadsDir } from './fs.js';
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -498,8 +498,15 @@ describe('POST /api/fs/upload — 拖入文件作为副本落盘 ~/.zai/uploads'
   let root: string;
   const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
   // zai patch (2026-09-05, tf-pqvxpay0):上传目录已从 cwd-relative `.zai/uploads`
-  // 迁到用户级 `~/.zai/uploads/`。helper 直接拼绝对路径,断言 absPath 前缀。
-  const uploads = (p: string) => join(homedir(), '.zai', 'uploads', p);
+  // 迁到用户级 `~/.zai/uploads/`。
+  // zai patch (2026-10-16, oc-001):断言基准改为 `resolveZaiDir()` 而非硬写
+  // `homedir()`。原因:fs.ts 的上传目录此前无视 `ZAI_DATA_DIR`,而
+  // test/setup.isolation.ts 一直把该变量指向临时目录 —— 所以旧断言实际上
+  // 在断言「这里必须无视隔离」,与隔离 harness 自相矛盾。修好后上传目录确实
+  // 落在 $ZAI_DATA_DIR 下,本组用例改为直接 import 被测的解析函数,断言
+  // 「路由用的目录」与「约定的目录」是同一个,而不是把值写死。
+  const uploadsDir = resolveUploadsDir();
+  const uploads = (p: string) => join(uploadsDir, p);
   // 测试创建的副产物 —— afterEach 统一清,避免污染用户真实 ~/.zai/uploads/。
   const created: string[] = [];
 
@@ -512,9 +519,9 @@ describe('POST /api/fs/upload — 拖入文件作为副本落盘 ~/.zai/uploads'
     // 限定为 `dup(-<digits>)?\\.txt$` 不影响用户真实上传文件。
     const { rmSync, readdirSync } = require('node:fs') as typeof import('node:fs')
     try {
-      for (const f of readdirSync(join(homedir(), '.zai', 'uploads'))) {
+      for (const f of readdirSync(uploadsDir)) {
         if (/^dup(-\d+)?\.txt$/.test(f)) {
-          try { rmSync(join(homedir(), '.zai', 'uploads', f)) } catch { /* ignore */ }
+          try { rmSync(join(uploadsDir, f)) } catch { /* ignore */ }
         }
       }
     } catch { /* dir 还没建;无所谓 */ }
@@ -544,7 +551,7 @@ describe('POST /api/fs/upload — 拖入文件作为副本落盘 ~/.zai/uploads'
     expect(res.body.absPath).toBe(uploads('report.xlsx'));
     // zai patch (2026-09-05, tf-pqvxpay0):absPath 必须落到 ~/.zai/uploads/ 下,
     // 不能落回 cwd 内的 .zai/uploads/(违反 AGENTS.md「不要把根 .zai/ 路径写进代码」)。
-    expect(res.body.absPath.startsWith(join(homedir(), '.zai', 'uploads') + sep)).toBe(true);
+    expect(res.body.absPath.startsWith(uploadsDir + sep)).toBe(true);
     expect(res.body.absPath.startsWith(join(root, '.zai'))).toBe(false);
     // relPath 跟随目录迁移,现在也是绝对路径(文件不在 cwd 内,无法走 cwd 相对)
     expect(res.body.relPath).toBe(uploads('report.xlsx'));
@@ -616,7 +623,8 @@ describe('POST /api/fs/upload — 拖入文件作为副本落盘 ~/.zai/uploads'
 // 头而非 query、非法文件名 / 超限时**不留半截文件**。
 describe('POST /api/fs/upload — octet-stream 流式分支(绕开 20mb JSON 闸)', () => {
   let root: string;
-  const uploads = (p: string) => join(homedir(), '.zai', 'uploads', p);
+  // 见上方 describe 的同名说明:断言基准走 `resolveUploadsDir()`,不再硬写 homedir()。
+  const uploads = (p: string) => join(resolveUploadsDir(), p);
   const created: string[] = [];
 
   beforeEach(() => {

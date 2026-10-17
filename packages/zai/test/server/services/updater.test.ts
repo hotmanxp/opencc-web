@@ -96,8 +96,8 @@ describe('maybeAutoUpdate', () => {
   it('skips npm view when settings.autoUpdate=false', async () => {
     // 写一个 settings.json 到隔离 dataDir 标记 autoUpdate=false
     const { writeFileSync, mkdirSync } = await import('node:fs')
-    mkdirSync(join(dataDir, '.zai'), { recursive: true })
-    writeFileSync(join(dataDir, '.zai', 'settings.json'), JSON.stringify({ autoUpdate: false }))
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({ autoUpdate: false }))
 
     const { maybeAutoUpdate } = await import('../../../src/server/services/updater.js')
     await maybeAutoUpdate()

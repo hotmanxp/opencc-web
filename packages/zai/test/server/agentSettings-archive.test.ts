@@ -34,7 +34,7 @@ afterEach(() => {
 
 function onDisk(): Record<string, unknown> {
   return JSON.parse(
-    readFileSync(join(dataDir, '.zai', 'settings.json'), 'utf-8'),
+    readFileSync(join(dataDir, 'settings.json'), 'utf-8'),
   )
 }
 
@@ -68,9 +68,9 @@ describe('PUT /api/agent/settings/archive-keep-count', () => {
     // updateZaiSettings 是浅合并({...settings, ...patch}),所以写 archive 块
     // 必须先读出现值再展开 —— 否则会把同级字段整个抹掉。这条是那个坑的回归测试
     // (对齐 agentSettings-memory.test.ts 的 sibling key 先例)。
-    mkdirSync(join(dataDir, '.zai'), { recursive: true })
+    mkdirSync(dataDir, { recursive: true })
     writeFileSync(
-      join(dataDir, '.zai', 'settings.json'),
+      join(dataDir, 'settings.json'),
       JSON.stringify({ archive: { keepCount: 5, someFutureKey: true } }),
     )
     const { __resetCacheForTests } = await import(

@@ -40,7 +40,12 @@ afterEach(() => {
 })
 
 function writeSettings(env: Record<string, string>) {
-  const dir = join(currentHome, '.zai')
+  // zai patch (2026-10-16, oc-001):seed 目标改为 `ZAI_DATA_DIR` 本身。
+  // 此前写 `<currentHome>/.zai/settings.json`,靠的是 `homedir()` 兜住的
+  // 老路径 —— 但本用例根本不设 `HOME`,真正生效的是
+  // test/setup.isolation.ts 设的 `ZAI_DATA_DIR`。settings.json 现在只从
+  // 后者读,不改这里就只会读到空 settings,apiKey 解析成 undefined。
+  const dir = process.env.ZAI_DATA_DIR ?? join(currentHome, '.zai')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'settings.json'), JSON.stringify({ env }), 'utf-8')
 }

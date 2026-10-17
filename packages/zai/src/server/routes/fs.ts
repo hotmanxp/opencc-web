@@ -8,6 +8,7 @@ import { execFile } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import { resolveSafePath } from '../utils/safePath.js';
+import { resolveZaiDir } from '../services/paths.js';
 import { MAX_FILE_BYTES, sha256OfString, writeTextFile } from '../utils/fsWrite.js';
 import { resolveRgPath, runRipgrep } from '../services/ripgrep.js';
 import type {
@@ -39,9 +40,11 @@ const IGNORED = new Set([
 // 因不同 instance cwd 不同而错位)。
 const UPLOADS_DIR = resolveUploadsDir()
 
-/** 解析用户级上传目录的绝对路径 —— 暴露为命名导出供单测断言。 */
+/** 解析用户级上传目录的绝对路径 —— 暴露为命名导出供单测断言。
+ *  zai patch (2026-10-16, oc-001 收口): 改走 `resolveZaiDir()`,
+ *  否则设了 `ZAI_DATA_DIR` 的实例仍把上传副本写进用户真实 home。 */
 export function resolveUploadsDir(): string {
-  return resolve(homedir(), '.zai', 'uploads')
+  return resolve(resolveZaiDir(), 'uploads')
 }
 // base64 请求体上限:express.json 全局是 20mb,留出 JSON envelope 余量。
 // **只管 JSON + base64 那条路**(web 端拖文件用),见下面 STREAM 分支。

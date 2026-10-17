@@ -56,7 +56,10 @@ afterEach(() => {
 })
 
 function writeSettings(env: Record<string, string>) {
-  const dir = join(currentHome, '.zai')
+  // zai patch (2026-10-16, oc-001):settings.json 只从 ZAI_DATA_DIR 读
+  // (见 resolveZaiDir),本用例不设 HOME,真正生效的是 isolation harness
+  // 设的那个变量。seed 目标随之改为它。
+  const dir = process.env.ZAI_DATA_DIR ?? join(currentHome, '.zai')
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('node:fs').mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'settings.json'),

@@ -7,6 +7,7 @@ import { readFileSync, existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname, parse } from 'node:path'
 import type { McpServerSpec } from '@zn-ai/zn-agent-core'
+import { resolveZaiDir } from './paths.js'
 
 type McpJsonServer = {
   command?: string
@@ -130,9 +131,11 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
   // 2. local: $cwd/.zai/settings.local.json (zai's project-local).
   //    Falls back to ~/.zai/settings.local.json only if cwd version missing
   //    (rare — opencc keeps project-local inside .zai/).
+  //    zai patch (2026-10-16, oc-001 收口): 用户级回落改走 resolveZaiDir()。
+  //    cwd 级那一条**刻意不动** —— 项目级配置本就不该被用户级隔离变量影响。
   const localPaths = [
     join(cwd, '.zai', 'settings.local.json'),
-    join(homedir(), '.zai', 'settings.local.json'),
+    join(resolveZaiDir(), 'settings.local.json'),
   ]
   const localLoads: ScopeLoadResult[] = []
   for (const p of localPaths) {
@@ -205,7 +208,7 @@ export function describeMcpSources(cwd: string): ScopeLoadResult[] {
   }
   // local
   for (const p of [join(cwd, '.zai', 'settings.local.json'),
-                   join(homedir(), '.zai', 'settings.local.json')]) {
+                   join(resolveZaiDir(), 'settings.local.json')]) {
     out.push({ scope: 'local', source: p, servers: parseFile(p)?.servers ?? [] })
   }
   // user

@@ -1,10 +1,14 @@
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { resolveZaiDir } from './paths.js';
 
-const MANIFEST_DIR = join(homedir(), '.zai');
-const MANIFEST_PATH = join(MANIFEST_DIR, 'manifest.json');
+// zai patch (2026-10-16, oc-001 收口): 此前硬写 `join(homedir(), '.zai')`,
+// 无视 `ZAI_DATA_DIR` —— 设了隔离目录的实例,插件解包清单仍写进用户真实 home。
+// 改为函数形态(与 paths.ts 里 weixin 那批路径同一做法):ESM 的顶层常量在
+// 模块加载时即求值,而测试需要在设完 env 之后才让路径生效。
+const manifestDir = (): string => resolveZaiDir();
+const manifestPath = (): string => join(manifestDir(), 'manifest.json');
 const MANIFEST_VERSION = 1;
 
 /**
@@ -48,8 +52,9 @@ export interface Manifest {
  * 确保 ~/.zai 目录存在
  */
 export async function ensureManifestDir(): Promise<void> {
-  if (!existsSync(MANIFEST_DIR)) {
-    await mkdir(MANIFEST_DIR, { recursive: true });
+  const dir = manifestDir();
+  if (!existsSync(dir)) {
+    await mkdir(dir, { recursive: true });
   }
 }
 
@@ -58,7 +63,7 @@ export async function ensureManifestDir(): Promise<void> {
  */
 export async function readManifest(): Promise<Manifest> {
   try {
-    const content = await readFile(MANIFEST_PATH, 'utf-8');
+    const content = await readFile(manifestPath(), 'utf-8');
     return JSON.parse(content) as Manifest;
   } catch {
     return { version: MANIFEST_VERSION, updatedAt: 0, packages: {} };
@@ -71,7 +76,7 @@ export async function readManifest(): Promise<Manifest> {
 export async function writeManifest(manifest: Manifest): Promise<void> {
   manifest.updatedAt = Date.now();
   await ensureManifestDir();
-  await writeFile(MANIFEST_PATH, JSON.stringify(manifest, null, 2), 'utf-8');
+  await writeFile(manifestPath(), JSON.stringify(manifest, null, 2), 'utf-8');
 }
 
 /**
