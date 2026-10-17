@@ -278,11 +278,15 @@ export class AaConnection {
    */
   sendNotification(method: string, params?: unknown): void {
     if (!this.ws || this.status.state !== 'connected') {
-      // Queue for replay when connection comes back. The offline buffer is
-      // a per-port JSONL; passing 0 here means "let the buffer pick a
-      // representative port based on the most recent runtime registration".
-      // For runtime/timeline notifications specifically, that's fine —
-      // AA server accepts slight reordering across a reconnect window.
+      // Queue for replay when connection comes back. One zai process has one
+      // AA connection, so a single shared outbox file is correct — the queue
+      // is inherently ordered. AA server accepts slight reordering across a
+      // reconnect window.
+      //
+      // zai patch (2026-10-17, cl-002):原注释说「passing 0 here means let
+      // the buffer pick a representative port based on the most recent
+      // runtime registration」—— 没有这回事,`setPort()` 全仓零调用,port
+      // 恒为 0。三处注释当时互相矛盾,现已对齐,详见 offlineBuffer.ts 头部。
       void this.queueOffline(method, params);
       return;
     }

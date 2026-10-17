@@ -43,7 +43,7 @@
 > 终裁见 [`VERDICT.md`](./bug-hunt-game-10-17/VERDICT.md)，修复计划见 [`FIX-PLAN.md`](./bug-hunt-game-10-17/FIX-PLAN.md)。
 > **其中 3 条来自「上一届的修复本身」** —— 详见下方「本节必读」。
 >
-> **修复进度：5/6 已修，仅 `cl-002` 未动**（S3 + 三层门，离默认用户最远，见下表）。
+> **修复进度：6/6 已修**（`cl-002` 已于批 5 修完，但**根因与原判不同**，见下方「⑤」）。
 
 | ID | 终裁 | 簇 | 标题 | 一句话 |
 |---|---|---|---|---|
@@ -52,13 +52,17 @@
 | **oc-001** | S3/E3a | C | `starting` 窗口内 DELETE 跳过 `doStop` | `instanceSupervisor.ts:581` → 子进程从 supervisor 脱管，`shutdown():693` / `tickHeartbeat:592` 都只遍历 `entries.values()` 故看不见它 — ✅ **已修** `563e0803`（上一届 wb-004 残留） |
 | **oc-r1** | **S2** | D | manifest 撕裂读 → 整份清空 | `manifest.ts:79` 非原子写 + `:64-71` 裸 catch 返回空 manifest → 下一次写回把**所有插件**的 `extractedVersions` + `latestVersion` 一起抹掉 — ✅ **已修** `cfd4c9d9`（改原子写 + 损坏改抛错） |
 | **cl-001** | S3/E3a | D | `updateCachedVersion` 覆盖掉 `extractedVersions` | `manifest.ts:106` 无 `...existing` 展开（同模块 `:132`/`:156` 两处都有）→ LRU prune 永久失效 — ✅ **已修** `cfd4c9d9`（同批） |
-| **cl-002** | S3/E3a | E | `OfflineBuffer.setPort()` 全仓零调用 | per-child outbox 隔离从未发生；`enforceSizeCap` 的 FIFO 截断无归属概念 → 跨子实例驱逐。**需 `--aa` + 已 pairing + 50MB 溢出，三层门** |
+| **cl-002** | S3/E3a | E | `OfflineBuffer.setPort()` 全仓零调用 | per-child outbox 隔离从未发生；**真正丢数据的缺口是 `enforceSizeCap` 缺重读合并**（不是 drain —— tc-001 已修）。**需 `--aa` + 已 pairing + 50MB 溢出，三层门** — ✅ **已修** `75034ee5` 之后的批 5（补重读合并 + 对齐三处矛盾注释） |
 
 ### 本节必读
 
 **① 3 条是「上一届的修复本身」留下的缺陷**（`oc-001` ← `5dedfe4d` 漏了 `doRemove`；`oc-002` ← `7c32e4da` 加 provider 漏了 zod 枚举；`cl-003` ← `d66d09f5` 声称一次收口实际漏三处）。这意味着**修它们是「把上一届说已修的修完」，不是加新功能**。三条现已全部修完。
 
 **④ 修 `oc-002` 时顺带发现：`7c32e4da` 留了一条红测试** —— 它加了 `claude` 却没更新 `superTasks.factorySettings.test.ts` 的断言，之后 **6 个 commit 没人跑过那个文件**（AGENTS.md 要求跑直接受影响的文件，`superTasks.ts` 正是），于是它一直红着。修 `oc-002` 时一并修好并改成跟随真相源。**这条本身就是「修复本身是新排查面」的又一例：上一届的漏不只在产品代码里，也在它的验证里。**
+
+**⑤ `cl-002` 的根因在动手时被实验推翻了 —— 原判把两条路径混成了一条。** 原判称「drain 末尾整文件重写会吃掉并发 append」，但双进程实验（`/tmp/bughunt-10-17/fix/multiproc.mts`，A 持续 enqueue、B drain 到第一条即握手）跑出**阴性**：`drain 前行数=52 → drain 后行数=300，A 写入的条目存活 300/300`。原因是 `maybeDrain:177-186` **早就有**「重写前重读并合并新增行」——那是 tc-001 修复时建立的，原判漏读了。**唯一剩下的缺口是 `enforceSizeCap`**（`stat → readFile → 裁剪 → 直接 writeFile`，无重读合并），批 5 补齐并加了双向自证的回归测试。
+
+操作教训两条：**(a)** 判「整文件重写会丢并发写」时，必须先确认那条重写**当前**有没有重读合并，不能按模式名推断；**(b)** 「共享文件 + 进程内互斥 = 跨进程丢数据」这个推理本身是对的，但它指向的**是哪一行**必须机器验 —— 本场是注释与代码的叙述压过了实测。修法同时把 `offlineBuffer.ts` 头部 / `setPort` / `init.ts` / `connection.ts` **三处互相矛盾的注释**全部对齐为实际行为（port 恒为 0，无 per-child 拆分），并标注 `setPort()` 全仓零调用 —— 免得下一个读代码的人再被同一段叙述带偏。
 
 **② 裁判撤回了一条自己的裁定。** 原第 7 条 `cl-r1`（tier-2 无条件读真实 `~/.claude/` 并回写实例目录）被判 CONFIRMED S3/E3b，**修复阶段动手前被裁判自行撤回**：读代码时才发现 `paths.ts` 的边界声明明写「`~/.claude/*` 属别的工具，**不受 `ZAI_DATA_DIR` 管辖，不要为了「统一」把它们也改掉**」，且 `zaiSettingsCache.test.ts:58` 有 4 个用例正经断言这个行为。**那是刻意钉住的产品特性，不是漏网。** 完整勘误见 [`bug-hunt-game-10-17/ERRETA.md`](./bug-hunt-game-10-17/ERRETA.md) §三。
 

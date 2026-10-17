@@ -11,8 +11,34 @@
  *   3. When status flips back to "connected", drains the outbox in order,
  *      replaying each notification through the connection.
  *
- * Per-port scoping: each child has its own outbox so a backlog from one
- * noisy child doesn't head-of-line-block another.
+ * Outbox scoping: ONE shared file per zai data dir. See the note below —
+ * the earlier "per child" claim in this header was never implemented.
+ *
+ * zai patch (2026-10-17, cl-002):本文件此前有三处**互相矛盾**的注释,
+ * 构成了这条缺陷的认知根源:
+ *   - 这里的「Per-port scoping: each child has its own outbox so a backlog
+ *     from one noisy child doesn't head-of-line-block another」
+ *   - `init.ts`:「Each runtime_registry registration updates the active port
+ *     to the most-recently-running child」
+ *   - `connection.ts`:`sendNotification` 里「passing 0 here means let the
+ *     buffer pick a representative port based on the most recent runtime
+ *     registration」
+ *
+ * **实际行为**:生产只在 `init.ts:172` 调 `initOfflineBuffer(conn, 0)`,
+ * 而 `setPort()`(见下)全仓零调用,所以 `port` 恒为 0 —— 没有「挑代表性端口」
+ * 这回事,也没有 per-child 的文件拆分。
+ *
+ * 那么共用一个文件对不对?对 —— **单个 zai 进程只有一条 AA 连接**,
+ * 它的待发队列本来就是一个有序列;`connection.ts` 里「AA server accepts
+ * slight reordering across a reconnect window」那句论证是成立的。
+ *
+ * 真正的问题在**跨进程**:凡 argv 带 `--aa` 的进程(root 与各 child)各持
+ * 一个 buffer 且 port 都是 0,于是都指向同一个 `outbox-0.jsonl`;而 `io`
+ * 互斥是**进程内**的 Promise 链,跨进程为零。已修:`enforceSizeCap` 补上
+ * 「重写前重读并合并并发新增」(`maybeDrain` 末尾早就有,当时漏了这条路径)。
+ *
+ * 若将来真要 per-child 拆分,`setPort()` 与三处注释都得一起改 ——
+ * **别只改其中一处**,这正是本条缺陷的成因。
  *
  * Size cap: ZAI_AA_OUTBOX_MAX_MB (default 50MB) per port. When exceeded,
  * the oldest entries are dropped (FIFO trim) — better than failing
@@ -66,6 +92,15 @@ export class OfflineBuffer {
     this.port = port;
   }
 
+  /**
+   * zai patch (2026-10-17, cl-002):**全仓零调用**。生产只在
+   * `initOfflineBuffer(conn, 0)` 构造,`port` 因此恒为 0。
+   *
+   * 此前 `init.ts` 的注释声称「每次 runtime_registry 注册会更新 active
+   * port」,本方法正是那个从未发生的更新的入口 —— 它从写下来那天起就没有
+   * 任何调用方。保留它是因为 per-child 拆分仍是合理的后续方向,但**在有人
+   * 真正调用它之前,别把它当成正在生效的隔离机制**。
+   */
   setPort(port: number): void {
     this.port = port;
   }
@@ -211,11 +246,30 @@ export class OfflineBuffer {
           break;
         }
       }
-      const trimmed = lines.slice(keepFrom).join('\n');
-      await writeFile(path, trimmed, 'utf-8');
+      const trimmed = lines.slice(keepFrom);
+      // zai patch (2026-10-17, cl-002):重写前**重新读一次**,把本次裁剪
+      // 期间由**别的进程**追加的行原样保留在后面 —— 与 `maybeDrain` 末尾
+      // 同一模式(tc-001 修复时已在那里建立,这条路径当时漏了)。
+      //
+      // 为什么需要:凡 argv 带 `--aa` 的 zai 进程(root 与各 child,见
+      // `instanceSupervisor` 的「子进程 env 说开 AA ⟺ argv 有 --aa」不变式)
+      // 各自持有一个 OfflineBuffer,port 恒为 0,于是**都指向同一个
+      // `$ZAI_DATA_DIR/aa/outbox-0.jsonl`**;而 `io` 互斥是**进程内**的
+      // Promise 链,跨进程为零。不重读的话,别的进程在这个 read→write 窗口
+      // 里 append 的通知会被整块抹掉 —— 而 FIFO 裁剪本意只是丢最老的。
+      //
+      // 保留下来可能又超限:那是预期的,下一轮 enqueue 再次触发 cap 时会
+      // 重新裁剪。与 `maybeDrain` 的行为一致。
+      const latest = existsSync(path) ? await readFile(path, 'utf-8') : '';
+      const latestLines = latest.split('\n').filter((l) => l.trim().length > 0);
+      const stillThere = new Set(lines);
+      const appended = latestLines.filter((l) => !stillThere.has(l));
+      const out = [...trimmed, ...appended];
+      await writeFile(path, out.length > 0 ? `${out.join('\n')}\n` : '', 'utf-8');
       console.warn(
         `[aa.offlineBuffer] port ${this.port} outbox exceeded ${MAX_BYTES} bytes; ` +
-        `dropped ${lines.length - keepFrom} oldest entries`,
+        `dropped ${lines.length - keepFrom} oldest entries` +
+        (appended.length ? ` (+${appended.length} concurrent, kept)` : ''),
       );
     } catch {
       // stat failed (file gone?) — nothing to do

@@ -165,10 +165,17 @@ export async function startAaRoot(config: import('./index.js').AaConfig): Promis
   // same bus with `_aa` envelope metadata.
   const adapter = initEventAdapter(conn);
 
-  // T8: offline buffer — picks a representative port (the supervisor's
-  // own instance, 0) for now. Each runtime_registry registration updates
-  // the active port to the most-recently-running child; outbox per port
-  // means a backlog from one noisy child doesn't block others.
+  // T8: offline buffer — 一个 zai 进程一条 AA 连接,所以共用一个 outbox
+  // 文件是正确的(待发队列本来就是一个有序列)。
+  //
+  // zai patch (2026-10-17, cl-002):此处注释原为「picks a representative port
+  // (the supervisor's own instance, 0) for now. Each runtime_registry
+  // registration updates the active port to the most-recently-running child;
+  // outbox per port means a backlog from one noisy child doesn't block
+  // others.」—— **后半段从未实现**:`OfflineBuffer.setPort()` 全仓零调用,
+  // port 恒为 0,没有 per-child 拆分。三处注释(此处 / offlineBuffer.ts 头部 /
+  // connection.ts 的 sendNotification)当时互相矛盾,是这条缺陷的认知根源。
+  // 现已全部对齐为实际行为,详见 offlineBuffer.ts 头部注释。
   const buffer = initOfflineBuffer(conn, 0);
 
   // T7: reverse dispatch — wires inbound RPC handlers on the connection

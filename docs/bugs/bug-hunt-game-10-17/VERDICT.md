@@ -122,6 +122,8 @@ if (pending) await pending.catch(() => {})
 
 ### cl-002 · `OfflineBuffer.setPort()` 零调用 → **PARTIAL,S2 → S3**/E3a
 
+> **修复阶段勘误(2026-10-17,批 5 后补记)**:本条**仍成立、严重度与分数不变**(S3/E3a,3.0 分),但**丢数据的具体路径被实验推翻过一次** —— 原判归因于 drain 末尾的整文件重写,双进程实验跑出 300/300 全存活(`maybeDrain:177-186` 早有重读合并,系 tc-001 修复建立)。唯一剩余缺口是 `enforceSizeCap`。详见 [`ERRETA.md`](./ERRETA.md) §三之二。
+
 **机制 100% 成立,且比作者的模型更强。裁判核实:**
 
 - `offlineBuffer.ts:69-71` `setPort()` 全仓**零生产调用**。grep 全仓 7 处命中:`:69` 定义本身,其余 6 处(`web/src/pages/Instances.tsx:160,354,628,802,816,817`)全是 React 的 `setPortEditRow` / 局部 `setPort(id, port)`。**作者 grep 结论正确。**
