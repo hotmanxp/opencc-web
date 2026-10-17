@@ -57,6 +57,27 @@ const VALID_DEFAULT_MODES: ReadonlySet<UserFacingPermissionMode> = new Set(
 )
 
 /**
+ * zai 数据目录解析 — 与 `paths.ts` 的 `resolveZaiDir()` 同一口径。
+ *
+ * zai patch (2026-10-17, cl-003):此前这里写死 `join(homedir(), '.zai', …)`,
+ * 完全不看 `ZAI_DATA_DIR`,于是设了隔离目录的实例读的是**用户真实**的
+ * `~/.zai/settings.json`,权限模式的判定结果与实例自身配置不符。
+ * (`d66d09f5` 声称「收口全部调用点」,这一处漏了。)
+ *
+ * compat 够不到 zai 的 `paths.ts`(那是 zai 包的服务,compat 不能反向依赖),
+ * 所以自带一份 —— 这是**结构性约束而非疏忽**,同包 `taskListStore.ts` 同理。
+ *
+ * 两个细节照抄 `taskListStore.ts` 的理由:
+ *   - 用 `homedir()` 而非 `$HOME`:与 `paths.ts:23` 同口径,Windows 上
+ *     `$HOME` 通常不存在,原实现在那儿会掉到 `/tmp`。
+ *   - **函数形态而非模块级常量**:ESM 顶层 import 在模块加载时即求值,而
+ *     测试要在设完 `ZAI_DATA_DIR` 之后才让路径生效。
+ */
+function zaiDir(): string {
+  return process.env.ZAI_DATA_DIR || join(homedir(), '.zai')
+}
+
+/**
  * Read the default permission mode from ~/.zai/settings.json.
  *
  * Resolution order:
@@ -80,7 +101,7 @@ const VALID_DEFAULT_MODES: ReadonlySet<UserFacingPermissionMode> = new Set(
  */
 export function getDefaultMode(): UserFacingPermissionMode {
   try {
-    const path = join(homedir(), '.zai', 'settings.json')
+    const path = join(zaiDir(), 'settings.json')
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as {
       defaultMode?: unknown
       permissions?: { defaultMode?: unknown }
@@ -93,8 +114,12 @@ export function getDefaultMode(): UserFacingPermissionMode {
       return candidate as UserFacingPermissionMode
     }
   } catch (err) {
+    // ENOENT(没配过)与 SyntaxError(文件坏了)是常态,静默回落即可。其余是
+    // 真 IO 错误 —— 此前这个分支**只有注释没有语句**,于是「读不到」与
+    // 「读到了但没这个字段」在行为上完全不可区分,排障时看不到任何线索
+    // (cl-003)。补一条 warn,不动返回语义。
     if (!(err instanceof SyntaxError) && (err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      // Real IO error — fall through to default.
+      console.warn('[permissions] getDefaultMode: read settings failed:', err)
     }
   }
   return 'default'

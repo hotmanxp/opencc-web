@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
+import { resolveZaiDir } from '../paths.js'
 import type { PromptCommand, CommandContext, CommandSource } from '@zn-ai/zn-agent-core'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-_]*$/
@@ -14,30 +14,35 @@ interface CommandsDirsOpts {
 
 /**
  * Resolve which command directories should be loaded. Merges:
- *   - project-level: `<cwd>/.zai/commands` and `<cwd>/.zai/commands` (if any)
- *   - home-level: `~/.zai/commands` wins if it exists (single-source for zai
- *     users), otherwise fall back to `~/.zai/commands` for OpenCC workflows.
+ *   - project-level: `<cwd>/.zai/commands` (if any)
+ *   - data-dir-level: `<resolveZaiDir()>/commands`
  * Project-level dirs come first so a project command overrides a same-named
- * home-level command on name conflicts.
+ * user-level command on name conflicts.
+ *
+ * zai patch (2026-10-17, cl-003):用户级目录此前拼的是
+ * `join(opts.dataDir, '.zai', 'commands')`,**比 writer 多套了一层 `.zai`**,
+ * 且还保留一条无条件指向真实 home 的回落分支。writer
+ * (`commands/fileStore.ts` 的 `commandsDir()`)早在 `d66d09f5` 就迁成了
+ * `join(resolveZaiDir(), 'commands')`,reader 却没跟上 —— 于是**写 A 读 B**:
+ * 写进 `$ZAI_DATA_DIR/commands` 的命令读不到,隔离实例反而静默继承了用户
+ * 真实的全套全局命令。
+ *
+ * 同时清掉两处上游 `.claude` → `.zai` 重命名遗留的死代码:原 `:33-36` 的
+ * `cwdClaude` 与 `cwdZai` 拼出**完全相同的字符串**,两个 `existsSync` 判同
+ * 一个目录,存在时会把同一路径 push 两次(见 `loadUserCommands` 的扫描循环)。
  */
 export function defaultCommandsDirs(opts: CommandsDirsOpts = {}): string[] {
-  const home = opts.homeDir ?? homedir()
-  const zaiDir = opts.dataDir
-    ? join(opts.dataDir, '.zai', 'commands')
-    : join(home, '.zai', 'commands')
-  const homeClaudeDir = join(home, '.zai', 'commands')
-
   const dirs: string[] = []
-  // project-level first (project overrides home on name conflicts)
+  // project-level first (project overrides user-level on name conflicts)
   if (opts.cwd) {
-    const cwdClaude = join(opts.cwd, '.zai', 'commands')
     const cwdZai = join(opts.cwd, '.zai', 'commands')
-    if (existsSync(cwdClaude)) dirs.push(cwdClaude)
     if (existsSync(cwdZai)) dirs.push(cwdZai)
   }
-  // home-level: keep the original single-source policy
+  // user-level: 与 writer 同源。`dataDir` / `homeDir` 是显式注入的测试口子,
+  // 生产走 resolveZaiDir()。
+  const dataRoot = opts.dataDir || opts.homeDir || resolveZaiDir()
+  const zaiDir = join(dataRoot, 'commands')
   if (existsSync(zaiDir)) dirs.push(zaiDir)
-  else if (existsSync(homeClaudeDir)) dirs.push(homeClaudeDir)
   return dirs
 }
 

@@ -77,7 +77,56 @@ entries.delete(id)                   // ← :582
 
 ---
 
-## 三、分数与排名的连带影响
+## 三、对**本场裁定**的修正:cl-r1 撤回(裁判改判自己的终裁)
+
+> 这一节修正的是本场 `VERDICT.md` / `ANNOUNCEMENT.md` 里的结论,不是上一届的。
+
+| # | 原判 | 新判 | 证据等级 | 计分 |
+|---|---|---|---|---|
+| 3 | **cl-r1**(评审期新发现,claude 报)判为**独立缺陷 S3/E3b** | **不成立** —— 是设计内的既定行为,不修 | — | **-1.5 分** |
+
+### 触发新证据的那次复核
+
+修复阶段动手前读 `zaiSettingsCache.ts` 时,读到两处把这条推翻的东西:
+
+**① `paths.ts` 的边界声明(原本就在代码里,裁定时我只读了 `:23` 的常量定义,没往下读到这段注释):**
+
+> ⚠️ 边界:只管 zai 自己的数据。`~/.claude/*`、`~/.nova/*`、`~/.zai.json` 属于别的工具,`<cwd>/.zai/*` 是项目级 —— 都**不**受 `ZAI_DATA_DIR` 管辖,**不要为了「统一」把它们也改掉**。
+
+**② `zaiSettingsCache.ts:17-19` 的产品意图注释:**
+
+> Tier 2 lets users who upgraded from upstream claude-code keep their pre-existing settings without manual copying — once seeded into ~/.zai, subsequent boots hit tier 1 and the legacy file is left untouched.
+
+**③ 决定性的一条:`zaiSettingsCache.test.ts:58` 有 4 个用例正经断言这个行为** —— 它显式把 `ZAI_DATA_DIR` 指到 mock home 下,然后要求 tier-2 仍从 `~/.claude` 读:
+
+```ts
+// mock `homedir()` 只能覆盖 tier-2 的 `~/.claude`
+// —— 那是别人的配置,刻意仍走 homedir()。
+process.env.ZAI_DATA_DIR = join(currentHome, '.zai')
+```
+
+**这 4 个用例是对的。** 「设了 `ZAI_DATA_DIR` 仍读 `~/.claude`」不是漏网,是**被刻意钉住的契约**。
+
+### 我裁错在哪
+
+我把两类东西混为一谈了:
+
+- **cl-003 那三处**(`permissions.ts` / `userLoader.ts` / `ReplHistoryService.ts`)—— 这些**本来就是 zai 自己的数据**,理应走 `resolveZaiDir()`,是**真的漏网**
+- **cl-r1 的 tier-2** —— 读的是**别的工具的配置**,`paths.ts` 已明确声明它不受隔离管辖,是**有意为之**
+
+「把真实 home 的配置复制进隔离实例」这个描述本身没错,但它描述的是 tier-2 的**既定语义**,不是缺陷。我当时只核了代码行为,没读这两个注释,就把机制成立直接等同于缺陷成立 —— **这正是我自己写进 §4.2.1 的那条纪律的反面:核了机制,没核「现有防护为什么挡不住 / 为什么它本来就该这样」。**
+
+### 分数与排名的连带影响
+
+**claude 总分 22.7 → 21.2**(撤回 cl-r1 的 1.5 分)。**名次不变**(opencc 25.9,差距由 3.2 扩大到 4.7)。
+
+`VERDICT.md` / `ANNOUNCEMENT.md` / `docs/bugs/README.md` 中的分数表与 cl-r1 条目已同步更新。
+
+**一个附带收获**:cl-r1 撤回后,oc-002(簇 A)的排查价值反而更清楚了 —— 它不是被 tier-2 污染「放大」出来的假象,而是 `7c32e4da` 真实遗漏的取值域。**撤回一条缺陷,没有动摇另一条。**
+
+---
+
+## 四、分数与排名的连带影响(上一届)
 
 **`bug-hunt-game-10-16` 的名次不变。** 理由:
 

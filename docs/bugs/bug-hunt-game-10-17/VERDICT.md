@@ -18,9 +18,11 @@
 | cl-002 | claude | S2/E3a | **PARTIAL S3** | E3a | 3.0 |
 | cl-003 | claude | S3/E1 | **CONFIRMED S3** | E1 | 1.5 |
 | oc-r1 | opencc(评审期) | — | **CONFIRMED S2** | E2 | 计评审分 |
-| cl-r1 | claude(评审期) | — | **CONFIRMED S3** | E3b | 计评审分 |
+| cl-r1 | claude(评审期) | — | **已撤回**(设计内行为,见 [`ERRETA.md`](./ERRETA.md) §三) | — | 0 |
 
 **无 REJECTED、无 KNOWN、UNVERIFIED 清单为空。全场无误杀。**
+
+> **修复阶段的自我修正**:`cl-r1` 在动手修之前被裁判**自行撤回** —— 动手前读 `zaiSettingsCache.ts` 时发现 `paths.ts` 的边界声明(`~/.claude/*` 属别的工具,**不受 `ZAI_DATA_DIR` 管辖,不要为了「统一」把它们也改掉**)与 `zaiSettingsCache.test.ts:58` 的 4 个契约用例,证明「设了 `ZAI_DATA_DIR` 仍读 `~/.claude`」是**被刻意钉住的产品特性**而非漏网。撤回扣 1.5 分,claude 总分 22.7 → **21.2**,名次不变。完整推理见 `ERRETA.md` §三。
 
 ---
 
@@ -208,23 +210,24 @@ const childEnv: NodeJS.ProcessEnv = { ...process.env, ZAI_INSTANCE_ID: id, … }
 
 ---
 
-### cl-r1(评审期新发现)· tier-2 无条件读真实 `~/.claude/` 并回写实例目录 → **CONFIRMED S3/E3b**
+### cl-r1(评审期新发现)· tier-2 无条件读真实 `~/.claude/` → **已撤回**
 
-**裁判核实(比作者自己写的更重):**
+> **本条由裁判在修复阶段自行撤回。** 原始裁定的推理与事实记录保留在下,但**结论是错的** —— 完整勘误见 [`ERRETA.md`](./ERRETA.md) §三。
 
-- `zaiSettingsCache.ts:161` `tier2 = await tryReadSettings(claudeSettingsPath())` —— **读用户真实 `~/.claude/settings.json`,完全不感知 `ZAI_DATA_DIR`**
+**当时核实到的机制事实(这些都对):**
+
+- `zaiSettingsCache.ts:161` `tier2 = await tryReadSettings(claudeSettingsPath())` —— 读用户真实 `~/.claude/settings.json`,不感知 `ZAI_DATA_DIR`
 - `:166` `settings = tier2 ?? BUILTIN_DEFAULT_SETTINGS` —— tier2 盖过内置默认
-- `:174-176` `if (settings.permissions === undefined) { …; await writeZaiSettings(settings) }` —— boot 期**自动写**
+- `:174-176` `if (settings.permissions === undefined) { …; await writeZaiSettings(settings) }` —— boot 期自动写
 
-**关键更正:这不只是读泄漏,是「复制」。** 隔离实例的 tier-1 缺 `settings.json` → 走 tier-2 读到**真实 home 的内容** → boot 回填把它**写进隔离目录的 `settings.json`**。真实 home 的配置内容被搬进了隔离实例。
+**撤回理由(修复阶段才读到的两处证据):**
 
-**为什么它会让 `/api/super-tasks/spawn-agents` 报 `registered:true`:** 该端点遍历 `CLI_AGENT_NAMES` 逐个探测,注册状态的判定最终落到这份被污染的 settings;作者的机器上真实 `~/.claude/settings.json` 恰有 `dsh` / `opencode` 两个 `subagents` key,而隔离目录里连 `settings.json` 都不存在。**机制可推广**:任何在 `~/.claude/settings.json` 里注册过 dsh/opencode 子 agent 的用户都会命中。
+1. **`paths.ts` 的边界声明** —— 原文:「⚠️ 边界:只管 zai 自己的数据。`~/.claude/*`、`~/.nova/*`、`~/.zai.json` 属于别的工具 …… 都**不**受 `ZAI_DATA_DIR` 管辖,**不要为了「统一」把它们也改掉**。」裁判裁定时只读了 `:23` 的常量定义,**没往下读到这段注释**。
+2. **`zaiSettingsCache.test.ts:58` 有 4 个用例正经断言这个行为** —— 它显式把 `ZAI_DATA_DIR` 指到 mock home 下,再要求 tier-2 仍从 `~/.claude` 读。**那 4 个用例是对的。**
 
-**S3 而非更高**:需 `ZAI_DATA_DIR`(非默认);后果是配置串味进隔离实例,**写落点是隔离目录而非用户真实文件**,不构成对真实数据的破坏。
+**我裁错的根源**:核了机制、没核「它为什么本来就该这样」。cl-003 那三处读的是 **zai 自己的数据**(理应走 `resolveZaiDir()`,是真漏网);cl-r1 读的是**别的工具的配置**,边界声明已明确排除。**把「机制成立」直接等同于「缺陷成立」** —— 这正是本场 §4.2.1 第③问要防的事,而我自己漏答了。
 
-**与 cl-003 的关系**:同一族(数据目录隔离),但**不同机制** —— cl-003 是路径解析疏忽,cl-r1 是一条**故意设计的跨工具回退链**忘了感知隔离。判独立缺陷,不判 DUPLICATE。
-
-**计分**:`主动新发现` 按 `S×0.5` = **1.5**。
+**计分**:`主动新发现` **0**(原 1.5,撤回)。
 
 ---
 
@@ -249,16 +252,16 @@ E0 占比:两家均为 **0%**(红线 50%)。严重度虚报罚则:**均未触发
 |---|---:|---:|---:|
 | 裁决正确率 | 15 | **6.0**(3 条全一致) | **4.0**(2 条全一致) |
 | 抽验质量 | 7 | **7.0**(4 条,全自建复现物) | **7.0**(4 条,含一次自曝失败实验) |
-| 主动新发现 | 5 | **3.0**(oc-r1,S2) | **1.5**(cl-r1,S3) |
+| 主动新发现 | 5 | **3.0**(oc-r1,S2) | **0**(cl-r1 已撤回,见 `ERRETA.md` §三) |
 | 交叉洞察 | 3 | **0.9**(oc-r2,S3) | **2.7**(cl-r2 0.9 + 取值域第 6 处 1.8) |
-| **小计** | 30 | **16.9** | **15.2** |
+| **小计** | 30 | **16.9** | **13.7** |
 
 ### 总分
 
 | 名次 | 选手 | 发掘 /70 | 评审 /30 | 总分 /100 |
 |:-:|---|---:|---:|---:|
 | **1** | **opencc** | **9.0** | **16.9** | **25.9** |
-| **2** | **claude** | **7.5** | **15.2** | **22.7** |
+| **2** | **claude** | **7.5** | **13.7** | **21.2** |
 
 ---
 

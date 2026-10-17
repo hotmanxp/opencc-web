@@ -1,13 +1,14 @@
 import { appendFile, mkdir, readFile, rename, stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
+import { resolveZaiDir } from '../paths.js'
 import type { TopCommandEntry } from '../../../shared/repl.js'
 
 /**
  * 全局 Bash REPL 命令历史服务。
  *
  * 设计:
- * - 每条 exec spawn 成功后 appendCommand 一行 JSONL 到 `~/.zai/repl-history.jsonl`。
+ * - 每条 exec spawn 成功后 appendCommand 一行 JSONL 到
+ *   `<resolveZaiDir()>/repl-history.jsonl`(设了 `ZAI_DATA_DIR` 时落在隔离目录)。
  * - getTopCommands 读时计算 + 内存 cache(TTL),返回按 command 频次倒序的 topN。
  * - blocklist 拦截包含敏感赋值的命令,不写入磁盘(假阴优先于假阳)。
  * - 文件超 maxBytes 时 rotate 成 `<path>.1`,只读主文件避免无限增长。
@@ -16,7 +17,10 @@ import type { TopCommandEntry } from '../../../shared/repl.js'
  * Spec/Plan: docs/superpowers/plans/2026-07-25-zai-bash-repl-top10.md
  */
 
-const DEFAULT_HISTORY_PATH = '~/.zai/repl-history.jsonl'
+// zai patch (2026-10-17, cl-003):原先有个 `DEFAULT_HISTORY_PATH =
+// '~/.zai/repl-history.jsonl'` 常量,但它**从未被引用** —— 真正的默认路径
+// 走下面的 defaultHistoryPath(),而后者硬写 `${homedir()}/.zai/…`。留着它
+// 会让人以为改这个常量就能改行为。已删除。
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 
@@ -40,7 +44,8 @@ interface CacheState {
 }
 
 export class ReplHistoryService {
-  private readonly historyPath: string
+  /** 显式注入的路径(测试口子);未给则每次现算 defaultHistoryPath()。 */
+  private readonly explicitHistoryPath?: string
   private readonly cacheTtlMs: number
   private readonly maxBytes: number
   private cache: CacheState | null = null
@@ -48,9 +53,21 @@ export class ReplHistoryService {
   private writeChain: Promise<void> = Promise.resolve()
 
   constructor(opts: ReplHistoryServiceOptions = {}) {
-    this.historyPath = opts.historyPath ?? defaultHistoryPath()
+    this.explicitHistoryPath = opts.historyPath
     this.cacheTtlMs = opts.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
     this.maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES
+  }
+
+  /**
+   * 惰性解析:默认路径**每次现算**。
+   *
+   * zai patch (2026-10-17, cl-003):此前是构造函数一次性捕获进
+   * `this.historyPath`,而 `getReplHistoryService()` 是惰性单例 —— 即使把
+   * 默认路径改成走 `resolveZaiDir()`,「首次使用 REPL 那一刻的 env」也会被
+   * 永久冻结,隔离目录对它无效。
+   */
+  private get historyPath(): string {
+    return this.explicitHistoryPath ?? defaultHistoryPath()
   }
 
   /**
@@ -159,8 +176,19 @@ function isSensitive(command: string): boolean {
   return SENSITIVE_PATTERNS.some((re) => re.test(command))
 }
 
+/**
+ * 默认历史文件路径 — 走 `resolveZaiDir()`。
+ *
+ * zai patch (2026-10-17, cl-003):此前是
+ * `` `${homedir()}/.zai/repl-history.jsonl` `` —— **模板串写法绕开了
+ * `join(homedir(), '.zai'` 这个 grep 特征**,所以 `d66d09f5` 的「收口全部
+ * 调用点」清单里没有它(上一届 tc-002 栽在同一类模板串上)。设了
+ * `ZAI_DATA_DIR` 的实例每次执行 REPL 都会 append 到**用户真实**的
+ * `~/.zai/repl-history.jsonl`,超限时 `rotate()` 还会 rename 覆盖用户真实的
+ * `.1` 文件。
+ */
 function defaultHistoryPath(): string {
-  return `${homedir()}/.zai/repl-history.jsonl`
+  return join(resolveZaiDir(), 'repl-history.jsonl')
 }
 
 // ----- 单例 -----
