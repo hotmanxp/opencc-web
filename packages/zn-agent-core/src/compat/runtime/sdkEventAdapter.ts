@@ -42,10 +42,11 @@ export interface SdkEventMeta {
    */
   streamedBlockIndices?: Set<number>
   /**
-   * Tracks the eventCounter of the most recent `stream_event`-wrapped
-   * message_start. Used by the format-(a) `assistant` wrapper path to
-   * decide whether to bump `meta.turnIndex` (and avoid double-bumping
-   * when stream_event already fired for this turn).
+   * The `message.id` of the turn whose `stream_event`-wrapped
+   * message_start already bumped `meta.turnIndex`. Used by the
+   * format-(a) `assistant` wrapper path to decide whether to bump
+   * (and avoid double-bumping when stream_event already fired for
+   * this turn). Undefined = no stream_event bump recorded yet.
    *
    * opencc's normal streaming flow is:
    *   stream_event(message_start) → ... → assistant(wrapper)
@@ -55,10 +56,16 @@ export interface SdkEventMeta {
    *
    * The latent gap (zai patch 2026-08-30 review update): if vendor
    * ever yields ONLY the format-(a) wrapper (non-streaming playback /
-   * vendor future change), the wrapper must bump instead. Comparison
-   * is `lastStreamedMessageStartCounter !== meta.eventCounter`.
+   * vendor future change), the wrapper must bump instead.
+   *
+   * Keyed on message.id, NOT eventCounter: the runtime loop increments
+   * `meta.eventCounter` after every SDKMessage (see
+   * createOpenccRuntime-impl.ts), so by the time the terminal
+   * `assistant` message is translated the counter has already advanced
+   * past the value recorded at message_start. Comparing counters could
+   * therefore never match in production and double-bumped every turn.
    */
-  lastStreamedMessageStartCounter?: number
+  lastStreamedTurnMessageId?: string
 }
 
 // ★ 诊断日志 (ZAI_DEBUG_SSE=1): 把 sdkEventAdapter 产出的每一帧 runtime
@@ -122,6 +129,7 @@ export function* translateSdkToRuntime(
           type?: string
           index?: number
           content_block?: { type?: string; id?: string; name?: string }
+          message?: { id?: string }
         }
       | undefined
     if (!raw || typeof raw !== 'object' || typeof raw.type !== 'string') return
@@ -153,11 +161,12 @@ export function* translateSdkToRuntime(
       // events get a fresh id and the frontend can detect "new turn"
       // via strict-greater-than (useAgentStore.runtime.started branch).
       //
-      // Record this eventCounter so the format-(a) `assistant` wrapper
-      // path can detect "stream_event already bumped for this turn"
-      // and avoid a double-bump. See SdkEventMeta.lastStreamedMessageStartCounter.
+      // Record this turn's message.id so the format-(a) `assistant`
+      // wrapper path can detect "stream_event already bumped for this
+      // turn" and avoid a double-bump. See
+      // SdkEventMeta.lastStreamedTurnMessageId.
       meta.turnIndex += 1
-      meta.lastStreamedMessageStartCounter = meta.eventCounter
+      meta.lastStreamedTurnMessageId = raw.message?.id
     }
     // Track which block indices have been streamed via the stream_event
     // path so the terminal `assistant` message can skip re-emitting
@@ -263,11 +272,11 @@ export function* translateSdkToRuntime(
     // zai patch (2026-08-30 review update): bump meta.turnIndex here
     // ONLY if stream_event-wrapped message_start didn't already bump
     // for this turn. Normal flow has stream_event first then wrapper,
-    // so we skip; latent gap (vendor non-streaming playback) sees
-    // lastStreamedMessageStartCounter !== meta.eventCounter and bumps
-    // here. Without this guard, normal flow would double-bump and
-    // create empty bubbles between streamed and synthesized blocks.
-    if (meta.lastStreamedMessageStartCounter !== meta.eventCounter) {
+    // so we skip; latent gap (vendor non-streaming playback) sees no
+    // recorded id for this turn and bumps here. Without this guard,
+    // normal flow would double-bump and create empty bubbles between
+    // streamed and synthesized blocks.
+    if (meta.lastStreamedTurnMessageId !== m.message.id) {
       meta.turnIndex += 1
     }
     yield emit('message_start', {

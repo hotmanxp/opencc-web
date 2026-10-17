@@ -91,13 +91,17 @@ describe('translateSdkToRuntime', () => {
       type: 'assistant',
       message: { id: 'm', model: 'm', content: [{ type: 'text', text: 'x' }], stop_reason: null },
     }
-    // (zai patch 2026-08-30 review update): set lastStreamedMessageStartCounter
-    // to eventCounter to simulate "stream_event-wrapped message_start
+    // (zai patch 2026-08-30 review update): set lastStreamedTurnMessageId
+    // to this message's id to simulate "stream_event-wrapped message_start
     // already bumped for this turn". This is the production case for
     // streaming turns — wrapper path must NOT double-bump. Without
     // this guard the wrapper would bump turnIndex from 0 to 1, which
     // would mis-trigger "new turn" detection downstream.
-    const events = [...translateSdkToRuntime(msg, { ...meta, eventCounter: 5, lastStreamedMessageStartCounter: 5 })]
+    //
+    // The id must MATCH, not merely be present: the runtime loop bumps
+    // eventCounter between every SDKMessage, so a counter-based key can
+    // never match in production (see the dedicated regression test below).
+    const events = [...translateSdkToRuntime(msg, { ...meta, eventCounter: 5, lastStreamedTurnMessageId: 'm' })]
     for (const event of events) {
       expect(event.eventId).toMatch(/^evt-5(\.\d+)?$/)
       expect(event.sessionId).toBe('s1')
@@ -266,6 +270,118 @@ describe('translateSdkToRuntime', () => {
     expect(terminalTypes).not.toContain('content_block_start')
     expect(terminalTypes).not.toContain('content_block_delta')
     expect(terminalTypes).not.toContain('content_block_stop')
+  })
+
+  it('does not double-bump turnIndex when eventCounter advances between stream_event and terminal assistant', () => {
+    // Production fidelity: createOpenccRuntime-impl.ts increments
+    // `adapterMeta.eventCounter` AFTER every translateSdkToRuntime call,
+    // so by the time the terminal `assistant` SDKMessage is translated,
+    // eventCounter has already moved past the value recorded at
+    // stream_event message_start. The old guard
+    // (`lastStreamedMessageStartCounter !== eventCounter`) therefore
+    // compared two values that can never be equal in production and
+    // bumped turnIndex a SECOND time on every streaming turn.
+    //
+    // Symptom: the frontend's useAgentStore.runtime.started branch keys
+    // "new turn" off strict-greater-than turnIndex, so the phantom bump
+    // opens a second empty bubble between the streamed and the
+    // synthesized blocks.
+    const liveMeta = {
+      sessionId: 's1',
+      turnIndex: 0,
+      eventCounter: 7,
+      toolNameByUseId: new Map<string, string>(),
+      streamedBlockIndices: new Set<number>(),
+    }
+    const streamSequence = [
+      { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg_x', model: 'm', role: 'assistant' } } },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hi' } } },
+      { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
+      { type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn' } } },
+    ]
+    const assistantMsg = {
+      type: 'assistant',
+      message: { id: 'msg_x', model: 'm', content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' },
+    }
+
+    // Stream the sequence exactly the way the runtime loop does: translate
+    // one message, then bump eventCounter.
+    for (const m of streamSequence) {
+      ;[...translateSdkToRuntime(m, liveMeta)]
+      liveMeta.eventCounter += 1
+    }
+    // message_start bumped turnIndex 0 → 1.
+    expect(liveMeta.turnIndex).toBe(1)
+
+    const terminalEvents = [...translateSdkToRuntime(assistantMsg, liveMeta)]
+
+    // The terminal assistant message belongs to the SAME turn (msg_x):
+    // stream_event already bumped it, so turnIndex must stay 1 across
+    // every event the terminal message emits.
+    expect(terminalEvents.length).toBeGreaterThan(0)
+    for (const event of terminalEvents) {
+      expect(event.turnIndex).toBe(1)
+    }
+    expect(liveMeta.turnIndex).toBe(1)
+  })
+
+  it('still bumps turnIndex on the terminal assistant message when no stream_event preceded it', () => {
+    // The latent gap the guard exists for: vendor replays an assistant
+    // message WITHOUT wrapping its message_start in stream_event
+    // (non-streaming playback). No bump happened yet, so the terminal
+    // path must bump 0 → 1 on its own.
+    const freshMeta = {
+      sessionId: 's1',
+      turnIndex: 0,
+      eventCounter: 3,
+      toolNameByUseId: new Map<string, string>(),
+      streamedBlockIndices: new Set<number>(),
+    }
+    const assistantMsg = {
+      type: 'assistant',
+      message: { id: 'msg_solo', model: 'm', content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' },
+    }
+    const events = [...translateSdkToRuntime(assistantMsg, freshMeta)]
+    expect(events.length).toBeGreaterThan(0)
+    for (const event of events) {
+      expect(event.turnIndex).toBe(1)
+    }
+  })
+
+  it('bumps turnIndex again for a SECOND turn streamed in the same query', () => {
+    // One query() bridges many LLM turns (main → agent dispatch → main
+    // close → sub-agent → new turn), so turnIndex must keep advancing
+    // across turns while each turn's stream_event+terminal pair stays
+    // balanced at one bump.
+    const liveMeta = {
+      sessionId: 's1',
+      turnIndex: 0,
+      eventCounter: 0,
+      toolNameByUseId: new Map<string, string>(),
+      streamedBlockIndices: new Set<number>(),
+    }
+    const streamOneTurn = (msgId: string) => {
+      for (const m of [
+        { type: 'stream_event', event: { type: 'message_start', message: { id: msgId, model: 'm', role: 'assistant' } } },
+        { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } },
+      ]) {
+        ;[...translateSdkToRuntime(m, liveMeta)]
+        liveMeta.eventCounter += 1
+      }
+      ;[...translateSdkToRuntime(
+        { type: 'assistant', message: { id: msgId, model: 'm', content: [{ type: 'text', text: 'x' }], stop_reason: 'end_turn' } },
+        liveMeta,
+      )]
+      liveMeta.eventCounter += 1
+    }
+
+    streamOneTurn('msg_a')
+    expect(liveMeta.turnIndex).toBe(1)
+    streamOneTurn('msg_b')
+    expect(liveMeta.turnIndex).toBe(2)
+    streamOneTurn('msg_c')
+    expect(liveMeta.turnIndex).toBe(3)
   })
 
   it('resets streamedBlockIndices on each stream_event message_start', () => {
