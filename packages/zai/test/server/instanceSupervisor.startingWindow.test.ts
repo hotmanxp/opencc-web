@@ -182,3 +182,90 @@ describe('instanceSupervisor — starting 窗口内的 stop/restart (wb-004)', (
     ).toBe(killsAfterFirst)
   })
 })
+
+/**
+ * 回归测试 — `starting` 窗口内的 **remove** 不得留下脱管孤儿子进程 (oc-001)。
+ *
+ * `wb-004` 的修法把 in-flight promise 闸加在了 `doStop` **内部**,而
+ * `doRemove` 是 supervisor 里唯一不经过 `doStop` 的删除路径:
+ *
+ *   `starting` 窗口内 `entry.child` 恒为 null
+ *     → `if (entry.child)` 判据失效,整段 doStop 被跳过
+ *     → `entries.delete(id)`
+ *     → in-flight start 照常 spawn 并 attachChild 到一个**已不在 entries 里**
+ *       的 Entry 上
+ *     → `tickHeartbeat` 与 `shutdown()` 都只遍历 `entries.values()`,
+ *       从此再看不见它 —— UI 里实例已消失,端口被占,退出 zai 也带不走。
+ *
+ * 修法:`doRemove` 与 `doStop` 一样先排在 in-flight start 之后;另在
+ * `attachChild` 加一道守卫(Entry 不在 entries 里就杀掉刚 spawn 的 child 并抛),
+ * 挡住未来任何新调用方。
+ */
+describe('instanceSupervisor — starting 窗口内的 remove (oc-001)', () => {
+  it('starting 期间 remove:子进程必须被终止,不得留在 supervisor 视野外', async () => {
+    const { sup, probeEnteredPromise } = await makeSup(
+      '/tmp/zai-oc001-a',
+      '/tmp/oc001-cur-a',
+      '/tmp/oc001-t-a',
+    )
+    PROBE_GATE.open = true
+    const startPromise = sup.startInstance('i1')
+    await probeEnteredPromise
+    expect(stateOf(sup, 'i1'), '此刻应处于 starting').toBe('starting')
+
+    PROBE_GATE.open = false
+    const removePromise = sup.removeInstance('i1')
+    await startPromise
+    await removePromise
+    await new Promise((r) => setTimeout(r, 120))
+
+    expect(spawned.length, 'start 应已 spawn 出 child').toBe(1)
+    expect(
+      (spawned[0] as unknown as { killed: boolean }).killed,
+      'starting 窗口内 remove → 子进程从未被终止,成为脱管孤儿(端口被占且 UI/退出流程都够不着)',
+    ).toBe(true)
+    expect(stateOf(sup, 'i1'), 'remove 后实例应从快照里消失').toBeUndefined()
+  })
+
+  // 对照组:不在 starting 窗口内 remove,child 同样必须被终止。
+  // 防止把「一律杀进程」当成修复 —— 那样上面那条也会绿,但语义是错的。
+  it('窗口外 remove(对照组):同样终止子进程', async () => {
+    const { sup } = await makeSup(
+      '/tmp/zai-oc001-b',
+      '/tmp/oc001-cur-b',
+      '/tmp/oc001-t-b',
+    )
+    PROBE_GATE.open = false
+    await sup.startInstance('i1')
+    await new Promise((r) => setTimeout(r, 40))
+    expect(spawned[0], '第一次 start 应已 spawn 出 child').toBeDefined()
+    // 注:fake child 从不发 `isChildReadyMessage`,状态会停在 `starting`
+    // 而非 `running`(上一届那两条用例期望的是 `stopped`,同理)。这里不断言
+    // 具体状态 —— 它测的是 ready 消息机制,与本条无关。
+
+    await sup.removeInstance('i1')
+    await new Promise((r) => setTimeout(r, 40))
+
+    expect((spawned[0] as unknown as { killed: boolean }).killed).toBe(true)
+    expect(stateOf(sup, 'i1')).toBeUndefined()
+  })
+
+  // 反向护栏:delete 之后再次 start,不应把已删除的定义复活成孤儿。
+  it('remove 之后不能再 start 出脱管进程', async () => {
+    const { sup, probeEnteredPromise } = await makeSup(
+      '/tmp/zai-oc001-c',
+      '/tmp/oc001-cur-c',
+      '/tmp/oc001-t-c',
+    )
+    PROBE_GATE.open = true
+    const startPromise = sup.startInstance('i1')
+    await probeEnteredPromise
+    PROBE_GATE.open = false
+    const removePromise = sup.removeInstance('i1')
+    await startPromise
+    await removePromise
+    await new Promise((r) => setTimeout(r, 60))
+
+    expect(spawned.every((c) => (c as unknown as { killed: boolean }).killed)).toBe(true)
+  })
+})

@@ -337,6 +337,17 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     }
 
     const attachChild = (entry: Entry, child: ChildProcess) => {
+      // zai patch (2026-10-17, oc-001):防御纵深。若该 Entry 已被删除(例如
+      // `doRemove` 排在 in-flight start 之前跑完了,或将来出现别的调用方),
+      // 立即杀掉刚 spawn 的 child 并抛 —— **宁可让 start 失败,也不要留下一个
+      // supervisor 视野外的活进程**。`doRemove` 侧的排队已经堵住了已知路径;
+      // 这一条挡住的是未来。
+      if (!entries.has(entry.def.id)) {
+        try { child.kill('SIGKILL') } catch { /* ignore */ }
+        throw new Error(
+          `instance ${entry.def.id} was removed while starting; spawned child killed`,
+        )
+      }
       // Bind child-specific state to this child. The exit handler closes
       // over the local refs so a stale exit from a replaced child can never
       // touch the new entry.child.
@@ -577,6 +588,20 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
 
     const doRemove = async (id: string) => {
       ensureNotCurrent(id)
+      // zai patch (2026-10-17, oc-001):与 `doStop` 一样,先排在 in-flight
+      // start 之后 —— `wb-004` 把那道闸加在了 `doStop` 内部,而 `doRemove`
+      // 是 supervisor 里**唯一不经过 doStop 的删除路径**:
+      //
+      //   `starting` 窗口内 `entry.child` 恒为 null → `if (entry.child)` 判据
+      //   在此失效 → 整段 doStop 被跳过 → entry 被删 → in-flight start 照常
+      //   spawn 并 attachChild 到一个**已不在 entries 里**的 Entry 上,而
+      //   `tickHeartbeat:592` 与 `shutdown():693` 都只遍历 `entries.values()`,
+      //   从此再看不见这个活进程 —— UI 里实例已消失,端口被占,退出 zai 也
+      //   带不走它。
+      //
+      // 排队后再决定,child 一定还在,doStop 一定会执行。
+      const pending = inFlightStarts.get(id)
+      if (pending) await pending.catch(() => {})
       const entry = getEntry(id)
       if (entry.child) await doStop(id)
       entries.delete(id)

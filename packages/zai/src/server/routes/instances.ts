@@ -307,7 +307,12 @@ router.delete('/instances/:id', async (req, res) => {
   if (!ensureNotInstanceChild(res)) return
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot delete current instance')
   try {
-    await getInstanceSupervisor().removeInstance(req.params.id)
+    // zai patch (2026-10-17, oc-002 → oc-001):DELETE 是第四个生命周期动词,
+    // 此前**只有** start/stop/restart 三个包在 `serializeLifecycle` 里。
+    // 与其对齐 —— 少一个动词排队,同 id 的并发请求就可能绕过。
+    await serializeLifecycle(req.params.id, () =>
+      getInstanceSupervisor().removeInstance(req.params.id),
+    )
     res.status(204).end()
   } catch (err) {
     handleError(res, err)
