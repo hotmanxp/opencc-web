@@ -399,6 +399,7 @@ export function applyZaiComputerUseEnableFromSettings(): boolean {
 // ----- entry point -----
 
 let enabled = false
+let initPromise: Promise<void> | null = null
 
 export type EnableOpenccConfigsOptions = {
   /** Project cwd; defaults to process.cwd() if omitted. */
@@ -434,8 +435,22 @@ export async function enableOpenccConfigs(
   opts: EnableOpenccConfigsOptions = {},
 ): Promise<void> {
   if (enabled) return
-  enabled = true
+  // Share one in-flight attempt among concurrent callers. The latch is set
+  // only on success, so a boot that throws stays retriable by the next
+  // caller instead of degrading to a permanent silent no-op.
+  if (initPromise) return initPromise
+  const attempt = runStartupSequence(opts)
+  initPromise = attempt
+  try {
+    await attempt
+    enabled = true
+  } finally {
+    // Only clear our own registration — a later retry may have replaced it.
+    if (initPromise === attempt) initPromise = null
+  }
+}
 
+async function runStartupSequence(opts: EnableOpenccConfigsOptions): Promise<void> {
   // Step 1: pre-populate globalThis.MACRO BEFORE importing the bundle.
   // (See comment on installMacroStub.) The bundle evaluates top-level
   // code that references MACRO.X — without this stub the first

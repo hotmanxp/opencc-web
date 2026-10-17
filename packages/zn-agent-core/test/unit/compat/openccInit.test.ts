@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * Vendor has 182 unguarded `MACRO.X` references that panic at runtime
@@ -396,5 +396,93 @@ describe('applyZaiWorkflowEnableFromSettings', () => {
     writeFileSync(join(tempDataDir, 'settings.json'), '')
     expect(applyZaiWorkflowEnableFromSettings()).toBe(false)
     expect(process.env.OPENCC_ENABLE_WORKFLOWS).toBeUndefined()
+  })
+})
+
+// `enableOpenccConfigs` sets its `enabled` latch BEFORE doing any work, so
+// a boot that throws (missing bundle, bad settings.json, transient fs
+// error) leaves the latch set and every later call short-circuits to a
+// silent no-op. The process looks booted but the vendor bundle was never
+// initialised — enableConfigs() never ran, STATE.cwd was never set, and
+// the failure is invisible because the *second* call resolves cleanly.
+//
+// BUNDLE_URL is the bare specifier '@zn-ai/zn-agent-core', so the bundle
+// import can be intercepted and no 17.8 MB import happens. Every export
+// the sequence touches must be declared — vitest throws on property
+// access for an export the factory didn't return.
+//
+// The observable is `enableConfigs`, which the sequence calls exactly
+// once per SUCCESSFUL run; a short-circuited call reaches it zero times.
+// `failAtStep` injects a mid-sequence failure (the cc-r1 scenario).
+const mockState = vi.hoisted(() => ({
+  bundle: {} as Record<string, unknown>,
+  failAtStep: false,
+}))
+
+vi.mock('@zn-ai/zn-agent-core', () => ({
+  enableConfigs: () => {
+    if (mockState.failAtStep) throw new Error('boom')
+    mockState.bundle.enableConfigs()
+  },
+  setOriginalCwd: () => {},
+  setCwdState: () => {},
+  setClientType: () => {},
+  setupGracefulShutdown: () => {},
+  configureGlobalAgents: () => {},
+}))
+
+describe('enableOpenccConfigs idempotency latch', () => {
+  beforeEach(async () => {
+    vi.resetModules()
+    mockState.failAtStep = false
+    mockState.bundle = { enableConfigs: vi.fn() }
+  })
+
+  it('retries after a failed first attempt instead of latching success', async () => {
+    mockState.failAtStep = true
+    const mod = await import('../../../src/compat/openccInit.js')
+
+    // First call fails partway through the startup sequence.
+    await expect(mod.enableOpenccConfigs()).rejects.toThrow(/boom/)
+
+    // Second call must ATTEMPT the sequence again, not silently no-op.
+    mockState.failAtStep = false
+    await expect(mod.enableOpenccConfigs()).resolves.toBeUndefined()
+    expect(mockState.bundle.enableConfigs).toHaveBeenCalledTimes(1)
+  })
+
+  it('short-circuits only after a SUCCESSFUL run', async () => {
+    const mod = await import('../../../src/compat/openccInit.js')
+
+    await expect(mod.enableOpenccConfigs()).resolves.toBeUndefined()
+    await expect(mod.enableOpenccConfigs()).resolves.toBeUndefined()
+    await expect(mod.enableOpenccConfigs()).resolves.toBeUndefined()
+
+    expect(mockState.bundle.enableConfigs).toHaveBeenCalledTimes(1)
+  })
+
+  it('shares one in-flight attempt across concurrent callers', async () => {
+    const mod = await import('../../../src/compat/openccInit.js')
+
+    const results = await Promise.allSettled([
+      mod.enableOpenccConfigs(),
+      mod.enableOpenccConfigs(),
+      mod.enableOpenccConfigs(),
+    ])
+
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true)
+    expect(mockState.bundle.enableConfigs).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects every concurrent caller when the shared attempt fails', async () => {
+    mockState.failAtStep = true
+    const mod = await import('../../../src/compat/openccInit.js')
+
+    const results = await Promise.allSettled([
+      mod.enableOpenccConfigs(),
+      mod.enableOpenccConfigs(),
+    ])
+
+    expect(results.every((r) => r.status === 'rejected')).toBe(true)
   })
 })
