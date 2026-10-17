@@ -254,6 +254,22 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     let writeChain: Promise<void> = Promise.resolve()
     const persistSafe = () => { writeChain = writeChain.then(() => persist().catch((err: unknown) => { const msg = err instanceof Error ? err.stack ?? err.message : String(err); console.warn(`[instanceSupervisor] persist failed: ${msg}`) })) }
     const setStatus = (entry: Entry, patch: Partial<InstanceStatus>) => { entry.status = { ...entry.status, ...patch }; return entry.status }
+    /**
+     * zai patch (2026-10-16, wb-004): in-flight `doStart` 的 promise 表。
+     *
+     * `starting` 窗口(entry.child 仍为 null,还在端口探测 / spawn 之前)内到达的
+     * stop / restart,此前被 `doStop` 的 starting 早退直接**丢弃** —— 返回一个
+     * 看起来正常的成功快照,而什么都没做。实测轨迹:
+     *   stop-returned-immediately:starting → spawn → final:starting
+     * 即调用方拿到 200 + 正常快照,实例却永远卡在 `starting` 既不 running 也不
+     * stopped,重启请求凭空消失。
+     *
+     * 修法:登记 in-flight start 的 promise,让窗口内的 stop/restart **等它跑完**
+     * 再基于新状态继续,而不是各返回一次假成功。`routes/instances.ts` 的
+     * `serializeLifecycle` 只挡住了 UI 双击那条路径;weixin / AA / IPC 那几处
+     * 绕过它的调用方才踩得到,所以修复必须在 supervisor 层。
+     */
+    const inFlightStarts = new Map<string, Promise<InstanceSnapshot>>()
     // Last known activity for an entry: freshest of heartbeat, start time,
     // or creation time. Used to decide stale-running resets.
     const lastActivityAt = (entry: Entry): number => {
@@ -371,6 +387,20 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     const doStart = async (id: string, opts?: { lan?: boolean; port?: number | null; aa?: boolean }) => {
       const entry = getEntry(id)
       if (entry.status.state === 'starting' || entry.status.state === 'running') return snapshotOf(entry)
+      // wb-004:登记 in-flight promise,让窗口内的 stop/restart 能等它跑完。
+      // 只覆盖真正进入 `starting` 的那次调用(上面已把重入挡掉)。
+      const startPromise = runStart(id, opts)
+      inFlightStarts.set(id, startPromise)
+      try {
+        return await startPromise
+      } finally {
+        // 只清自己登记的那一次,避免误删后续 start 的登记
+        if (inFlightStarts.get(id) === startPromise) inFlightStarts.delete(id)
+      }
+    }
+
+    const runStart = async (id: string, opts?: { lan?: boolean; port?: number | null; aa?: boolean }) => {
+      const entry = getEntry(id)
       setStatus(entry, { state: 'starting', lastError: null })
       emit(id, entry.status)
       persistSafe()
@@ -505,14 +535,22 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     }
 
     const doStop = async (id: string) => {
+      // wb-004: `starting` 期间先等 in-flight start 跑完,再基于**新**状态决定。
+      //
+      // 旧实现在下面直接 `return snapshotOf(entry)` 把请求丢掉 —— 返回一个正常
+      // 快照却什么都没做,实测实例从此卡在 `starting` 永不落地。原注释担心的是
+      // 「无条件翻 stopped 会撤销 in-flight start 的 starting 态、导致双 child」
+      // (fix-plan-10-05 H3)—— 那个担心成立,所以不能简单去掉守卫;正解是**排队**:
+      // 等它跑完再停,既不撤销 starting 态,也不丢请求。
+      //
+      // 刻意写成「有才 await」而非调一个总是返回的 async helper:
+      // 无 in-flight start 时连微任务都不引入,不给正常路径凭空加一次 tick 延迟。
+      const pending = inFlightStarts.get(id)
+      if (pending) await pending.catch(() => {})
       const entry = getEntry(id); const child = entry.child; const childState = entry.childState
       if (!child || !childState) {
-        // `starting` 期间 entry.child 仍是 null(还在端口探测 / spawn 之前),
-        // 此时无条件翻成 stopped 会**撤销 in-flight start 设的 starting 态**;
-        // 那个 doStart 随后会穿过 doStart 顶部的 state 守卫直接 spawn,
-        // 叠加上另一个已排队的 start → 双 child(见 fix-plan-10-05 H3)。
-        // 正确做法:不碰状态,让 in-flight start 自己跑完(或失败后落 down)。
-        if (entry.status.state === 'starting') return snapshotOf(entry)
+        // 仍无 child:要么 start 已失败落 down,要么它本来就该落 stopped。
+        // 无条件翻 stopped 在这里安全 —— 因为已经不存在并发的 in-flight start。
         setStatus(entry, { state: 'stopped', port: null, pid: null }); emit(id, entry.status); persistSafe(); return snapshotOf(entry)
       }
       setStatus(entry, { state: 'stopping' }); emit(id, entry.status); persistSafe()

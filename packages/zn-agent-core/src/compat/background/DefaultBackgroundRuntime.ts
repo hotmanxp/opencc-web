@@ -617,8 +617,28 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
               turnText = ''
             }
           }
-          // 流正常结束 → 任务成功 (abort 由外层 while 顶部捕获)
+          // 流正常结束 → 先看 inbox 有没有新消息 (wb-007)
+          //
+          // 此前此处直接 `break`,而 taskInbox 只在 runOne 开头被读一次
+          // (`pendingPrompts` 那一段),于是 **running 期间**经
+          // sendMessageToTask 投递的消息永远不被消费:接口返回 ok:true
+          // 骗调用方说成功,消息却永久滞留到任务自然结束 —— 工具描述与实际
+          // 语义相反(subagent 想中途改向,改向指令石沉大海)。
+          //
+          // 改成 turn 边界消费:本轮流正常结束后若 inbox 非空,拼到下一轮
+          // queryInput 并继续循环,而不是完成任务。
           if (!rec.controller.signal.aborted) {
+            const inbox = this.taskInbox.get(id) ?? []
+            if (inbox.length > 0) {
+              // 一次性消费 —— 与 runOne 开头的既有语义一致。
+              this.taskInbox.delete(id)
+              queryInput.prompt = inbox.join('\n\n') + '\n\n' + queryInput.prompt
+              turnText = ''
+              // 继续 while → 起下一轮 turn。不走重试计数:这不是失败重试,
+              // 但 attempt 已在顶部自增过;上限由 maxRetries 兜底,
+              // 对「父 agent 反复改向」这种真会发生的用法足够。
+              continue
+            }
             streamCompleted = true
           }
           break

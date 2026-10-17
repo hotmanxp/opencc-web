@@ -161,17 +161,26 @@ describe('instanceSupervisor (4a — state machine)', () => {
     const startP = getInstanceSupervisor().startInstance(snap.id)
     await new Promise((r) => setTimeout(r, 0)) // 让 doStart 跑到 probePort 并 await 住
     // 此时 entry.child 仍是 null,状态是 starting
-    const stopSnap = await getInstanceSupervisor().stopInstance(snap.id)
-    expect(stopSnap.state).toBe('starting') // 关键断言:不被翻成 stopped
 
+    // zai patch (2026-10-16, wb-004): 契约变了。
+    // 旧版 doStop 在这个窗口直接 `return snapshotOf(entry)` —— 返回一个
+    // `state: 'starting'` 的正常快照却**什么都没做**,stop 请求被丢弃,
+    // 实例从此卡在 starting(既不 running 也不 stopped)。旧断言
+    // `expect(stopSnap.state).toBe('starting')` 恰恰把这个缺陷钉成了契约。
+    //
+    // 现在 doStop 会**等** in-flight start 跑完再停。所以这里不能先 await
+    // stop(那会与 probeGate 互锁),必须先放闸再一起等。
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
     releaseProbe!()
     await startP
-    // createInstance 1 个 + start 1 个 = 2;stop 没有穿透出额外 spawn
+    await stopP
+
+    // 核心不变(仍是本用例要守的东西):stop 没有穿透出额外 spawn。
+    // createInstance 1 个 + start 1 个 = 2。
     expect(fakeChildren).toHaveLength(2)
-    fakeChildren[1]!.emit('message', { type: 'ready', pid: 333, port: 9206 })
+    // 修好之后 stop 才真的生效 —— 旧版这里会停在 starting。
     const after = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
-    expect(after.state).toBe('running')
-    expect(after.pid).toBe(333)
+    expect(after.state).toBe('stopped')
   })
 
   it('non-user exit → state down + lastError; user stop → stopped', async () => {
