@@ -39,6 +39,7 @@ import { createRequire } from 'node:module'
 // from). Used by applyZaiComputerUseEnableFromSettings() to honor the
 // OR-bridge semantics (env-only opt-in survives a settings-disabled cold start).
 import { isEnvTruthy } from '../opencc-src/utils/envUtils.js'
+import { getCurrentSessionId } from './runWithSessionId.js'
 
 // Imported via the package's main entry — the runtime `default` export
 // IS the single bundle (dist/opencc-core.mjs, see package.json
@@ -166,6 +167,20 @@ export function setZaiIsNonInteractive(): void {
     g.__zaiIsNonInteractive = true
   }
 }
+
+/**
+ * zai patch (2026-10-16, cc-002): 把 compat 的 per-async-chain sessionId
+ * resolver 注册给 vendor 用。
+ *
+ * `opencc-src/server/headlessPermissionBridge.ts` 需要 per-chain 的
+ * sessionId 才能避免并发会话审批串台,但它在 vendor 树内够不到这里的 ALS
+ * (反向依赖)。与 `__zaiIsNonInteractive` 同款 globalThis seam。
+ *
+ * 模块加载期执行 —— 早于任何 query,不依赖 bundle 何时 eval。vendor 侧
+ * 未拿到 resolver 时退回读进程级全局,行为与修复前一致。
+ */
+;(globalThis as any).__zaiSessionIdResolver = (): string | undefined =>
+  getCurrentSessionId()
 
 /**
  * Step 8 / 13 — apply environment variables from

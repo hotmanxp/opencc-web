@@ -1,7 +1,7 @@
 /**
  * subagent_report — 子 agent 主动向父 agent 上报(对齐 DSH tool-subagent-report)。
  * 注册进 AgentTool 子上下文;父 session 优先取子上下文注入值,回退
- * __zaiCurrentSessionId bridge。
+ * per-async-chain ALS,最后才回退 __zaiCurrentSessionId bridge。
  */
 import { z } from 'zod/v4'
 import { deliverInboxMessage } from '../../inboxBridge.js'
@@ -22,8 +22,17 @@ export const subagentReportTool = {
     context: { parentSessionId?: string },
   ): Promise<{ delivered: boolean }> {
     const delivery = input.delivery ?? 'wakeup'
+    // zai patch (2026-10-16, cc-002 治理项): 加 ALS 层。此前只读进程级全局
+    // `__zaiCurrentSessionId` —— 单例,多 session 共享进程时互相覆写,上报
+    // 会投进别的会话。顺序与 SpawnAgent / CliAgent / subagentControl 对齐:
+    // 显式 context → per-chain ALS(经 globalThis seam)→ 全局兜底。
+    const alsSessionId = (globalThis as {
+      __zaiSessionIdResolver?: () => string | undefined
+    }).__zaiSessionIdResolver?.()
     const senderSessionId =
-      (globalThis as { __zaiCurrentSessionId?: string }).__zaiCurrentSessionId ?? ''
+      alsSessionId ??
+      (globalThis as { __zaiCurrentSessionId?: string }).__zaiCurrentSessionId ??
+      ''
     const parent = context.parentSessionId ?? senderSessionId
     if (!parent) return { delivered: false }
     return {

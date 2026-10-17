@@ -634,8 +634,25 @@ function readToolUseIdFromCtx(ctx: unknown): string | undefined {
   return o?.toolUseId ?? o?.toolUseID
 }
 
-/** Read the parent session id via the zai globalThis bridge (best-effort). */
+/** Read the parent session id (best-effort).
+ *
+ * zai patch (2026-10-16, cc-002 治理项): 此前只读进程级全局
+ * `__zaiCurrentSessionId` —— 那是**单例**,zai-server 多 session 共享进程,
+ * 任何 session 发 prompt 都会覆写它。并发时 A 的 CliAgent 会读到 B 的
+ * sessionId,而子 agent 的 `<task-notification>` 按 parentSessionId 路由,
+ * 于是投进错误会话。
+ *
+ * 对齐 `subagentControl.ts` 的既有做法:先读 vendor 的纯 ALS
+ * `getSdkSessionId()`,拿不到才退回全局。刻意不用 `getSessionId()` ——
+ * 它缺值时 fallback 到 STATE.sessionId,那是另一个进程级单例。
+ */
 function readZaiCurrentSessionIdBridge(): string | undefined {
+  // 走 compat/openccInit 装的 globalThis seam,而不是顶层 import
+  // bootstrap/state.js —— 本文件的顶部注释明令所有 opencc-src import 不得
+  // 出现在顶层(会把 vendor 重模块拖进单测的模块加载)。
+  const als = (globalThis as { __zaiSessionIdResolver?: () => string | undefined })
+    .__zaiSessionIdResolver?.()
+  if (als) return als
   const v = (globalThis as { __zaiCurrentSessionId?: string | null }).__zaiCurrentSessionId
   return typeof v === 'string' && v.length > 0 ? v : undefined
 }

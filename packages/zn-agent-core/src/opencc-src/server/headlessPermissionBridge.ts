@@ -2,6 +2,26 @@ import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
 import type { PermissionDecision } from '../types/permissions.js'
 
 /**
+ * zai patch (2026-10-16, cc-002): per-async-chain sessionId resolver 的读取口。
+ *
+ * 本文件在 vendor 树内,**够不到** compat 的 `runWithSessionId` ALS(反向依赖)。
+ * 所以由 compat 在 init 时经 globalThis 注册进来 —— 与同目录既有的
+ * `__zaiIsNonInteractive` 同款 seam(见 compat/openccInit.ts)。
+ *
+ * 为什么必须有它:`globalThis.__zaiBridgeCtx.sessionId` 由
+ * `createOpenccRuntime-impl.query` 在每次 query 前后做「存旧值 → 写本次 →
+ * finally 恢复」,是**进程级**的,并发会话互相覆盖;B 先结束时的 finally 恢复
+ * 还会让仍在跑的 A 读到无关旧值。审批登记因此串台。ALS 才是 per-chain 的。
+ *
+ * 未注册时(单元测试 / 不走 zai-server 的 headless)为 undefined,行为与修复前
+ * 完全一致 —— 退回读全局。
+ */
+function resolveSessionIdFromAsyncContext(): string | undefined {
+  const resolver = (globalThis as any).__zaiSessionIdResolver
+  return typeof resolver === 'function' ? resolver() : undefined
+}
+
+/**
  * Bridge context for the headless permission flow — same shape as
  * AskUserQuestion's `AskUserQuestionBridgeContext` (compat/tools/opencc/
  * AskUserQuestionTool.ts). zai-server injects the static parts
@@ -63,10 +83,18 @@ export function wrapHeadlessPermissionFn(
 
     const bridge = ((globalThis as any).__zaiBridgeCtx ??
       {}) as HeadlessPermissionBridgeContext
+    // zai patch (2026-10-16, cc-002): 与 AskUserQuestionTool.ts:28 对齐 ——
+    // per-async-chain 的 ALS 优先,拿不到才退回进程级全局。
+    //
+    // 此前这里只读 `bridge.sessionId`,而那是 per-query 写、finally 恢复的
+    // 进程级全局:并发会话会互相覆盖,B 先结束时的恢复还会让仍在跑的 A
+    // 读到无关旧值。审批登记因此挂到别的会话上(见 __zaiSessionIdResolver
+    // 上方注释)。
+    const sessionId = resolveSessionIdFromAsyncContext() ?? bridge.sessionId
     if (
       !bridge.permissionRegistry ||
       !bridge.onYield ||
-      !bridge.sessionId ||
+      !sessionId ||
       !toolUseID
     ) {
       return decision
@@ -106,7 +134,7 @@ export function wrapHeadlessPermissionFn(
     try {
       const response = await bridge.permissionRegistry.register(
         toolUseID,
-        bridge.sessionId,
+        sessionId,
         signal,
       )
       if (response && response.decision === 'allow') {
